@@ -18,20 +18,30 @@ const HOUR = 60 * MINUTE
 /** Durations longer than this are refused; the user is offered a split instead. */
 export const MAX_DURATION_MS = 24 * HOUR
 
-export type ParseFailure = "empty" | "unparseable" | "too-long"
+export type ParseFailure = "empty" | "unparseable" | "zero" | "too-long"
 
 export type ParseResult =
   | { ok: true; ms: number }
   | { ok: false; reason: ParseFailure }
 
-const CLOCK = /^(\d{1,3}):([0-5]?\d)(?::([0-5]?\d))?$/
-const BARE_INT = /^\d{1,6}$/
-const BARE_DECIMAL = /^\d{1,4}\.\d{1,6}$/
-// "1h30" — hours followed by a bare number, which every tracker reads as minutes.
-const HOURS_THEN_MINUTES = /^(\d{1,4}(?:\.\d{1,6})?)\s*h\s*(\d{1,2})$/
+const CLOCK = /^(\d{1,4}):([0-5]?\d)(?::([0-5]?\d))?$/
+const BARE_INT = /^\d{1,9}$/
+const BARE_DECIMAL = /^\d{1,6}\.\d{1,6}$/
+// "1h30" — hours followed by a bare number, which every tracker reads as
+// minutes. Capped at 59 so that "1h99" is refused for the same reason "1:99"
+// is: it is an adjacent-key fumble for "1h09" or "1h39", and accepting it as
+// 2h39m commits an over-record the user has no reason to re-read.
+const HOURS_THEN_MINUTES = /^(\d{1,6}(?:\.\d{1,6})?)\s*h\s*([0-5]?\d)$/
 // "1h", "30m", "45s", "1.5h", "1h 30m", "1h30m15s" — any subset, in order.
 const UNITS =
-  /^(?:(\d{1,4}(?:\.\d{1,6})?)\s*h)?\s*(?:(\d{1,6}(?:\.\d{1,6})?)\s*m(?:in)?)?\s*(?:(\d{1,6}(?:\.\d{1,6})?)\s*s(?:ec)?)?$/
+  /^(?:(\d{1,6}(?:\.\d{1,6})?)\s*h)?\s*(?:(\d{1,9}(?:\.\d{1,6})?)\s*m(?:in)?)?\s*(?:(\d{1,9}(?:\.\d{1,6})?)\s*s(?:ec)?)?$/
+// A comma is a decimal separator in much of the world ("1,5" is 1.5 hours) and
+// a thousands separator elsewhere ("1,440"). Only the shape that CANNOT be a
+// thousands group is treated as a decimal; anything else keeps its comma and
+// falls through to "unparseable". Reading "1,440" as 1h 26m would be a 16x
+// under-record with an echo the user has no reason to question — and a paste
+// from a spreadsheet column of minutes is exactly that shape.
+const DECIMAL_COMMA = /^\d{1,6},\d{1,2}$/
 
 /**
  * Parses a duration a human typed.
@@ -54,12 +64,14 @@ export function parseDuration(input: string): ParseResult {
   const raw = input.trim().toLowerCase()
   if (raw === "") return { ok: false, reason: "empty" }
 
-  // A comma is a decimal separator in most of the world. It is never a
-  // thousands separator in a duration a human types.
-  const text = raw.replace(",", ".")
+  const text = DECIMAL_COMMA.test(raw) ? raw.replace(",", ".") : raw
 
   const ms = parseToMs(text)
   if (ms === null) return { ok: false, reason: "unparseable" }
+  // Zero is refused HERE rather than at the mutation. The two layers used to
+  // disagree — the inline hint enabled the confirm control and the save then
+  // threw from a layer that had never seen the input.
+  if (ms <= 0) return { ok: false, reason: "zero" }
   if (ms > MAX_DURATION_MS) return { ok: false, reason: "too-long" }
   return { ok: true, ms }
 }
@@ -85,7 +97,12 @@ function parseToMs(text: string): number | null {
 
   const hm = HOURS_THEN_MINUTES.exec(text)
   if (hm !== null) {
-    return (group(hm, 1) ?? 0) * HOUR + (group(hm, 2) ?? 0) * MINUTE
+    // Rounded like every other branch. Without it "4.1h30" produced
+    // 16559999.999999998 while "4.1h 30m" produced 16560000 — two spellings of
+    // one duration disagreeing, and a non-integer millisecond count reaching
+    // the database, where `durationMs === endedAt - startedAt` would then be
+    // asserted between drifting doubles.
+    return Math.round((group(hm, 1) ?? 0) * HOUR + (group(hm, 2) ?? 0) * MINUTE)
   }
 
   if (BARE_INT.test(text)) {
@@ -112,7 +129,11 @@ function parseToMs(text: string): number | null {
 }
 
 function parts(ms: number) {
-  const total = Math.max(0, Math.floor(ms / SECOND))
+  // Non-finite input is clamped rather than propagated. One NaN `now` on a
+  // running timer would otherwise put "NaN:NaN:NaN" where the elapsed time
+  // belongs and "PTNaNHNaNMNaNS" into a <time datetime> attribute. The
+  // negative case was already handled; this is the other half of that guard.
+  const total = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / SECOND)) : 0
   return {
     hours: Math.floor(total / 3600),
     minutes: Math.floor((total % 3600) / 60),
@@ -161,8 +182,17 @@ export function formatCompactDuration(ms: number): string {
  * parser above exists to remove.
  */
 export function formatDecimalHours(ms: number): string {
-  const hours = Math.max(0, ms) / HOUR
-  return (Math.floor(hours * 100) / 100).toFixed(2)
+  if (!Number.isFinite(ms) || ms <= 0) return "0.00"
+  // Integer arithmetic, not `Math.floor((ms / HOUR) * 100)`.
+  //
+  // In binary floating point, 0.29 * 100 is 28.999999999999996, so flooring it
+  // gives 28. That understated 144 of 2401 exact centihours — 6% of durations,
+  // always low, never high. 8h 12m billed as 8.19 instead of 8.20. It is
+  // undetectable by eye on an invoice, which is what made it worth an integer.
+  //
+  // 36000 ms is exactly one centihour, so this division has no remainder to
+  // lose.
+  return (Math.floor(ms / 36_000) / 100).toFixed(2)
 }
 
 /** "1 hour 30 minutes" — for aria-labels, where `1:30:00` is read as a time. */

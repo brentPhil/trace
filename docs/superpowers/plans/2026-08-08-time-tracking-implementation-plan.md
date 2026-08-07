@@ -291,21 +291,37 @@ export default defineSchema({
 ```
 convex/
   lib/            # PURE. No convex/_generated, no convex/server. Shared with src/ via @shared/*
-    day.ts        # dayWindow, dayOf, instantOfLocal, weekWindow
-    duration.ts   # parseDuration, formatDuration, formatDecimalHours, formatRecapDuration
-    timeOfDay.ts  # nearest-time parsing for manual mode
-    entryTimes.ts # the reconciliation rule (§1.2) — one function, both sides of the wire
+    day.ts        # dayOf, dayWindow, weekWindow, instantOfLocal, startOfDay, addDays  [SHIPPED]
+    duration.ts   # parseDuration, formatClock, formatCompactDuration,
+                  #   formatDecimalHours, spokenDuration, msToIsoDuration            [SHIPPED]
+    timeOfDay.ts  # parseTimeOfDay, resolveEndAfterStart, formatTimeOfDay            [SHIPPED]
+    entryTimes.ts # entryTimes, applyTimeEdit, assertEnteredDuration, elapsedMs      [SHIPPED]
+    codes.ts      # TraceErrorCode union, isTraceError, traceErrorCode               [SHIPPED]
     recap.ts      # assembleRecap(entries, projects, dayFields) -> RecapDoc
     render.ts     # renderMrkdwn(doc), renderPlain(doc) — both from RecapDoc
-    errors.ts     # TraceErrorCode union, traceError()
-  owned.ts        # getOwned
-  entries.ts      # the tracking loop
+  errors.ts       # traceError() — server-side, because ConvexError is convex/values [SHIPPED]
+  owned.ts        # getOwned, assertOwned                                            [SHIPPED]
+  entries.ts      # the tracking loop                                                [SHIPPED]
   projects.ts
   tags.ts
   settings.ts
   recap.ts
   crons.ts        # fast-follow (recap nudge)
 ```
+
+Two naming decisions differ from earlier drafts of this plan, recorded here
+because callers written later would otherwise import something that does not
+exist:
+
+- **`formatCompactDuration`, not `formatRecapDuration`.** It is the same
+  function the recap needs (`5h 44m` / `47m` / `<1m`, floored), but day headers
+  and totals use it too, so it is not named for one caller.
+- **The error vocabulary is split.** `convex/lib/codes.ts` holds the
+  `TraceErrorCode` union and the guards, because the *client* needs those and
+  cannot import anything that pulls in `convex/server`. `convex/errors.ts` holds
+  `traceError()`, which throws and therefore needs `ConvexError` from
+  `convex/values`. This keeps `convex/lib` free of Convex imports entirely,
+  which is stricter than this plan originally proposed and worth the extra file.
 
 ### Queries
 
@@ -342,9 +358,29 @@ convex/
 
 ### Error taxonomy
 
-`UNAUTHENTICATED` (exists), `NOT_FOUND`, `INVALID_DURATION`, `END_NOT_AFTER_START`, `TOO_MANY_TAGS`, `PROJECT_IN_USE`, `INVARIANT_MULTIPLE_RUNNING`.
+As shipped in `convex/lib/codes.ts`: `UNAUTHENTICATED`, `NOT_FOUND`,
+`INVALID_DURATION`, `END_NOT_AFTER_START`, `DURATION_TOO_LONG`,
+`TOO_MANY_TAGS`, `IN_USE`, `TOO_LONG`, `INVALID_TIMEZONE`,
+`INVARIANT_MULTIPLE_RUNNING`.
 
-Note what is deliberately absent: there is no error code for "cannot start". Start does not fail.
+`IN_USE` rather than `PROJECT_IN_USE`: tags need the same refusal, and one code
+with a `meta.kind` beats two codes that drift.
+
+Note what is deliberately absent: there is no error code for "cannot start".
+Start does not fail.
+
+### Where the 24-hour ceiling lives
+
+Worth stating explicitly, because getting it wrong produced a real bug during
+Phase 2. There are two different questions and they need different answers:
+
+| Path | Ceiling? | Why |
+|---|---|---|
+| `entryTimes()` — the sole writer of the time fields | **No** | A timer left running over a weekend is real recorded time. Refusing it here made `stop()` silently fail, which is a timer that can never be stopped |
+| `parseDuration()` — a duration the user typed | Yes (`too-long`) | Offers "longer than a day — split it?" |
+| `applyTimeEdit()` — any of the three edit fields | Yes | A mistyped year in the *start* field wrote a 584-day entry when only the field literally named `duration` was capped |
+
+The ceiling is policy about **input**; `entryTimes` enforces **consistency**.
 
 ---
 

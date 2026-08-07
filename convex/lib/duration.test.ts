@@ -176,8 +176,22 @@ describe("msToIsoDuration", () => {
 
 describe("round-trip", () => {
   it("every clock string this formats, it can also parse back", () => {
-    for (const value of [0, 45_000, 90 * MINUTE, HOUR + 5 * MINUTE + 3_000, 12 * HOUR]) {
+    // Zero is excluded: it formats to "0:00:00" and the parser refuses it, by
+    // design — a zero-length entry is not a thing the user can commit.
+    for (const value of [
+      1_000,
+      45_000,
+      90 * MINUTE,
+      HOUR + 5 * MINUTE + 3_000,
+      12 * HOUR,
+      24 * HOUR,
+    ]) {
       expect(ms(formatClock(value)), formatClock(value)).toBe(value)
     }
+  })
+
+  it("refuses the one string it formats but cannot mean", () => {
+    expect(formatClock(0)).toBe("0:00:00")
+    expect(parseDuration("0:00:00")).toEqual({ ok: false, reason: "zero" })
   })
 })

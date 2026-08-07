@@ -93,6 +93,13 @@ function parseBare(digits: string, nowMinutes: number): TimeParseResult {
   const value = Number(digits)
   if (value > 23) return fail()
 
+  // A leading zero is an explicit 24-hour hour, never a candidate for the
+  // nearest-reading rule. Without this, "09" typed at 16:00 resolved to 21:00
+  // — so backfilling a 9-to-5 day committed a 20-hour entry instead of eight,
+  // a twelve-hour over-bill from two keystrokes, while "0900" at the same
+  // moment gave 09:00. Two spellings of one intention must not disagree.
+  if (digits.length === 2 && digits.startsWith("0")) return ok(value * 60)
+
   if (value === 0) return ok(0)
 
   if (value === 12) {
@@ -107,6 +114,10 @@ function parseBare(digits: string, nowMinutes: number): TimeParseResult {
   if (value >= 13) return ok(value * 60)
 
   // 1-11: pick whichever of the two readings is nearer on the clock face.
+  // The two candidates are always exactly 12 hours apart, so a tie happens at
+  // exactly one `now` per input. `<=` breaks it toward AM — deterministic, and
+  // documented here because it is otherwise invisible. The caller echoes the
+  // parse before committing, which is what makes the whole rule safe.
   const am = value * 60
   const pm = (value + 12) * 60
   return ok(clockDistance(am, nowMinutes) <= clockDistance(pm, nowMinutes) ? am : pm)
@@ -135,21 +146,33 @@ function fail(): TimeParseResult {
  */
 export function resolveEndAfterStart(end: TimeOfDay, start: TimeOfDay): TimeOfDay {
   const startAbs = start.dayOffset * MINUTES_PER_DAY + start.minutes
-  let endAbs = end.dayOffset * MINUTES_PER_DAY + end.minutes
-  while (endAbs <= startAbs) endAbs += MINUTES_PER_DAY
+  // Anchored to the start's own day rather than repeatedly adding a day to
+  // whatever the end already carried. The loop form could return dayOffset 2
+  // when the start was already offset, which is outside this type's documented
+  // 0 | 1 domain and produced an entry more than 24 hours long.
+  const endMinutes = end.minutes
+  const sameDay = start.dayOffset * MINUTES_PER_DAY + endMinutes
+  const endAbs = sameDay > startAbs ? sameDay : sameDay + MINUTES_PER_DAY
   return {
     minutes: endAbs % MINUTES_PER_DAY,
     dayOffset: Math.floor(endAbs / MINUTES_PER_DAY),
   }
 }
 
-/** `09:00` / `9:00 AM`, for echoing the parse back before commit. */
+/**
+ * `09:00` / `9:00 AM`, for echoing the parse back before commit.
+ *
+ * A next-day time is marked. This echo is the product's stated defence against
+ * a mis-parse, and without the marker a rejected zero-length entry and an
+ * accepted 24-hour one both rendered as "12:00 AM → 12:00 AM".
+ */
 export function formatTimeOfDay(time: TimeOfDay, use12Hour: boolean): string {
   const hour = Math.floor(time.minutes / 60)
   const minute = time.minutes % 60
   const mm = minute < 10 ? `0${minute}` : String(minute)
-  if (!use12Hour) return `${hour < 10 ? `0${hour}` : hour}:${mm}`
+  const nextDay = time.dayOffset > 0 ? " +1d" : ""
+  if (!use12Hour) return `${hour < 10 ? `0${hour}` : hour}:${mm}${nextDay}`
   const suffix = hour < 12 ? "AM" : "PM"
   const h12 = hour % 12 === 0 ? 12 : hour % 12
-  return `${h12}:${mm} ${suffix}`
+  return `${h12}:${mm} ${suffix}${nextDay}`
 }

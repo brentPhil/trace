@@ -108,15 +108,19 @@ export function applyTimeEdit(
   now: number
 ): TimesResult {
   switch (edit.field) {
-    case "start":
+    case "start": {
       // End is a fact the user did not touch. Duration follows.
-      return entryTimes(edit.value, current.endedAt)
+      const result = entryTimes(edit.value, current.endedAt)
+      return capEditedDuration(result)
+    }
 
-    case "end":
+    case "end": {
       // Start is a fact the user did not touch. Duration follows. Giving a
       // running entry an end time is a stop, and it is the legitimate fix for
       // "I finished this twenty minutes ago and forgot to press stop".
-      return entryTimes(current.startedAt, edit.value)
+      const result = entryTimes(current.startedAt, edit.value)
+      return capEditedDuration(result)
+    }
 
     case "duration": {
       // A duration the user typed, so the policy ceiling applies here — unlike
@@ -139,11 +143,37 @@ export function applyTimeEdit(
 }
 
 /**
+ * The ceiling, applied to a result produced by editing a TIMESTAMP.
+ *
+ * The ceiling used to live only on the field literally named "duration", so a
+ * mistyped year in the start field wrote a 584-day entry with no refusal —
+ * into every day header, week total and export. All three edit fields are
+ * user-entered, so all three are capped; `entryTimes` itself stays uncapped so
+ * a genuinely-elapsed runaway timer can always be stopped.
+ */
+function capEditedDuration(result: TimesResult): TimesResult {
+  if (!result.ok || result.times.durationMs === null) return result
+  const entered = assertEnteredDuration(result.times.durationMs)
+  return entered.ok ? result : entered
+}
+
+/**
  * Elapsed time for a running entry needs a clock, and this module has no
  * business owning one. Callers pass `now` explicitly.
+ *
+ * A completed entry reports its STORED durationMs rather than recomputing from
+ * the timestamps. That is the field every total in the product sums, so the
+ * number on the row and the number in the day header come from one place and
+ * cannot disagree on screen. `entryTimes` is the sole writer, which is what
+ * keeps the two consistent at rest.
  */
 export function elapsedMs(times: EntryTimes, now: number): number {
-  if (times.endedAt !== null) return times.endedAt - times.startedAt
+  if (times.endedAt !== null) {
+    return times.durationMs ?? times.endedAt - times.startedAt
+  }
+  // A non-finite clock yields zero, not NaN. NaN here would reach the
+  // formatters and render "NaN:NaN:NaN" in place of the elapsed time.
+  if (!Number.isFinite(now)) return 0
   return Math.max(0, now - times.startedAt)
 }
 
@@ -157,5 +187,9 @@ export function crossesMidnight(
   dayOf: (instantMs: number) => string
 ): boolean {
   if (times.endedAt === null) return false
-  return dayOf(times.startedAt) !== dayOf(times.endedAt)
+  // The last instant the entry occupies, not the first instant after it. Days
+  // are half-open, so an entry ending exactly at local midnight belongs wholly
+  // to the day it started in — flagging it would draw a continuation marker
+  // into a day where it has zero time, contradicting the total directly above.
+  return dayOf(times.startedAt) !== dayOf(times.endedAt - 1)
 }
