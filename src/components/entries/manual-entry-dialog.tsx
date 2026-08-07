@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
@@ -52,6 +52,19 @@ export function ManualEntryDialog({
     setTo("")
     setError(null)
   }
+
+  /*
+   * Re-seed the day every time the dialog OPENS, not once at mount.
+   *
+   * `today` is derived from the wall clock, and this page is one people leave
+   * open. Seeded only at mount, a tab opened yesterday evening offers yesterday
+   * as the default when it is used at 09:00 this morning — so an entry meant
+   * for today lands on a day that has very likely already been reported, and
+   * goes missing from the total the user is looking at while they add it.
+   */
+  useEffect(() => {
+    if (open) setDay(today)
+  }, [open, today])
 
   const submit = async () => {
     if (saving) return

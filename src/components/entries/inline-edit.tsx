@@ -79,19 +79,44 @@ export function InlineEdit<T>({
     setEditing(true)
   }
 
-  const cancel = () => {
-    cancelling.current = true
-    setEditing(false)
-    setError(null)
-    // Focus goes back where it came from. Without this it falls to <body> and
-    // the next Tab restarts from the top of the document.
+  /**
+   * Hands focus back to the trigger the editor replaced.
+   *
+   * Required on EVERY path that closes the editor, not just Escape. The input
+   * unmounts, so without this focus falls to <body> and the next Tab restarts
+   * from the top of the document — a keyboard or screen-reader user loses their
+   * place in the log on every successful edit, which is the common case rather
+   * than the exceptional one.
+   *
+   * Skipped when the editor is closing because focus already moved somewhere
+   * else (a click on another control), since stealing it back would fight the
+   * user's own gesture.
+   */
+  const returnFocus = (force: boolean) => {
     requestAnimationFrame(() => {
-      triggerRef.current?.focus()
+      const active = document.activeElement
+      if (force || active === null || active === document.body) {
+        triggerRef.current?.focus()
+      }
       cancelling.current = false
     })
   }
 
-  const commit = async () => {
+  const cancel = () => {
+    cancelling.current = true
+    setEditing(false)
+    setError(null)
+    returnFocus(true)
+  }
+
+  /**
+   * `fromKeyboard` is true for Enter and false for blur.
+   *
+   * Enter keeps focus in a control that is about to unmount, so it has to be
+   * put back. A blur means focus has already gone somewhere the user chose, and
+   * dragging it back to the trigger would undo their click.
+   */
+  const commit = async (fromKeyboard: boolean) => {
     if (cancelling.current) return
 
     const trimmed = raw.trim()
@@ -100,6 +125,7 @@ export function InlineEdit<T>({
     // user never touched must never raise an error.
     if (trimmed === initialInput.trim()) {
       setEditing(false)
+      returnFocus(fromKeyboard)
       return
     }
 
@@ -112,6 +138,7 @@ export function InlineEdit<T>({
 
     setEditing(false)
     setError(null)
+    returnFocus(fromKeyboard)
 
     try {
       await onCommit(parsed.value)
@@ -159,11 +186,11 @@ export function InlineEdit<T>({
           setRaw(event.target.value)
           if (error !== null) setError(null)
         }}
-        onBlur={() => void commit()}
+        onBlur={() => void commit(false)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault()
-            void commit()
+            void commit(true)
           } else if (event.key === "Escape") {
             event.preventDefault()
             // Stops the key reaching a dialog or popover above this one. The

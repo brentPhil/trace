@@ -22,6 +22,20 @@ import type { Doc, Id } from "../../convex/_generated/dataModel"
  * against a paginated list, whose pages live in a different cache shape — which
  * is why the history view deliberately does not use optimistic updates.
  */
+/**
+ * Marks an id that no server row has yet.
+ *
+ * A placeholder `_id` is unavoidable — the real one does not exist until the
+ * mutation lands — but it must be RECOGNISABLE, because sending it to a
+ * mutation is an argument-validation error, and because any UI keying off
+ * `_id` needs to know the identity is provisional.
+ */
+const OPTIMISTIC_ID_PREFIX = "optimistic:"
+
+export function isOptimisticId(id: string): boolean {
+  return id.startsWith(OPTIMISTIC_ID_PREFIX)
+}
+
 function optimisticEntry(args: {
   clientKey: string
   title: string
@@ -29,9 +43,12 @@ function optimisticEntry(args: {
   billable: boolean
 }): Doc<"timeEntries"> {
   return {
-    // A placeholder id. The real one arrives with the server's response, which
-    // replaces this whole document.
-    _id: crypto.randomUUID() as unknown as Id<"timeEntries">,
+    // Derived from the clientKey, NOT crypto.randomUUID(). Convex re-runs every
+    // pending optimistic update on every server transition, so a random id here
+    // mints a different one each time — the placeholder would not even be
+    // stable within the in-flight window, and anything keyed on it would see a
+    // fresh "entry" whenever an unrelated subscription updated.
+    _id: `${OPTIMISTIC_ID_PREFIX}${args.clientKey}` as unknown as Id<"timeEntries">,
     _creationTime: args.startedAt,
     userId: "",
     clientKey: args.clientKey,

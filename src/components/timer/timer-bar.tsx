@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { DollarSign, FolderClosed, Play, Square, Tag, Trash2 } from "lucide-react"
 import { EntryDuration } from "@/components/timer/entry-duration"
+import { isOptimisticId } from "@/hooks/use-entry-mutations"
 import { cn } from "@/lib/utils"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -66,49 +67,93 @@ export function TimerBar({
   const inputRef = useRef<HTMLInputElement>(null)
 
   const isRunning = running !== null
-  const runningId = running?._id ?? null
+  const runningKey = running?.clientKey ?? null
   const runningTitle = running?.title ?? ""
 
   /*
-   * The draft carries the id of the entry it belongs to.
+   * The draft is tagged with WHICH entry it belongs to and WHETHER the user
+   * typed it. Both halves are load-bearing.
    *
-   * It has to, because `draft` is component state and `running` is a query
-   * result: for one render after a new entry appears, the state still holds the
-   * previous one's text. An untagged draft cannot tell "the user has typed
-   * something" apart from "state has not caught up yet", and the persist effect
-   * below acted on both.
+   * `draft` is component state and `running` is a reactive query result, so for
+   * one render after the query moves, the state still describes the previous
+   * value. Without the tags, the persist effect below cannot tell these three
+   * cases apart, and it acted on all of them:
    *
-   * That was not theoretical. On first mount the draft is empty while the
-   * running entry has a real title, so the effect scheduled setTitle(id, "").
-   * The re-render normally cancels it inside the 400 ms debounce — but it is a
-   * race, and losing it ERASES the title of the entry the user is tracking.
-   * Tagging makes the two cases distinguishable and the write impossible.
+   *   1. The user typed something          -> write it
+   *   2. State has not caught up yet       -> write nothing
+   *   3. The title changed somewhere else  -> ADOPT it, write nothing
+   *
+   * Case 2 erased titles: on mount the draft is empty while the running entry
+   * has a real title, so the effect scheduled setTitle(id, ""). Case 3 reverted
+   * them: retitle the running entry from its row in the log and the bar's stale
+   * draft would write the old text back 400 ms later.
+   *
+   * The key is `clientKey`, NOT `_id`. One logical entry changes `_id` exactly
+   * once — the optimistic placeholder is replaced by the server's real document
+   * mid-flight — so keying on `_id` reads that swap as a different entry and
+   * reseeds the draft, discarding anything typed during the round trip.
+   * `clientKey` is minted before the mutation is sent and is carried by both
+   * the optimistic row and the stored one, so it is stable across the swap.
    */
-  const [draft, setDraft] = useState<{ id: string | null; text: string }>({
-    id: null,
-    text: "",
-  })
+  const [draft, setDraft] = useState<{
+    key: string | null
+    text: string
+    /** True once the user has typed since the last agreement with the server. */
+    dirty: boolean
+  }>({ key: null, text: "", dirty: false })
 
   // Adjusted during render rather than in an effect — React's documented
   // pattern for state derived from props. An effect would paint one frame of
   // the PREVIOUS entry's title in the input before correcting itself.
-  if (draft.id !== runningId) {
-    setDraft({ id: runningId, text: runningTitle })
+  if (draft.key !== runningKey) {
+    setDraft({ key: runningKey, text: runningTitle, dirty: false })
   }
 
   // Persist while typing. Debounced and last-write-wins: the timer is already
   // running and the words are already on screen, so this must never block.
   useEffect(() => {
-    // `draft.id !== runningId` is the guard that makes the stale-state case
-    // unreachable, including the reverse one: the outgoing entry's text must
-    // never be written onto the incoming entry during a handoff.
-    if (runningId === null || draft.id !== runningId) return
+    if (running === null || draft.key !== runningKey) return
+
+    // Nothing local to defend, so the server is simply right. This is what
+    // makes an edit from the log row, another tab, or another device appear in
+    // the bar instead of being fought by a draft the user never touched.
+    if (!draft.dirty) {
+      if (draft.text !== runningTitle) {
+        setDraft({ key: runningKey, text: runningTitle, dirty: false })
+      }
+      return
+    }
+
     if (draft.text === runningTitle) return
 
+    // No row exists to write to yet; the start mutation is still in flight and
+    // is carrying a title of its own. Once it lands, `runningTitle` changes and
+    // this effect re-runs with a real id.
+    if (isOptimisticId(running._id)) return
+
+    const entryId = running._id
     const text = draft.text
-    const id = setTimeout(() => void setTitle(runningId, text), TITLE_DEBOUNCE_MS)
-    return () => clearTimeout(id)
-  }, [draft, runningId, runningTitle, setTitle])
+    const timer = setTimeout(() => {
+      void setTitle(entryId, text)
+        .then(() => {
+          // Only clear `dirty` if this is still the text on screen. Clearing it
+          // unconditionally would let a remote change adopt over whatever the
+          // user typed while the write was in flight.
+          setDraft((current) =>
+            current.key === runningKey && current.text === text
+              ? { ...current, dirty: false }
+              : current
+          )
+        })
+        .catch(() => {
+          // Deliberately silent, and `dirty` stays true so the next keystroke
+          // retries. A failed title write must not raise anything modal in the
+          // middle of typing — the timer is running and the words are already
+          // on screen, which is what actually matters.
+        })
+    }, TITLE_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [draft, running, runningKey, runningTitle, setTitle])
 
   async function onToggle() {
     // A double press must not create two entries. clientKey makes a genuine
@@ -123,7 +168,7 @@ export function TimerBar({
         const result = await stop()
         // Tagged null, so the render-phase adjustment above does not
         // immediately re-seed it from an entry that is on its way out.
-        setDraft({ id: null, text: "" })
+        setDraft({ key: null, text: "", dirty: false })
         // Only when something actually stopped. A second tab having already
         // stopped it returns an empty list, and raising a note sheet for an
         // entry the user did not just finish would be a non-sequitur.
@@ -159,7 +204,9 @@ export function TimerBar({
           id="timer-title"
           ref={inputRef}
           value={draft.text}
-          onChange={(event) => setDraft({ id: runningId, text: event.target.value })}
+          onChange={(event) =>
+            setDraft({ key: runningKey, text: event.target.value, dirty: true })
+          }
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault()
