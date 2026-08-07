@@ -21,7 +21,11 @@ export function ToastViewport() {
     <Toast.Portal>
       <Toast.Viewport
         className={cn(
-          "fixed bottom-0 left-1/2 z-50 w-full max-w-[26rem] -translate-x-1/2",
+          // `inset-x-0` + `mx-auto` rather than `w-full left-1/2` with a
+          // translate. Same result, one fewer moving part: the centring is done
+          // by auto margins instead of a transform, so nothing here can
+          // interact with the transform-based enter/exit animation below.
+          "fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[26rem]",
           "flex flex-col gap-2 p-4",
           // Not a click shield: the viewport spans the width, and swallowing
           // pointer events across it would block the row underneath.

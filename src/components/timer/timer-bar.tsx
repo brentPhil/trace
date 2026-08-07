@@ -373,7 +373,14 @@ export function TimerBar({
         isRunning ? "border-enlarger/50" : "border-edge-soft"
       )}
     >
-      <div className="relative flex items-center gap-2 px-4 py-3">
+      {/*
+        Wraps below `sm`, where the classifier cluster gets its own line.
+        Single-row at 375px, the project name plus three controls plus the
+        elapsed time plus a 42px button left the title field zero width and
+        pushed the start button off the edge — the two things on this bar that
+        must never be crowded out.
+      */}
+      <div className="relative flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3">
         <label htmlFor="timer-title" className="sr-only">
           What are you working on?
         </label>
@@ -438,12 +445,23 @@ export function TimerBar({
           // without them the text runs straight into the elapsed time with no
           // gap at all — the title and the clock read as one string.
           className={cn(
-            "min-w-0 flex-1 bg-transparent pr-2 text-lg outline-none",
+            // A floor on the width: `flex-1` alone lets a long elapsed time and
+            // a wide control cluster squeeze this to nothing, and the field the
+            // whole product is built around must never be the thing that gives.
+            "min-w-[7rem] flex-1 bg-transparent pr-2 text-base outline-none sm:text-lg",
             "placeholder:text-muted-foreground focus-visible:ring-0"
           )}
         />
 
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-0.5",
+            // Own line below `sm`, ordered after the button so it wraps down
+            // rather than pushing the input along.
+            "order-last w-full border-t border-edge-soft/60 pt-2",
+            "sm:order-none sm:w-auto sm:border-t-0 sm:pt-0"
+          )}
+        >
           <ProjectPicker
             projects={projects}
             value={classification.projectId}
@@ -482,7 +500,7 @@ export function TimerBar({
           startedAt={running?.startedAt ?? Date.now()}
           endedAt={isRunning ? null : 0}
           className={cn(
-            "shrink-0 px-2 text-lg font-medium",
+            "shrink-0 px-1 text-base font-medium sm:px-2 sm:text-lg",
             isRunning ? "text-enlarger" : "text-muted-foreground"
           )}
         />
