@@ -37,7 +37,7 @@ export const Route = createRootRouteWithContext<{
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "TanStack Start Starter",
+        title: "Trace",
       },
     ],
     links: [
@@ -93,7 +93,10 @@ function RootComponent() {
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    // The palette lives on :root, but shadcn components carry `dark:` variants
+    // that only fire inside `.dark` (see the @custom-variant in styles.css).
+    // Without this class those branches are dead code.
+    <html lang="en" className="dark">
       <head>
         <HeadContent />
       </head>

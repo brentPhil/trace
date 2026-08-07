@@ -9,8 +9,10 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as email from "../email.js";
 import type * as healthcheck from "../healthcheck.js";
 import type * as http from "../http.js";
+import type * as maintenance from "../maintenance.js";
 
 import type {
   ApiFromModules,
@@ -20,8 +22,10 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  email: typeof email;
   healthcheck: typeof healthcheck;
   http: typeof http;
+  maintenance: typeof maintenance;
 }>;
 
 /**
@@ -52,4 +56,5 @@ export declare const internal: FilterApi<
 
 export declare const components: {
   betterAuth: import("@convex-dev/better-auth/_generated/component.js").ComponentApi<"betterAuth">;
+  resend: import("@convex-dev/resend/_generated/component.js").ComponentApi<"resend">;
 };

@@ -1,0 +1,26 @@
+{
+  /* Convex functions run in the Convex runtime, not the browser, so they need
+   * their own compiler settings. The root tsconfig.json excludes this directory
+   * and defers to this file; `pnpm typecheck` runs both.
+   */
+  "compilerOptions": {
+    "allowJs": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    /* Convex functions read deployment config from process.env. */
+    "types": ["node"],
+
+    /* Required by Convex. */
+    "target": "ESNext",
+    "lib": ["ES2021", "dom", "ESNext.Array", "DOM.Iterable"],
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["./**/*"],
+  "exclude": ["./_generated"]
+}

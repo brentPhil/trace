@@ -1,9 +1,13 @@
 import { betterAuth } from "better-auth/minimal"
 import { createClient } from "@convex-dev/better-auth"
 import { convex } from "@convex-dev/better-auth/plugins"
+import { requireActionCtx } from "@convex-dev/better-auth/utils"
 import authConfig from "./auth.config"
+import { sendPasswordResetEmail } from "./email"
+import { ConvexError } from "convex/values"
 import { components } from "./_generated/api"
 import { query } from "./_generated/server"
+import type { MutationCtx, QueryCtx } from "./_generated/server"
 import type { GenericCtx } from "@convex-dev/better-auth"
 import type { DataModel } from "./_generated/dataModel"
 
@@ -20,6 +24,20 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: false,
+      // Password reset is the recovery path after a compromise. Better Auth
+      // leaves existing sessions alive by default, which would let an attacker
+      // keep the session the reset was meant to evict.
+      revokeSessionsOnPasswordReset: true,
+      // Better Auth returns the same response whether or not the account
+      // exists, so this callback simply does not run for unknown addresses.
+      // Never surface anything here that would let a caller tell the
+      // difference.
+      sendResetPassword: async ({ user, url }) => {
+        await sendPasswordResetEmail(requireActionCtx(ctx), {
+          to: user.email,
+          url,
+        })
+      },
     },
     plugins: [
       // Required for Convex compatibility.
@@ -28,11 +46,48 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
   })
 }
 
-// safeGetAuthUser returns null when signed out rather than throwing, so this
-// can be loaded on pages that render both signed-in and signed-out states.
+/**
+ * The identity check every non-public Convex function must call.
+ *
+ * Route guards in the client only decide what renders; they cannot stop a
+ * direct call to a Convex function. This is the layer that actually protects
+ * data, so any query, mutation, or action touching a user's entries must start
+ * here and scope its reads and writes to the returned user.
+ *
+ * Throws for anonymous callers. Use safeGetUser when "signed out" is a valid
+ * state the caller renders rather than an error.
+ */
+export const requireUser = async (ctx: QueryCtx | MutationCtx) => {
+  const user = await authComponent.safeGetAuthUser(ctx)
+  if (!user) {
+    throw new ConvexError({
+      code: "UNAUTHENTICATED",
+      message: "You must be signed in to do that.",
+    })
+  }
+  return user
+}
+
+/** Returns the signed-in user, or null when anonymous. Never throws. */
+export const safeGetUser = async (ctx: QueryCtx | MutationCtx) => {
+  return await authComponent.safeGetAuthUser(ctx)
+}
+
+// Nullable by design: this is loaded by pages that render both signed-in and
+// signed-out states, where being anonymous is not an error.
 export const getCurrentUser = query({
   args: {},
   handler: async (ctx) => {
-    return await authComponent.safeGetAuthUser(ctx)
+    return await safeGetUser(ctx)
+  },
+})
+
+// Protected counterpart to getCurrentUser. Exists both as the endpoint an
+// authenticated-only loader can call, and as the thing that proves requireUser
+// actually rejects anonymous callers.
+export const getAuthenticatedUser = query({
+  args: {},
+  handler: async (ctx) => {
+    return await requireUser(ctx)
   },
 })
