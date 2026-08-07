@@ -118,9 +118,21 @@ export function assembleRecap(input: {
   // the recap; short entries are handled by ORDERING, never by filtering.
   const grouped = new Map<string, Array<RecapEntry>>()
   for (const entry of input.entries) {
-    const key = entry.projectId ?? ""
-    const list = grouped.get(key)
-    if (list === undefined) grouped.set(key, [entry])
+    /*
+     * The key is the project that RESOLVES, not the id that was stored.
+     *
+     * An entry can carry a projectId whose project is gone — delete an entry,
+     * delete its project (allowed, nothing live references it), then undo the
+     * entry. Keying on the raw id gave that entry a block of its own which,
+     * having no project to name it, was ALSO titled "No project" — so the recap
+     * showed two blocks with identical headings and the reader had no way to
+     * tell why. Resolving first merges them, and the totals are unaffected
+     * because no entry is dropped either way.
+     */
+    const resolved =
+      entry.projectId !== undefined && byId.has(entry.projectId) ? entry.projectId : ""
+    const list = grouped.get(resolved)
+    if (list === undefined) grouped.set(resolved, [entry])
     else list.push(entry)
   }
 

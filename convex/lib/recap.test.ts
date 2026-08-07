@@ -175,6 +175,27 @@ describe("the messy day", () => {
     expect(doc.blocks).toHaveLength(1)
   })
 
+  it("never renders two blocks both titled 'No project'", () => {
+    // Reachable: delete an entry, delete its project (allowed — nothing live
+    // references it), then undo the entry. Keying the grouping on the raw
+    // projectId gave the orphan its own block which, having no project to name
+    // it, was also called "No project".
+    const doc = day(
+      [
+        e({ title: "Ghost work", durationMs: 2 * HOUR, projectId: "p_gone" }),
+        e({ title: "Loose work", durationMs: 45 * MIN }),
+      ],
+      []
+    )
+
+    const named = doc.blocks.map((b) => b.projectName)
+    expect(new Set(named).size).toBe(named.length)
+    expect(doc.blocks).toHaveLength(1)
+    expect(doc.blocks[0].durationMs).toBe(2 * HOUR + 45 * MIN)
+    // And no time went missing in the merge.
+    expect(doc.blocks[0].durationMs).toBe(doc.totalMs)
+  })
+
   it("labels the no-project block without scolding", () => {
     const doc = day([e({ title: "Email", durationMs: 15 * MIN })])
     expect(doc.blocks[0].projectName).toBe("No project")
