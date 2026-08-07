@@ -1,14 +1,15 @@
-import { EntryRow } from "@/components/entries/entry-row"
+﻿import { EntryRow } from "@/components/entries/entry-row"
 import { formatClock } from "@shared/duration"
 import { cn } from "@/lib/utils"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { DayGroup } from "@/lib/group-entries"
+import type { Doc } from "../../../convex/_generated/dataModel"
 
 /**
  * The log: entries under day headers, newest first.
  *
  * This is the only list view in the product. Every "report" is this same view
- * with a filter applied, because Trace's entries are meaningful one at a time —
+ * with a filter applied, because Trace's entries are meaningful one at a time â€”
  * the aggregation layer a conventional tracker needs exists to compensate for
  * prose being absent, and here it is not.
  */
@@ -16,11 +17,15 @@ export function DayList({
   groups,
   timeZone,
   use12Hour,
+  projects,
+  tags,
   actions,
 }: {
   groups: Array<DayGroup>
   timeZone: string
   use12Hour: boolean
+  projects: Array<Doc<"projects">>
+  tags: Array<Doc<"tags">>
   actions: EntryRowActions
 }) {
   if (groups.length === 0) return <EmptyLog />
@@ -58,6 +63,8 @@ export function DayList({
                 entry={entry}
                 timeZone={timeZone}
                 use12Hour={use12Hour}
+                projects={projects}
+                tags={tags}
                 actions={actions}
               />
             ))}
@@ -78,10 +85,11 @@ function EmptyLog() {
     <div className="flex flex-col gap-2 px-4 py-12 text-sm">
       <p className="font-medium">Nothing tracked yet.</p>
       <p className="max-w-prose text-muted-foreground">
-        Type what you&apos;re working on and press start — a title is optional,
+        Type what you&apos;re working on and press start â€” a title is optional,
         and you can fill in the rest later. Forgot to start the timer? You can
         add an entry by hand and set its times afterwards.
       </p>
     </div>
   )
 }
+

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react"
 import { DayList } from "@/components/entries/day-list"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { Toast } from "@/components/ui/toast"
+import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
 import { errorMessage } from "@/lib/error-message"
@@ -31,7 +32,14 @@ export function EntryLog({
 }) {
   const { setNote, update, editTime, remove, restore } = useEntryEditMutations()
   const { resume } = useEntryMutations()
+  const { projects, tags } = useClassifiers()
+  const { createProject: createProjectRaw, ensureTag } = useClassifierMutations()
   const toasts = Toast.useToastManager()
+
+  const createProject = useCallback(
+    async (name: string) => await createProjectRaw({ name }),
+    [createProjectRaw]
+  )
 
   const [noteEntry, setNoteEntry] = useState<Entry | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)
@@ -87,6 +95,21 @@ export function EntryLog({
     onDurationChange: async (entry, ms) => {
       await editTime(entry._id, "duration", ms)
     },
+    // Classifier changes are fire-and-forget with an optimistic update behind
+    // them, so the row reflects the choice immediately. A failure surfaces as a
+    // toast rather than reverting silently.
+    onClassify: (entry, change) => {
+      void update({
+        entryId: entry._id,
+        ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
+        ...(change.tagIds !== undefined ? { tagIds: change.tagIds } : {}),
+        ...(change.billable !== undefined ? { billable: change.billable } : {}),
+      }).catch((thrown: unknown) => {
+        toasts.add({ title: errorMessage(thrown), priority: "high" })
+      })
+    },
+    onCreateProject: createProject,
+    onCreateTag: ensureTag,
     onNoteOpen: (entry) => {
       setNoteEntry(entry)
       setNoteOpen(true)
@@ -115,6 +138,8 @@ export function EntryLog({
         groups={groups}
         timeZone={timeZone}
         use12Hour={use12Hour}
+        projects={projects}
+        tags={tags}
         actions={actions}
       />
       <NoteSheet

@@ -239,6 +239,117 @@ export const listRangeAs = internalQuery({
 })
 
 // ---------------------------------------------------------------------------
+// titleSuggestions
+// ---------------------------------------------------------------------------
+
+/** How far back autocomplete looks. Recent work is what gets repeated. */
+const SUGGESTION_SCAN = 400
+
+const suggestion = v.object({
+  title: v.string(),
+  projectId: v.optional(v.id("projects")),
+  tagIds: v.array(v.id("tags")),
+  billable: v.boolean(),
+  lastUsedAt: v.number(),
+  count: v.number(),
+})
+
+/**
+ * Previous titles, with the classification each one last carried.
+ *
+ * Returns project, tags and billable — and deliberately NOT the note. The note
+ * describes what happened during one specific interval; copying it onto a new
+ * block of time would put a false account on work nobody has done yet, in the
+ * user's own voice, indistinguishable from something they wrote.
+ *
+ * This is EXACTLY the set `resume` inherits, and that is the point. Toggl's
+ * autocomplete and its resume button inherit different sets from each other —
+ * tags come along on one path and not the other — so a user who notices cannot
+ * trust either, and a user who does not notice silently loses tags.
+ *
+ * Ranked by recency rather than frequency: the thing you did an hour ago is a
+ * better guess than the thing you did forty times last quarter.
+ */
+async function titleSuggestionsImpl(
+  ctx: QueryCtx,
+  userId: string,
+  prefix: string,
+  limit: number
+) {
+  const rows = await ctx.db
+    .query("timeEntries")
+    .withIndex("by_user_started", (q) => q.eq("userId", userId))
+    .order("desc")
+    .take(SUGGESTION_SCAN)
+
+  const needle = prefix.trim().toLowerCase()
+  const seen = new Map<
+    string,
+    {
+      title: string
+      projectId?: Id<"projects">
+      tagIds: Array<Id<"tags">>
+      billable: boolean
+      lastUsedAt: number
+      count: number
+    }
+  >()
+
+  for (const row of rows) {
+    if (row.deletedAt !== null) continue
+    const title = row.title.trim()
+    if (title === "") continue
+    if (needle !== "" && !title.toLowerCase().includes(needle)) continue
+
+    // Case-insensitive key so "Standup" and "standup" are one suggestion, but
+    // the FIRST spelling seen wins — and rows arrive newest first, so that is
+    // the most recent spelling rather than an arbitrary one.
+    const key = title.toLowerCase()
+    const existing = seen.get(key)
+    if (existing === undefined) {
+      seen.set(key, {
+        title,
+        projectId: row.projectId,
+        tagIds: row.tagIds,
+        billable: row.billable,
+        lastUsedAt: row.startedAt,
+        count: 1,
+      })
+    } else {
+      existing.count += 1
+    }
+  }
+
+  return [...seen.values()]
+    .sort((a, b) => b.lastUsedAt - a.lastUsedAt)
+    .slice(0, limit)
+}
+
+const titleSuggestionsArgs = {
+  prefix: v.optional(v.string()),
+  limit: v.optional(v.number()),
+}
+
+export const titleSuggestions = query({
+  args: titleSuggestionsArgs,
+  returns: v.array(suggestion),
+  handler: async (ctx, args) =>
+    await titleSuggestionsImpl(
+      ctx,
+      await requireUserId(ctx),
+      args.prefix ?? "",
+      args.limit ?? 6
+    ),
+})
+
+export const titleSuggestionsAs = internalQuery({
+  args: { ...titleSuggestionsArgs, userId: v.string() },
+  returns: v.array(suggestion),
+  handler: async (ctx, args) =>
+    await titleSuggestionsImpl(ctx, args.userId, args.prefix ?? "", args.limit ?? 6),
+})
+
+// ---------------------------------------------------------------------------
 // start
 // ---------------------------------------------------------------------------
 

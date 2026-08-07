@@ -12,14 +12,17 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
  * one losing text the user had typed, and none of them were visible by reading
  * the component.
  *
- * These tests exist because the component takes its writes as arguments. That
- * refactor was done to stop the design harness writing to production; being
- * able to assert on what would have been written is the second dividend.
+ * These tests exist because the component takes its writes and its classifier
+ * lists as arguments. That refactor was done to stop the design harness writing
+ * to production; being able to render the bar with no backend at all, and to
+ * assert on what WOULD have been written, is the second dividend.
  */
 
 const TITLE_DEBOUNCE_MS = 400
 
-function entry(over: Partial<Doc<"timeEntries">> & { clientKey: string }): Doc<"timeEntries"> {
+function entry(
+  over: Partial<Doc<"timeEntries">> & { clientKey: string }
+): Doc<"timeEntries"> {
   return {
     _id: over._id ?? (optimisticIdFor(over.clientKey) as unknown as Id<"timeEntries">),
     _creationTime: 0,
@@ -39,17 +42,46 @@ function entry(over: Partial<Doc<"timeEntries">> & { clientKey: string }): Doc<"
 
 function makeActions(over: Partial<TimerBarActions> = {}) {
   const setTitle = vi.fn(async () => {})
+  const classify = vi.fn(async () => {})
   const actions: TimerBarActions = {
     start: vi.fn(async () => {}),
     stop: vi.fn(async () => ({ stoppedEntryIds: [], serverNow: Date.now() })),
     discard: vi.fn(async () => {}),
     setTitle,
+    classify,
+    createProject: vi.fn(async () => ({
+      projectId: "jd7proj" as unknown as Id<"projects">,
+    })),
+    createTag: vi.fn(async () => ({ tagId: "jd7tag" as unknown as Id<"tags"> })),
     ...over,
   }
-  return { actions, setTitle }
+  return { actions, setTitle, classify }
+}
+
+/** The bar with empty classifier lists — no backend behind any of it. */
+function Bar({
+  running,
+  actions,
+  onStopped,
+}: {
+  running: Doc<"timeEntries"> | null
+  actions: TimerBarActions
+  onStopped?: (stopped: Doc<"timeEntries">) => void
+}) {
+  return (
+    <TimerBar
+      running={running}
+      actions={actions}
+      projects={[]}
+      tags={[]}
+      onStopped={onStopped}
+    />
+  )
 }
 
 const input = () => screen.getByLabelText<HTMLInputElement>("What are you working on?")
+
+const REAL_ID = "jd7abc123" as unknown as Id<"timeEntries">
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -67,19 +99,15 @@ describe("the draft survives the optimistic id being replaced", () => {
     // placeholder. That swap read as "a different entry", reseeded the draft
     // from the server title, and the text vanished mid-keystroke.
     const { actions } = makeActions()
-    const optimistic = entry({ clientKey: "k1", title: "" })
 
-    const view = render(<TimerBar running={optimistic} actions={actions} />)
+    const view = render(<Bar running={entry({ clientKey: "k1" })} actions={actions} />)
     fireEvent.change(input(), { target: { value: "fix the parser" } })
     expect(input().value).toBe("fix the parser")
 
     // The server's document lands: same clientKey, real id, title still "".
-    const real = entry({
-      clientKey: "k1",
-      title: "",
-      _id: "jd7abc123" as unknown as Id<"timeEntries">,
-    })
-    view.rerender(<TimerBar running={real} actions={actions} />)
+    view.rerender(
+      <Bar running={entry({ clientKey: "k1", _id: REAL_ID })} actions={actions} />
+    )
 
     expect(input().value).toBe("fix the parser")
   })
@@ -88,7 +116,7 @@ describe("the draft survives the optimistic id being replaced", () => {
     // `v.id("timeEntries")` rejects it, so the write is not merely useless — it
     // is an ArgumentValidationError in the logs and a lost title.
     const { actions, setTitle } = makeActions()
-    render(<TimerBar running={entry({ clientKey: "k1", title: "" })} actions={actions} />)
+    render(<Bar running={entry({ clientKey: "k1" })} actions={actions} />)
 
     fireEvent.change(input(), { target: { value: "typed while starting" } })
     await vi.advanceTimersByTimeAsync(TITLE_DEBOUNCE_MS * 3)
@@ -98,37 +126,27 @@ describe("the draft survives the optimistic id being replaced", () => {
 
   it("writes with the real id once the swap has happened", async () => {
     const { actions, setTitle } = makeActions()
-    const view = render(
-      <TimerBar running={entry({ clientKey: "k1", title: "" })} actions={actions} />
-    )
+    const view = render(<Bar running={entry({ clientKey: "k1" })} actions={actions} />)
 
     fireEvent.change(input(), { target: { value: "fix the parser" } })
     view.rerender(
-      <TimerBar
-        running={entry({
-          clientKey: "k1",
-          title: "",
-          _id: "jd7abc123" as unknown as Id<"timeEntries">,
-        })}
-        actions={actions}
-      />
+      <Bar running={entry({ clientKey: "k1", _id: REAL_ID })} actions={actions} />
     )
     await vi.advanceTimersByTimeAsync(TITLE_DEBOUNCE_MS + 50)
 
-    expect(setTitle).toHaveBeenCalledWith("jd7abc123", "fix the parser")
+    expect(setTitle).toHaveBeenCalledWith(REAL_ID, "fix the parser")
   })
 })
 
 describe("the draft and the server disagreeing", () => {
-  const real = (title: string) =>
-    entry({ clientKey: "k1", title, _id: "jd7abc123" as unknown as Id<"timeEntries"> })
+  const real = (title: string) => entry({ clientKey: "k1", title, _id: REAL_ID })
 
   it("never writes an empty draft over a real title on mount", async () => {
     // The original defect: `draft` starts "" while the running entry has a
     // title, and both effects run in the same commit pass, so a setTitle(id, "")
     // was scheduled. Losing the race against the re-render ERASED the title.
     const { actions, setTitle } = makeActions()
-    render(<TimerBar running={real("Checkout form validation")} actions={actions} />)
+    render(<Bar running={real("Checkout form validation")} actions={actions} />)
 
     await vi.advanceTimersByTimeAsync(TITLE_DEBOUNCE_MS * 3)
 
@@ -139,9 +157,9 @@ describe("the draft and the server disagreeing", () => {
   it("adopts a title changed elsewhere when the user has not typed", async () => {
     // Retitled from its row in the log, another tab, or another device.
     const { actions, setTitle } = makeActions()
-    const view = render(<TimerBar running={real("Foo")} actions={actions} />)
+    const view = render(<Bar running={real("Foo")} actions={actions} />)
 
-    view.rerender(<TimerBar running={real("Bar")} actions={actions} />)
+    view.rerender(<Bar running={real("Bar")} actions={actions} />)
     await vi.advanceTimersByTimeAsync(TITLE_DEBOUNCE_MS * 3)
 
     expect(input().value).toBe("Bar")
@@ -153,10 +171,10 @@ describe("the draft and the server disagreeing", () => {
     // asking WHICH side moved. Editing the running entry's title in the log
     // made the bar write its stale copy back 400 ms later, visibly undoing it.
     const { actions, setTitle } = makeActions()
-    const view = render(<TimerBar running={real("Foo")} actions={actions} />)
+    const view = render(<Bar running={real("Foo")} actions={actions} />)
 
     // The user has NOT touched the bar; the change came from elsewhere.
-    view.rerender(<TimerBar running={real("Bar")} actions={actions} />)
+    view.rerender(<Bar running={real("Bar")} actions={actions} />)
     await vi.advanceTimersByTimeAsync(TITLE_DEBOUNCE_MS * 3)
 
     expect(setTitle).not.toHaveBeenCalledWith(expect.anything(), "Foo")
@@ -166,14 +184,14 @@ describe("the draft and the server disagreeing", () => {
     // The mirror case. Someone typing in the bar is the most recent intent, so
     // their text wins — but it must be THEIR text that gets written.
     const { actions, setTitle } = makeActions()
-    const view = render(<TimerBar running={real("Foo")} actions={actions} />)
+    const view = render(<Bar running={real("Foo")} actions={actions} />)
 
     fireEvent.change(input(), { target: { value: "Mine" } })
-    view.rerender(<TimerBar running={real("Remote")} actions={actions} />)
+    view.rerender(<Bar running={real("Remote")} actions={actions} />)
 
     expect(input().value).toBe("Mine")
     await vi.advanceTimersByTimeAsync(TITLE_DEBOUNCE_MS + 50)
-    expect(setTitle).toHaveBeenCalledWith("jd7abc123", "Mine")
+    expect(setTitle).toHaveBeenCalledWith(REAL_ID, "Mine")
   })
 })
 
@@ -191,11 +209,11 @@ describe("handoff between entries", () => {
       _id: "jd7second" as unknown as Id<"timeEntries">,
     })
 
-    const view = render(<TimerBar running={first} actions={actions} />)
+    const view = render(<Bar running={first} actions={actions} />)
     fireEvent.change(input(), { target: { value: "half typed" } })
 
     // A new entry starts before the debounce fires.
-    view.rerender(<TimerBar running={second} actions={actions} />)
+    view.rerender(<Bar running={second} actions={actions} />)
     await vi.advanceTimersByTimeAsync(TITLE_DEBOUNCE_MS * 3)
 
     expect(input().value).toBe("Second")
@@ -204,16 +222,12 @@ describe("handoff between entries", () => {
 
   it("clears the draft when the timer stops", async () => {
     const { actions } = makeActions()
-    const running = entry({
-      clientKey: "k1",
-      title: "Done now",
-      _id: "jd7abc123" as unknown as Id<"timeEntries">,
-    })
+    const running = entry({ clientKey: "k1", title: "Done now", _id: REAL_ID })
 
-    const view = render(<TimerBar running={running} actions={actions} />)
+    const view = render(<Bar running={running} actions={actions} />)
     expect(input().value).toBe("Done now")
 
-    view.rerender(<TimerBar running={null} actions={actions} />)
+    view.rerender(<Bar running={null} actions={actions} />)
     expect(input().value).toBe("")
   })
 })
@@ -221,30 +235,67 @@ describe("handoff between entries", () => {
 describe("starting and stopping", () => {
   it("starts with the typed title and never blocks on one being present", async () => {
     const { actions } = makeActions()
-    render(<TimerBar running={null} actions={actions} />)
+    render(<Bar running={null} actions={actions} />)
 
     fireEvent.click(screen.getByLabelText("Start timer"))
     await vi.advanceTimersByTimeAsync(0)
-    expect(actions.start).toHaveBeenCalledWith({ title: "" })
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "", billable: false })
+    )
+  })
+
+  it("carries a staged classification into the start", async () => {
+    // "Start the Acme timer" is one gesture in the user's head, not two, so a
+    // project picked before anything is running has to survive the start.
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByLabelText("Not billable"))
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ billable: true })
+    )
+  })
+
+  it("classifies the running entry rather than staging it", async () => {
+    const { actions, classify } = makeActions()
+    render(<Bar running={entry({ clientKey: "k1", _id: REAL_ID })} actions={actions} />)
+
+    fireEvent.click(screen.getByLabelText("Not billable"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(classify).toHaveBeenCalledWith(REAL_ID, { billable: true })
+  })
+
+  it("does not try to classify an entry that has no row yet", async () => {
+    // The optimistic placeholder is not a document id; patching it would be an
+    // argument-validation error against a row that does not exist.
+    const { actions, classify } = makeActions()
+    render(<Bar running={entry({ clientKey: "k1" })} actions={actions} />)
+
+    fireEvent.click(screen.getByLabelText("Not billable"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(classify).not.toHaveBeenCalled()
   })
 
   it("reports the stopped entry with a real end and duration", async () => {
     const serverNow = 1_800_000_000_000
     const { actions } = makeActions({
-      stop: vi.fn(async () => ({
-        stoppedEntryIds: ["jd7abc123" as unknown as Id<"timeEntries">],
-        serverNow,
-      })),
+      stop: vi.fn(async () => ({ stoppedEntryIds: [REAL_ID], serverNow })),
     })
     const onStopped = vi.fn()
     const running = entry({
       clientKey: "k1",
       title: "Work",
       startedAt: serverNow - 90_000,
-      _id: "jd7abc123" as unknown as Id<"timeEntries">,
+      _id: REAL_ID,
     })
 
-    render(<TimerBar running={running} actions={actions} onStopped={onStopped} />)
+    render(<Bar running={running} actions={actions} onStopped={onStopped} />)
     fireEvent.click(screen.getByLabelText("Stop timer"))
     await vi.advanceTimersByTimeAsync(0)
 
@@ -259,11 +310,8 @@ describe("starting and stopping", () => {
     const { actions } = makeActions()
     const onStopped = vi.fn()
     render(
-      <TimerBar
-        running={entry({
-          clientKey: "k1",
-          _id: "jd7abc123" as unknown as Id<"timeEntries">,
-        })}
+      <Bar
+        running={entry({ clientKey: "k1", _id: REAL_ID })}
         actions={actions}
         onStopped={onStopped}
       />
@@ -273,5 +321,80 @@ describe("starting and stopping", () => {
     await vi.advanceTimersByTimeAsync(0)
 
     expect(onStopped).not.toHaveBeenCalled()
+  })
+})
+
+describe("title autocomplete", () => {
+  const suggestions = [
+    {
+      title: "Checkout form validation",
+      projectId: "jd7proj" as unknown as Id<"projects">,
+      tagIds: ["jd7tag" as unknown as Id<"tags">],
+      billable: true,
+    },
+  ]
+
+  function WithSuggestions({ actions }: { actions: TimerBarActions }) {
+    return (
+      <TimerBar
+        running={null}
+        actions={actions}
+        projects={[]}
+        tags={[]}
+        suggestions={suggestions}
+      />
+    )
+  }
+
+  it("inherits project, tags and billable — the same set Resume does", async () => {
+    const { actions } = makeActions()
+    render(<WithSuggestions actions={actions} />)
+
+    fireEvent.change(input(), { target: { value: "check" } })
+    fireEvent.mouseDown(screen.getByRole("option", { name: /Checkout form/ }))
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith({
+      title: "Checkout form validation",
+      projectId: "jd7proj",
+      tagIds: ["jd7tag"],
+      billable: true,
+    })
+  })
+
+  it("Enter with nothing highlighted starts, rather than taking a suggestion", async () => {
+    // The list being open must never turn the primary gesture into something
+    // else. That is how people end up tracking the wrong thing.
+    const { actions } = makeActions()
+    render(<WithSuggestions actions={actions} />)
+
+    fireEvent.change(input(), { target: { value: "check" } })
+    expect(screen.getByRole("option", { name: /Checkout form/ })).toBeTruthy()
+
+    fireEvent.keyDown(input(), { key: "Enter" })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "check" })
+    )
+  })
+
+  it("offers nothing once a timer is running", async () => {
+    // While running, the field IS the live title of that entry. A dropdown that
+    // could swap its project and tags mid-clock is a foot-gun.
+    const { actions } = makeActions()
+    render(
+      <TimerBar
+        running={entry({ clientKey: "k1", _id: REAL_ID })}
+        actions={actions}
+        projects={[]}
+        tags={[]}
+        suggestions={suggestions}
+      />
+    )
+
+    fireEvent.change(input(), { target: { value: "check" } })
+    expect(screen.queryByRole("option")).toBeNull()
   })
 })

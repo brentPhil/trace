@@ -16,6 +16,9 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as AuthedHistoryRouteImport } from './routes/_authed/history'
+import { Route as AuthedProjectsRouteImport } from './routes/_authed/projects'
+import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedTodayRouteImport } from './routes/_authed/today'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
@@ -53,6 +56,21 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthedHistoryRoute = AuthedHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedProjectsRoute = AuthedProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedTodayRoute = AuthedTodayRouteImport.update({
   id: '/today',
   path: '/today',
@@ -71,6 +89,9 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/history': typeof AuthedHistoryRoute
+  '/projects': typeof AuthedProjectsRoute
+  '/settings': typeof AuthedSettingsRoute
   '/today': typeof AuthedTodayRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -81,6 +102,9 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/history': typeof AuthedHistoryRoute
+  '/projects': typeof AuthedProjectsRoute
+  '/settings': typeof AuthedSettingsRoute
   '/today': typeof AuthedTodayRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -93,6 +117,9 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/_authed/history': typeof AuthedHistoryRoute
+  '/_authed/projects': typeof AuthedProjectsRoute
+  '/_authed/settings': typeof AuthedSettingsRoute
   '/_authed/today': typeof AuthedTodayRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
@@ -105,6 +132,9 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
+    | '/history'
+    | '/projects'
+    | '/settings'
     | '/today'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
@@ -115,6 +145,9 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
+    | '/history'
+    | '/projects'
+    | '/settings'
     | '/today'
     | '/api/auth/$'
   id:
@@ -126,6 +159,9 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
+    | '/_authed/history'
+    | '/_authed/projects'
+    | '/_authed/settings'
     | '/_authed/today'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
@@ -192,6 +228,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authed/history': {
+      id: '/_authed/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof AuthedHistoryRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/projects': {
+      id: '/_authed/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof AuthedProjectsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/settings': {
+      id: '/_authed/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthedSettingsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/today': {
       id: '/_authed/today'
       path: '/today'
@@ -210,10 +267,16 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedRouteChildren {
+  AuthedHistoryRoute: typeof AuthedHistoryRoute
+  AuthedProjectsRoute: typeof AuthedProjectsRoute
+  AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedTodayRoute: typeof AuthedTodayRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedHistoryRoute: AuthedHistoryRoute,
+  AuthedProjectsRoute: AuthedProjectsRoute,
+  AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedTodayRoute: AuthedTodayRoute,
 }
 

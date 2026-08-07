@@ -1,28 +1,29 @@
-import { useMemo, useState } from "react"
+﻿import { useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
-import { Button } from "@/components/ui/button"
+import { AppHeader } from "@/components/app-header"
 import { TimerBar } from "@/components/timer/timer-bar"
 import { EntryLog } from "@/components/entries/entry-log"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
 import { useSecond } from "@/hooks/use-clock"
+import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
 import { useReplayPendingStart, useTabTitleClock } from "@/hooks/use-timer-effects"
 import { groupByDay, sumRange } from "@/lib/group-entries"
-import { signOutAndLeave } from "@/lib/auth-client"
 import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
+import type { TimerBarActions } from "@/components/timer/timer-bar"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 /** How far back the log reaches before pagination lands. */
 const LOG_DAYS = 30
 
 export const Route = createFileRoute("/_authed/today")({
-  head: () => ({ meta: [{ title: "Today — Trace" }] }),
+  head: () => ({ meta: [{ title: "Today â€” Trace" }] }),
   component: Today,
   loader: async ({ context }) => {
     // Settings first and awaited: every day boundary below depends on the
@@ -60,7 +61,7 @@ function Today() {
   const second = useSecond()
   const nowMs = (second ?? Math.floor(Date.now() / 1000)) * 1000
 
-  // A day string, so it changes once a day rather than once a second — which
+  // A day string, so it changes once a day rather than once a second â€” which
   // is what keeps the query key below stable and stops the subscription being
   // torn down and rebuilt on every tick.
   const today = dayOf(nowMs, settings.timezone)
@@ -87,6 +88,35 @@ function Today() {
   // them; the bar and the rows receive what they are allowed to do.
   const entryMutations = useEntryMutations()
   const editMutations = useEntryEditMutations()
+  const { projects, tags } = useClassifiers()
+  const { createProject, ensureTag } = useClassifierMutations()
+
+  const { data: suggestions } = useSuspenseQuery(
+    convexQuery(api.entries.titleSuggestions, { limit: 40 })
+  )
+
+  // Assembled once here rather than inline in JSX, so the bar's props are a
+  // stable object and the identity of every callback is the hook's, not a new
+  // arrow per render.
+  const timerActions: TimerBarActions = useMemo(
+    () => ({
+      start: entryMutations.start,
+      stop: entryMutations.stop,
+      discard: entryMutations.discard,
+      setTitle: entryMutations.setTitle,
+      classify: async (entryId, change) => {
+        await editMutations.update({
+          entryId,
+          ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
+          ...(change.tagIds !== undefined ? { tagIds: change.tagIds } : {}),
+          ...(change.billable !== undefined ? { billable: change.billable } : {}),
+        })
+      },
+      createProject: async (name) => await createProject({ name }),
+      createTag: async (name) => await ensureTag(name),
+    }),
+    [entryMutations, editMutations, createProject, ensureTag]
+  )
 
   const groups = useMemo(
     () => groupByDay(entries, settings.timezone, nowMs),
@@ -101,20 +131,15 @@ function Today() {
 
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
-      <header className="flex items-baseline justify-between px-4 py-4">
-        <span className="text-base font-medium tracking-tight">Trace</span>
-        <span className="flex items-baseline gap-4 text-xs text-muted-foreground">
-          <span className="hidden sm:inline">{user.email}</span>
-          <Button variant="ghost" size="sm" onClick={() => signOutAndLeave()}>
-            Sign out
-          </Button>
-        </span>
-      </header>
+      <AppHeader email={user.email} />
 
       <div className="px-4">
         <TimerBar
           running={running}
-          actions={entryMutations}
+          actions={timerActions}
+          projects={projects}
+          tags={tags}
+          suggestions={suggestions}
           onStopped={(entry) => {
             setStopped(entry)
             setNoteOpen(true)
@@ -158,3 +183,4 @@ function Today() {
     </div>
   )
 }
+

@@ -1,4 +1,4 @@
-import { useState } from "react"
+﻿import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { TimerBar } from "@/components/timer/timer-bar"
 import { DayList } from "@/components/entries/day-list"
@@ -13,10 +13,10 @@ import { elapsedMs } from "@shared/entryTimes"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
 import type { Entry } from "@/lib/group-entries"
-import type { Id } from "../../convex/_generated/dataModel"
+import type { Doc, Id } from "../../convex/_generated/dataModel"
 
 // DEV-ONLY design harness. Renders the tracking surfaces against fixtures so
-// the layout can be reviewed without a session — the only way to see the log,
+// the layout can be reviewed without a session â€” the only way to see the log,
 // the day headers and the running/idle timer states side by side.
 //
 // It is a PUBLIC route with no auth guard. It reads nothing and writes nothing,
@@ -53,9 +53,44 @@ function entry(part: Partial<Entry> & { startedAt: number; endedAt: number | nul
   }
 }
 
+function fixtureProject(
+  name: string,
+  color: string,
+  billableByDefault: boolean
+): Doc<"projects"> {
+  return {
+    _id: `proj-${name}` as unknown as Id<"projects">,
+    _creationTime: NOW,
+    userId: "u",
+    name,
+    color,
+    archived: false,
+    billableByDefault,
+    updatedAt: NOW,
+    deletedAt: null,
+  }
+}
+
+function fixtureTag(name: string): Doc<"tags"> {
+  return {
+    _id: `tag-${name}` as unknown as Id<"tags">,
+    _creationTime: NOW,
+    userId: "u",
+    name,
+    updatedAt: NOW,
+    deletedAt: null,
+  }
+}
+
+const ACME = "proj-Acme redesign" as unknown as Id<"projects">
+const BELL = "proj-Bellweather API" as unknown as Id<"projects">
+const DEEP = "tag-deep-work" as unknown as Id<"tags">
+
 const entries: Array<Entry> = [
   entry({
     title: "Checkout form validation",
+    projectId: ACME,
+    tagIds: [DEEP],
     note: "Rebuilt the validation so card errors surface inline instead of in the toast",
     startedAt: NOW - 1 * H - 46 * M,
     endedAt: null,
@@ -63,6 +98,7 @@ const entries: Array<Entry> = [
   }),
   entry({
     title: "PR review",
+    projectId: ACME,
     note: "Reviewed Priya's PR #218; left notes on the state-machine transitions",
     startedAt: NOW - 4 * H,
     endedAt: NOW - 3 * H - 13 * M,
@@ -80,6 +116,7 @@ const entries: Array<Entry> = [
   }),
   entry({
     title: "Pool leak in the webhook worker",
+    projectId: BELL,
     note: "Traced the intermittent 502s to a connection-pool leak; patched the checkout path and added a regression test",
     startedAt: NOW - 26 * H,
     endedAt: NOW - 24 * H - 5 * M,
@@ -114,7 +151,7 @@ function DesignHarness() {
    * one is a signed-in developer opening this page: the bar's start button
    * would have started a real timer and stopped whatever was actually running.
    *
-   * The fix is structural rather than a flag — TimerBar and EntryRow both take
+   * The fix is structural rather than a flag â€” TimerBar and EntryRow both take
    * their writes as arguments now, so "cannot write" is a thing the harness can
    * express, and forgetting to express it is a type error rather than traffic.
    */
@@ -123,21 +160,35 @@ function DesignHarness() {
     stop: async () => ({ stoppedEntryIds: [], serverNow: NOW }),
     discard: async () => {},
     setTitle: async () => {},
+    classify: async () => {},
+    createProject: async () => ({ projectId: "p" as unknown as Id<"projects"> }),
+    createTag: async () => ({ tagId: "t" as unknown as Id<"tags"> }),
   }
 
+  // Fixture classifiers, so the pickers have something to show.
+  const fixtureProjects = [
+    fixtureProject("Acme redesign", "coral", true),
+    fixtureProject("Bellweather API", "teal", true),
+    fixtureProject("Internal", "slate", false),
+  ]
+  const fixtureTags = [fixtureTag("deep-work"), fixtureTag("meeting")]
+
   // The note sheet and the inline editors are still wired up, because the point
-  // of the harness is to see how they behave — an editor that opens and refuses
+  // of the harness is to see how they behave â€” an editor that opens and refuses
   // to close would not be visible from a static render.
   const actions: EntryRowActions = {
     onTitleChange: async () => {},
     onTimeChange: async () => {},
     onDurationChange: async () => {},
+    onClassify: () => {},
+    onCreateProject: async () => ({ projectId: "p" as unknown as Id<"projects"> }),
+    onCreateTag: async () => ({ tagId: "t" as unknown as Id<"tags"> }),
     onNoteOpen: (row) => {
       setNoteEntry(row)
       setNoteOpen(true)
     },
     onRemove: (row) => {
-      const label = row.title.trim() === "" ? "entry" : `“${row.title.trim()}”`
+      const label = row.title.trim() === "" ? "entry" : `â€œ${row.title.trim()}â€`
       toasts.add({
         title: `Deleted ${label}`,
         description: formatCompactDuration(elapsedMs(row, NOW)),
@@ -156,7 +207,7 @@ function DesignHarness() {
       </header>
 
       <div className="px-4">
-        <TimerBar running={entries[0]} actions={timerActions} />
+        <TimerBar running={entries[0]} actions={timerActions} projects={fixtureProjects} tags={fixtureTags} />
       </div>
 
       <div className="flex items-center justify-between gap-3 pr-2">
@@ -174,12 +225,19 @@ function DesignHarness() {
       </div>
 
       <main className="flex-1 border-t border-edge-soft">
-        <DayList groups={groups} timeZone={TZ} use12Hour={false} actions={actions} />
+        <DayList
+          groups={groups}
+          timeZone={TZ}
+          use12Hour={false}
+          projects={fixtureProjects}
+          tags={fixtureTags}
+          actions={actions}
+        />
       </main>
 
       <div className="px-4 py-8">
         <p className="mb-3 text-xs text-muted-foreground">Idle state</p>
-        <TimerBar running={null} actions={timerActions} />
+        <TimerBar running={null} actions={timerActions} projects={fixtureProjects} tags={fixtureTags} />
       </div>
 
       <NoteSheet
@@ -191,3 +249,5 @@ function DesignHarness() {
     </div>
   )
 }
+
+

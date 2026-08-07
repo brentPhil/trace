@@ -179,6 +179,72 @@
   }
 }
 
+/* The project palette.
+ *
+ * Twelve hues at a single lightness and chroma, so no project reads as more
+ * important than another — a swatch that pops is a swatch that claims priority
+ * the user did not assign. L 0.72 clears 4.5:1 against `--ground` as text and
+ * reads clearly as a 8px dot.
+ *
+ * Two hues are deliberately absent. ~230 is `--enlarger`, which means RUNNING
+ * and nothing else (The Cold Light Rule); ~85 is `--brass`, which means money.
+ * A project tinted either would be read as a state rather than a name. The
+ * spacing below steps around both gaps.
+ *
+ * Colour is never the only carrier: every swatch appears beside the project's
+ * name, and `--project-color` is also used for a text variant where a dot alone
+ * would be ambiguous. */
+/* Fallback FIRST, deliberately. `[data-project-color]` and
+ * `[data-project-color="slate"]` have identical specificity, so ordering is the
+ * only thing deciding the winner — declared after the named hues, this would
+ * override every one of them and paint the whole palette grey. */
+[data-project-color] {
+  --project-color: var(--ink-muted);
+}
+
+[data-project-color="slate"] {
+  --project-color: oklch(0.72 0.02 250);
+}
+[data-project-color="rose"] {
+  --project-color: oklch(0.72 0.13 10);
+}
+[data-project-color="coral"] {
+  --project-color: oklch(0.72 0.13 35);
+}
+[data-project-color="amber"] {
+  --project-color: oklch(0.72 0.13 60);
+}
+[data-project-color="olive"] {
+  --project-color: oklch(0.72 0.11 110);
+}
+[data-project-color="moss"] {
+  --project-color: oklch(0.72 0.13 140);
+}
+[data-project-color="sage"] {
+  --project-color: oklch(0.72 0.09 160);
+}
+[data-project-color="teal"] {
+  --project-color: oklch(0.72 0.11 180);
+}
+[data-project-color="cyan"] {
+  --project-color: oklch(0.72 0.1 200);
+}
+[data-project-color="indigo"] {
+  --project-color: oklch(0.72 0.13 275);
+}
+[data-project-color="violet"] {
+  --project-color: oklch(0.72 0.13 300);
+}
+[data-project-color="plum"] {
+  --project-color: oklch(0.72 0.13 330);
+}
+
+@media (forced-colors: active) {
+  [data-project-color] {
+    --project-color: currentColor;
+  }
+}
+
 /* WCAG 2.2 AA, 2.5.8 Target Size (Minimum): 24x24 CSS pixels.
  *
  * Some controls sit in a row whose height is load-bearing — the entry row is

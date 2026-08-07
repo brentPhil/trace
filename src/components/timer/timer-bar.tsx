@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react"
-import { DollarSign, FolderClosed, Play, Square, Tag, Trash2 } from "lucide-react"
+import { Play, Square, Trash2 } from "lucide-react"
+import {
+  BillableToggle,
+  ProjectPicker,
+  TagPicker,
+} from "@/components/classifiers/classifier-pickers"
+import { ProjectDot } from "@/components/classifiers/project-dot"
 import { EntryDuration } from "@/components/timer/entry-duration"
 import { isOptimisticId } from "@/lib/optimistic-id"
 import { cn } from "@/lib/utils"
@@ -37,23 +43,57 @@ const TITLE_DEBOUNCE_MS = 400
  * Making the writes an argument is what makes "render this without a backend"
  * expressible at all.
  */
+export type Classification = {
+  projectId: Id<"projects"> | null
+  tagIds: Array<Id<"tags">>
+  billable: boolean
+}
+
 export type TimerBarActions = {
-  start: (input?: { title?: string }) => Promise<unknown>
+  start: (input?: {
+    title?: string
+    projectId?: Id<"projects">
+    tagIds?: Array<Id<"tags">>
+    billable?: boolean
+  }) => Promise<unknown>
   stop: () => Promise<{
     stoppedEntryIds: Array<Id<"timeEntries">>
     serverNow: number
   }>
   discard: () => Promise<unknown>
   setTitle: (entryId: Id<"timeEntries">, title: string) => Promise<void>
+  /** Applies a classifier change to the entry already running. */
+  classify: (entryId: Id<"timeEntries">, change: Partial<Classification>) => Promise<void>
+  createProject: (name: string) => Promise<{ projectId: Id<"projects"> }>
+  createTag: (name: string) => Promise<{ tagId: Id<"tags"> }>
+}
+
+/** A previous title and the classification it last carried. Never its note. */
+export type TitleSuggestion = {
+  title: string
+  projectId?: Id<"projects">
+  tagIds: Array<Id<"tags">>
+  billable: boolean
 }
 
 export function TimerBar({
   running,
   actions,
+  projects,
+  tags,
+  suggestions = [],
   onStopped,
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
+  projects: Array<Doc<"projects">>
+  tags: Array<Doc<"tags">>
+  /**
+   * The whole recent set, filtered in this component rather than re-queried per
+   * keystroke — a prefix argument would tear down and rebuild the subscription
+   * on every character typed.
+   */
+  suggestions?: Array<TitleSuggestion>
   /**
    * Called with the entry as it was the instant it stopped — closed, with a
    * real duration — so the note sheet can name it without reading a query that
@@ -62,9 +102,54 @@ export function TimerBar({
    */
   onStopped?: (entry: Doc<"timeEntries">) => void
 }) {
-  const { start, stop, discard, setTitle } = actions
+  const { start, stop, discard, setTitle, classify } = actions
   const [pending, setPending] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  /*
+   * Classification before a timer exists.
+   *
+   * You can pick a project and tags with nothing running — and must be able to,
+   * because "start the Acme timer" is one gesture in the user's head, not two.
+   * Until `start` lands there is no row to write them to, so they are held here
+   * and handed to the mutation.
+   *
+   * Once something IS running, `running` is the truth and this is unused: a
+   * second copy of the classification living beside the query is precisely the
+   * stale-state trap the draft above exists to document.
+   */
+  const [staged, setStaged] = useState<Classification>({
+    projectId: null,
+    tagIds: [],
+    billable: false,
+  })
+
+  const [projectOpen, setProjectOpen] = useState(false)
+  const [tagsOpen, setTagsOpen] = useState(false)
+
+  const classification: Classification =
+    running === null
+      ? staged
+      : {
+          projectId: running.projectId ?? null,
+          tagIds: running.tagIds,
+          billable: running.billable,
+        }
+
+  /** Applies a classifier change to whichever of the two is currently real. */
+  const applyClassification = (change: Partial<Classification>) => {
+    if (running === null) {
+      setStaged((current) => ({ ...current, ...change }))
+      return
+    }
+    // A row that does not exist yet cannot be patched; the start mutation is
+    // carrying the staged values and will land in a moment.
+    if (isOptimisticId(running._id)) return
+    void classify(running._id, change).catch(() => {
+      // Same reasoning as the title write: never interrupt a running timer to
+      // report that a tag did not stick.
+    })
+  }
 
   const isRunning = running !== null
   const runningKey = running?.clientKey ?? null
@@ -155,6 +240,76 @@ export function TimerBar({
     return () => clearTimeout(timer)
   }, [draft, running, runningKey, runningTitle, setTitle])
 
+  /*
+   * Title autocomplete.
+   *
+   * Offered only when nothing is running. Once a timer is going, the field is
+   * the live title of that entry, and a dropdown that could replace its project
+   * and tags while the clock runs is a foot-gun, not a convenience.
+   *
+   * Never shown for an exact match: if what you have typed already IS the
+   * suggestion, the list is one row saying what you can see, and Enter would
+   * silently mean "take the suggestion" instead of "start".
+   */
+  const [suggestOpen, setSuggestOpen] = useState(false)
+  const [suggestIndex, setSuggestIndex] = useState(-1)
+
+  const matches =
+    running !== null || draft.text.trim() === ""
+      ? []
+      : suggestions
+          .filter((s) => {
+            const needle = draft.text.trim().toLowerCase()
+            const title = s.title.toLowerCase()
+            return title.includes(needle) && title !== needle
+          })
+          .slice(0, 5)
+
+  const showSuggestions = suggestOpen && matches.length > 0
+
+  /**
+   * Takes a suggestion: title, project, tags and billable — never the note.
+   *
+   * EXACTLY the set `resume` inherits. Toggl's two paths differ from each other
+   * on tags, so a user who notices cannot trust either and a user who does not
+   * silently loses them.
+   */
+  const takeSuggestion = (s: TitleSuggestion) => {
+    setDraft({ key: runningKey, text: s.title, dirty: true })
+    setStaged({
+      projectId: s.projectId ?? null,
+      tagIds: s.tagIds,
+      billable: s.billable,
+    })
+    setSuggestOpen(false)
+    setSuggestIndex(-1)
+    inputRef.current?.focus()
+  }
+
+  /**
+   * `@` opens the project picker, `#` opens tags — both only at a word
+   * boundary, so an address or a channel name typed mid-sentence does not
+   * hijack the field. The character stays in the input and is stripped when a
+   * choice is made, so dismissing the picker leaves what was typed intact.
+   */
+  const maybeOpenPicker = (text: string) => {
+    const last = text.slice(-1)
+    if (last !== "@" && last !== "#") return
+    const before = text.slice(-2, -1)
+    if (before !== "" && !/\s/.test(before)) return
+    if (last === "@") setProjectOpen(true)
+    else setTagsOpen(true)
+  }
+
+  /** Removes the trailing trigger character once the picker has been used. */
+  const stripTrigger = () => {
+    setDraft((current) =>
+      /[@#]$/.test(current.text)
+        ? { ...current, text: current.text.replace(/\s*[@#]$/, ""), dirty: true }
+        : current
+    )
+  }
+
   async function onToggle() {
     // A double press must not create two entries. clientKey makes a genuine
     // network retry idempotent; this handles the cheaper local case.
@@ -180,7 +335,17 @@ export function TimerBar({
           })
         }
       } else {
-        await start({ title: draft.text.trim() })
+        await start({
+          title: draft.text.trim(),
+          projectId: staged.projectId ?? undefined,
+          tagIds: staged.tagIds,
+          billable: staged.billable,
+        })
+        // Cleared only after the mutation resolves. Clearing optimistically
+        // would lose the classification if the start failed and the user
+        // pressed the button again.
+        setStaged({ projectId: null, tagIds: [], billable: false })
+        setSuggestOpen(false)
         inputRef.current?.focus()
       }
     } finally {
@@ -196,7 +361,7 @@ export function TimerBar({
         isRunning ? "border-enlarger/50" : "border-edge-soft"
       )}
     >
-      <div className="flex items-center gap-2 px-4 py-3">
+      <div className="relative flex items-center gap-2 px-4 py-3">
         <label htmlFor="timer-title" className="sr-only">
           What are you working on?
         </label>
@@ -204,13 +369,52 @@ export function TimerBar({
           id="timer-title"
           ref={inputRef}
           value={draft.text}
-          onChange={(event) =>
-            setDraft({ key: runningKey, text: event.target.value, dirty: true })
+          role="combobox"
+          aria-expanded={showSuggestions}
+          aria-controls="timer-suggestions"
+          aria-activedescendant={
+            showSuggestions && suggestIndex >= 0
+              ? `timer-suggestion-${suggestIndex}`
+              : undefined
           }
+          onChange={(event) => {
+            const text = event.target.value
+            setDraft({ key: runningKey, text, dirty: true })
+            setSuggestOpen(true)
+            setSuggestIndex(-1)
+            maybeOpenPicker(text)
+          }}
+          onFocus={() => setSuggestOpen(true)}
+          // A blur that lands INSIDE the suggestion list would close it before
+          // the click registers, so the close is deferred a frame.
+          onBlur={() => window.setTimeout(() => setSuggestOpen(false), 120)}
           onKeyDown={(event) => {
+            if (showSuggestions && event.key === "ArrowDown") {
+              event.preventDefault()
+              setSuggestIndex((i) => (i + 1) % matches.length)
+              return
+            }
+            if (showSuggestions && event.key === "ArrowUp") {
+              event.preventDefault()
+              setSuggestIndex((i) => (i - 1 + matches.length) % matches.length)
+              return
+            }
+            if (event.key === "Escape" && showSuggestions) {
+              event.preventDefault()
+              // Dismisses the list without touching what was typed. Escape here
+              // must not also mean "clear the field".
+              setSuggestOpen(false)
+              setSuggestIndex(-1)
+              return
+            }
             if (event.key === "Enter") {
               event.preventDefault()
-              void onToggle()
+              const chosen = showSuggestions ? matches[suggestIndex] : undefined
+              // Enter with nothing highlighted STARTS. The suggestion list
+              // being open must never turn the primary gesture into something
+              // else — that is how people end up tracking the wrong thing.
+              if (chosen !== undefined) takeSuggestion(chosen)
+              else void onToggle()
             }
           }}
           placeholder="What are you working on?"
@@ -227,17 +431,38 @@ export function TimerBar({
           )}
         />
 
-        {/*
-          Classifiers. Disabled until projects and tags exist, but present now
-          so the bar's geometry does not shift when they arrive.
-        */}
-        <div className="hidden items-center gap-0.5 sm:flex">
-          <ClassifierButton icon={FolderClosed} label="Project" />
-          <ClassifierButton icon={Tag} label="Tags" />
-          <ClassifierButton
-            icon={DollarSign}
-            label="Billable"
-            active={running?.billable ?? false}
+        <div className="flex shrink-0 items-center gap-0.5">
+          <ProjectPicker
+            projects={projects}
+            value={classification.projectId}
+            onCreate={actions.createProject}
+            open={projectOpen}
+            onOpenChange={(next) => {
+              setProjectOpen(next)
+              if (!next) inputRef.current?.focus()
+            }}
+            onChange={(projectId) => {
+              applyClassification({ projectId })
+              stripTrigger()
+            }}
+          />
+          <TagPicker
+            tags={tags}
+            value={classification.tagIds}
+            onCreate={actions.createTag}
+            open={tagsOpen}
+            onOpenChange={(next) => {
+              setTagsOpen(next)
+              if (!next) inputRef.current?.focus()
+            }}
+            onChange={(tagIds) => {
+              applyClassification({ tagIds })
+              stripTrigger()
+            }}
+          />
+          <BillableToggle
+            value={classification.billable}
+            onChange={(billable) => applyClassification({ billable })}
           />
         </div>
 
@@ -271,6 +496,54 @@ export function TimerBar({
             <Play className="size-4 fill-current" />
           )}
         </button>
+
+        {showSuggestions ? (
+          <ul
+            id="timer-suggestions"
+            role="listbox"
+            aria-label="Previous entries"
+            className={cn(
+              "absolute top-full right-4 left-4 z-40 mt-1 overflow-hidden rounded-lg",
+              "border border-edge-soft bg-surface-raised py-1 shadow-xl"
+            )}
+          >
+            {matches.map((s, index) => (
+              <li key={`${s.title}-${index}`}>
+                <button
+                  type="button"
+                  id={`timer-suggestion-${index}`}
+                  role="option"
+                  aria-selected={index === suggestIndex}
+                  data-active={index === suggestIndex}
+                  onMouseEnter={() => setSuggestIndex(index)}
+                  // `onMouseDown` rather than `onClick`: the input's blur fires
+                  // first otherwise and the list is gone before the click lands.
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    takeSuggestion(s)
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm",
+                    "data-[active=true]:bg-surface focus-visible:outline-none"
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate">{s.title}</span>
+                  {s.projectId === undefined ? null : (
+                    <ProjectDot
+                      project={projects.find((p) => p._id === s.projectId) ?? null}
+                      className="shrink-0"
+                    />
+                  )}
+                  {s.billable ? (
+                    <span aria-hidden="true" className="shrink-0 text-xs text-brass">
+                      $
+                    </span>
+                  ) : null}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
 
       {isRunning ? (
@@ -298,27 +571,3 @@ export function TimerBar({
   )
 }
 
-function ClassifierButton({
-  icon: Icon,
-  label,
-  active = false,
-}: {
-  icon: typeof Tag
-  label: string
-  active?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      disabled
-      aria-label={label}
-      title={`${label} — coming soon`}
-      className={cn(
-        "rounded-md p-2 transition-colors disabled:cursor-default",
-        active ? "text-brass" : "text-muted-foreground/50"
-      )}
-    >
-      <Icon className="size-4" />
-    </button>
-  )
-}

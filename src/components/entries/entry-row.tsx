@@ -1,11 +1,18 @@
 import { Play, Trash2 } from "lucide-react"
 import {
+  BillableToggle,
+  ProjectPicker,
+  TagPicker,
+} from "@/components/classifiers/classifier-pickers"
+import {
   EditableDuration,
   EditableTimeRange,
   EditableTitle,
 } from "@/components/entries/editable-fields"
 import { cn } from "@/lib/utils"
+import type { Classification } from "@/components/timer/timer-bar"
 import type { Entry } from "@/lib/group-entries"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 /**
  * What a row can do. Passed in rather than reached for with a hook, so the row
@@ -15,6 +22,9 @@ export type EntryRowActions = {
   onTitleChange: (entry: Entry, title: string) => Promise<void>
   onTimeChange: (entry: Entry, field: "start" | "end", instantMs: number) => Promise<void>
   onDurationChange: (entry: Entry, ms: number) => Promise<void>
+  onClassify: (entry: Entry, change: Partial<Classification>) => void
+  onCreateProject: (name: string) => Promise<{ projectId: Id<"projects"> }>
+  onCreateTag: (name: string) => Promise<{ tagId: Id<"tags"> }>
   onNoteOpen: (entry: Entry) => void
   onRemove: (entry: Entry) => void
   onResume: (entry: Entry) => void
@@ -31,15 +41,32 @@ export type EntryRowActions = {
  * save button, because the correction this product actually sees is one field
  * mistyped, ten times a day, and a modal turns that into four gestures.
  */
+/**
+ * An empty control: present in the layout so nothing shifts, invisible until
+ * the row is hovered or something in it is focused.
+ *
+ * Always visible below `sm`, because a phone has no hover and a hover-revealed
+ * control there is not subtle, it is unreachable.
+ */
+const revealed = cn(
+  "opacity-100 sm:opacity-0",
+  "transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
+  "focus-visible:opacity-100 motion-reduce:transition-none"
+)
+
 export function EntryRow({
   entry,
   timeZone,
   use12Hour,
+  projects,
+  tags,
   actions,
 }: {
   entry: Entry
   timeZone: string
   use12Hour: boolean
+  projects: Array<Doc<"projects">>
+  tags: Array<Doc<"tags">>
   actions: EntryRowActions
 }) {
   const title = entry.title.trim()
@@ -70,12 +97,17 @@ export function EntryRow({
           {entry.billable ? (
             // Brass means money — The Two Temperatures Rule. Paired with a
             // glyph so it survives without colour.
+            // `sm:hidden` because the BillableToggle below carries this at
+            // wider widths, where it is also editable. Below `sm` the toggle is
+            // dropped for room, so this static mark is what keeps billable
+            // visible on a phone rather than merely absent.
+            //
             // `leading-5` matters as much as the colour here: an unsized span
             // establishes a 24px line box from the inherited 16px base, so
             // without it every billable row is four pixels taller than every
             // non-billable one and the whole log develops a stutter.
             <span
-              className="flex shrink-0 items-center text-xs leading-5 text-brass"
+              className="flex shrink-0 items-center text-xs leading-5 text-brass sm:hidden"
               title="Billable"
             >
               <span aria-hidden="true" className="font-semibold">
@@ -130,6 +162,44 @@ export function EntryRow({
             </button>
           )}
         </div>
+      </div>
+
+      {/*
+        The classifiers, editable in place like everything else on the row.
+        Same three controls in the same order as the timer bar — a project is
+        set the same way whether the work is running or finished, because a
+        second way to do it is a second thing to remember.
+
+        A control that HOLDS something is always visible, because it is data. An
+        EMPTY one is only an affordance, and is revealed on hover like the row's
+        other controls. Showing all three on every row put a dollar sign beside
+        every entry in the log, which is exactly how "brass means money" stops
+        meaning anything.
+      */}
+      <div className="flex shrink-0 items-center gap-0.5">
+        <ProjectPicker
+          projects={projects}
+          value={entry.projectId ?? null}
+          onCreate={actions.onCreateProject}
+          onChange={(projectId) => actions.onClassify(entry, { projectId })}
+          className={cn("max-w-[8rem]", entry.projectId === undefined && revealed)}
+          // The dot survives at every width; the name is what gets dropped when
+          // there is no room, because the dot plus the row's own context is
+          // enough to tell two clients apart at a glance.
+          nameClassName="hidden md:inline"
+        />
+        <TagPicker
+          tags={tags}
+          value={entry.tagIds}
+          onCreate={actions.onCreateTag}
+          onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
+          className={cn("hidden sm:inline-flex", entry.tagIds.length === 0 && revealed)}
+        />
+        <BillableToggle
+          value={entry.billable}
+          onChange={(billable) => actions.onClassify(entry, { billable })}
+          className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
+        />
       </div>
 
       <EditableTimeRange
