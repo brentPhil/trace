@@ -9,6 +9,8 @@ import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
 import { useSecond } from "@/hooks/use-clock"
+import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
+import { useEntryMutations } from "@/hooks/use-entry-mutations"
 import { useReplayPendingStart, useTabTitleClock } from "@/hooks/use-timer-effects"
 import { groupByDay, sumRange } from "@/lib/group-entries"
 import { signOutAndLeave } from "@/lib/auth-client"
@@ -81,6 +83,11 @@ function Today() {
   const [stopped, setStopped] = useState<Doc<"timeEntries"> | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)
 
+  // The live writes. This is the only place in the tracking surface that has
+  // them; the bar and the rows receive what they are allowed to do.
+  const entryMutations = useEntryMutations()
+  const editMutations = useEntryEditMutations()
+
   const groups = useMemo(
     () => groupByDay(entries, settings.timezone, nowMs),
     [entries, settings.timezone, nowMs]
@@ -107,6 +114,7 @@ function Today() {
       <div className="px-4">
         <TimerBar
           running={running}
+          actions={entryMutations}
           onStopped={(entry) => {
             setStopped(entry)
             setNoteOpen(true)
@@ -121,7 +129,11 @@ function Today() {
           weekMs={weekTotals.totalMs}
           billableMs={weekTotals.billableMs}
         />
-        <ManualEntryDialog today={today} timeZone={settings.timezone} />
+        <ManualEntryDialog
+          today={today}
+          timeZone={settings.timezone}
+          onCreate={editMutations.create}
+        />
       </div>
 
       <main className="flex-1 border-t border-edge-soft">
@@ -137,7 +149,12 @@ function Today() {
         because the entry it asks about has just left the timer bar and may not
         be in the log's data yet. It reads the frozen snapshot the stop returned.
       */}
-      <NoteSheet entry={stopped} open={noteOpen} onOpenChange={setNoteOpen} />
+      <NoteSheet
+        entry={stopped}
+        open={noteOpen}
+        onOpenChange={setNoteOpen}
+        onSave={editMutations.setNote}
+      />
     </div>
   )
 }

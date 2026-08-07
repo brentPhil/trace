@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react"
 import { useConvexMutation } from "@convex-dev/react-query"
+import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { applyTimeEdit } from "@shared/entryTimes"
 import { api } from "../../convex/_generated/api"
@@ -82,8 +83,8 @@ function insertEverywhere(localStore: OptimisticLocalStore, entry: Entry): void 
  * not corrupting a row that is already recorded.
  */
 export function useEntryEditMutations() {
-  const setNoteMutation = useConvexMutation(api.entries.setNote).withOptimisticUpdate(
-    (localStore, args) => {
+  const setNoteMutation = useLatest(
+    useConvexMutation(api.entries.setNote).withOptimisticUpdate((localStore, args) => {
       const note = args.note.trim()
       patchEverywhere(localStore, args.entryId, (entry) => ({
         ...entry,
@@ -91,11 +92,11 @@ export function useEntryEditMutations() {
         // does not flicker by one while the mutation is in flight.
         note: note === "" ? undefined : note,
       }))
-    }
+    })
   )
 
-  const updateMutation = useConvexMutation(api.entries.update).withOptimisticUpdate(
-    (localStore, args) => {
+  const updateMutation = useLatest(
+    useConvexMutation(api.entries.update).withOptimisticUpdate((localStore, args) => {
       patchEverywhere(localStore, args.entryId, (entry) => ({
         ...entry,
         ...(args.title !== undefined ? { title: args.title } : {}),
@@ -108,11 +109,11 @@ export function useEntryEditMutations() {
           : {}),
         ...(args.tagIds !== undefined ? { tagIds: args.tagIds } : {}),
       }))
-    }
+    })
   )
 
-  const editTimeMutation = useConvexMutation(api.entries.editTime).withOptimisticUpdate(
-    (localStore, args) => {
+  const editTimeMutation = useLatest(
+    useConvexMutation(api.entries.editTime).withOptimisticUpdate((localStore, args) => {
       const now = Date.now()
       patchEverywhere(localStore, args.entryId, (entry) => {
         // The SAME pure function the mutation runs. This is the payoff for
@@ -132,13 +133,13 @@ export function useEntryEditMutations() {
         // and then snapping it back would be worse than a brief nothing.
         return result.ok ? { ...entry, ...result.times } : entry
       })
-    }
+    })
   )
 
-  const removeMutation = useConvexMutation(api.entries.remove).withOptimisticUpdate(
-    (localStore, args) => {
+  const removeMutation = useLatest(
+    useConvexMutation(api.entries.remove).withOptimisticUpdate((localStore, args) => {
       dropEverywhere(localStore, args.entryId)
-    }
+    })
   )
 
   // An optimistic update only receives the mutation's own args, and `restore`
@@ -148,13 +149,15 @@ export function useEntryEditMutations() {
   // undo and lose Convex's own rollback bookkeeping.
   const pendingRestore = useRef(new Map<string, Entry>())
 
-  const restoreMutation = useConvexMutation(api.entries.restore).withOptimisticUpdate(
-    (localStore, args) => {
+  const restoreMutation = useLatest(
+    useConvexMutation(api.entries.restore).withOptimisticUpdate((localStore, args) => {
       const entry = pendingRestore.current.get(args.entryId)
       if (entry !== undefined) insertEverywhere(localStore, entry)
-    }
+    })
   )
 
+  // No `useLatest`: plain `useMutation` IS memoised, so this one is already
+  // stable. Wrapping it would add indirection that says nothing.
   const createMutation = useConvexMutation(api.entries.create)
 
   const setNote = useCallback(

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
-import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
 import { cn } from "@/lib/utils"
 import type { Entry } from "@/lib/group-entries"
+import type { Id } from "../../../convex/_generated/dataModel"
 
 const MAX_NOTE_LENGTH = 2_000
 
@@ -27,12 +27,14 @@ export function NoteSheet({
   entry,
   open,
   onOpenChange,
+  onSave,
 }: {
   entry: Entry | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Passed in, not reached for — see TimerBarActions on why. */
+  onSave: (entryId: Id<"timeEntries">, note: string) => Promise<void>
 }) {
-  const { setNote } = useEntryEditMutations()
   const [value, setValue] = useState("")
   const [saving, setSaving] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -53,7 +55,7 @@ export function NoteSheet({
     if (saving) return
     setSaving(true)
     try {
-      await setNote(entry._id, value)
+      await onSave(entry._id, value)
       onOpenChange(false)
     } finally {
       setSaving(false)

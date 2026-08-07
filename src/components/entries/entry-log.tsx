@@ -29,7 +29,7 @@ export function EntryLog({
   timeZone: string
   use12Hour: boolean
 }) {
-  const { update, editTime, remove, restore } = useEntryEditMutations()
+  const { setNote, update, editTime, remove, restore } = useEntryEditMutations()
   const { resume } = useEntryMutations()
   const toasts = Toast.useToastManager()
 
@@ -117,7 +117,12 @@ export function EntryLog({
         use12Hour={use12Hour}
         actions={actions}
       />
-      <NoteSheet entry={liveNoteEntry} open={noteOpen} onOpenChange={setNoteOpen} />
+      <NoteSheet
+        entry={liveNoteEntry}
+        open={noteOpen}
+        onOpenChange={setNoteOpen}
+        onSave={setNote}
+      />
     </>
   )
 }

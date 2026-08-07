@@ -1,5 +1,6 @@
 import { useCallback } from "react"
 import { useConvexMutation } from "@convex-dev/react-query"
+import { useLatest } from "@/hooks/use-latest"
 import { recordServerNow } from "@/lib/clock"
 import { newClientKey } from "@/lib/client-key"
 import { clearPendingStart, recordPendingStart } from "@/lib/pending-start"
@@ -46,9 +47,17 @@ function optimisticEntry(args: {
   }
 }
 
+/**
+ * Every mutation below is wrapped in `useLatest`.
+ *
+ * `.withOptimisticUpdate()` returns a new function on every render, so without
+ * this the callbacks this hook exports change identity every render — and an
+ * effect that debounces one of them re-arms its timer every render instead of
+ * every keystroke. See src/hooks/use-latest.ts.
+ */
 export function useEntryMutations() {
-  const startMutation = useConvexMutation(api.entries.start).withOptimisticUpdate(
-    (localStore, args) => {
+  const startMutation = useLatest(
+    useConvexMutation(api.entries.start).withOptimisticUpdate((localStore, args) => {
       localStore.setQuery(
         api.entries.getRunning,
         {},
@@ -59,28 +68,28 @@ export function useEntryMutations() {
           billable: args.billable ?? false,
         })
       )
-    }
+    })
   )
 
-  const stopMutation = useConvexMutation(api.entries.stop).withOptimisticUpdate(
-    (localStore) => {
+  const stopMutation = useLatest(
+    useConvexMutation(api.entries.stop).withOptimisticUpdate((localStore) => {
       localStore.setQuery(api.entries.getRunning, {}, null)
-    }
+    })
   )
 
-  const discardMutation = useConvexMutation(
-    api.entries.discardRunning
-  ).withOptimisticUpdate((localStore) => {
-    localStore.setQuery(api.entries.getRunning, {}, null)
-  })
+  const discardMutation = useLatest(
+    useConvexMutation(api.entries.discardRunning).withOptimisticUpdate((localStore) => {
+      localStore.setQuery(api.entries.getRunning, {}, null)
+    })
+  )
 
-  const setTitleMutation = useConvexMutation(api.entries.setTitle).withOptimisticUpdate(
-    (localStore, args) => {
+  const setTitleMutation = useLatest(
+    useConvexMutation(api.entries.setTitle).withOptimisticUpdate((localStore, args) => {
       const running = localStore.getQuery(api.entries.getRunning, {})
       if (running != null && running._id === args.entryId) {
         localStore.setQuery(api.entries.getRunning, {}, { ...running, title: args.title })
       }
-    }
+    })
   )
 
   /**

@@ -11,6 +11,7 @@ import { dayOf } from "@shared/day"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { TimerBarActions } from "@/components/timer/timer-bar"
 import type { Entry } from "@/lib/group-entries"
 import type { Id } from "../../convex/_generated/dataModel"
 
@@ -104,10 +105,29 @@ function DesignHarness() {
   const [noteOpen, setNoteOpen] = useState(false)
   const toasts = Toast.useToastManager()
 
-  // Fixtures have no backend behind them. The note sheet and the inline editors
-  // are still wired up, because the point of the harness is to see how they
-  // behave — an editor that opens and refuses to close would not be visible
-  // from a static render.
+  /*
+   * INERT. Nothing on this page may reach the backend.
+   *
+   * These fixtures carry ids like "fixture-1", which is not a Convex id, so
+   * every write from here failed argument validation and logged an error
+   * against the real deployment. That was the harmless version. The dangerous
+   * one is a signed-in developer opening this page: the bar's start button
+   * would have started a real timer and stopped whatever was actually running.
+   *
+   * The fix is structural rather than a flag — TimerBar and EntryRow both take
+   * their writes as arguments now, so "cannot write" is a thing the harness can
+   * express, and forgetting to express it is a type error rather than traffic.
+   */
+  const timerActions: TimerBarActions = {
+    start: async () => {},
+    stop: async () => ({ stoppedEntryIds: [], serverNow: NOW }),
+    discard: async () => {},
+    setTitle: async () => {},
+  }
+
+  // The note sheet and the inline editors are still wired up, because the point
+  // of the harness is to see how they behave — an editor that opens and refuses
+  // to close would not be visible from a static render.
   const actions: EntryRowActions = {
     onTitleChange: async () => {},
     onTimeChange: async () => {},
@@ -136,7 +156,7 @@ function DesignHarness() {
       </header>
 
       <div className="px-4">
-        <TimerBar running={entries[0]} />
+        <TimerBar running={entries[0]} actions={timerActions} />
       </div>
 
       <div className="flex items-center justify-between gap-3 pr-2">
@@ -146,7 +166,11 @@ function DesignHarness() {
           weekMs={31 * H + 40 * M}
           billableMs={24 * H}
         />
-        <ManualEntryDialog today={dayOf(NOW, TZ)} timeZone={TZ} />
+        <ManualEntryDialog
+          today={dayOf(NOW, TZ)}
+          timeZone={TZ}
+          onCreate={async () => {}}
+        />
       </div>
 
       <main className="flex-1 border-t border-edge-soft">
@@ -155,10 +179,15 @@ function DesignHarness() {
 
       <div className="px-4 py-8">
         <p className="mb-3 text-xs text-muted-foreground">Idle state</p>
-        <TimerBar running={null} />
+        <TimerBar running={null} actions={timerActions} />
       </div>
 
-      <NoteSheet entry={noteEntry} open={noteOpen} onOpenChange={setNoteOpen} />
+      <NoteSheet
+        entry={noteEntry}
+        open={noteOpen}
+        onOpenChange={setNoteOpen}
+        onSave={async () => {}}
+      />
     </div>
   )
 }

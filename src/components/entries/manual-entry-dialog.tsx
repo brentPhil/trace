@@ -2,7 +2,6 @@ import { useState } from "react"
 import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
-import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { errorMessage } from "@/lib/error-message"
 import { instantOfDayTime } from "@/lib/format-time"
 import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
@@ -24,12 +23,18 @@ import type { DayString } from "@shared/day"
 export function ManualEntryDialog({
   today,
   timeZone,
+  onCreate,
 }: {
   today: DayString
   timeZone: string
+  /** Passed in, not reached for — see TimerBarActions on why. */
+  onCreate: (input: {
+    title?: string
+    note?: string
+    startedAt: number
+    endedAt: number
+  }) => Promise<unknown>
 }) {
-  const { create } = useEntryEditMutations()
-
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [note, setNote] = useState("")
@@ -75,7 +80,7 @@ export function ManualEntryDialog({
 
     setSaving(true)
     try {
-      await create({
+      await onCreate({
         title: title.trim(),
         note: note.trim() === "" ? undefined : note.trim(),
         startedAt,
