@@ -6,6 +6,9 @@
     "prettier.config.js",
     "vite.config.ts"
   ],
+  // Convex functions are typechecked by convex/tsconfig.json, which targets the
+  // Convex runtime rather than the browser.
+  "exclude": ["convex"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",

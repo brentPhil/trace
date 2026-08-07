@@ -15,6 +15,9 @@ export default [
     },
   },
   {
-    ignores: ["eslint.config.js", ".prettierrc"],
+    // Convex functions are excluded from the root tsconfig because they target
+    // the Convex runtime, so the typed-lint project service cannot resolve
+    // them. `npx convex dev` typechecks them against convex/tsconfig.json.
+    ignores: ["eslint.config.js", ".prettierrc", "convex/**"],
   },
 ]
