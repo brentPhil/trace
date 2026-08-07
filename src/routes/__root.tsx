@@ -14,6 +14,7 @@ import type { AuthClient } from "@convex-dev/better-auth/react"
 import type { ConvexQueryClient } from "@convex-dev/react-query"
 import type { QueryClient } from "@tanstack/react-query"
 
+import { Toast, ToastViewport } from "@/components/ui/toast"
 import { authClient } from "@/lib/auth-client"
 import { getToken } from "@/lib/auth-server"
 import appCss from "../styles.css?url"
@@ -86,7 +87,15 @@ function RootComponent() {
       authClient={authClient as unknown as AuthClient}
       initialToken={context.token}
     >
-      <Outlet />
+      {/*
+        App-wide rather than per-route: an undo has to outlive the surface that
+        raised it. Deleting an entry from the log and navigating away must still
+        leave the way back on screen for its six seconds.
+      */}
+      <Toast.Provider>
+        <Outlet />
+        <ToastViewport />
+      </Toast.Provider>
     </ConvexBetterAuthProvider>
   )
 }

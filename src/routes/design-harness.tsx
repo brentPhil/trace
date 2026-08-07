@@ -1,8 +1,16 @@
+import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { TimerBar } from "@/components/timer/timer-bar"
 import { DayList } from "@/components/entries/day-list"
+import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
+import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
+import { Toast } from "@/components/ui/toast"
 import { groupByDay } from "@/lib/group-entries"
+import { dayOf } from "@shared/day"
+import { formatCompactDuration } from "@shared/duration"
+import { elapsedMs } from "@shared/entryTimes"
+import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { Entry } from "@/lib/group-entries"
 import type { Id } from "../../convex/_generated/dataModel"
 
@@ -92,6 +100,33 @@ const entries: Array<Entry> = [
 
 function DesignHarness() {
   const groups = groupByDay(entries, TZ, NOW)
+  const [noteEntry, setNoteEntry] = useState<Entry | null>(null)
+  const [noteOpen, setNoteOpen] = useState(false)
+  const toasts = Toast.useToastManager()
+
+  // Fixtures have no backend behind them. The note sheet and the inline editors
+  // are still wired up, because the point of the harness is to see how they
+  // behave — an editor that opens and refuses to close would not be visible
+  // from a static render.
+  const actions: EntryRowActions = {
+    onTitleChange: async () => {},
+    onTimeChange: async () => {},
+    onDurationChange: async () => {},
+    onNoteOpen: (row) => {
+      setNoteEntry(row)
+      setNoteOpen(true)
+    },
+    onRemove: (row) => {
+      const label = row.title.trim() === "" ? "entry" : `“${row.title.trim()}”`
+      toasts.add({
+        title: `Deleted ${label}`,
+        description: formatCompactDuration(elapsedMs(row, NOW)),
+        timeout: 6_000,
+        actionProps: { children: "Undo", onClick: () => {} },
+      })
+    },
+    onResume: () => {},
+  }
 
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
@@ -104,16 +139,26 @@ function DesignHarness() {
         <TimerBar running={entries[0]} />
       </div>
 
-      <TotalsRow className="py-3" todayMs={6 * H + 15 * M} weekMs={31 * H + 40 * M} billableMs={24 * H} />
+      <div className="flex items-center justify-between gap-3 pr-2">
+        <TotalsRow
+          className="py-3"
+          todayMs={6 * H + 15 * M}
+          weekMs={31 * H + 40 * M}
+          billableMs={24 * H}
+        />
+        <ManualEntryDialog today={dayOf(NOW, TZ)} timeZone={TZ} />
+      </div>
 
       <main className="flex-1 border-t border-edge-soft">
-        <DayList groups={groups} timeZone={TZ} use12Hour={false} />
+        <DayList groups={groups} timeZone={TZ} use12Hour={false} actions={actions} />
       </main>
 
       <div className="px-4 py-8">
         <p className="mb-3 text-xs text-muted-foreground">Idle state</p>
         <TimerBar running={null} />
       </div>
+
+      <NoteSheet entry={noteEntry} open={noteOpen} onOpenChange={setNoteOpen} />
     </div>
   )
 }

@@ -179,6 +179,28 @@
   }
 }
 
+/* WCAG 2.2 AA, 2.5.8 Target Size (Minimum): 24x24 CSS pixels.
+ *
+ * Some controls sit in a row whose height is load-bearing — the entry row is
+ * 50px so a working day fits on one screen, which leaves the note slot 20px.
+ * Padding the control would push the row past 50; this grows the TARGET without
+ * growing the box, by hanging an invisible pseudo-element off it.
+ *
+ * `inset-inline: 0` rather than a fixed inset, so the target tracks the
+ * control's own width however long its label is. */
+.touch-target {
+  position: relative;
+}
+.touch-target::after {
+  content: "";
+  position: absolute;
+  /* Exactly -2px: 20 + 2 + 2 = 24. Any more and the target reaches up into the
+   * title's own hit area on the line above, so a tap meant for the note would
+   * sometimes open the title editor instead. */
+  inset-block: -2px;
+  inset-inline: 0;
+}
+
 /* Entrance. Deliberately a plain keyframe with no fill-mode and no class
  * toggle: if the animation never runs (reduced motion, headless render,
  * hidden tab) the element is already in its natural, visible state. */

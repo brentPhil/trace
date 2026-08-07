@@ -1,9 +1,10 @@
 import { v } from "convex/values"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
-import { assertOwned, getOwned } from "./owned"
+import { assertOwned, getOwned, getOwnedIncludingDeleted } from "./owned"
 import { traceError } from "./errors"
-import { entryTimes } from "./lib/entryTimes"
+import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
+import type { EntryTimes, TimeEdit, TimesResult } from "./lib/entryTimes"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
@@ -84,6 +85,42 @@ export function checkNote(note: string | undefined): void {
   if (note !== undefined && note.length > MAX_NOTE_LENGTH) {
     traceError("TOO_LONG", `A note can be at most ${MAX_NOTE_LENGTH} characters.`)
   }
+}
+
+/**
+ * Turns a refusal from the pure time domain into a thrown ConvexError.
+ *
+ * The domain returns a result rather than throwing so it stays testable without
+ * a backend; the boundary is here, in exactly one place, so no caller can
+ * accidentally write a row from a `!ok` result.
+ */
+function unwrapTimes(result: TimesResult): EntryTimes {
+  if (result.ok) return result.times
+  switch (result.code) {
+    case "END_NOT_AFTER_START":
+      return traceError("END_NOT_AFTER_START", "An entry has to end after it starts.")
+    case "DURATION_TOO_LONG":
+      return traceError(
+        "DURATION_TOO_LONG",
+        "That is longer than a day. Split it into two entries."
+      )
+    case "INVALID_DURATION":
+      return traceError("INVALID_DURATION", "That is not a length of time.")
+  }
+}
+
+/**
+ * An empty note is an ABSENT note, not a stored empty string.
+ *
+ * Both would render the same today, but "has a note" is the field the recap
+ * selects on and the day header counts, so two representations of nothing would
+ * eventually disagree. `undefined` deletes the field in a Convex patch.
+ */
+function normaliseNote(note: string | undefined): string | undefined {
+  if (note === undefined) return undefined
+  checkNote(note)
+  const trimmed = note.trim()
+  return trimmed === "" ? undefined : trimmed
 }
 
 /** Closes an entry at `endedAt`, never before its own start. */
@@ -450,4 +487,394 @@ export const discardRunningAs = internalMutation({
   args: { userId: v.string() },
   returns: discardReturns,
   handler: async (ctx, args) => await discardRunningImpl(ctx, args.userId),
+})
+
+// ---------------------------------------------------------------------------
+// setNote
+// ---------------------------------------------------------------------------
+
+const setNoteArgs = {
+  entryId: v.id("timeEntries"),
+  note: v.string(),
+}
+
+/**
+ * Writes the note — the field this product exists for.
+ *
+ * Split from `update` for the same reason `setTitle` is: it is written from the
+ * stop sheet under a fifteen-second budget, and it must be a cheap
+ * last-write-wins patch that cannot fail for a reason unrelated to the note.
+ *
+ * Works on a RUNNING entry too. The note is a description of the work, not of
+ * the interval, and a user who knows what they are doing at 10:04 should not
+ * have to wait until they stop to write it down.
+ */
+async function setNoteImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryId: Id<"timeEntries">,
+  note: string
+) {
+  const entry = await getOwned(ctx, userId, "timeEntries", entryId)
+  await ctx.db.patch(entry._id, { note: normaliseNote(note), updatedAt: Date.now() })
+  return null
+}
+
+export const setNote = mutation({
+  args: setNoteArgs,
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setNoteImpl(ctx, await requireUserId(ctx), args.entryId, args.note),
+})
+
+export const setNoteAs = internalMutation({
+  args: { ...setNoteArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => await setNoteImpl(ctx, args.userId, args.entryId, args.note),
+})
+
+// ---------------------------------------------------------------------------
+// update — the non-time fields
+// ---------------------------------------------------------------------------
+
+const updateArgs = {
+  entryId: v.id("timeEntries"),
+  title: v.optional(v.string()),
+  note: v.optional(v.string()),
+  // v.null() is "clear the project", absent is "leave it alone". Without the
+  // distinction there is no way to express unassigning one.
+  projectId: v.optional(v.union(v.id("projects"), v.null())),
+  tagIds: v.optional(v.array(v.id("tags"))),
+  billable: v.optional(v.boolean()),
+}
+
+type UpdateArgs = {
+  entryId: Id<"timeEntries">
+  title?: string
+  note?: string
+  projectId?: Id<"projects"> | null
+  tagIds?: Array<Id<"tags">>
+  billable?: boolean
+}
+
+/**
+ * Edits the fields that are not times.
+ *
+ * Every field is optional and absent means "unchanged", so the inline editor
+ * sends only what the user touched. Two people editing different fields of the
+ * same row therefore do not overwrite each other, which a whole-document write
+ * would do.
+ *
+ * Changing the project does NOT re-inherit `billable`. Inheritance is a
+ * convenience at creation time; re-applying it here would silently reverse a
+ * decision the user made deliberately on this specific entry.
+ */
+async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
+  const entry = await getOwned(ctx, userId, "timeEntries", args.entryId)
+  checkTitle(args.title)
+
+  const patch: Partial<Doc<"timeEntries">> = { updatedAt: Date.now() }
+
+  if (args.title !== undefined) patch.title = args.title
+  if (args.note !== undefined) patch.note = normaliseNote(args.note)
+  if (args.billable !== undefined) patch.billable = args.billable
+
+  if (args.projectId !== undefined) {
+    if (args.projectId !== null) {
+      await assertOwned(ctx, userId, "projects", args.projectId)
+      patch.projectId = args.projectId
+    } else {
+      patch.projectId = undefined
+    }
+  }
+
+  if (args.tagIds !== undefined) {
+    patch.tagIds = await normaliseTagIds(ctx, userId, args.tagIds)
+  }
+
+  await ctx.db.patch(entry._id, patch)
+  return null
+}
+
+export const update = mutation({
+  args: updateArgs,
+  returns: v.null(),
+  handler: async (ctx, args) => await updateImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const updateAs = internalMutation({
+  args: { ...updateArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { userId, ...args }) => await updateImpl(ctx, userId, args),
+})
+
+// ---------------------------------------------------------------------------
+// editTime
+// ---------------------------------------------------------------------------
+
+const editTimeArgs = {
+  entryId: v.id("timeEntries"),
+  field: v.union(v.literal("start"), v.literal("end"), v.literal("duration")),
+  /** An instant for start/end, a length in ms for duration. */
+  value: v.number(),
+}
+
+const editTimeReturns = v.object({
+  startedAt: v.number(),
+  endedAt: v.union(v.number(), v.null()),
+  durationMs: v.union(v.number(), v.null()),
+})
+
+/**
+ * Moves exactly one of start, end, or duration.
+ *
+ * The reconciliation rule — which of the other two follows — lives entirely in
+ * `applyTimeEdit`, so the client cannot decide it and the two sides of the wire
+ * cannot disagree. See convex/lib/entryTimes.ts for the rule itself.
+ *
+ * Giving a running entry an end time is a stop, and it is the ordinary fix for
+ * "I finished twenty minutes ago and forgot". It is allowed here rather than
+ * pushed to `stop`, because the user is looking at the row, not the timer bar.
+ */
+async function editTimeImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryId: Id<"timeEntries">,
+  edit: TimeEdit
+) {
+  const now = Date.now()
+  const entry = await getOwned(ctx, userId, "timeEntries", entryId)
+
+  // A running entry whose start is in the future would read 0:00:00 and stay
+  // there — a stopped-looking clock that is actually running. Clamp rather than
+  // refuse, matching `start`: the intent is legible, only the number is wrong.
+  const clamped =
+    edit.field === "start" && entry.endedAt === null && edit.value > now
+      ? ({ field: "start", value: now } as const)
+      : edit
+
+  const times = unwrapTimes(
+    applyTimeEdit(
+      { startedAt: entry.startedAt, endedAt: entry.endedAt, durationMs: entry.durationMs },
+      clamped,
+      now
+    )
+  )
+
+  await ctx.db.patch(entry._id, {
+    startedAt: times.startedAt,
+    endedAt: times.endedAt,
+    durationMs: times.durationMs,
+    updatedAt: now,
+  })
+  return times
+}
+
+export const editTime = mutation({
+  args: editTimeArgs,
+  returns: editTimeReturns,
+  handler: async (ctx, args) =>
+    await editTimeImpl(ctx, await requireUserId(ctx), args.entryId, {
+      field: args.field,
+      value: args.value,
+    } as TimeEdit),
+})
+
+export const editTimeAs = internalMutation({
+  args: { ...editTimeArgs, userId: v.string() },
+  returns: editTimeReturns,
+  handler: async (ctx, args) =>
+    await editTimeImpl(ctx, args.userId, args.entryId, {
+      field: args.field,
+      value: args.value,
+    } as TimeEdit),
+})
+
+// ---------------------------------------------------------------------------
+// remove / restore
+// ---------------------------------------------------------------------------
+
+const removeReturns = v.object({
+  /** Empty when the entry was already deleted — remove is idempotent. */
+  removedEntryIds: v.array(v.id("timeEntries")),
+})
+
+/**
+ * Soft-deletes an entry.
+ *
+ * Soft, because the undo toast has to be able to bring it back, and because
+ * "never lose time" is the first rule. A hard delete is a maintenance sweep,
+ * not a user gesture.
+ *
+ * Deleting a RUNNING entry closes it first, so the row in the trash is a valid
+ * interval. Restoring a row with `endedAt: null` would otherwise resurrect a
+ * second running timer hours later, violating the one-running invariant from a
+ * gesture the user has already forgotten making.
+ */
+async function removeImpl(ctx: MutationCtx, userId: string, entryId: Id<"timeEntries">) {
+  const now = Date.now()
+  const entry = await getOwnedIncludingDeleted(ctx, userId, "timeEntries", entryId)
+
+  if (entry.deletedAt !== null) return { removedEntryIds: [] }
+
+  if (entry.endedAt === null) {
+    await closeEntry(ctx, entry, now, now, { deletedAt: now })
+  } else {
+    await ctx.db.patch(entry._id, { deletedAt: now, updatedAt: now })
+  }
+  return { removedEntryIds: [entry._id] }
+}
+
+export const remove = mutation({
+  args: { entryId: v.id("timeEntries") },
+  returns: removeReturns,
+  handler: async (ctx, args) =>
+    await removeImpl(ctx, await requireUserId(ctx), args.entryId),
+})
+
+export const removeAs = internalMutation({
+  args: { entryId: v.id("timeEntries"), userId: v.string() },
+  returns: removeReturns,
+  handler: async (ctx, args) => await removeImpl(ctx, args.userId, args.entryId),
+})
+
+/**
+ * Undo.
+ *
+ * Restores as a COMPLETED entry whatever the stored `endedAt` says. `remove`
+ * always closes a running row on the way out, but an import or an older row
+ * could still carry a null end, and restoring that would hand the user a second
+ * running timer they did not start. Ending it at its own updatedAt is the
+ * honest reading: that is the last instant the row was known to be live.
+ */
+async function restoreImpl(ctx: MutationCtx, userId: string, entryId: Id<"timeEntries">) {
+  const now = Date.now()
+  const entry = await getOwnedIncludingDeleted(ctx, userId, "timeEntries", entryId)
+
+  if (entry.deletedAt === null) return { restoredEntryIds: [] }
+
+  if (entry.endedAt === null) {
+    const times = unwrapTimes(
+      entryTimes(entry.startedAt, Math.max(entry.updatedAt, entry.startedAt + 1))
+    )
+    await ctx.db.patch(entry._id, { ...times, deletedAt: null, updatedAt: now })
+  } else {
+    await ctx.db.patch(entry._id, { deletedAt: null, updatedAt: now })
+  }
+  return { restoredEntryIds: [entry._id] }
+}
+
+const restoreReturns = v.object({
+  restoredEntryIds: v.array(v.id("timeEntries")),
+})
+
+export const restore = mutation({
+  args: { entryId: v.id("timeEntries") },
+  returns: restoreReturns,
+  handler: async (ctx, args) =>
+    await restoreImpl(ctx, await requireUserId(ctx), args.entryId),
+})
+
+export const restoreAs = internalMutation({
+  args: { entryId: v.id("timeEntries"), userId: v.string() },
+  returns: restoreReturns,
+  handler: async (ctx, args) => await restoreImpl(ctx, args.userId, args.entryId),
+})
+
+// ---------------------------------------------------------------------------
+// create — manual entry
+// ---------------------------------------------------------------------------
+
+const createArgs = {
+  clientKey: v.string(),
+  title: v.optional(v.string()),
+  note: v.optional(v.string()),
+  startedAt: v.number(),
+  endedAt: v.number(),
+  projectId: v.optional(v.id("projects")),
+  tagIds: v.optional(v.array(v.id("tags"))),
+  billable: v.optional(v.boolean()),
+}
+
+const createReturns = v.object({
+  entryId: v.id("timeEntries"),
+  replayed: v.boolean(),
+})
+
+type CreateArgs = {
+  clientKey: string
+  title?: string
+  note?: string
+  startedAt: number
+  endedAt: number
+  projectId?: Id<"projects">
+  tagIds?: Array<Id<"tags">>
+  billable?: boolean
+}
+
+/**
+ * Creates a completed entry from typed times.
+ *
+ * Unlike `start`, this one REFUSES bad input rather than clamping it. Both
+ * timestamps came from a keyboard, so an end before its start is a typo the
+ * user can see and fix — clamping it would silently record a length they did
+ * not mean. `start` clamps because the wrong value there comes from a device
+ * clock the user cannot see or correct.
+ *
+ * Idempotent on `clientKey`, like `start`, so a retried submit cannot produce a
+ * duplicate day's work.
+ */
+async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
+  const now = Date.now()
+
+  const replay = await ctx.db
+    .query("timeEntries")
+    .withIndex("by_user_clientKey", (q) =>
+      q.eq("userId", userId).eq("clientKey", args.clientKey)
+    )
+    .first()
+  if (replay !== null) return { entryId: replay._id, replayed: true }
+
+  checkTitle(args.title)
+  const note = normaliseNote(args.note)
+
+  // Consistency first, then the policy ceiling — these times were typed, so the
+  // 24-hour limit applies here in a way it never does to a clock that ran.
+  const times = unwrapTimes(entryTimes(args.startedAt, args.endedAt))
+  const entered = assertEnteredDuration(times.durationMs ?? 0)
+  if (!entered.ok) unwrapTimes(entered)
+
+  const project =
+    args.projectId === undefined
+      ? null
+      : await getOwned(ctx, userId, "projects", args.projectId)
+  const tagIds = await normaliseTagIds(ctx, userId, args.tagIds)
+
+  const entryId = await ctx.db.insert("timeEntries", {
+    userId,
+    clientKey: args.clientKey,
+    title: args.title ?? "",
+    note,
+    ...times,
+    projectId: args.projectId,
+    tagIds,
+    billable: args.billable ?? project?.billableByDefault ?? false,
+    source: "manual",
+    updatedAt: now,
+    deletedAt: null,
+  })
+
+  return { entryId, replayed: false }
+}
+
+export const create = mutation({
+  args: createArgs,
+  returns: createReturns,
+  handler: async (ctx, args) => await createImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const createAs = internalMutation({
+  args: { ...createArgs, userId: v.string() },
+  returns: createReturns,
+  handler: async (ctx, { userId, ...args }) => await createImpl(ctx, userId, args),
 })

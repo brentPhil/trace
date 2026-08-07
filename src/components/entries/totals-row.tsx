@@ -22,7 +22,9 @@ export function TotalsRow({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-baseline gap-x-6 gap-y-1 px-4 text-sm",
+        // A tighter gap on narrow screens, so "Today" and "This week" share a
+        // line at 375px instead of each taking one.
+        "flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 text-sm sm:gap-x-6",
         className
       )}
     >

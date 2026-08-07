@@ -1,6 +1,7 @@
 import { EntryRow } from "@/components/entries/entry-row"
 import { formatClock } from "@shared/duration"
 import { cn } from "@/lib/utils"
+import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { DayGroup } from "@/lib/group-entries"
 
 /**
@@ -15,10 +16,12 @@ export function DayList({
   groups,
   timeZone,
   use12Hour,
+  actions,
 }: {
   groups: Array<DayGroup>
   timeZone: string
   use12Hour: boolean
+  actions: EntryRowActions
 }) {
   if (groups.length === 0) return <EmptyLog />
 
@@ -55,6 +58,7 @@ export function DayList({
                 entry={entry}
                 timeZone={timeZone}
                 use12Hour={use12Hour}
+                actions={actions}
               />
             ))}
           </div>

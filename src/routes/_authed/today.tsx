@@ -1,10 +1,12 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { Button } from "@/components/ui/button"
 import { TimerBar } from "@/components/timer/timer-bar"
-import { DayList } from "@/components/entries/day-list"
+import { EntryLog } from "@/components/entries/entry-log"
+import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
+import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
 import { useSecond } from "@/hooks/use-clock"
 import { useReplayPendingStart, useTabTitleClock } from "@/hooks/use-timer-effects"
@@ -12,6 +14,7 @@ import { groupByDay, sumRange } from "@/lib/group-entries"
 import { signOutAndLeave } from "@/lib/auth-client"
 import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
+import type { Doc } from "../../../convex/_generated/dataModel"
 
 /** How far back the log reaches before pagination lands. */
 const LOG_DAYS = 30
@@ -75,6 +78,9 @@ function Today() {
   useTabTitleClock(running, settings.tabTitleClock)
   useReplayPendingStart(running)
 
+  const [stopped, setStopped] = useState<Doc<"timeEntries"> | null>(null)
+  const [noteOpen, setNoteOpen] = useState(false)
+
   const groups = useMemo(
     () => groupByDay(entries, settings.timezone, nowMs),
     [entries, settings.timezone, nowMs]
@@ -99,23 +105,39 @@ function Today() {
       </header>
 
       <div className="px-4">
-        <TimerBar running={running} />
+        <TimerBar
+          running={running}
+          onStopped={(entry) => {
+            setStopped(entry)
+            setNoteOpen(true)
+          }}
+        />
       </div>
 
-      <TotalsRow
-        className="py-3"
-        todayMs={todayGroup?.totalMs ?? 0}
-        weekMs={weekTotals.totalMs}
-        billableMs={weekTotals.billableMs}
-      />
+      <div className="flex items-center justify-between gap-3 pr-2">
+        <TotalsRow
+          className="py-3"
+          todayMs={todayGroup?.totalMs ?? 0}
+          weekMs={weekTotals.totalMs}
+          billableMs={weekTotals.billableMs}
+        />
+        <ManualEntryDialog today={today} timeZone={settings.timezone} />
+      </div>
 
       <main className="flex-1 border-t border-edge-soft">
-        <DayList
+        <EntryLog
           groups={groups}
           timeZone={settings.timezone}
           use12Hour={settings.timeFormat === "12"}
         />
       </main>
+
+      {/*
+        The stop-time note sheet is owned here rather than inside the log,
+        because the entry it asks about has just left the timer bar and may not
+        be in the log's data yet. It reads the frozen snapshot the stop returned.
+      */}
+      <NoteSheet entry={stopped} open={noteOpen} onOpenChange={setNoteOpen} />
     </div>
   )
 }

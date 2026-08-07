@@ -34,6 +34,38 @@ export async function getOwned<T extends OwnedTable>(
   table: T,
   id: Id<T>
 ): Promise<Doc<T>> {
+  return await load(ctx, userId, table, id, false)
+}
+
+/**
+ * The same ownership check, but a soft-deleted row is returned rather than
+ * treated as missing.
+ *
+ * Exists for exactly two callers — `remove` and `restore` — and is named at
+ * length so it cannot be reached for absent-mindedly. Undo is impossible
+ * without it: `getOwned` hides the very rows restore has to find, so a delete
+ * would be irreversible and a double-fired delete would raise NOT_FOUND on a
+ * row the user is looking at.
+ *
+ * The OWNERSHIP check is not relaxed, only the deleted check. Someone else's
+ * deleted row is still NOT_FOUND.
+ */
+export async function getOwnedIncludingDeleted<T extends OwnedTable>(
+  ctx: QueryCtx | MutationCtx,
+  userId: string,
+  table: T,
+  id: Id<T>
+): Promise<Doc<T>> {
+  return await load(ctx, userId, table, id, true)
+}
+
+async function load<T extends OwnedTable>(
+  ctx: QueryCtx | MutationCtx,
+  userId: string,
+  table: T,
+  id: Id<T>,
+  includeDeleted: boolean
+): Promise<Doc<T>> {
   const row = await ctx.db.get(id)
   if (row === null) {
     traceError("NOT_FOUND", `That ${label(table)} no longer exists.`)
@@ -44,7 +76,8 @@ export async function getOwned<T extends OwnedTable>(
   // both of these fields. It does — the schema is the proof — but the compiler
   // needs the round trip through `unknown` to accept it.
   const owned = row as unknown as OwnedFields
-  if (owned.userId !== userId || owned.deletedAt !== null) {
+  const hidden = owned.deletedAt !== null && !includeDeleted
+  if (owned.userId !== userId || hidden) {
     traceError("NOT_FOUND", `That ${label(table)} no longer exists.`)
   }
 

@@ -26,7 +26,19 @@ const TITLE_DEBOUNCE_MS = 400
  *   Light Rule), and so do the icon changing from play to stop, the boundary
  *   brightening, and the word "Recording" for a screen reader.
  */
-export function TimerBar({ running }: { running: Doc<"timeEntries"> | null }) {
+export function TimerBar({
+  running,
+  onStopped,
+}: {
+  running: Doc<"timeEntries"> | null
+  /**
+   * Called with the entry as it was the instant it stopped — closed, with a
+   * real duration — so the note sheet can name it without reading a query that
+   * has not caught up yet. The single most valuable moment to ask what someone
+   * just did is the moment they say they have stopped doing it.
+   */
+  onStopped?: (entry: Doc<"timeEntries">) => void
+}) {
   const { start, stop, discard, setTitle } = useEntryMutations()
   const [draft, setDraft] = useState("")
   const [pending, setPending] = useState(false)
@@ -59,10 +71,23 @@ export function TimerBar({ running }: { running: Doc<"timeEntries"> | null }) {
     if (pending) return
     setPending(true)
     try {
-      if (isRunning) {
-        await stop()
+      // `running !== null` rather than `isRunning`, so the narrowing survives
+      // into the branch and `stopped` is a document rather than a maybe.
+      if (running !== null) {
+        const stopped = running
+        const result = await stop()
         setDraft("")
         adoptedFor.current = null
+        // Only when something actually stopped. A second tab having already
+        // stopped it returns an empty list, and raising a note sheet for an
+        // entry the user did not just finish would be a non-sequitur.
+        if (result.stoppedEntryIds.length > 0) {
+          onStopped?.({
+            ...stopped,
+            endedAt: result.serverNow,
+            durationMs: Math.max(1, result.serverNow - stopped.startedAt),
+          })
+        }
       } else {
         await start({ title: draft.trim() })
         inputRef.current?.focus()
@@ -100,8 +125,11 @@ export function TimerBar({ running }: { running: Doc<"timeEntries"> | null }) {
           // Borderless inside an already-bordered bar: the section IS the
           // control's boundary, so The Boundary Rule is satisfied once. A
           // second border here would read as a form field inside a card.
+          // `pr-2` because the classifier icons are hidden below `sm`, and
+          // without them the text runs straight into the elapsed time with no
+          // gap at all — the title and the clock read as one string.
           className={cn(
-            "min-w-0 flex-1 bg-transparent text-lg outline-none",
+            "min-w-0 flex-1 bg-transparent pr-2 text-lg outline-none",
             "placeholder:text-muted-foreground focus-visible:ring-0"
           )}
         />

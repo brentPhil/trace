@@ -1,3 +1,7 @@
+import { addDays, dayOf, instantOfLocal, localPartsOf, parseDayString } from "@shared/day"
+import type { DayString } from "@shared/day"
+import type { TimeOfDay } from "@shared/timeOfDay"
+
 const cache = new Map<string, Intl.DateTimeFormat>()
 
 function formatter(timeZone: string, use12Hour: boolean): Intl.DateTimeFormat {
@@ -40,4 +44,50 @@ export function formatTimeRange(
   const start = formatTimeOfInstant(startedAt, timeZone, use12Hour)
   if (endedAt === null) return `${start} – …`
   return `${start} – ${formatTimeOfInstant(endedAt, timeZone, use12Hour)}`
+}
+
+/**
+ * Turns "the wall-clock time the user typed" into an instant.
+ *
+ * `anchorMs` names the local day the typed time belongs to — for a start that
+ * is the entry's own start, and for an end it is ALSO the start, because
+ * `resolveEndAfterStart` expresses "past midnight" as `dayOffset: 1` relative
+ * to the start rather than as a date of its own.
+ *
+ * Everything goes through `instantOfLocal`, which is the module that knows what
+ * to do when the typed time is ambiguous (the hour that repeats when clocks go
+ * back) or does not exist at all (the hour that is skipped when they go
+ * forward). Doing the arithmetic here with a raw offset would be wrong twice a
+ * year, in a way nobody would notice until an invoice was already sent.
+ */
+export function instantOfTypedTime(
+  anchorMs: number,
+  time: TimeOfDay,
+  timeZone: string
+): number {
+  return instantOfDayTime(dayOf(anchorMs, timeZone), time, timeZone)
+}
+
+/** The same, anchored to a day string rather than to an existing entry. */
+export function instantOfDayTime(
+  day: DayString,
+  time: TimeOfDay,
+  timeZone: string
+): number {
+  const parts = parseDayString(addDays(day, time.dayOffset))
+  return instantOfLocal(
+    parts.year,
+    parts.month,
+    parts.day,
+    Math.floor(time.minutes / 60),
+    time.minutes % 60,
+    0,
+    timeZone
+  )
+}
+
+/** Minutes past local midnight for an instant — the parsers' reference point. */
+export function localMinutesOf(instantMs: number, timeZone: string): number {
+  const parts = localPartsOf(instantMs, timeZone)
+  return parts.hour * 60 + parts.minute
 }

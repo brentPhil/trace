@@ -92,7 +92,15 @@ export function useEntryMutations() {
    * gone with nothing on screen to say so.
    */
   const start = useCallback(
-    async (input: { title?: string; startedAt?: number } = {}) => {
+    async (
+      input: {
+        title?: string
+        startedAt?: number
+        projectId?: Id<"projects">
+        tagIds?: Array<Id<"tags">>
+        billable?: boolean
+      } = {}
+    ) => {
       const clientKey = newClientKey()
       const startedAt = input.startedAt ?? Date.now()
       const title = input.title ?? ""
@@ -101,12 +109,40 @@ export function useEntryMutations() {
 
       // No try/catch: the intent must STAY in storage if this throws, so the
       // next load replays it. Clearing happens only on the success path.
-      const result = await startMutation({ clientKey, title, startedAt })
+      const result = await startMutation({
+        clientKey,
+        title,
+        startedAt,
+        projectId: input.projectId,
+        tagIds: input.tagIds,
+        billable: input.billable,
+      })
       recordServerNow(result.serverNow)
       clearPendingStart(clientKey)
       return result
     },
     [startMutation]
+  )
+
+  /**
+   * Resume: a NEW entry carrying everything the old one classified itself
+   * with, except the note.
+   *
+   * The note describes what happened during that specific interval, so copying
+   * it forward would put a false account on a block of time nobody has done
+   * yet — and the copy would look exactly like something the user wrote.
+   * Toggl's resume and its title-autocomplete inherit different sets from each
+   * other, which quietly teaches people to trust neither.
+   */
+  const resume = useCallback(
+    async (entry: Doc<"timeEntries">) =>
+      await start({
+        title: entry.title,
+        projectId: entry.projectId,
+        tagIds: entry.tagIds,
+        billable: entry.billable,
+      }),
+    [start]
   )
 
   /**
@@ -150,5 +186,5 @@ export function useEntryMutations() {
     [setTitleMutation]
   )
 
-  return { start, replayStart, stop, discard, setTitle }
+  return { start, resume, replayStart, stop, discard, setTitle }
 }
