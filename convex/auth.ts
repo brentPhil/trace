@@ -68,6 +68,27 @@ export const requireUser = async (ctx: QueryCtx | MutationCtx) => {
   return user
 }
 
+/**
+ * The signed-in user's id — the value every domain row is scoped to.
+ *
+ * This is the Better Auth user's `_id`, a string in the component's namespace
+ * rather than a `v.id()` in this deployment. It is the same value as
+ * `identity.subject`: safeGetAuthUser looks the user up with
+ * `where: [{ field: "_id", value: identity.subject }]`, so the two cannot
+ * diverge.
+ *
+ * Deliberately routed through requireUser rather than reading
+ * `identity.subject` directly, even though that would save two component
+ * queries per call. requireUser also checks the session has not expired, which
+ * is what makes `revokeSessionsOnPasswordReset` above mean anything. Skipping
+ * that for speed would quietly re-open the window a password reset exists to
+ * close.
+ */
+export const requireUserId = async (ctx: QueryCtx | MutationCtx) => {
+  const user = await requireUser(ctx)
+  return user._id
+}
+
 /** Returns the signed-in user, or null when anonymous. Never throws. */
 export const safeGetUser = async (ctx: QueryCtx | MutationCtx) => {
   return await authComponent.safeGetAuthUser(ctx)

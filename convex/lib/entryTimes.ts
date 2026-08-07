@@ -50,6 +50,13 @@ export type TimesResult =
  * Every mutation that writes startedAt or endedAt goes through this. A row that
  * did not come out of this function is a row whose duration might not match its
  * timestamps, and every total in the product sums that field.
+ *
+ * Note what is NOT checked here: the 24-hour ceiling. This function enforces
+ * CONSISTENCY, not policy. A timer left running over a weekend produces a
+ * 60-hour entry, and that is real recorded time — refusing it here would make
+ * stop() fail, which means a timer that can never be stopped. The ceiling
+ * applies to durations a user TYPES, and is enforced by parseDuration and by
+ * assertEnteredDuration below.
  */
 export function entryTimes(startedAt: number, endedAt: number | null): TimesResult {
   if (!Number.isFinite(startedAt)) return { ok: false, code: "INVALID_DURATION" }
@@ -61,10 +68,22 @@ export function entryTimes(startedAt: number, endedAt: number | null): TimesResu
   if (!Number.isFinite(endedAt)) return { ok: false, code: "INVALID_DURATION" }
   if (endedAt <= startedAt) return { ok: false, code: "END_NOT_AFTER_START" }
 
-  const durationMs = endedAt - startedAt
-  if (durationMs > MAX_DURATION_MS) return { ok: false, code: "DURATION_TOO_LONG" }
+  return { ok: true, times: { startedAt, endedAt, durationMs: endedAt - startedAt } }
+}
 
-  return { ok: true, times: { startedAt, endedAt, durationMs } }
+/**
+ * The policy ceiling, applied to a duration the user entered rather than one a
+ * clock produced. Callers offer "longer than a day — split it?" rather than
+ * treating this as an error.
+ */
+export function assertEnteredDuration(
+  durationMs: number
+): { ok: true } | { ok: false; code: TimeErrorCode } {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    return { ok: false, code: "INVALID_DURATION" }
+  }
+  if (durationMs > MAX_DURATION_MS) return { ok: false, code: "DURATION_TOO_LONG" }
+  return { ok: true }
 }
 
 export type TimeEdit =
@@ -100,10 +119,10 @@ export function applyTimeEdit(
       return entryTimes(current.startedAt, edit.value)
 
     case "duration": {
-      if (!Number.isFinite(edit.value) || edit.value <= 0) {
-        return { ok: false, code: "INVALID_DURATION" }
-      }
-      if (edit.value > MAX_DURATION_MS) return { ok: false, code: "DURATION_TOO_LONG" }
+      // A duration the user typed, so the policy ceiling applies here — unlike
+      // in entryTimes, which only enforces consistency.
+      const entered = assertEnteredDuration(edit.value)
+      if (!entered.ok) return entered
 
       if (current.endedAt === null) {
         // No end exists to move, so the anchor has to be the other side. The

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   applyTimeEdit,
+  assertEnteredDuration,
   crossesMidnight,
   elapsedMs,
   entryTimes,
@@ -52,10 +53,29 @@ describe("entryTimes — the sole writer of the time fields", () => {
     })
   })
 
-  it("refuses more than 24 hours", () => {
-    expect(
-      entryTimes(at("2026-08-06T09:00:00Z"), at("2026-08-07T09:00:00.001Z"))
-    ).toEqual({ ok: false, code: "DURATION_TOO_LONG" })
+  /**
+   * The ceiling is policy, not consistency, and it deliberately does NOT live
+   * here. A timer left running over a weekend is real recorded time; refusing
+   * it in the sole time-writer would mean stop() fails, which means a timer
+   * that can never be stopped — the worst outcome in the product.
+   */
+  it("accepts a runaway timer longer than a day, so stop can never fail", () => {
+    const t = times(entryTimes(at("2026-08-06T09:00:00Z"), at("2026-08-09T09:00:00Z")))
+    expect(t.durationMs).toBe(72 * HOUR)
+  })
+
+  it("applies the 24-hour ceiling to a duration the user TYPED", () => {
+    expect(assertEnteredDuration(24 * HOUR)).toEqual({ ok: true })
+    expect(assertEnteredDuration(24 * HOUR + 1)).toEqual({
+      ok: false,
+      code: "DURATION_TOO_LONG",
+    })
+    expect(assertEnteredDuration(0)).toEqual({ ok: false, code: "INVALID_DURATION" })
+    expect(assertEnteredDuration(-1)).toEqual({ ok: false, code: "INVALID_DURATION" })
+    expect(assertEnteredDuration(Number.NaN)).toEqual({
+      ok: false,
+      code: "INVALID_DURATION",
+    })
   })
 
   it("refuses non-finite input rather than writing NaN into a total", () => {

@@ -10,13 +10,17 @@
 
 import type * as auth from "../auth.js";
 import type * as email from "../email.js";
+import type * as entries from "../entries.js";
+import type * as errors from "../errors.js";
 import type * as healthcheck from "../healthcheck.js";
 import type * as http from "../http.js";
+import type * as lib_codes from "../lib/codes.js";
 import type * as lib_day from "../lib/day.js";
 import type * as lib_duration from "../lib/duration.js";
 import type * as lib_entryTimes from "../lib/entryTimes.js";
 import type * as lib_timeOfDay from "../lib/timeOfDay.js";
 import type * as maintenance from "../maintenance.js";
+import type * as owned from "../owned.js";
 
 import type {
   ApiFromModules,
@@ -27,13 +31,17 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   email: typeof email;
+  entries: typeof entries;
+  errors: typeof errors;
   healthcheck: typeof healthcheck;
   http: typeof http;
+  "lib/codes": typeof lib_codes;
   "lib/day": typeof lib_day;
   "lib/duration": typeof lib_duration;
   "lib/entryTimes": typeof lib_entryTimes;
   "lib/timeOfDay": typeof lib_timeOfDay;
   maintenance: typeof maintenance;
+  owned: typeof owned;
 }>;
 
 /**

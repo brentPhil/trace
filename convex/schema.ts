@@ -1,8 +1,125 @@
-import { defineSchema } from "convex/server"
+import { defineSchema, defineTable } from "convex/server"
+import { v } from "convex/values"
 
-// No application tables yet.
-//
-// Better Auth is installed as a Convex component, so its user, session, and
-// account tables live in the component's own namespace rather than here. Add
-// this app's tables below as the domain takes shape.
-export default defineSchema({})
+/**
+ * Trace's domain tables.
+ *
+ * Better Auth is installed as a Convex component, so user, session and account
+ * tables live in the component's own namespace rather than here. `userId` below
+ * is the Better Auth user's `_id` — a STRING, not a `v.id()`, because it names a
+ * document in another namespace.
+ *
+ * Two shapes are load-bearing and are argued in
+ * docs/superpowers/plans/2026-08-08-time-tracking-implementation-plan.md:
+ *
+ *   - There is no stored `dayKey`. Entries hold a UTC instant and nothing else;
+ *     "which local day is this" is computed from convex/lib/day.ts at query
+ *     time. Storing it would mean the ordinary inline-edit path silently
+ *     re-buckets historical entries under whatever timezone the user is in
+ *     today, which changes an already-invoiced month with no audit trail.
+ *
+ *   - A running entry is `endedAt === null`, stored as an explicit union rather
+ *     than an optional field, so it is indexable. Toggl's negative-duration
+ *     encoding is not adopted: a field whose units flip with its sign turns
+ *     every sum into a place to forget a branch.
+ */
+export default defineSchema({
+  timeEntries: defineTable({
+    userId: v.string(),
+    /** UUIDv7 minted by the client before the mutation is sent. Makes a create
+     *  idempotent, so a retry after a lost response returns the existing row
+     *  instead of duplicating the entry — which is exactly what happens on a
+     *  phone with bad signal, when nobody is watching. */
+    clientKey: v.string(),
+    /** "" is allowed and normal. Blocking start on a missing title would
+     *  destroy the reason the product exists. Also the grouping and
+     *  autocomplete key. */
+    title: v.string(),
+    /** The differentiator. Never a grouping, matching, or autocomplete key —
+     *  that is the mistake that makes Toggl's single description field
+     *  unusable for prose. */
+    note: v.optional(v.string()),
+    startedAt: v.number(),
+    /** null means running. */
+    endedAt: v.union(v.number(), v.null()),
+    /** Denormalised because Convex has no generated columns and every total in
+     *  the product sums it. convex/lib/entryTimes.ts is the sole writer, which
+     *  is what keeps it honest. null exactly when endedAt is null. */
+    durationMs: v.union(v.number(), v.null()),
+    projectId: v.optional(v.id("projects")),
+    /** Unique, sorted, capped. Flat by design — hierarchy is what turns tags
+     *  into a second project taxonomy. */
+    tagIds: v.array(v.id("tags")),
+    billable: v.boolean(),
+    /** "web" | "import" | "api". The cheapest observability there is. */
+    source: v.string(),
+    updatedAt: v.number(),
+    deletedAt: v.union(v.number(), v.null()),
+  })
+    // userId leads every index: ownership is a key prefix, not a filter that
+    // someone can forget on the one query that matters.
+    .index("by_user_ended", ["userId", "endedAt"])
+    .index("by_user_started", ["userId", "startedAt"])
+    .index("by_user_clientKey", ["userId", "clientKey"])
+    .index("by_user_project", ["userId", "projectId"]),
+
+  projects: defineTable({
+    userId: v.string(),
+    name: v.string(),
+    /** A key into a fixed palette, not a free-form colour. Legibility, never
+     *  the sole carrier of meaning. */
+    color: v.string(),
+    /** Archive, never delete. Last year's entries must still render their
+     *  project name. */
+    archived: v.boolean(),
+    billableByDefault: v.boolean(),
+    hourlyRateCents: v.optional(v.number()),
+    updatedAt: v.number(),
+    deletedAt: v.union(v.number(), v.null()),
+  }).index("by_user_archived_name", ["userId", "archived", "name"]),
+
+  tags: defineTable({
+    userId: v.string(),
+    name: v.string(),
+    updatedAt: v.number(),
+    deletedAt: v.union(v.number(), v.null()),
+  }).index("by_user_name", ["userId", "name"]),
+
+  userSettings: defineTable({
+    userId: v.string(),
+    /** IANA, first-class. Never the browser's zone at read time — that is how a
+     *  travelling freelancer's entries silently jump days. */
+    timezone: v.string(),
+    /** 0 = Sunday. Honoured from the first week total; assuming Sunday is wrong
+     *  for most of the world. */
+    weekStartDay: v.number(),
+    durationDisplay: v.union(v.literal("hms"), v.literal("decimal")),
+    timeFormat: v.union(v.literal("12"), v.literal("24")),
+    runawayThresholdMs: v.number(),
+    /** Opt-out for the tab-title clock, which a screen reader announces. */
+    tabTitleClock: v.boolean(),
+    /** Minutes past local midnight, default 1050 (17:30). Minutes rather than
+     *  hours because the default is not on an hour, and because an hourly
+     *  schedule cannot serve Asia/Kolkata, Asia/Kathmandu or Pacific/Chatham
+     *  at all. */
+    recapMinuteLocal: v.number(),
+    updatedAt: v.number(),
+  }).index("by_user", ["userId"]),
+
+  /**
+   * Day-scoped user prose only.
+   *
+   * The recap body itself is NEVER stored — it is a pure function of the day's
+   * entries, derived on read. Storing it would create an invalidation problem
+   * with a branch for every way an entry can change. These two optional strings
+   * are the only part of a recap the user types that is not already an entry.
+   */
+  recapDays: defineTable({
+    userId: v.string(),
+    /** "YYYY-MM-DD" in the user's timezone. */
+    day: v.string(),
+    next: v.optional(v.string()),
+    blocked: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_user_day", ["userId", "day"]),
+})
