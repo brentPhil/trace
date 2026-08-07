@@ -14,6 +14,8 @@ import type { AuthClient } from "@convex-dev/better-auth/react"
 import type { ConvexQueryClient } from "@convex-dev/react-query"
 import type { QueryClient } from "@tanstack/react-query"
 
+import { Announcer } from "@/components/a11y/announcer"
+import { ShortcutsOverlay } from "@/components/a11y/shortcuts-overlay"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import { authClient } from "@/lib/auth-client"
 import { getToken } from "@/lib/auth-server"
@@ -93,7 +95,16 @@ function RootComponent() {
         leave the way back on screen for its six seconds.
       */}
       <Toast.Provider>
-        <Outlet />
+        {/*
+          The live region and the shortcut list are app-wide because both are
+          about reaching the product at all: an undo has to outlive the surface
+          that raised it, a state change has to be announced wherever it
+          happened, and "what can I press?" is never a per-route question.
+        */}
+        <Announcer>
+          <Outlet />
+          <ShortcutsOverlay />
+        </Announcer>
         <ToastViewport />
       </Toast.Provider>
     </ConvexBetterAuthProvider>

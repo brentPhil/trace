@@ -6,9 +6,11 @@ import {
   TagPicker,
 } from "@/components/classifiers/classifier-pickers"
 import { ProjectDot } from "@/components/classifiers/project-dot"
+import { useAnnounce } from "@/components/a11y/announcer"
 import { EntryDuration } from "@/components/timer/entry-duration"
 import { isOptimisticId } from "@/lib/optimistic-id"
 import { cn } from "@/lib/utils"
+import { spokenDuration } from "@shared/duration"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 const TITLE_DEBOUNCE_MS = 400
@@ -105,6 +107,7 @@ export function TimerBar({
   const { start, stop, discard, setTitle, classify } = actions
   const [pending, setPending] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const announce = useAnnounce()
 
   /*
    * Classification before a timer exists.
@@ -328,10 +331,14 @@ export function TimerBar({
         // stopped it returns an empty list, and raising a note sheet for an
         // entry the user did not just finish would be a non-sequitur.
         if (result.stoppedEntryIds.length > 0) {
+          const elapsed = Math.max(1, result.serverNow - stopped.startedAt)
+          announce(
+            `Stopped ${stopped.title.trim() === "" ? "the timer" : stopped.title.trim()}. ${spokenDuration(elapsed)} recorded.`
+          )
           onStopped?.({
             ...stopped,
             endedAt: result.serverNow,
-            durationMs: Math.max(1, result.serverNow - stopped.startedAt),
+            durationMs: elapsed,
           })
         }
       } else {
@@ -346,6 +353,11 @@ export function TimerBar({
         // pressed the button again.
         setStaged({ projectId: null, tagIds: [], billable: false })
         setSuggestOpen(false)
+        announce(
+          draft.text.trim() === ""
+            ? "Timer started."
+            : `Timer started: ${draft.text.trim()}.`
+        )
         inputRef.current?.focus()
       }
     } finally {
@@ -559,7 +571,10 @@ export function TimerBar({
           */}
           <button
             type="button"
-            onClick={() => void discard()}
+            onClick={() => {
+              announce("Timer discarded. Nothing was recorded.")
+              void discard()
+            }}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-destructive"
           >
             <Trash2 className="size-3.5" />

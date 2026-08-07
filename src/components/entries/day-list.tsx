@@ -1,8 +1,9 @@
 ﻿import { EntryRow } from "@/components/entries/entry-row"
-import { formatClock } from "@shared/duration"
+import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { DayGroup } from "@/lib/group-entries"
+import type { DurationDisplay } from "@/lib/format-total"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 /**
@@ -21,6 +22,7 @@ export function DayList({
   tags,
   actions,
   highlightedEntryId,
+  display = "hms",
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -29,6 +31,7 @@ export function DayList({
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
   highlightedEntryId?: string | null
+  display?: DurationDisplay
 }) {
   if (groups.length === 0) return <EmptyLog />
 
@@ -54,7 +57,7 @@ export function DayList({
               </span>
             </div>
             <span className="text-base font-semibold tabular text-muted-foreground">
-              {formatClock(group.totalMs)}
+              {formatTotal(group.totalMs, display)}
             </span>
           </header>
 
@@ -85,15 +88,41 @@ export function DayList({
  */
 function EmptyLog() {
   return (
-    <div className="flex flex-col gap-2 px-4 py-12 text-sm">
+    <div className="flex max-w-prose flex-col gap-4 px-4 py-10 text-sm">
       <p className="font-medium">Nothing tracked yet.</p>
-      <p className="max-w-prose text-muted-foreground">
-        Type what you&apos;re working on and press start â€” a title is optional,
-        and you can fill in the rest later. Forgot to start the timer? You can
-        add an entry by hand and set its times afterwards.
+
+      <dl className="flex flex-col gap-3 text-muted-foreground">
+        <div className="flex flex-col gap-0.5">
+          <dt className="font-medium text-foreground">
+            How do the hours come back out?
+          </dt>
+          <dd>
+            The recap panel above turns a day into something you can paste into
+            a channel or an email — grouped by client, with what you actually
+            did. History totals any date range and marks what was billable.
+          </dd>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <dt className="font-medium text-foreground">
+            What if I forget to start the timer?
+          </dt>
+          <dd>
+            Use <strong className="font-medium text-foreground">Add entry</strong>{" "}
+            and type the hours you worked. Every time on every entry can be
+            corrected afterwards by clicking it — nothing here is written in
+            stone, and nothing is lost by getting it wrong the first time.
+          </dd>
+        </div>
+      </dl>
+
+      <p className="text-muted-foreground">
+        Type what you&apos;re working on and press start. A title is optional and
+        so is everything else — the note can wait until you stop, and it is the
+        part this is really for.
       </p>
     </div>
   )
 }
+
 
 

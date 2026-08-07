@@ -9,12 +9,14 @@ import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
 import { RecapPanel } from "@/components/recap/recap-panel"
+import { RunawayBanner } from "@/components/timer/runaway-banner"
 import { useSecond } from "@/hooks/use-clock"
 import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
 import { useReplayPendingStart, useTabTitleClock } from "@/hooks/use-timer-effects"
 import { groupByDay, sumRange } from "@/lib/group-entries"
+import { cn } from "@/lib/utils"
 import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
@@ -144,7 +146,26 @@ function Today() {
     <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
       <AppHeader email={user.email} />
 
-      <div className="px-4">
+      {/*
+        Below `md` the bar is pinned to the BOTTOM of the viewport rather than
+        sitting at the top of the document.
+
+        On a phone the start control belongs under the thumb, not behind a
+        scroll — and the log is what you scroll, so the one control you press
+        twenty times a day must not scroll away with it. `pb-safe` clears the
+        home indicator; the spacer below reserves the height so the last entry
+        in the log is never hidden underneath.
+
+        Toggl has publicly declined to fix its mobile web app. This is the
+        surface the incumbent abandoned, and it costs one breakpoint.
+      */}
+      <div
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-30 border-t border-edge-soft bg-ground px-3 pt-2",
+          "pb-[max(0.5rem,env(safe-area-inset-bottom))]",
+          "md:static md:z-auto md:border-t-0 md:bg-transparent md:px-4 md:pt-0 md:pb-0"
+        )}
+      >
         <TimerBar
           running={running}
           actions={timerActions}
@@ -158,12 +179,20 @@ function Today() {
         />
       </div>
 
+      <RunawayBanner
+        running={running}
+        thresholdMs={settings.runawayThresholdMs}
+        onStop={() => void entryMutations.stop()}
+        onDiscard={() => void entryMutations.discard()}
+      />
+
       <div className="flex items-center justify-between gap-3 pr-2">
         <TotalsRow
           className="py-3"
           todayMs={todayGroup?.totalMs ?? 0}
           weekMs={weekTotals.totalMs}
           billableMs={weekTotals.billableMs}
+          display={settings.durationDisplay}
         />
         <ManualEntryDialog
           today={today}
@@ -186,8 +215,17 @@ function Today() {
           timeZone={settings.timezone}
           use12Hour={settings.timeFormat === "12"}
           highlightedEntryId={highlighted}
+          display={settings.durationDisplay}
         />
       </main>
+
+      {/*
+        Reserves the fixed bar's height so the last row of the log can always
+        be scrolled clear of it. Sized generously — the bar grows a second line
+        while recording — because a too-small spacer hides the newest entry,
+        which is the one being worked on.
+      */}
+      <div aria-hidden="true" className="h-[6.5rem] shrink-0 md:hidden" />
 
       {/*
         The stop-time note sheet is owned here rather than inside the log,
@@ -203,5 +241,6 @@ function Today() {
     </div>
   )
 }
+
 
 

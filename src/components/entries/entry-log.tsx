@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+﻿import { useCallback, useState } from "react"
 import { DayList } from "@/components/entries/day-list"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { Toast } from "@/components/ui/toast"
@@ -9,6 +9,7 @@ import { errorMessage } from "@/lib/error-message"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { DurationDisplay } from "@/lib/format-total"
 import type { DayGroup, Entry } from "@/lib/group-entries"
 
 /** Long enough to notice and reach, short enough not to linger. */
@@ -26,12 +27,14 @@ export function EntryLog({
   timeZone,
   use12Hour,
   highlightedEntryId,
+  display,
 }: {
   groups: Array<DayGroup>
   timeZone: string
   use12Hour: boolean
   /** Set by a recap drill-down. The row scrolls into view and marks itself. */
   highlightedEntryId?: string | null
+  display?: DurationDisplay
 }) {
   const { setNote, update, editTime, remove, restore } = useEntryEditMutations()
   const { resume } = useEntryMutations()
@@ -51,13 +54,13 @@ export function EntryLog({
    * Deletes, then offers the way back.
    *
    * The snapshot is captured BEFORE the mutation, because after it the row is
-   * gone from every query the toast could read it from — and the toast has to
+   * gone from every query the toast could read it from â€” and the toast has to
    * be able to name what it removed and to put that exact row back.
    */
   const onRemove = useCallback(
     (entry: Entry) => {
       const title = entry.title.trim()
-      const label = title === "" ? "entry" : `“${title}”`
+      const label = title === "" ? "entry" : `â€œ${title}â€`
 
       void (async () => {
         try {
@@ -145,6 +148,7 @@ export function EntryLog({
         tags={tags}
         actions={actions}
         highlightedEntryId={highlightedEntryId}
+        display={display}
       />
       <NoteSheet
         entry={liveNoteEntry}
@@ -155,3 +159,4 @@ export function EntryLog({
     </>
   )
 }
+

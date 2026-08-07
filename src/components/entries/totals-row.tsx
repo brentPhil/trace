@@ -1,8 +1,9 @@
-import { formatClock } from "@shared/duration"
+﻿import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
+import type { DurationDisplay } from "@/lib/format-total"
 
 /**
- * Today and this week — the only two numbers a freelancer checks all day.
+ * Today and this week â€” the only two numbers a freelancer checks all day.
  *
  * A sentence-weight row, not a dashboard. The moment this becomes four bordered
  * cards with large numerals it has changed the page's genre, and readers skim
@@ -12,11 +13,14 @@ export function TotalsRow({
   todayMs,
   weekMs,
   billableMs,
+  display = "hms",
   className,
 }: {
   todayMs: number
   weekMs: number
   billableMs: number
+  /** Totals are one of the two places decimal hours apply. See format-total. */
+  display?: DurationDisplay
   className?: string
 }) {
   return (
@@ -28,12 +32,12 @@ export function TotalsRow({
         className
       )}
     >
-      <Total label="Today" value={todayMs} />
-      <Total label="This week" value={weekMs} />
+      <Total label="Today" value={todayMs} display={display} />
+      <Total label="This week" value={weekMs} display={display} />
       {billableMs > 0 ? (
-        // Brass is money — The Two Temperatures Rule. The word "billable"
+        // Brass is money â€” The Two Temperatures Rule. The word "billable"
         // carries it too, so the meaning survives without colour.
-        <Total label="Billable" value={billableMs} tone="brass" />
+        <Total label="Billable" value={billableMs} display={display} tone="brass" />
       ) : null}
     </div>
   )
@@ -42,10 +46,12 @@ export function TotalsRow({
 function Total({
   label,
   value,
+  display,
   tone,
 }: {
   label: string
   value: number
+  display: DurationDisplay
   tone?: "brass"
 }) {
   return (
@@ -57,8 +63,9 @@ function Total({
           tone === "brass" ? "text-brass" : "text-foreground"
         )}
       >
-        {formatClock(value)}
+        {formatTotal(value, display)}
       </span>
     </span>
   )
 }
+

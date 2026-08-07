@@ -7,6 +7,7 @@ import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
 import { FilterBar } from "@/components/history/filter-bar"
 import { RecapPanel } from "@/components/recap/recap-panel"
+import { RunawayBanner } from "@/components/timer/runaway-banner"
 import { Toast } from "@/components/ui/toast"
 import { groupByDay } from "@/lib/group-entries"
 import { dayOf } from "@shared/day"
@@ -284,6 +285,28 @@ function DesignHarness() {
         />
       </div>
 
+      <div className="border-t border-edge-soft px-4 py-6">
+        <p className="mb-3 text-xs text-muted-foreground">Runaway banner</p>
+        <RunawayBanner
+          running={entries[0]}
+          thresholdMs={0}
+          onStop={() => {}}
+          onDiscard={() => {}}
+        />
+      </div>
+
+      <div className="border-t border-edge-soft px-4 py-6">
+        <p className="mb-3 text-xs text-muted-foreground">Empty log</p>
+        <DayList
+          groups={[]}
+          timeZone={TZ}
+          use12Hour={false}
+          projects={fixtureProjects}
+          tags={fixtureTags}
+          actions={actions}
+        />
+      </div>
+
       <div className="px-4 py-8">
         <p className="mb-3 text-xs text-muted-foreground">Idle state</p>
         <TimerBar running={null} actions={timerActions} projects={fixtureProjects} tags={fixtureTags} />
@@ -298,6 +321,7 @@ function DesignHarness() {
     </div>
   )
 }
+
 
 
 
