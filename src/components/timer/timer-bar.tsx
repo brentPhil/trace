@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { DollarSign, FolderClosed, Play, Square, Tag, Trash2 } from "lucide-react"
 import { EntryDuration } from "@/components/timer/entry-duration"
-import { isOptimisticId } from "@/hooks/use-entry-mutations"
+import { isOptimisticId } from "@/lib/optimistic-id"
 import { cn } from "@/lib/utils"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 

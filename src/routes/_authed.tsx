@@ -8,6 +8,7 @@ import {
 import { ConvexError } from "convex/values"
 import { buttonVariants } from "@/components/ui/button"
 import { AuthShell } from "@/components/auth-shell"
+import { useEnsureSettings } from "@/hooks/use-ensure-settings"
 import { cn } from "@/lib/utils"
 
 /**
@@ -29,8 +30,17 @@ export const Route = createFileRoute("/_authed")({
     }
   },
   errorComponent: AuthedErrorBoundary,
-  component: () => <Outlet />,
+  component: AuthedLayout,
 })
+
+/**
+ * Every authed page hangs off this, which is why the settings seed lives here:
+ * it needs to run once per session on the client, wherever the user landed.
+ */
+function AuthedLayout() {
+  useEnsureSettings()
+  return <Outlet />
+}
 
 /**
  * Catches the case where the client believes it is authenticated but the server
