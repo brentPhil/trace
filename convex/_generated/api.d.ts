@@ -21,6 +21,7 @@ import type * as lib_entryTimes from "../lib/entryTimes.js";
 import type * as lib_timeOfDay from "../lib/timeOfDay.js";
 import type * as maintenance from "../maintenance.js";
 import type * as owned from "../owned.js";
+import type * as settings from "../settings.js";
 
 import type {
   ApiFromModules,
@@ -42,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   "lib/timeOfDay": typeof lib_timeOfDay;
   maintenance: typeof maintenance;
   owned: typeof owned;
+  settings: typeof settings;
 }>;
 
 /**

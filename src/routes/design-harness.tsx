@@ -1,0 +1,119 @@
+import { createFileRoute } from "@tanstack/react-router"
+import { TimerBar } from "@/components/timer/timer-bar"
+import { DayList } from "@/components/entries/day-list"
+import { TotalsRow } from "@/components/entries/totals-row"
+import { groupByDay } from "@/lib/group-entries"
+import type { Entry } from "@/lib/group-entries"
+import type { Id } from "../../convex/_generated/dataModel"
+
+// DEV-ONLY design harness. Renders the tracking surfaces against fixtures so
+// the layout can be reviewed without a session — the only way to see the log,
+// the day headers and the running/idle timer states side by side.
+//
+// It is a PUBLIC route with no auth guard. It reads nothing and writes nothing,
+// so it leaks no data, but it must be deleted before this ships. Phases 4-8
+// (edit sheet, projects, tags, recap, filters) still lean on it.
+export const Route = createFileRoute("/design-harness")({
+  component: DesignHarness,
+})
+
+const TZ = "Europe/London"
+// Anchored to the real clock, not a fixed instant: EntryDuration reads the wall
+// clock itself, so a pinned fixture time would put the running entry's start in
+// the future and it would correctly clamp to 0:00:00.
+const NOW = Date.now()
+const H = 3_600_000
+const M = 60_000
+
+let seq = 0
+function entry(part: Partial<Entry> & { startedAt: number; endedAt: number | null }): Entry {
+  seq++
+  return {
+    _id: `fixture-${seq}` as unknown as Id<"timeEntries">,
+    _creationTime: part.startedAt,
+    userId: "u",
+    clientKey: `k${seq}`,
+    title: "",
+    tagIds: [],
+    billable: false,
+    source: "web",
+    updatedAt: part.startedAt,
+    deletedAt: null,
+    durationMs: part.endedAt === null ? null : part.endedAt - part.startedAt,
+    ...part,
+  }
+}
+
+const entries: Array<Entry> = [
+  entry({
+    title: "Checkout form validation",
+    note: "Rebuilt the validation so card errors surface inline instead of in the toast",
+    startedAt: NOW - 1 * H - 46 * M,
+    endedAt: null,
+    billable: true,
+  }),
+  entry({
+    title: "PR review",
+    note: "Reviewed Priya's PR #218; left notes on the state-machine transitions",
+    startedAt: NOW - 4 * H,
+    endedAt: NOW - 3 * H - 13 * M,
+    billable: true,
+  }),
+  entry({
+    title: "Standup",
+    startedAt: NOW - 5 * H,
+    endedAt: NOW - 4 * H - 48 * M,
+  }),
+  entry({
+    title: "",
+    startedAt: NOW - 6 * H,
+    endedAt: NOW - 5 * H - 37 * M,
+  }),
+  entry({
+    title: "Pool leak in the webhook worker",
+    note: "Traced the intermittent 502s to a connection-pool leak; patched the checkout path and added a regression test",
+    startedAt: NOW - 26 * H,
+    endedAt: NOW - 24 * H - 5 * M,
+    billable: true,
+  }),
+  entry({
+    title: "Logo lockups for Meridian",
+    note: "Exported at every size the printer asked for, zipped and sent",
+    startedAt: NOW - 30 * H,
+    endedAt: NOW - 28 * H - 30 * M,
+    billable: true,
+  }),
+  entry({
+    title: "Invoicing",
+    startedAt: NOW - 32 * H,
+    endedAt: NOW - 31 * H - 34 * M,
+  }),
+]
+
+function DesignHarness() {
+  const groups = groupByDay(entries, TZ, NOW)
+
+  return (
+    <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
+      <header className="flex items-baseline justify-between px-4 py-4">
+        <span className="text-base font-medium tracking-tight">Trace</span>
+        <span className="text-xs text-muted-foreground">design harness</span>
+      </header>
+
+      <div className="px-4">
+        <TimerBar running={entries[0]} />
+      </div>
+
+      <TotalsRow className="py-3" todayMs={6 * H + 15 * M} weekMs={31 * H + 40 * M} billableMs={24 * H} />
+
+      <main className="flex-1 border-t border-edge-soft">
+        <DayList groups={groups} timeZone={TZ} use12Hour={false} />
+      </main>
+
+      <div className="px-4 py-8">
+        <p className="mb-3 text-xs text-muted-foreground">Idle state</p>
+        <TimerBar running={null} />
+      </div>
+    </div>
+  )
+}

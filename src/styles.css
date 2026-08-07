@@ -156,6 +156,29 @@
   }
 }
 
+/* The Hatch Rule: gaps, untracked time, and entries missing a note are marked
+ * with a texture, never a colour. Absence is a hatch, not a hue — which is what
+ * makes it survive colour blindness and peripheral vision alike, and keeps it
+ * an invitation rather than a warning.
+ *
+ * The dashed border is the load-bearing carrier: in forced-colors mode the
+ * gradient is dropped entirely by the UA, and the border is what remains. */
+.hatch-empty {
+  border: 1px dashed var(--edge-soft);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in oklch, var(--edge-soft) 55%, transparent) 0 1px,
+    transparent 1px 6px
+  );
+}
+
+@media (forced-colors: active) {
+  .hatch-empty {
+    background-image: none;
+    border-color: currentColor;
+  }
+}
+
 /* Entrance. Deliberately a plain keyframe with no fill-mode and no class
  * toggle: if the animation never runs (reduced motion, headless render,
  * hidden tab) the element is already in its natural, visible state. */

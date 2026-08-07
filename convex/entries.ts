@@ -119,7 +119,14 @@ async function closeEntry(
  * first evaluation and never invalidate — a clock that silently stops. Elapsed
  * is derived on the client from `startedAt`, on every render.
  */
-async function getRunningImpl(ctx: QueryCtx, userId: string) {
+// The return type is annotated rather than inferred. Without it TypeScript
+// reads `running[0]` as always present (noUncheckedIndexedAccess is off), so
+// the inferred type claimed this never returns null — and every client reading
+// `running.title` would have typechecked and then crashed on an idle timer.
+async function getRunningImpl(
+  ctx: QueryCtx,
+  userId: string
+): Promise<Doc<"timeEntries"> | null> {
   const running = await runningEntries(ctx, userId)
   // Newest wins if the invariant was ever violated; the next start or stop
   // repairs the rest.
@@ -135,6 +142,63 @@ export const getRunning = query({
 export const getRunningAs = internalQuery({
   args: { userId: v.string() },
   handler: async (ctx, args) => await getRunningImpl(ctx, args.userId),
+})
+
+// ---------------------------------------------------------------------------
+// listRange
+// ---------------------------------------------------------------------------
+
+/**
+ * Entries whose START falls in a half-open instant range, newest first.
+ *
+ * Ranges on `startedAt` because there is no stored day key — see the plan §2.1.
+ * The caller converts a local date to instants with convex/lib/day.ts, so the
+ * log and the recap resolve days through the same function and cannot disagree.
+ *
+ * Attribution is by START. An entry running from 23:00 to 01:30 belongs wholly
+ * to the day it began, and Split is the manual correction — the same rule Toggl
+ * uses, kept because the alternative silently divides one piece of work across
+ * two invoices.
+ */
+async function listRangeImpl(
+  ctx: QueryCtx,
+  userId: string,
+  fromMs: number,
+  toMs: number,
+  limit: number
+): Promise<Array<Doc<"timeEntries">>> {
+  const rows = await ctx.db
+    .query("timeEntries")
+    .withIndex("by_user_started", (q) =>
+      q.eq("userId", userId).gte("startedAt", fromMs).lt("startedAt", toMs)
+    )
+    .order("desc")
+    .take(limit)
+  return rows.filter((row) => row.deletedAt === null)
+}
+
+const listRangeArgs = {
+  fromMs: v.number(),
+  toMs: v.number(),
+  limit: v.optional(v.number()),
+}
+
+export const listRange = query({
+  args: listRangeArgs,
+  handler: async (ctx, args) =>
+    await listRangeImpl(
+      ctx,
+      await requireUserId(ctx),
+      args.fromMs,
+      args.toMs,
+      args.limit ?? 500
+    ),
+})
+
+export const listRangeAs = internalQuery({
+  args: { ...listRangeArgs, userId: v.string() },
+  handler: async (ctx, args) =>
+    await listRangeImpl(ctx, args.userId, args.fromMs, args.toMs, args.limit ?? 500),
 })
 
 // ---------------------------------------------------------------------------
@@ -298,6 +362,50 @@ export const stopAs = internalMutation({
   args: { userId: v.string(), endedAt: v.optional(v.number()) },
   returns: stopReturns,
   handler: async (ctx, args) => await stopImpl(ctx, args.userId, args.endedAt),
+})
+
+// ---------------------------------------------------------------------------
+// setTitle
+// ---------------------------------------------------------------------------
+
+const setTitleArgs = {
+  entryId: v.id("timeEntries"),
+  title: v.string(),
+}
+
+/**
+ * Retitles an entry.
+ *
+ * Its own mutation rather than a field on a general update, because it is the
+ * single highest-frequency write in the product — the user types into the timer
+ * bar while the clock runs — and it must stay a cheap, last-write-wins patch. A
+ * general update carrying optimistic-concurrency checks would fight a debounced
+ * editor and surface a conflict dialog in the middle of typing.
+ */
+async function setTitleImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryId: Id<"timeEntries">,
+  title: string
+) {
+  checkTitle(title)
+  const entry = await getOwned(ctx, userId, "timeEntries", entryId)
+  await ctx.db.patch(entry._id, { title, updatedAt: Date.now() })
+  return null
+}
+
+export const setTitle = mutation({
+  args: setTitleArgs,
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setTitleImpl(ctx, await requireUserId(ctx), args.entryId, args.title),
+})
+
+export const setTitleAs = internalMutation({
+  args: { ...setTitleArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setTitleImpl(ctx, args.userId, args.entryId, args.title),
 })
 
 // ---------------------------------------------------------------------------

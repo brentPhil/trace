@@ -1,3 +1,4 @@
+import { v } from "convex/values"
 import { internalMutation } from "./_generated/server"
 import { components } from "./_generated/api"
 
@@ -30,5 +31,46 @@ export const clearJwks = internalMutation({
       paginationOpts: { cursor: null, numItems: 100 },
     })
     return { cleared: true }
+  },
+})
+
+/**
+ * Deletes every domain row belonging to a user, permanently.
+ *
+ * Internal only, and deliberately not reachable from any client. Two real uses:
+ * clearing test data out of a dev deployment, and the account-deletion cascade
+ * when that ships.
+ *
+ * Bounded per call rather than unbounded: a Convex mutation has a write ceiling,
+ * so a user with years of history would fail atomically and repair nothing.
+ * Returns what remains so the caller can loop.
+ */
+export const purgeUser = internalMutation({
+  args: { userId: v.string(), limit: v.optional(v.number()) },
+  returns: v.object({ deleted: v.number(), remaining: v.number() }),
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 500
+    let deleted = 0
+
+    for (const table of ["timeEntries", "projects", "tags"] as const) {
+      const rows = await ctx.db
+        .query(table)
+        .filter((q) => q.eq(q.field("userId"), args.userId))
+        .take(limit - deleted)
+      for (const row of rows) {
+        await ctx.db.delete(row._id)
+        deleted++
+      }
+      if (deleted >= limit) break
+    }
+
+    const remaining = (
+      await ctx.db
+        .query("timeEntries")
+        .filter((q) => q.eq(q.field("userId"), args.userId))
+        .take(1)
+    ).length
+
+    return { deleted, remaining }
   },
 })
