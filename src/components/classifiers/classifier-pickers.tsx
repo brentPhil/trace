@@ -52,6 +52,26 @@ export function ProjectPicker({
   const [query, setQuery] = useState("")
   const [error, setError] = useState<string | null>(null)
 
+  /*
+   * Open state is held here even when the caller controls it.
+   *
+   * The timer bar drives `open` (so typing `@` can raise the picker), but the
+   * entry row uses this uncontrolled — and there, `onOpenChange?.(false)` was a
+   * no-op, so picking a project left the popover sitting open over the row it
+   * had just changed. Tracking both means one code path closes it either way.
+   */
+  const [selfOpen, setSelfOpen] = useState(false)
+  const isOpen = open ?? selfOpen
+
+  const setOpen = (next: boolean) => {
+    setSelfOpen(next)
+    onOpenChange?.(next)
+    if (!next) {
+      setQuery("")
+      setError(null)
+    }
+  }
+
   const selected = projects.find((p) => p._id === value) ?? null
 
   const options: Array<PickerOption> = projects.map((project) => ({
@@ -65,23 +85,10 @@ export function ProjectPicker({
     render: <ProjectDot project={project} />,
   }))
 
-  const close = () => {
-    setQuery("")
-    setError(null)
-    onOpenChange?.(false)
-  }
+  const close = () => setOpen(false)
 
   return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          setQuery("")
-          setError(null)
-        }
-        onOpenChange?.(next)
-      }}
-    >
+    <Popover.Root open={isOpen} onOpenChange={setOpen}>
       <Popover.Trigger
         aria-label={selected === null ? "Project" : `Project: ${selected.name}`}
         className={cn(
@@ -175,6 +182,21 @@ export function TagPicker({
   const [query, setQuery] = useState("")
   const [error, setError] = useState<string | null>(null)
 
+  // Same controlled/uncontrolled handling as ProjectPicker. Tags differ in one
+  // respect only: choosing does NOT close, because picking three tags should
+  // not mean opening the same menu three times.
+  const [selfOpen, setSelfOpen] = useState(false)
+  const isOpen = open ?? selfOpen
+
+  const setOpen = (next: boolean) => {
+    setSelfOpen(next)
+    onOpenChange?.(next)
+    if (!next) {
+      setQuery("")
+      setError(null)
+    }
+  }
+
   const selectedSet = new Set<string>(value)
 
   const options: Array<PickerOption> = tags.map((tag) => ({
@@ -193,16 +215,7 @@ export function TagPicker({
   }
 
   return (
-    <Popover.Root
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) {
-          setQuery("")
-          setError(null)
-        }
-        onOpenChange?.(next)
-      }}
-    >
+    <Popover.Root open={isOpen} onOpenChange={setOpen}>
       <Popover.Trigger
         aria-label={value.length === 0 ? "Tags" : `Tags: ${value.length} selected`}
         className={cn(
