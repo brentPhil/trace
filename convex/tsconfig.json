@@ -19,7 +19,12 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+
+    /* The pure shared layer, addressed by the same specifier the client uses. */
+    "paths": {
+      "@shared/*": ["./lib/*"]
+    }
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]

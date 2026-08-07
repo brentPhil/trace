@@ -6,9 +6,15 @@
     "prettier.config.js",
     "vite.config.ts"
   ],
-  // Convex functions are typechecked by convex/tsconfig.json, which targets the
-  // Convex runtime rather than the browser.
-  "exclude": ["convex"],
+  // Convex *functions* are typechecked by convex/tsconfig.json, which targets
+  // the Convex runtime rather than the browser.
+  //
+  // convex/lib is deliberately NOT excluded. It is the pure shared layer — no
+  // convex/server, no convex/_generated — imported by both the Convex functions
+  // and the client. Typechecking it here as well as under convex/tsconfig.json
+  // is the point: it proves the shared code compiles under both, which matters
+  // because this config sets `verbatimModuleSyntax` and that one does not.
+  "exclude": ["convex/_generated", "convex/*.ts"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
@@ -16,7 +22,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@shared/*": ["./convex/lib/*"]
     },
 
     /* Bundler mode */
