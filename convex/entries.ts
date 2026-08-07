@@ -1,4 +1,5 @@
 import { v } from "convex/values"
+import { paginationOptsValidator } from "convex/server"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { assertOwned, getOwned, getOwnedIncludingDeleted } from "./owned"
@@ -236,6 +237,109 @@ export const listRangeAs = internalQuery({
   args: { ...listRangeArgs, userId: v.string() },
   handler: async (ctx, args) =>
     await listRangeImpl(ctx, args.userId, args.fromMs, args.toMs, args.limit ?? 500),
+})
+
+// ---------------------------------------------------------------------------
+// listPage / rangeSummary — the history view
+// ---------------------------------------------------------------------------
+
+/**
+ * A page of entries in a range, newest first.
+ *
+ * Paginated because history is unbounded in principle. The filters that can be
+ * expressed as an index prefix (the date range) are applied here; project,
+ * billable, text and the preset chips are applied on the client over what is
+ * loaded — see the plan §3 on why a search index is the wrong MVP trade.
+ *
+ * Soft-deleted rows are filtered AFTER the page is taken, which makes pages
+ * ragged. That is correct rather than convenient: the alternative is a second
+ * index on deletedAt whose only purpose is to make page sizes tidy.
+ */
+export const listPage = query({
+  args: {
+    fromMs: v.number(),
+    toMs: v.number(),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    const userId = await requireUserId(ctx)
+    const result = await ctx.db
+      .query("timeEntries")
+      .withIndex("by_user_started", (q) =>
+        q.eq("userId", userId).gte("startedAt", args.fromMs).lt("startedAt", args.toMs)
+      )
+      .order("desc")
+      .paginate(args.paginationOpts)
+
+    return {
+      ...result,
+      page: result.page.filter((row) => row.deletedAt === null),
+    }
+  },
+})
+
+const summaryReturns = v.object({
+  totalMs: v.number(),
+  billableMs: v.number(),
+  count: v.number(),
+  /** True when the range holds more entries than this scan looked at. */
+  truncated: v.boolean(),
+})
+
+/** Above this, the summary stops being exact and says so. */
+const SUMMARY_SCAN_LIMIT = 5_000
+
+/**
+ * Exact totals for a whole range, independent of how much of it is paginated
+ * into view.
+ *
+ * Deliberately NOT derived from the loaded pages. A totals line that silently
+ * means "of the fifty rows fetched so far" is precisely the number that ends up
+ * on an invoice understated, and nothing on screen would reveal it. When the
+ * range is genuinely too large to total, `truncated` says so and the UI stops
+ * claiming a figure rather than showing a wrong one.
+ */
+async function rangeSummaryImpl(
+  ctx: QueryCtx,
+  userId: string,
+  fromMs: number,
+  toMs: number
+) {
+  const rows = await ctx.db
+    .query("timeEntries")
+    .withIndex("by_user_started", (q) =>
+      q.eq("userId", userId).gte("startedAt", fromMs).lt("startedAt", toMs)
+    )
+    .take(SUMMARY_SCAN_LIMIT + 1)
+
+  const truncated = rows.length > SUMMARY_SCAN_LIMIT
+  const live = rows.slice(0, SUMMARY_SCAN_LIMIT).filter((row) => row.deletedAt === null)
+
+  let totalMs = 0
+  let billableMs = 0
+  for (const row of live) {
+    const ms = row.durationMs ?? 0
+    totalMs += ms
+    if (row.billable) billableMs += ms
+  }
+
+  return { totalMs, billableMs, count: live.length, truncated }
+}
+
+const rangeSummaryArgs = { fromMs: v.number(), toMs: v.number() }
+
+export const rangeSummary = query({
+  args: rangeSummaryArgs,
+  returns: summaryReturns,
+  handler: async (ctx, args) =>
+    await rangeSummaryImpl(ctx, await requireUserId(ctx), args.fromMs, args.toMs),
+})
+
+export const rangeSummaryAs = internalQuery({
+  args: { ...rangeSummaryArgs, userId: v.string() },
+  returns: summaryReturns,
+  handler: async (ctx, args) =>
+    await rangeSummaryImpl(ctx, args.userId, args.fromMs, args.toMs),
 })
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import { DayList } from "@/components/entries/day-list"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
+import { FilterBar } from "@/components/history/filter-bar"
 import { RecapPanel } from "@/components/recap/recap-panel"
 import { Toast } from "@/components/ui/toast"
 import { groupByDay } from "@/lib/group-entries"
@@ -12,6 +13,7 @@ import { dayOf } from "@shared/day"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
 import { assembleRecap } from "@shared/recap"
+import { defaultFilters } from "@/lib/history-filters"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
 import type { Entry } from "@/lib/group-entries"
@@ -166,6 +168,7 @@ function DesignHarness() {
   const [noteEntry, setNoteEntry] = useState<Entry | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)
   const [highlighted, setHighlighted] = useState<string | null>(null)
+  const [filters, setFilters] = useState(() => defaultFilters(dayOf(NOW, TZ), 1))
   const toasts = Toast.useToastManager()
 
   /*
@@ -268,6 +271,19 @@ function DesignHarness() {
         />
       </main>
 
+      <div className="border-t border-edge-soft px-4 py-6">
+        <p className="mb-3 text-xs text-muted-foreground">History filters</p>
+        <FilterBar
+          filters={filters}
+          projects={fixtureProjects}
+          today={dayOf(NOW, TZ)}
+          weekStartDay={1}
+          onChange={(next) =>
+            setFilters((current) => (typeof next === "function" ? next(current) : next))
+          }
+        />
+      </div>
+
       <div className="px-4 py-8">
         <p className="mb-3 text-xs text-muted-foreground">Idle state</p>
         <TimerBar running={null} actions={timerActions} projects={fixtureProjects} tags={fixtureTags} />
@@ -282,6 +298,7 @@ function DesignHarness() {
     </div>
   )
 }
+
 
 
 
