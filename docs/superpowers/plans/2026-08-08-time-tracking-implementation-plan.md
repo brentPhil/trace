@@ -386,6 +386,9 @@ The ceiling is policy about **input**; `entryTimes` enforces **consistency**.
 
 ## 5. Implementation phases — MVP
 
+> **Status: all eight phases are built.** See §5.9 below for what shipped, what
+> deviates from this plan and why, and what remains unverified.
+
 Each phase ends in something runnable and testable. Ordering respects the hazards found in review: **the schema is settled before any code; pure time functions are proven before anything depends on them; the list primitive and one optimistic mutation are proven before any list UI.**
 
 ### Phase 0 — Foundations *(~0.5 d)*
@@ -519,6 +522,38 @@ No greeting, no sign-off, no "Here's my standup for". The user is pasting into a
 - Empty state answering the two questions a new freelancer actually has: how do I get hours out for an invoice, and what happens when I forget to start the timer.
 
 **MVP total: ~18 working days.**
+
+### 5.9 — What actually shipped
+
+All eight phases are implemented and committed. Where the build departs from
+the plan above, it is recorded here rather than left as a silent difference.
+
+**Deviations, and why**
+
+| Plan said | Built | Why |
+|---|---|---|
+| `/history` totals from `usePaginatedQuery` | Pagination for the LIST; `entries.rangeSummary` for the TOTALS | A total derived from loaded pages silently means "of the rows fetched so far". That is the number that ends up understated on an invoice with nothing on screen to reveal it. |
+| Text search filters "the loaded range" | With any client-side filter active, the whole period is auto-loaded first | Otherwise a half-loaded month silently searches a prefix of itself and reports a total for it. The date filter bounds the range, so it terminates. |
+| Edit as a two-height slide-up sheet on mobile | Inline editing at every width; the note is the only sheet | Inline edit was already built in Phase 4 and works at 375px. A second editing model for one breakpoint is a second thing to maintain and to learn. |
+| Roving tabindex on the entry list | Native tab order | Every control on a row is a real focusable element already. Revisit if the list grows long enough that tabbing through it is the complaint. |
+| `R` / `E` row shortcuts, and the recap keyboard collision | Not bound | The collision the plan flagged was resolved by not creating it. Click-to-edit and Enter/Escape cover the same ground; `?` documents what exists. |
+
+**Not built, deliberately** — `hourlyRateCents` is in the schema and nothing
+reads it (§8.2, unchanged); the trash view and untracked-gap hatching remain
+Tier 2, so `DESIGN.md`'s Hatch Rule is still two-thirds implemented.
+
+**Verification status**
+
+- 298 tests across three projects; typecheck and lint clean.
+- The pure layers — day boundaries, durations, the recap assembler and both
+  renderers, history filters — are covered directly and adversarially.
+- Convex functions are covered by `convex-test`, including every authorization
+  refusal and cross-user isolation case.
+- Components that hold tricky state (the timer bar's draft, the pickers) have
+  DOM tests, and each was verified to go red when its defect is reintroduced.
+- **Not verified end-to-end in a browser while signed in.** Every authed route
+  renders under SSR and redirects correctly when signed out, but no one has
+  driven the real app with a real session. That is the first thing to do.
 
 ---
 
