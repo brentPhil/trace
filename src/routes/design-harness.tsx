@@ -5,11 +5,13 @@ import { DayList } from "@/components/entries/day-list"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
+import { RecapPanel } from "@/components/recap/recap-panel"
 import { Toast } from "@/components/ui/toast"
 import { groupByDay } from "@/lib/group-entries"
 import { dayOf } from "@shared/day"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
+import { assembleRecap } from "@shared/recap"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
 import type { Entry } from "@/lib/group-entries"
@@ -136,10 +138,34 @@ const entries: Array<Entry> = [
   }),
 ]
 
+/** Today's entries, run through the real assembler rather than hand-written. */
+const recapDoc = assembleRecap({
+  day: dayOf(NOW, TZ),
+  dayLabel: "Thu 6 Aug",
+  entries: entries
+    .filter((e) => e.endedAt !== null && dayOf(e.startedAt, TZ) === dayOf(NOW, TZ))
+    .map((e) => ({
+      id: e._id,
+      title: e.title,
+      note: e.note,
+      projectId: e.projectId,
+      startedAt: e.startedAt,
+      durationMs: e.durationMs ?? 0,
+      billable: e.billable,
+    })),
+  projects: [
+    { id: String(ACME), name: "Acme redesign", color: "coral" },
+    { id: String(BELL), name: "Bellweather API", color: "teal" },
+  ],
+  next: "ship the pool fix behind a flag once staging is up",
+  blocked: "waiting on Dana for the legal wording",
+})
+
 function DesignHarness() {
   const groups = groupByDay(entries, TZ, NOW)
   const [noteEntry, setNoteEntry] = useState<Entry | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)
+  const [highlighted, setHighlighted] = useState<string | null>(null)
   const toasts = Toast.useToastManager()
 
   /*
@@ -224,6 +250,12 @@ function DesignHarness() {
         />
       </div>
 
+      <RecapPanel
+        doc={recapDoc}
+        onSaveFields={async () => {}}
+        onFocusEntry={setHighlighted}
+      />
+
       <main className="flex-1 border-t border-edge-soft">
         <DayList
           groups={groups}
@@ -232,6 +264,7 @@ function DesignHarness() {
           projects={fixtureProjects}
           tags={fixtureTags}
           actions={actions}
+          highlightedEntryId={highlighted}
         />
       </main>
 
@@ -249,5 +282,6 @@ function DesignHarness() {
     </div>
   )
 }
+
 
 

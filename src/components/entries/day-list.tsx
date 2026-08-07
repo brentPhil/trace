@@ -20,6 +20,7 @@ export function DayList({
   projects,
   tags,
   actions,
+  highlightedEntryId,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -27,6 +28,7 @@ export function DayList({
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
+  highlightedEntryId?: string | null
 }) {
   if (groups.length === 0) return <EmptyLog />
 
@@ -66,6 +68,7 @@ export function DayList({
                 projects={projects}
                 tags={tags}
                 actions={actions}
+                highlighted={entry._id === highlightedEntryId}
               />
             ))}
           </div>
@@ -92,4 +95,5 @@ function EmptyLog() {
     </div>
   )
 }
+
 

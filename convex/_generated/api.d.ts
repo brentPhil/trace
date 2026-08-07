@@ -19,10 +19,13 @@ import type * as lib_day from "../lib/day.js";
 import type * as lib_duration from "../lib/duration.js";
 import type * as lib_entryTimes from "../lib/entryTimes.js";
 import type * as lib_palette from "../lib/palette.js";
+import type * as lib_recap from "../lib/recap.js";
+import type * as lib_render from "../lib/render.js";
 import type * as lib_timeOfDay from "../lib/timeOfDay.js";
 import type * as maintenance from "../maintenance.js";
 import type * as owned from "../owned.js";
 import type * as projects from "../projects.js";
+import type * as recap from "../recap.js";
 import type * as settings from "../settings.js";
 import type * as tags from "../tags.js";
 
@@ -44,10 +47,13 @@ declare const fullApi: ApiFromModules<{
   "lib/duration": typeof lib_duration;
   "lib/entryTimes": typeof lib_entryTimes;
   "lib/palette": typeof lib_palette;
+  "lib/recap": typeof lib_recap;
+  "lib/render": typeof lib_render;
   "lib/timeOfDay": typeof lib_timeOfDay;
   maintenance: typeof maintenance;
   owned: typeof owned;
   projects: typeof projects;
+  recap: typeof recap;
   settings: typeof settings;
   tags: typeof tags;
 }>;

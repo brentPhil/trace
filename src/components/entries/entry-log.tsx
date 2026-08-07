@@ -25,10 +25,13 @@ export function EntryLog({
   groups,
   timeZone,
   use12Hour,
+  highlightedEntryId,
 }: {
   groups: Array<DayGroup>
   timeZone: string
   use12Hour: boolean
+  /** Set by a recap drill-down. The row scrolls into view and marks itself. */
+  highlightedEntryId?: string | null
 }) {
   const { setNote, update, editTime, remove, restore } = useEntryEditMutations()
   const { resume } = useEntryMutations()
@@ -141,6 +144,7 @@ export function EntryLog({
         projects={projects}
         tags={tags}
         actions={actions}
+        highlightedEntryId={highlightedEntryId}
       />
       <NoteSheet
         entry={liveNoteEntry}

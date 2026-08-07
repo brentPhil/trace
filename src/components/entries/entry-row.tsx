@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react"
 import { Play, Trash2 } from "lucide-react"
 import {
   BillableToggle,
@@ -61,6 +62,7 @@ export function EntryRow({
   projects,
   tags,
   actions,
+  highlighted = false,
 }: {
   entry: Entry
   timeZone: string
@@ -68,17 +70,32 @@ export function EntryRow({
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
+  /** Drilled into from a recap bullet. */
+  highlighted?: boolean
 }) {
   const title = entry.title.trim()
   const note = (entry.note ?? "").trim()
   const hasNote = note !== ""
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!highlighted) return
+    // `nearest` rather than `center`: the row is usually already on screen, and
+    // yanking the whole log to centre something the user can see is disorienting.
+    rowRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [highlighted])
 
   return (
     <div
+      ref={rowRef}
       className={cn(
         "group flex min-h-[50px] items-center gap-2 px-3",
         "border-b border-edge-soft/60 last:border-b-0",
-        "transition-colors hover:bg-surface/60"
+        "transition-colors hover:bg-surface/60",
+        // A left marker and a lifted surface, not a colour wash: the row is
+        // still a row, and the highlight has to survive being read by someone
+        // who cannot distinguish the tint.
+        highlighted && "bg-surface shadow-[inset_2px_0_0_0_var(--ink-muted)]"
       )}
     >
       {/*

@@ -1,13 +1,14 @@
-﻿import { useMemo, useState } from "react"
+﻿import { useEffect, useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
-import { convexQuery } from "@convex-dev/react-query"
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
 import { AppHeader } from "@/components/app-header"
 import { TimerBar } from "@/components/timer/timer-bar"
 import { EntryLog } from "@/components/entries/entry-log"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { TotalsRow } from "@/components/entries/totals-row"
+import { RecapPanel } from "@/components/recap/recap-panel"
 import { useSecond } from "@/hooks/use-clock"
 import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
@@ -43,6 +44,9 @@ export const Route = createFileRoute("/_authed/today")({
       context.queryClient.ensureQueryData(convexQuery(api.entries.getRunning, {})),
       context.queryClient.ensureQueryData(
         convexQuery(api.entries.listRange, { fromMs: from.fromMs, toMs: to.toMs })
+      ),
+      context.queryClient.ensureQueryData(
+        convexQuery(api.recap.get, { day: dayOf(now, settings.timezone) })
       ),
     ])
   },
@@ -94,6 +98,13 @@ function Today() {
   const { data: suggestions } = useSuspenseQuery(
     convexQuery(api.entries.titleSuggestions, { limit: 40 })
   )
+  const { data: recap } = useSuspenseQuery(convexQuery(api.recap.get, { day: today }))
+  const setRecapFields = useConvexMutation(api.recap.setFields)
+
+  // Which entry a recap bullet was drilled into. Cleared when the day changes,
+  // since the id would then point at a row no longer on screen.
+  const [highlighted, setHighlighted] = useState<string | null>(null)
+  useEffect(() => setHighlighted(null), [today])
 
   // Assembled once here rather than inline in JSX, so the bar's props are a
   // stable object and the identity of every callback is the hook's, not a new
@@ -161,11 +172,20 @@ function Today() {
         />
       </div>
 
-      <main className="flex-1 border-t border-edge-soft">
+      <RecapPanel
+        doc={recap}
+        onSaveFields={async (fields) => {
+          await setRecapFields({ day: today, ...fields })
+        }}
+        onFocusEntry={setHighlighted}
+      />
+
+      <main className="flex-1">
         <EntryLog
           groups={groups}
           timeZone={settings.timezone}
           use12Hour={settings.timeFormat === "12"}
+          highlightedEntryId={highlighted}
         />
       </main>
 
@@ -183,4 +203,5 @@ function Today() {
     </div>
   )
 }
+
 
