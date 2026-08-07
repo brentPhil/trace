@@ -98,11 +98,20 @@ function blockLines(block: RecapBlock, style: Style): Array<string> {
   return lines
 }
 
+/**
+ * "4h 38m across 2 projects".
+ *
+ * Counts blocks that are ACTUALLY a project. The un-projected block is real
+ * work and keeps its place in the body, but calling it a project in the
+ * headline overstates how organised the day was — "across 2 projects" when one
+ * of them is literally headed "No project" is a claim the reader can see
+ * through, in the one line they are most likely to read.
+ */
 function headline(doc: RecapDoc): string {
   const total = recapDuration(doc.totalMs)
-  const count = doc.blocks.length
-  if (count === 0) return total
-  return `${total} across ${count} ${count === 1 ? "project" : "projects"}`
+  const named = doc.blocks.filter((block) => block.projectId !== null).length
+  if (named === 0) return total
+  return `${total} across ${named} ${named === 1 ? "project" : "projects"}`
 }
 
 /**

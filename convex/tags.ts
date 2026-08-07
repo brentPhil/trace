@@ -162,15 +162,27 @@ export const renameAs = internalMutation({
 // ---------------------------------------------------------------------------
 
 /**
+ * The most entries a tag delete will read before giving up.
+ *
+ * Convex enforces a per-transaction read limit, and exceeding it fails the
+ * mutation with an internal error rather than anything a user could act on.
+ * A bound turns that into a refusal with a sentence.
+ */
+const TAG_SCAN_LIMIT = 4_096
+
+/**
  * Deletes a tag, and REFUSES while any live entry carries it.
  *
  * Same contract as projects, for the same reason: no dangling reference means
  * no denormalised copy, which means a rename fixes history everywhere.
  *
- * There is no index on `tagIds`, so this scans the user's entries. Acceptable
- * because deleting a tag is rare and deliberate, unlike the read paths, which
- * all go through an index. If tag counts ever need to be shown continuously,
- * that is the point to reach for a proper index rather than to loosen this.
+ * There is no index on `tagIds` — Convex cannot index array membership — so
+ * this scans. The scan is BOUNDED: an unbounded `.collect()` over every entry a
+ * heavy user has ever recorded blows the per-transaction read limit, and the
+ * failure is an internal error rather than something the user can do anything
+ * with. Deleting a tag is rare and deliberate, so a bound that occasionally
+ * says "too many to check" is a far better outcome than one that occasionally
+ * throws.
  */
 async function removeImpl(ctx: MutationCtx, userId: string, tagId: Id<"tags">) {
   const tag = await getOwned(ctx, userId, "tags", tagId)
@@ -178,16 +190,27 @@ async function removeImpl(ctx: MutationCtx, userId: string, tagId: Id<"tags">) {
   const entries = await ctx.db
     .query("timeEntries")
     .withIndex("by_user_started", (q) => q.eq("userId", userId))
-    .collect()
-  const live = entries.filter(
-    (entry) => entry.deletedAt === null && entry.tagIds.includes(tag._id)
-  )
+    .take(TAG_SCAN_LIMIT + 1)
+
+  const live = entries
+    .slice(0, TAG_SCAN_LIMIT)
+    .filter((entry) => entry.deletedAt === null && entry.tagIds.includes(tag._id))
 
   if (live.length > 0) {
     traceError(
       "IN_USE",
       `${live.length} ${live.length === 1 ? "entry carries" : "entries carry"} this tag. Remove it from them first.`,
       { count: live.length }
+    )
+  }
+
+  // Nothing found, but not everything was looked at — so "it is unused" is not
+  // a claim this can make. Renaming the tag to something harmless is the
+  // available answer, and it is one the user can actually take.
+  if (entries.length > TAG_SCAN_LIMIT) {
+    traceError(
+      "IN_USE",
+      "You have too many entries to check this tag against. Rename it instead — every entry that carries it will follow."
     )
   }
 

@@ -281,7 +281,10 @@ export const listPage = query({
 const summaryReturns = v.object({
   totalMs: v.number(),
   billableMs: v.number(),
+  /** COMPLETED entries only — see below. */
   count: v.number(),
+  /** Entries still running, which the totals deliberately exclude. */
+  runningCount: v.number(),
   /** True when the range holds more entries than this scan looked at. */
   truncated: v.boolean(),
 })
@@ -315,15 +318,36 @@ async function rangeSummaryImpl(
   const truncated = rows.length > SUMMARY_SCAN_LIMIT
   const live = rows.slice(0, SUMMARY_SCAN_LIMIT).filter((row) => row.deletedAt === null)
 
+  /*
+   * A RUNNING entry is counted separately and contributes nothing to the total.
+   *
+   * It has no duration yet, and a query cannot supply one: `Date.now()` inside
+   * a Convex query resolves to the transaction timestamp and creates no
+   * subscription to the passage of time, so any elapsed value computed here
+   * would freeze at its first evaluation.
+   *
+   * Silently treating it as 0 was worse than excluding it. The day header
+   * beneath this sentence derives its total on the CLIENT and does include the
+   * live elapsed time, so the two numbers described the same rows and
+   * disagreed — with the smaller one labelled as the exact figure. The caller
+   * now has what it needs to say so out loud.
+   */
   let totalMs = 0
   let billableMs = 0
+  let count = 0
+  let runningCount = 0
+
   for (const row of live) {
-    const ms = row.durationMs ?? 0
-    totalMs += ms
-    if (row.billable) billableMs += ms
+    if (row.durationMs === null) {
+      runningCount += 1
+      continue
+    }
+    count += 1
+    totalMs += row.durationMs
+    if (row.billable) billableMs += row.durationMs
   }
 
-  return { totalMs, billableMs, count: live.length, truncated }
+  return { totalMs, billableMs, count, runningCount, truncated }
 }
 
 const rangeSummaryArgs = { fromMs: v.number(), toMs: v.number() }

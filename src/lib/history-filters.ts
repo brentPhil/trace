@@ -106,9 +106,15 @@ export function matches(
   for (const preset of filters.presets) {
     if (preset === "no-project" && entry.projectId !== undefined) return false
     if (preset === "no-note" && (entry.note ?? "").trim() !== "") return false
-    // Strictly under a minute. The chip exists to find mis-starts — a timer
-    // begun and stopped by accident — so an exact 60s entry is not one.
-    if (preset === "under-a-minute" && (entry.durationMs ?? 0) >= 60_000) return false
+    if (preset === "under-a-minute") {
+      // A RUNNING entry has no duration yet, and `?? 0` made every one of them
+      // match — so the chip meant to surface accidental mis-starts surfaced the
+      // timer the user was actively running, however long it had been going.
+      if (entry.durationMs === null) return false
+      // Strictly under. The chip exists to find a timer begun and stopped by
+      // accident, and an exact 60s entry is not one.
+      if (entry.durationMs >= 60_000) return false
+    }
   }
 
   const needle = filters.text.trim().toLowerCase()

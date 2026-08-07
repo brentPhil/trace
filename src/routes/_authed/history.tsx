@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+﻿import { useEffect, useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
@@ -16,14 +16,14 @@ import {
   rangeOf,
 } from "@/lib/history-filters"
 import { dayOf } from "@shared/day"
-import { formatCompactDuration } from "@shared/duration"
+import { formatTotal } from "@/lib/format-total"
 import { api } from "../../../convex/_generated/api"
 import type { Filters } from "@/lib/history-filters"
 
 const PAGE_SIZE = 100
 
 export const Route = createFileRoute("/_authed/history")({
-  head: () => ({ meta: [{ title: "History — Trace" }] }),
+  head: () => ({ meta: [{ title: "History â€” Trace" }] }),
   component: History,
   loader: async ({ context }) => {
     await Promise.all([
@@ -72,7 +72,7 @@ function History() {
    *
    * Text and the preset chips are scans over what has been fetched, so a
    * half-loaded period would silently search a prefix of itself and report a
-   * total for it — a number that looks authoritative and is not. The date
+   * total for it â€” a number that looks authoritative and is not. The date
    * filter bounds the range, so this terminates. Browsing without a filter
    * still paginates normally.
    */
@@ -82,7 +82,7 @@ function History() {
   }, [filtering, status, loadMore])
 
   const filtered = useMemo(() => {
-    // Built inside the memo so the dependency list is honest — a `nameOf`
+    // Built inside the memo so the dependency list is honest â€” a `nameOf`
     // declared outside would be a new function every render.
     const nameOf = (id: string | undefined) =>
       id === undefined ? "" : (projectsById.get(id)?.name ?? "")
@@ -95,7 +95,18 @@ function History() {
   )
 
   const shownMs = filtered.reduce((n, e) => n + (e.durationMs ?? 0), 0)
-  const stillLoading = filtering && status === "CanLoadMore"
+
+  /*
+   * "LoadingMore" counts as still loading, not just "CanLoadMore".
+   *
+   * The auto-loader spends almost all of its time in LoadingMore â€” CanLoadMore
+   * is the instant between two fetches. Checking only the latter meant the
+   * partial filtered total was presented as final for essentially the whole
+   * bulk load: exactly the half-loaded number this page goes out of its way to
+   * avoid reporting.
+   */
+  const stillLoading =
+    filtering && (status === "CanLoadMore" || status === "LoadingMore")
 
   return (
     <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
@@ -111,18 +122,18 @@ function History() {
         />
 
         {/*
-          Totals as a sentence, not a dashboard — and two different sentences,
+          Totals as a sentence, not a dashboard â€” and two different sentences,
           because the honest claim genuinely changes. Unfiltered, the server has
           counted the whole range exactly. Filtered, the number describes what
           is on screen, and says so.
         */}
         <p aria-live="polite" className="text-sm text-muted-foreground">
           {stillLoading ? (
-            "Loading the rest of this period…"
+            "Loading the rest of this periodâ€¦"
           ) : filtering ? (
             <>
               <strong className="font-medium tabular text-foreground">
-                {formatCompactDuration(shownMs)}
+                {formatTotal(shownMs, settings.durationDisplay)}
               </strong>{" "}
               across {filtered.length} {filtered.length === 1 ? "entry" : "entries"}{" "}
               matching these filters.
@@ -130,23 +141,35 @@ function History() {
           ) : (
             <>
               <strong className="font-medium tabular text-foreground">
-                {formatCompactDuration(summary.totalMs)}
+                {formatTotal(summary.totalMs, settings.durationDisplay)}
               </strong>{" "}
               across {summary.count} {summary.count === 1 ? "entry" : "entries"}
               {summary.billableMs > 0 ? (
                 <>
                   , of which{" "}
                   <strong className="font-medium tabular text-brass">
-                    {formatCompactDuration(summary.billableMs)}
+                    {formatTotal(summary.billableMs, settings.durationDisplay)}
                   </strong>{" "}
                   billable
                 </>
               ) : null}
               .
+              {/*
+                A running entry has no duration to add, so it is excluded and
+                said out loud. Folding it in as zero made this figure contradict
+                the day header directly beneath it, which counts live elapsed
+                time on the client.
+              */}
+              {summary.runningCount > 0 ? (
+                <>
+                  {" "}
+                  One entry is still running and is not counted.
+                </>
+              ) : null}
               {summary.truncated ? (
                 <span className="text-alarm">
                   {" "}
-                  This period is too large to total exactly — narrow the dates.
+                  This period is too large to total exactly â€” narrow the dates.
                 </span>
               ) : null}
             </>
@@ -155,7 +178,13 @@ function History() {
       </div>
 
       <main className="flex-1 border-t border-edge-soft">
-        {groups.length === 0 && status !== "LoadingFirstPage" ? (
+        {/*
+          `stillLoading` is part of this condition because the auto-loader
+          starts from an empty filtered set: without it the page told the user
+          to widen the range or clear the filters at the exact moment it was
+          fetching the pages that would answer them.
+        */}
+        {groups.length === 0 && status !== "LoadingFirstPage" && !stillLoading ? (
           <p className="px-4 py-12 text-sm text-muted-foreground">
             Nothing here. Try a wider date range, or clear the filters.
           </p>
@@ -164,6 +193,7 @@ function History() {
             groups={groups}
             timeZone={settings.timezone}
             use12Hour={settings.timeFormat === "12"}
+            display={settings.durationDisplay}
           />
         )}
 
@@ -183,3 +213,4 @@ function History() {
     </div>
   )
 }
+

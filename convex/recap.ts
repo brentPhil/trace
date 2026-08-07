@@ -1,4 +1,4 @@
-import { v } from "convex/values"
+﻿import { v } from "convex/values"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { SETTINGS_DEFAULTS } from "./settings"
@@ -14,7 +14,7 @@ const MAX_FIELD_LENGTH = 500
  *
  * The BODY is never stored. It is a pure function of the day's entries, so
  * storing it would create an invalidation problem with a branch for every way
- * an entry can change — edit a note at 18:00 and a stored recap from 17:30 is
+ * an entry can change â€” edit a note at 18:00 and a stored recap from 17:30 is
  * silently wrong, with nothing to say so.
  *
  * The only things persisted are the two strings the user types that are not
@@ -109,6 +109,9 @@ async function buildImpl(
     // Only ever a PREFILL, and only when the user has not written their own.
     // Overwriting what they typed with a guess drawn from their notes would be
     // the single most alarming thing this product could do.
+    // `?? ` rather than `||`: a stored "" is the tombstone written when the
+    // user cleared the field, and it must SUPPRESS the suggestion rather than
+    // fall through to it.
     blocked: stored?.blocked ?? suggestBlocked(entries),
     // The UI says "suggested from your last note" beside this field, and it
     // must only say so when that is true.
@@ -144,7 +147,7 @@ type SetFieldsArgs = {
  * Stores `Next` / `Blocked` for a day.
  *
  * `null` clears; absent leaves alone. Without the distinction there is no way
- * to remove a Blocked line once written — and the prefill would then reappear
+ * to remove a Blocked line once written â€” and the prefill would then reappear
  * every time, which reads as the app arguing with you.
  */
 async function setFieldsImpl(ctx: MutationCtx, userId: string, args: SetFieldsArgs) {
@@ -167,12 +170,16 @@ async function setFieldsImpl(ctx: MutationCtx, userId: string, args: SetFieldsAr
     .first()
 
   if (existing === null) {
-    if (next == null && blocked == null) return null
+    // A clear on a day with no row still has to be RECORDED, not skipped â€”
+    // otherwise there is nothing to distinguish it from never having written
+    // one, and the prefill comes back. `next` has no prefill, so nothing needs
+    // storing when it is merely absent.
+    if (next == null && blocked === undefined) return null
     await ctx.db.insert("recapDays", {
       userId,
       day: args.day,
       next: next ?? undefined,
-      blocked: blocked ?? undefined,
+      blocked: tombstone(blocked),
       updatedAt: now,
     })
     return null
@@ -180,10 +187,27 @@ async function setFieldsImpl(ctx: MutationCtx, userId: string, args: SetFieldsAr
 
   await ctx.db.patch(existing._id, {
     ...(next !== undefined ? { next: next ?? undefined } : {}),
-    ...(blocked !== undefined ? { blocked: blocked ?? undefined } : {}),
+    ...(blocked !== undefined ? { blocked: tombstone(blocked) } : {}),
     updatedAt: now,
   })
   return null
+}
+
+/**
+ * An empty string is a TOMBSTONE: "the user cleared this".
+ *
+ * Deleting the field instead â€” the obvious implementation â€” makes "cleared"
+ * indistinguishable from "never set", and the read path falls through to
+ * `suggestBlocked` and puts the sentence the user just deleted straight back
+ * into the field. They then delete it again, and it returns again. There is no
+ * gesture in the UI that can remove it.
+ *
+ * `assembleRecap` already normalises "" to undefined via `blank()`, so a
+ * tombstone renders as nothing without any change downstream.
+ */
+function tombstone(value: string | null | undefined): string | undefined {
+  if (value === undefined) return undefined
+  return value ?? ""
 }
 
 export const setFields = mutation({
@@ -197,3 +221,4 @@ export const setFieldsAs = internalMutation({
   returns: v.null(),
   handler: async (ctx, { userId, ...args }) => await setFieldsImpl(ctx, userId, args),
 })
+

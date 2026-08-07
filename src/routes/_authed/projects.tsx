@@ -1,4 +1,4 @@
-﻿import { useState } from "react"
+﻿import { useRef, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
@@ -210,10 +210,35 @@ function ColorPicker({
   onPick: (color: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  /**
+   * Closes and hands focus back to the swatch that opened it.
+   *
+   * Without it the popup's buttons unmount under the user's own focus and it
+   * falls to <body>, so the next Tab restarts at the top of the page — from a
+   * settings screen that is entirely a list of controls.
+   */
+  const close = () => {
+    setOpen(false)
+    requestAnimationFrame(() => triggerRef.current?.focus())
+  }
 
   return (
-    <div className="relative shrink-0">
+    <div
+      className="relative shrink-0"
+      // Escape is handled here rather than on each swatch, so it works wherever
+      // focus is inside the popup.
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) {
+          event.preventDefault()
+          event.stopPropagation()
+          close()
+        }
+      }}
+    >
       <button
+        ref={triggerRef}
         type="button"
         aria-label={`Colour for ${project.name}: ${project.color}`}
         aria-expanded={open}
@@ -231,7 +256,7 @@ function ColorPicker({
           <div
             className="fixed inset-0 z-40"
             aria-hidden="true"
-            onClick={() => setOpen(false)}
+            onClick={close}
           />
           <div
             className={cn(
@@ -248,7 +273,7 @@ function ColorPicker({
                 data-project-color={color}
                 onClick={() => {
                   onPick(color)
-                  setOpen(false)
+                  close()
                 }}
                 className={cn(
                   "size-5 rounded-full bg-[var(--project-color)]",
@@ -422,5 +447,6 @@ function Kbd({ children }: { children: React.ReactNode }) {
     </kbd>
   )
 }
+
 
 

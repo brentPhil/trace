@@ -270,6 +270,50 @@ describe("Next and Blocked", () => {
     expect((await build(t)).blocked).toBe("what I actually meant")
   })
 
+  it("CLEARING Blocked sticks, even when a note still suggests one", async () => {
+    /*
+     * The bug this pins: clearing deleted the field, and the read path cannot
+     * tell "the user cleared this" from "never set" — so it fell through to
+     * suggestBlocked and put the sentence the user had just deleted straight
+     * back into the panel. They delete it, it returns. There was no gesture in
+     * the UI that could remove it.
+     *
+     * The earlier test below passes on a day with no marker-bearing note, which
+     * is exactly why it never caught this.
+     */
+    const t = setup()
+    await useLondon(t, ALICE)
+    await add(t, ALICE, {
+      startedAt: DAY_START_UTC + 9 * HOUR,
+      note: "Shipped the parser. Waiting on Dana for the legal wording.",
+    })
+
+    expect((await build(t)).blocked).toBe("Waiting on Dana for the legal wording.")
+
+    await t.mutation(internal.recap.setFieldsAs, { userId: ALICE, day: DAY, blocked: null })
+
+    const doc = await build(t)
+    expect(doc.blocked).toBeUndefined()
+    expect(doc.blockedIsSuggestion).toBe(false)
+  })
+
+  it("records a clear even when the day had no row yet", async () => {
+    // The first clear happens on a day with nothing stored, so the mutation
+    // must INSERT the tombstone rather than take the nothing-to-do early exit.
+    const t = setup()
+    await useLondon(t, ALICE)
+    await add(t, ALICE, {
+      startedAt: DAY_START_UTC + 9 * HOUR,
+      note: "Blocked on the staging key.",
+    })
+
+    await t.mutation(internal.recap.setFieldsAs, { userId: ALICE, day: DAY, blocked: null })
+
+    const rows = await t.run(async (ctx) => await ctx.db.query("recapDays").collect())
+    expect(rows).toHaveLength(1)
+    expect((await build(t)).blocked).toBeUndefined()
+  })
+
   it("scopes fields per user and per day", async () => {
     const t = setup()
     await useLondon(t, ALICE)
@@ -281,10 +325,58 @@ describe("Next and Blocked", () => {
   })
 
   it("does not create a row for a day with nothing to store", async () => {
+    // `next` has no prefill behind it, so an emptied one needs no tombstone —
+    // unlike `blocked`, which does.
     const t = setup()
     await useLondon(t, ALICE)
     await t.mutation(internal.recap.setFieldsAs, { userId: ALICE, day: DAY, next: "  " })
     const rows = await t.run(async (ctx) => await ctx.db.query("recapDays").collect())
     expect(rows).toHaveLength(0)
+  })
+})
+
+describe("rangeSummary", () => {
+  it("excludes a running entry from the total and reports it separately", async () => {
+    /*
+     * A running entry has no duration, and a query cannot compute one — so it
+     * used to contribute 0ms while still being COUNTED. The day header below
+     * this sentence derives its total on the client and DOES include live
+     * elapsed time, so the two numbers described the same rows, disagreed, and
+     * the smaller one was labelled exact.
+     */
+    const t = setup()
+    await useLondon(t, ALICE)
+    await add(t, ALICE, { startedAt: DAY_START_UTC + 9 * HOUR, durationMs: 2 * HOUR })
+    await add(t, ALICE, { startedAt: DAY_START_UTC + 13 * HOUR, endedAt: null })
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      fromMs: DAY_START_UTC,
+      toMs: DAY_START_UTC + 24 * HOUR,
+    })
+
+    expect(summary.count).toBe(1)
+    expect(summary.runningCount).toBe(1)
+    expect(summary.totalMs).toBe(2 * HOUR)
+  })
+
+  it("ignores soft-deleted entries in both the count and the total", async () => {
+    const t = setup()
+    await useLondon(t, ALICE)
+    await add(t, ALICE, { startedAt: DAY_START_UTC + 9 * HOUR, durationMs: HOUR })
+    await add(t, ALICE, {
+      startedAt: DAY_START_UTC + 11 * HOUR,
+      durationMs: HOUR,
+      deletedAt: 1,
+    })
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      fromMs: DAY_START_UTC,
+      toMs: DAY_START_UTC + 24 * HOUR,
+    })
+
+    expect(summary.count).toBe(1)
+    expect(summary.totalMs).toBe(HOUR)
   })
 })

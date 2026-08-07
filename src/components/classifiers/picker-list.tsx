@@ -151,6 +151,12 @@ export function PickerList({
               id={`picker-option-${index}`}
               role="option"
               aria-selected={option.selected ?? false}
+              // Out of the tab order. The text field keeps DOM focus and drives
+              // the list through `aria-activedescendant`; a focusable option
+              // means Tab lands on a row the field does not know is active, so
+              // the visual highlight and the announced position disagree and
+              // Enter takes the wrong one.
+              tabIndex={-1}
               data-active={index === active}
               onMouseEnter={() => setActive(index)}
               onClick={() => take(index)}
@@ -183,6 +189,7 @@ export function PickerList({
               id={`picker-option-${visible.length}`}
               role="option"
               aria-selected="false"
+              tabIndex={-1}
               data-active={visible.length === active}
               onMouseEnter={() => setActive(visible.length)}
               onClick={() => take(visible.length)}

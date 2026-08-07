@@ -291,6 +291,7 @@ function Field({
   onSave: (value: string | null) => Promise<void>
 }) {
   const [draft, setDraft] = useState(value)
+  const [error, setError] = useState<string | null>(null)
   const committed = useRef(value)
 
   // Adopt a change from the server only when the user has not diverged from
@@ -300,11 +301,29 @@ function Field({
     setDraft(value)
   }
 
+  /**
+   * `committed` moves only once the write has LANDED.
+   *
+   * Setting it up front looked harmless and was not: on a failed save the ref
+   * already held the new text, so the adopt branch above saw the draft matching
+   * it and quietly replaced both with the server's old value. The user's
+   * sentence disappeared with no error and no trace — and for the cleared case
+   * it reappeared as the prefill, which reads as the app overruling them.
+   */
   const commit = () => {
     const trimmed = draft.trim()
     if (trimmed === committed.current.trim()) return
-    committed.current = trimmed
+
+    const previous = committed.current
     void onSave(trimmed === "" ? null : trimmed)
+      .then(() => {
+        committed.current = trimmed
+        setError(null)
+      })
+      .catch(() => {
+        committed.current = previous
+        setError("That didn't save. It is still here — try again.")
+      })
   }
 
   return (
@@ -334,7 +353,11 @@ function Field({
           )}
         />
       </label>
-      {hint === undefined ? null : (
+      {error !== null ? (
+        <p role="alert" className="text-[0.7rem] text-alarm">
+          {error}
+        </p>
+      ) : hint === undefined ? null : (
         <p className="text-[0.7rem] text-muted-foreground">{hint}</p>
       )}
     </div>
