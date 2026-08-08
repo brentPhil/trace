@@ -47,8 +47,8 @@ export function DayList({
               <h2 className="text-sm font-semibold">{group.label}</h2>
               {/*
                 The note count, not a badge or a score. It states a fact and
-                creates just enough pressure to fill the gaps before the recap
-                is written -- without ever gating the timer.
+                creates just enough pressure to fill the gaps in the day --
+                without ever gating the timer.
 
                 Omitted entirely when the day has no completed entries yet.
                 Since a running entry is not a row, the count would otherwise
