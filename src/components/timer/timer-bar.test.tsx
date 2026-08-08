@@ -599,6 +599,25 @@ describe("the duration's popover", () => {
     })
   })
 
+  it("closes the popover after a successful create, so a second click cannot duplicate it", async () => {
+    // The bug: `onCreateCompleted` resolved, `saving` went back to `false`,
+    // but the popup itself never left the DOM — inviting exactly the
+    // accidental duplicate this confirm button exists to avoid.
+    const fixedNow = Date.parse("2026-08-07T20:00:00Z")
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "9:05 PM" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /create entry/i }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(screen.queryByLabelText("Start time")).toBeNull()
+  })
+
   it("gives the trigger an accessible name describing the action, not just the digits", () => {
     const { actions: runningActions } = makeActions()
     const view = render(

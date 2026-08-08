@@ -8,6 +8,7 @@ import {
   localMinutesOf,
 } from "@/lib/format-time"
 import { cn } from "@/lib/utils"
+import { forceClosePopover, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { dayOf } from "@shared/day"
 import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
@@ -80,6 +81,7 @@ export function EntryTimePopover({
   const [start, setStart] = useState("")
   const [end, setEnd] = useState("")
   const [error, setError] = useState<string | null>(null)
+  const actionsRef = usePopoverActionsRef()
 
   /*
    * Re-seed every time it OPENS, not once at mount.
@@ -132,7 +134,7 @@ export function EntryTimePopover({
   }
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
       <Popover.Trigger
         render={
           trigger ?? (
@@ -173,6 +175,7 @@ export function EntryTimePopover({
           weekStartDay={weekStartDay}
           onPickDay={(day) => {
             setOpen(false)
+            forceClosePopover(actionsRef)
             void onCommitDay(day)
           }}
         />

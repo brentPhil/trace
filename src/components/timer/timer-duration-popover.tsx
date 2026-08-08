@@ -11,6 +11,7 @@ import {
 } from "@/lib/format-time"
 import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
+import { forceClosePopover, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { dayOf } from "@shared/day"
 import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
@@ -176,6 +177,7 @@ function IdleDurationPopover({
   const [end, setEnd] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const actionsRef = usePopoverActionsRef()
 
   // Re-seed every time it opens, to "now" — the Toggl gesture this is. A tab
   // left open since yesterday must not offer yesterday's moment today.
@@ -237,6 +239,7 @@ function IdleDurationPopover({
     try {
       await onCreateCompleted({ startedAt, endedAt })
       setOpen(false)
+      forceClosePopover(actionsRef)
     } catch (thrown) {
       setError(errorMessage(thrown))
     } finally {
@@ -245,7 +248,7 @@ function IdleDurationPopover({
   }
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
       <Popover.Trigger
         render={
           <button
@@ -255,8 +258,17 @@ function IdleDurationPopover({
             aria-label="Add a completed entry"
             className={triggerClass}
           >
+            {/* Idle has no entry to measure — the duration is a constant
+             *  zero, not a live one, so both endpoints are fixed rather than
+             *  re-evaluating `Date.now()` on every render. That render churn
+             *  was a real anti-pattern (a new `startedAt` prop on every
+             *  render, the same instability React's hydration-mismatch
+             *  warning calls out) but it was NOT what left the popup below
+             *  stuck open — that was verified separately; see
+             *  `popover-force-close.ts`. This is a correctness fix on its
+             *  own merits: the idle duration IS zero, not "now minus zero". */}
             <EntryDuration
-              startedAt={Date.now()}
+              startedAt={0}
               endedAt={0}
               className={cn(durationClass, "text-muted-foreground")}
             />
