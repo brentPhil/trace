@@ -27,6 +27,5 @@ export function renderWithRouter(ui: ReactNode, { path }: { path: string }) {
     history: createMemoryHistory({ initialEntries: [path] }),
   })
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <RouterProvider router={router as any} />
+  return <RouterProvider router={router} />
 }
