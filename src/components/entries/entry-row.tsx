@@ -4,13 +4,11 @@ import {
   ProjectPicker,
   TagPicker,
 } from "@/components/classifiers/classifier-pickers"
-import {
-  EditableDuration,
-  EditableTimeRange,
-  EditableTitle,
-} from "@/components/entries/editable-fields"
+import { EditableDuration, EditableTitle } from "@/components/entries/editable-fields"
+import { EntryTimePopover } from "@/components/entries/entry-time-popover"
 import { cn } from "@/lib/utils"
 import type { Classification } from "@/components/timer/timer-bar"
+import type { DayString } from "@shared/day"
 import type { Entry } from "@/lib/group-entries"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -21,6 +19,9 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
 export type EntryRowActions = {
   onTitleChange: (entry: Entry, title: string) => Promise<void>
   onTimeChange: (entry: Entry, field: "start" | "end", instantMs: number) => Promise<void>
+  /** The DATE moved. Separate from onTimeChange because it is the one edit that
+   *  takes the row off the day it is rendered on, so it owes the user a word. */
+  onDayChange: (entry: Entry, day: DayString) => Promise<void>
   onDurationChange: (entry: Entry, ms: number) => Promise<void>
   onClassify: (entry: Entry, change: Partial<Classification>) => void
   onCreateProject: (name: string) => Promise<{ projectId: Id<"projects"> }>
@@ -58,6 +59,7 @@ export function EntryRow({
   entry,
   timeZone,
   use12Hour,
+  weekStartDay,
   projects,
   tags,
   actions,
@@ -65,6 +67,8 @@ export function EntryRow({
   entry: Entry
   timeZone: string
   use12Hour: boolean
+  /** 0 = Sunday. The calendar's first column, from userSettings. */
+  weekStartDay: number
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
@@ -213,11 +217,18 @@ export function EntryRow({
         />
       </div>
 
-      <EditableTimeRange
+      {/*
+        Visible at EVERY width. The inline fields this replaced were
+        `hidden sm:inline-flex`, so on a phone an entry's times could not be
+        corrected at all — the surface Toggl abandoned, again.
+      */}
+      <EntryTimePopover
         entry={entry}
         timeZone={timeZone}
         use12Hour={use12Hour}
-        onCommit={(field, value) => actions.onTimeChange(entry, field, value)}
+        weekStartDay={weekStartDay}
+        onCommitTime={(field, value) => actions.onTimeChange(entry, field, value)}
+        onCommitDay={(day) => actions.onDayChange(entry, day)}
       />
 
       <EditableDuration

@@ -723,3 +723,147 @@ describe("create — manual entry", () => {
     expect(running?._id).toBe(started.entryId)
   })
 })
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Moving an entry to another date.
+ *
+ * The fourth edit field, and the reason it exists: a `start` edit holds the end
+ * still, so "same times, yesterday" stretches the entry across a day and is
+ * refused by the 24-hour ceiling. The rule itself is proved in
+ * convex/lib/entryTimes.test.ts; what is asserted here is that the mutation
+ * reaches it, persists it, and is still bounded by ownership.
+ */
+describe("editTime — moving an entry to another day", () => {
+  it("carries the end along and leaves the duration untouched", async () => {
+    const t = setup()
+    const startedAt = Date.parse("2026-08-06T09:00:00Z")
+    const entryId = await seedEntry(t, ALICE, {
+      startedAt,
+      endedAt: startedAt + 90 * MINUTE,
+    })
+
+    const times = await t.mutation(internal.entries.editTimeAs, {
+      userId: ALICE,
+      entryId,
+      field: "day",
+      value: startedAt - DAY,
+    })
+
+    expect(times.startedAt).toBe(startedAt - DAY)
+    expect(times.endedAt).toBe(startedAt - DAY + 90 * MINUTE)
+    expect(times.durationMs).toBe(90 * MINUTE)
+
+    const row = await read(t, entryId)
+    expect(row?.startedAt).toBe(startedAt - DAY)
+    expect(row?.durationMs).toBe(90 * MINUTE)
+  })
+
+  it("succeeds where the same move through START would be refused", async () => {
+    const t = setup()
+    const startedAt = Date.parse("2026-08-06T09:00:00Z")
+    const entryId = await seedEntry(t, ALICE, {
+      startedAt,
+      endedAt: startedAt + 90 * MINUTE,
+    })
+
+    await expectCode(
+      t.mutation(internal.entries.editTimeAs, {
+        userId: ALICE,
+        entryId,
+        field: "start",
+        value: startedAt - DAY,
+      }),
+      "DURATION_TOO_LONG"
+    )
+
+    await t.mutation(internal.entries.editTimeAs, {
+      userId: ALICE,
+      entryId,
+      field: "day",
+      value: startedAt - DAY,
+    })
+    expect((await read(t, entryId))?.startedAt).toBe(startedAt - DAY)
+  })
+
+  it("moves an entry that is longer than a day, which nobody typed", async () => {
+    // A timer left running over a weekend is real recorded time. The ceiling
+    // applies to lengths a user enters; refusing to re-date one would strand it.
+    const t = setup()
+    const startedAt = Date.parse("2026-08-06T09:00:00Z")
+    const entryId = await seedEntry(t, ALICE, {
+      startedAt,
+      endedAt: startedAt + 60 * HOUR,
+    })
+
+    await t.mutation(internal.entries.editTimeAs, {
+      userId: ALICE,
+      entryId,
+      field: "day",
+      value: startedAt - DAY,
+    })
+
+    const row = await read(t, entryId)
+    expect(row?.startedAt).toBe(startedAt - DAY)
+    expect(row?.durationMs).toBe(60 * HOUR)
+  })
+
+  it("will not let one user re-date another's entry", async () => {
+    const t = setup()
+    const entryId = await seedEntry(t, ALICE)
+
+    await expectCode(
+      t.mutation(internal.entries.editTimeAs, {
+        userId: BOB,
+        entryId,
+        field: "day",
+        value: Date.now() - DAY,
+      }),
+      "NOT_FOUND"
+    )
+  })
+})
+
+describe("editTime — a future date on a running entry", () => {
+  it("clamps to now, the same as a future START does", async () => {
+    // A running entry whose start is ahead of the clock renders 0:00:00 and
+    // stays there — a stopped-looking timer that is actually running. `start`
+    // already clamps for exactly this reason; `day` reaches the same field by
+    // another name and must not be the way around it.
+    const t = setup()
+    const { entryId } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+
+    const times = await t.mutation(internal.entries.editTimeAs, {
+      userId: ALICE,
+      entryId,
+      field: "day",
+      value: Date.now() + 7 * DAY,
+    })
+
+    expect(times.startedAt).toBeLessThanOrEqual(Date.now())
+    expect(times.endedAt).toBeNull()
+  })
+
+  it("still allows moving a running entry BACKWARDS", async () => {
+    // "I actually started this yesterday" is a legitimate correction.
+    const t = setup()
+    const { entryId } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+    const target = Date.now() - DAY
+
+    const times = await t.mutation(internal.entries.editTimeAs, {
+      userId: ALICE,
+      entryId,
+      field: "day",
+      value: target,
+    })
+
+    expect(times.startedAt).toBe(target)
+  })
+})

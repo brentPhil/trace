@@ -111,7 +111,11 @@ export function groupByDay(
  * "3 days ago" is arithmetic the reader has to undo to find a date, which is
  * the opposite of what a log is for.
  */
-function dayLabel(day: string, today: string, yesterday: string): string {
+export function dayLabel(
+  day: string,
+  today: string,
+  yesterday: string
+): string {
   if (day === today) return "Today"
   if (day === yesterday) return "Yesterday"
 

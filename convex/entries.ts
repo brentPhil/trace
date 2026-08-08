@@ -878,8 +878,15 @@ export const updateAs = internalMutation({
 
 const editTimeArgs = {
   entryId: v.id("timeEntries"),
-  field: v.union(v.literal("start"), v.literal("end"), v.literal("duration")),
-  /** An instant for start/end, a length in ms for duration. */
+  field: v.union(
+    v.literal("start"),
+    v.literal("end"),
+    v.literal("duration"),
+    v.literal("day")
+  ),
+  /** An instant for start/end/day, a length in ms for duration. For `day` it is
+   *  the new START instant: resolving a picked date against the entry's local
+   *  time-of-day needs a timezone and a DST policy, which the caller has. */
   value: v.number(),
 }
 
@@ -912,9 +919,14 @@ async function editTimeImpl(
   // A running entry whose start is in the future would read 0:00:00 and stay
   // there — a stopped-looking clock that is actually running. Clamp rather than
   // refuse, matching `start`: the intent is legible, only the number is wrong.
+  //
+  // `day` is included because it moves the same field by another name. Leaving
+  // it out would make re-dating a running entry the documented way around a
+  // guard the field beside it enforces.
+  const movesStart = edit.field === "start" || edit.field === "day"
   const clamped =
-    edit.field === "start" && entry.endedAt === null && edit.value > now
-      ? ({ field: "start", value: now } as const)
+    movesStart && entry.endedAt === null && edit.value > now
+      ? ({ field: edit.field, value: now } as const)
       : edit
 
   const times = unwrapTimes(

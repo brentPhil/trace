@@ -146,6 +146,79 @@ describe("applyTimeEdit — timestamps are facts, duration is arithmetic", () =>
   })
 })
 
+/*
+ * Moving an entry to another date.
+ *
+ * The fourth rule, and the one that could not be expressed with the other
+ * three: a START edit holds the END still, so "same times, yesterday" would
+ * stretch the entry across a day and be refused by the 24-hour ceiling. The
+ * duration is what has to be anchored here, because it is the number that gets
+ * invoiced and a date correction is not a claim about how long the work took.
+ */
+describe("applyTimeEdit — moving an entry to another day", () => {
+  const now = at("2026-08-06T12:00:00Z")
+  const entry = completed("2026-08-06T09:00:00Z", "2026-08-06T10:30:00Z")
+
+  it("anchors the DURATION and carries the end along", () => {
+    const t = times(
+      applyTimeEdit(entry, { field: "day", value: at("2026-08-05T09:00:00Z") }, now)
+    )
+    expect(t.startedAt).toBe(at("2026-08-05T09:00:00Z"))
+    expect(t.endedAt).toBe(at("2026-08-05T10:30:00Z"))
+    expect(t.durationMs).toBe(90 * MINUTE)
+  })
+
+  it("does NOT refuse a move backwards, which a start edit would", () => {
+    // The whole reason this field exists. Editing `start` to the same instant
+    // leaves the end a day later and trips the ceiling.
+    const asStartEdit = applyTimeEdit(
+      entry,
+      { field: "start", value: at("2026-08-05T09:00:00Z") },
+      now
+    )
+    expect(asStartEdit).toEqual({ ok: false, code: "DURATION_TOO_LONG" })
+
+    expect(
+      applyTimeEdit(entry, { field: "day", value: at("2026-08-05T09:00:00Z") }, now).ok
+    ).toBe(true)
+  })
+
+  it("keeps the duration exact across a DST boundary", () => {
+    // Europe/London springs forward on 2026-03-29. An entry moved onto that
+    // day keeps 90 minutes of billable time even though its local end reads an
+    // hour later than it did — the caller supplies the start instant, and the
+    // duration is carried, not recomputed from wall-clock arithmetic.
+    const moved = times(
+      applyTimeEdit(entry, { field: "day", value: at("2026-03-29T00:30:00Z") }, now)
+    )
+    expect(moved.durationMs).toBe(90 * MINUTE)
+    expect(moved.endedAt).toBe(at("2026-03-29T02:00:00Z"))
+  })
+
+  it("refuses a non-finite target", () => {
+    expect(applyTimeEdit(entry, { field: "day", value: Number.NaN }, now)).toEqual({
+      ok: false,
+      code: "INVALID_DURATION",
+    })
+  })
+
+  it("moves a RUNNING entry's start and leaves it running", () => {
+    // There is no duration to anchor, so the start simply moves. Not reachable
+    // from the log today, which never draws a running entry as a row, but the
+    // rule has to be total or the next caller finds a hole in it.
+    const t = times(
+      applyTimeEdit(
+        running("2026-08-06T09:00:00Z"),
+        { field: "day", value: at("2026-08-05T09:00:00Z") },
+        now
+      )
+    )
+    expect(t.startedAt).toBe(at("2026-08-05T09:00:00Z"))
+    expect(t.endedAt).toBeNull()
+    expect(t.durationMs).toBeNull()
+  })
+})
+
 describe("applyTimeEdit — the running entry is the exception", () => {
   const now = at("2026-08-06T12:00:00Z")
   const entry = running("2026-08-06T09:00:00Z")

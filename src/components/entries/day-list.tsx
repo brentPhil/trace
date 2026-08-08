@@ -18,6 +18,7 @@ export function DayList({
   groups,
   timeZone,
   use12Hour,
+  weekStartDay,
   projects,
   tags,
   actions,
@@ -26,6 +27,7 @@ export function DayList({
   groups: Array<DayGroup>
   timeZone: string
   use12Hour: boolean
+  weekStartDay: number
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
@@ -80,6 +82,7 @@ export function DayList({
                 entry={entry}
                 timeZone={timeZone}
                 use12Hour={use12Hour}
+                weekStartDay={weekStartDay}
                 projects={projects}
                 tags={tags}
                 actions={actions}

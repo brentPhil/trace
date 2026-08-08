@@ -6,6 +6,9 @@ import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
 import { errorMessage } from "@/lib/error-message"
+import { instantMovedToDay } from "@/lib/format-time"
+import { dayLabel } from "@/lib/group-entries"
+import { addDays, dayOf } from "@shared/day"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
 import type { EntryRowActions } from "@/components/entries/entry-row"
@@ -26,11 +29,14 @@ export function EntryLog({
   groups,
   timeZone,
   use12Hour,
+  weekStartDay,
   display,
 }: {
   groups: Array<DayGroup>
   timeZone: string
   use12Hour: boolean
+  /** 0 = Sunday. The calendar's first column must match the week totals. */
+  weekStartDay: number
   display?: DurationDisplay
 }) {
   const { setNote, update, editTime, remove, restore } = useEntryEditMutations()
@@ -85,6 +91,45 @@ export function EntryLog({
     [remove, restore, toasts]
   )
 
+  /**
+   * Re-dates an entry, then says so.
+   *
+   * The only edit that takes a row off the screen it was made on: past midnight
+   * in either direction the entry leaves this day's group, and on the Today page
+   * it leaves the view entirely. Every other edit leaves something to look at,
+   * so this is the one that owes the user a sentence — otherwise a row simply
+   * vanishes under the pointer and the day total corrects itself for no visible
+   * reason.
+   *
+   * Undo carries the original START INSTANT rather than the original day, so it
+   * restores the exact time. Re-deriving it from a day string would re-resolve
+   * the offset and could land an hour out across a DST boundary — putting the
+   * entry back somewhere it never was.
+   */
+  const onDayChange = useCallback(
+    async (entry: Entry, day: string) => {
+      const from = entry.startedAt
+      await editTime(entry._id, "day", instantMovedToDay(from, day, timeZone))
+
+      // The same label the day headers use, so the toast names the heading the
+      // row has just gone to rather than a raw date string.
+      const today = dayOf(Date.now(), timeZone)
+      toasts.add({
+        title: `Moved to ${dayLabel(day, today, addDays(today, -1))}`,
+        timeout: UNDO_MS,
+        actionProps: {
+          children: "Undo",
+          onClick: () => {
+            void editTime(entry._id, "day", from).catch((thrown: unknown) => {
+              toasts.add({ title: errorMessage(thrown), priority: "high" })
+            })
+          },
+        },
+      })
+    },
+    [editTime, timeZone, toasts]
+  )
+
   const actions: EntryRowActions = {
     // Errors here are deliberately left to propagate: InlineEdit catches them
     // and reopens the field with the rejected text still in it, which is a
@@ -95,6 +140,7 @@ export function EntryLog({
     onTimeChange: async (entry, field, instantMs) => {
       await editTime(entry._id, field, instantMs)
     },
+    onDayChange,
     onDurationChange: async (entry, ms) => {
       await editTime(entry._id, "duration", ms)
     },
@@ -142,6 +188,7 @@ export function EntryLog({
         groups={groups}
         timeZone={timeZone}
         use12Hour={use12Hour}
+        weekStartDay={weekStartDay}
         projects={projects}
         tags={tags}
         actions={actions}
