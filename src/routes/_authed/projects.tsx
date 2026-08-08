@@ -27,7 +27,7 @@ function Projects() {
 
   return (
     <div className="flex flex-col">
-      <main className="flex flex-1 flex-col gap-10 px-4 py-6">
+      <div className="flex flex-1 flex-col gap-10 px-4 py-6">
         <section className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-3">
             <h1 className="text-sm font-semibold">Projects</h1>
@@ -85,7 +85,7 @@ function Projects() {
             </ul>
           )}
         </section>
-      </main>
+      </div>
     </div>
   )
 }

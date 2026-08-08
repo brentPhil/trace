@@ -100,7 +100,7 @@ function Timer() {
         />
       </div>
 
-      <main className="flex-1">
+      <div className="flex-1">
         <EntryLog
           groups={groups}
           timeZone={settings.timezone}
@@ -120,7 +120,7 @@ function Timer() {
             </Button>
           </div>
         ) : null}
-      </main>
+      </div>
     </div>
   )
 }

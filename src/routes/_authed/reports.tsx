@@ -186,7 +186,7 @@ function Reports() {
         </p>
       </div>
 
-      <main className="flex-1 border-t border-edge-soft">
+      <div className="flex-1 border-t border-edge-soft">
         {/*
           `stillLoading` is part of this condition because the auto-loader
           starts from an empty filtered set: without it the page told the user
@@ -218,7 +218,7 @@ function Reports() {
             </Button>
           </div>
         ) : null}
-      </main>
+      </div>
     </div>
   )
 }

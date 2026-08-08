@@ -45,7 +45,7 @@ function Settings() {
 
   return (
     <div className="flex flex-col">
-      <main className="flex flex-1 flex-col gap-8 px-4 py-6">
+      <div className="flex flex-1 flex-col gap-8 px-4 py-6">
         <h1 className="text-sm font-semibold">Settings</h1>
 
         <Section
@@ -152,7 +152,7 @@ function Settings() {
             Show the running timer in the browser tab
           </label>
         </Section>
-      </main>
+      </div>
     </div>
   )
 }

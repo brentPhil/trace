@@ -9,6 +9,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarRail,
 } from "@/components/ui/sidebar"
 import type { LucideIcon } from "lucide-react"
 
@@ -44,6 +45,11 @@ export function AppSidebar({
 }) {
   return (
     <Sidebar collapsible="icon">
+      {/* The only way to re-expand a collapsed rail with a mouse on desktop —
+          without it ⌘B/Ctrl+B is the sole path back, and that is a shortcut
+          people hit by accident reaching for bold. */}
+      <SidebarRail />
+
       <SidebarHeader>
         {/* `to={NAV_ITEMS[0].to}`, not a `"/timer"` literal, so the header
             link always points at whatever the first nav destination is. */}
@@ -58,32 +64,36 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarMenu>
-          {NAV_ITEMS.map((item) => (
-            <SidebarMenuItem key={item.to}>
-              {/* `tooltip` is what makes the collapsed rail usable; it is
-                  rendered only when the sidebar is collapsed.
+        {/* The deleted AppHeader provided the `navigation` landmark; nothing
+            replaced it when the nav moved into the rail. */}
+        <nav aria-label="Main">
+          <SidebarMenu>
+            {NAV_ITEMS.map((item) => (
+              <SidebarMenuItem key={item.to}>
+                {/* `tooltip` is what makes the collapsed rail usable; it is
+                    rendered only when the sidebar is collapsed.
 
-                  The vendored SidebarMenuButton is Base UI, not Radix — it
-                  composes via `render` (Base UI's useRender convention), not
-                  `asChild`. `render` takes the element to clone its own props
-                  onto, so the rendered DOM node stays the real `<a>` from
-                  TanStack `Link`. */}
-              <SidebarMenuButton
-                tooltip={item.label}
-                render={
-                  <Link
-                    to={item.to}
-                    activeProps={{ "aria-current": "page", "data-active": true }}
-                  >
-                    <item.icon />
-                    <span>{item.label}</span>
-                  </Link>
-                }
-              />
-            </SidebarMenuItem>
-          ))}
-        </SidebarMenu>
+                    The vendored SidebarMenuButton is Base UI, not Radix — it
+                    composes via `render` (Base UI's useRender convention), not
+                    `asChild`. `render` takes the element to clone its own props
+                    onto, so the rendered DOM node stays the real `<a>` from
+                    TanStack `Link`. */}
+                <SidebarMenuButton
+                  tooltip={item.label}
+                  render={
+                    <Link
+                      to={item.to}
+                      activeProps={{ "aria-current": "page", "data-active": true }}
+                    >
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </Link>
+                  }
+                />
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </nav>
       </SidebarContent>
 
       <SidebarFooter>
@@ -92,10 +102,18 @@ export function AppSidebar({
             {email}
           </span>
         )}
+        {/*
+          `aria-label` is set explicitly rather than left to the visible text,
+          because jsdom applies no CSS: both spans below are always in the
+          accessible name in a test, even though only one is ever on screen in
+          a browser. Collapsed on a real browser, the accessible name would
+          otherwise be the bare "⎋" glyph.
+        */}
         <Button
           variant="ghost"
           size="sm"
           onClick={onSignOut}
+          aria-label="Sign out"
           className="justify-start"
         >
           <span className="group-data-[collapsible=icon]:hidden">Sign out</span>
