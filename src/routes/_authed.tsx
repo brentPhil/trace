@@ -118,6 +118,10 @@ function AuthedLayout() {
       },
       createProject: async (name) => await createProject({ name }),
       createTag: async (name) => await ensureTag(name),
+      editTime: async (entryId, field, instantMs) => {
+        await editMutations.editTime(entryId, field, instantMs)
+      },
+      createCompleted: async (input) => await editMutations.create(input),
     }),
     [entryMutations, editMutations, createProject, ensureTag]
   )
@@ -135,6 +139,9 @@ function AuthedLayout() {
             projects={projects}
             tags={tags}
             suggestions={suggestions}
+            timeZone={settings.timezone}
+            use12Hour={settings.timeFormat === "12"}
+            weekStartDay={settings.weekStartDay}
             onError={report}
           />
           <RunawayBanner

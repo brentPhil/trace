@@ -44,6 +44,8 @@ function entry(
 function makeActions(over: Partial<TimerBarActions> = {}) {
   const setTitle = vi.fn(async () => {})
   const classify = vi.fn(async () => {})
+  const editTime = vi.fn(async () => {})
+  const createCompleted = vi.fn(async () => {})
   const actions: TimerBarActions = {
     start: vi.fn(async () => {}),
     stop: vi.fn(async () => ({ stoppedEntryIds: [], serverNow: Date.now() })),
@@ -54,10 +56,14 @@ function makeActions(over: Partial<TimerBarActions> = {}) {
       projectId: "jd7proj" as unknown as Id<"projects">,
     })),
     createTag: vi.fn(async () => ({ tagId: "jd7tag" as unknown as Id<"tags"> })),
+    editTime,
+    createCompleted,
     ...over,
   }
-  return { actions, setTitle, classify }
+  return { actions, setTitle, classify, editTime, createCompleted }
 }
+
+const LONDON = "Europe/London"
 
 /** The bar with empty classifier lists — no backend behind any of it. */
 function Bar({
@@ -75,6 +81,9 @@ function Bar({
       actions={actions}
       projects={[]}
       tags={[]}
+      timeZone={LONDON}
+      use12Hour
+      weekStartDay={1}
       onError={onError}
     />
   )
@@ -345,6 +354,9 @@ describe("title autocomplete", () => {
         actions={actions}
         projects={[]}
         tags={[]}
+        timeZone={LONDON}
+        use12Hour
+        weekStartDay={1}
         suggestions={suggestions}
       />
     )
@@ -394,6 +406,9 @@ describe("title autocomplete", () => {
         actions={actions}
         projects={[]}
         tags={[]}
+        timeZone={LONDON}
+        use12Hour
+        weekStartDay={1}
         suggestions={suggestions}
       />
     )
@@ -495,5 +510,113 @@ describe("a failed write is reported rather than swallowed", () => {
     deferred.settle()
     await vi.advanceTimersByTimeAsync(0)
     expect(screen.getByText(/Timer discarded/)).toBeTruthy()
+  })
+})
+
+/*
+ * The duration's popover.
+ *
+ * Toggl's gesture: click the elapsed time to open START/STOP fields and a
+ * calendar. Running, it edits the entry already on screen — the same body
+ * `EntryTimePopover` renders for a log row, reached through the same
+ * component so there is only one calendar to get right. Idle, nothing exists
+ * to edit yet, so the same fields instead stage a brand-new completed entry
+ * that is not written until the popover's own confirm button is pressed.
+ */
+describe("the duration's popover", () => {
+  // 7 August 2026, 21:00 London (BST, so 20:00Z).
+  const startedAt = Date.parse("2026-08-07T20:00:00Z")
+
+  it("opens on the running entry, seeded with its start time", () => {
+    const { actions } = makeActions()
+    render(
+      <Bar running={entry({ clientKey: "k1", _id: REAL_ID, startedAt })} actions={actions} />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /edit start time/i }))
+
+    expect(screen.getByLabelText<HTMLInputElement>("Start time").value).toBe(
+      "9:00 PM"
+    )
+  })
+
+  it("commits an edited start through the action prop, as an instant", () => {
+    const { actions, editTime } = makeActions()
+    render(
+      <Bar running={entry({ clientKey: "k1", _id: REAL_ID, startedAt })} actions={actions} />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /edit start time/i }))
+    const field = screen.getByLabelText("Start time")
+    fireEvent.change(field, { target: { value: "8:30 PM" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+
+    expect(editTime).toHaveBeenCalledWith(
+      REAL_ID,
+      "start",
+      Date.parse("2026-08-07T19:30:00Z")
+    )
+  })
+
+  it("offers no stop field while the timer is running", () => {
+    // Typing an end time is a stop, and stopping belongs to the Stop button.
+    const { actions } = makeActions()
+    render(
+      <Bar running={entry({ clientKey: "k1", _id: REAL_ID, startedAt })} actions={actions} />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /edit start time/i }))
+
+    expect(screen.getByLabelText("Start time")).toBeTruthy()
+    expect(screen.queryByLabelText("End time")).toBeNull()
+  })
+
+  it("creates a completed entry from Start and Stop while idle, defaulting both to now", async () => {
+    const fixedNow = Date.parse("2026-08-07T20:00:00Z") // 9:00 PM London
+    vi.setSystemTime(fixedNow)
+    const { actions, createCompleted } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    expect(screen.getByLabelText<HTMLInputElement>("Start time").value).toBe(
+      "9:00 PM"
+    )
+    expect(screen.getByLabelText<HTMLInputElement>("End time").value).toBe(
+      "9:00 PM"
+    )
+
+    // Both fields default to the same instant; a real stop is typed before
+    // confirming, same as the row's popover requires a real value per field.
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "9:05 PM" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /create entry/i }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(createCompleted).toHaveBeenCalledWith({
+      startedAt: fixedNow,
+      endedAt: fixedNow + 5 * 60_000,
+    })
+  })
+
+  it("gives the trigger an accessible name describing the action, not just the digits", () => {
+    const { actions: runningActions } = makeActions()
+    const view = render(
+      <Bar
+        running={entry({ clientKey: "k1", _id: REAL_ID, startedAt })}
+        actions={runningActions}
+      />
+    )
+    expect(screen.queryByRole("button", { name: "0:00:00" })).toBeNull()
+    expect(screen.getByRole("button", { name: /edit start time/i })).toBeTruthy()
+
+    view.unmount()
+
+    const { actions: idleActions } = makeActions()
+    render(<Bar running={null} actions={idleActions} />)
+    expect(screen.queryByRole("button", { name: "0:00:00" })).toBeNull()
+    expect(
+      screen.getByRole("button", { name: /add a completed entry/i })
+    ).toBeTruthy()
   })
 })

@@ -7,7 +7,7 @@ import {
 } from "@/components/classifiers/classifier-pickers"
 import { ProjectDot } from "@/components/classifiers/project-dot"
 import { useAnnounce } from "@/components/a11y/announcer"
-import { EntryDuration } from "@/components/timer/entry-duration"
+import { TimerDurationPopover } from "@/components/timer/timer-duration-popover"
 import { isOptimisticId } from "@/lib/optimistic-id"
 import { cn } from "@/lib/utils"
 import { spokenDuration } from "@shared/duration"
@@ -71,6 +71,25 @@ export type TimerBarActions = {
   classify: (entryId: Id<"timeEntries">, change: Partial<Classification>) => Promise<void>
   createProject: (name: string) => Promise<{ projectId: Id<"projects"> }>
   createTag: (name: string) => Promise<{ tagId: Id<"tags"> }>
+  /**
+   * Edits a field on the entry already running. Backs the duration's popover
+   * while a timer is going — mirrors `EntryRowActions.onTimeChange` and
+   * `onDayChange` through one function, since a `"day"` edit already carries
+   * a resolved START instant rather than a bare date.
+   */
+  editTime: (
+    entryId: Id<"timeEntries">,
+    field: "start" | "end" | "day",
+    instantMs: number
+  ) => Promise<void>
+  /**
+   * Creates a completed entry from the duration's popover while idle —
+   * mirrors `editMutations.create`, the same call `ManualEntryDialog` makes.
+   */
+  createCompleted: (input: {
+    startedAt: number
+    endedAt: number
+  }) => Promise<unknown>
 }
 
 /** A previous title and the classification it last carried. Never its note. */
@@ -87,6 +106,9 @@ export function TimerBar({
   projects,
   tags,
   suggestions = [],
+  timeZone,
+  use12Hour,
+  weekStartDay,
   onError,
 }: {
   running: Doc<"timeEntries"> | null
@@ -99,6 +121,10 @@ export function TimerBar({
    * on every character typed.
    */
   suggestions?: Array<TitleSuggestion>
+  timeZone: string
+  use12Hour: boolean
+  /** 0 = Sunday, from userSettings. The grid and the week totals must agree. */
+  weekStartDay: number
   /**
    * Called when a start, stop or discard REJECTS.
    *
@@ -513,13 +539,13 @@ export function TimerBar({
           />
         </div>
 
-        <EntryDuration
-          startedAt={running?.startedAt ?? Date.now()}
-          endedAt={isRunning ? null : 0}
-          className={cn(
-            "shrink-0 px-1 text-base font-medium sm:px-2 sm:text-lg",
-            isRunning ? "text-enlarger" : "text-muted-foreground"
-          )}
+        <TimerDurationPopover
+          running={running}
+          timeZone={timeZone}
+          use12Hour={use12Hour}
+          weekStartDay={weekStartDay}
+          onEditTime={actions.editTime}
+          onCreateCompleted={actions.createCompleted}
         />
 
         <button
