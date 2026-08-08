@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
+import { Toast } from "@/components/ui/toast"
 import { errorMessage } from "@/lib/error-message"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
@@ -9,6 +10,10 @@ import type { Entry } from "@/lib/group-entries"
 import type { Id } from "../../../convex/_generated/dataModel"
 
 const MAX_NOTE_LENGTH = 2_000
+
+/** Matches the undo window `entry-log.tsx` uses for delete and re-date, so a
+ * dismissed note behaves like every other reversible write in the product. */
+const UNDO_MS = 6_000
 
 /**
  * The fifteen-second window.
@@ -23,6 +28,20 @@ const MAX_NOTE_LENGTH = 2_000
  * is a legitimate answer — the hatch in the row keeps the invitation open for
  * later, so nothing is lost by declining now. A dialog that punished skipping
  * would train people to stop the timer somewhere else.
+ *
+ * All three used to be lossy: none of them checked whether `value` still
+ * matched the saved note, so a half-written sentence and an accidental
+ * Escape were indistinguishable from a deliberate Skip. PRODUCT.md calls a
+ * lost note worse than friction, and a confirm dialog would be friction on
+ * every dismissal to prevent a mistake on a few — the ban on
+ * modal-as-first-thought stays. Instead: dismissal with unsaved text now
+ * SAVES that text on the way out and reports it with the same
+ * undo-toast vocabulary `entry-log.tsx` uses for delete and re-date — an
+ * action already taken, reversible for `UNDO_MS`. `draftsRef` keeps a copy in
+ * memory too, keyed by entry id, so if the save is still in flight (or fails)
+ * and the sheet is reopened on the same entry before the page unloads, the
+ * user's own text wins over whatever the server most recently agreed to. See
+ * `handleDismiss` below.
  */
 export function NoteSheet({
   entry,
@@ -40,6 +59,14 @@ export function NoteSheet({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const toasts = Toast.useToastManager()
+
+  /** In-memory backstop, keyed by entry id. Never cleared on a failed or
+   * in-flight save — only ever overwritten by a newer draft or dropped once a
+   * dismissal had nothing to save. Lost on page reload, same as any other
+   * unsynced client state; the save kicked off by `handleDismiss` is what
+   * makes the note durable, this is what makes reopening feel instant. */
+  const draftsRef = useRef<Map<string, string>>(new Map())
 
   /*
    * Seeded when the sheet OPENS, and never again while it is open.
@@ -61,7 +88,11 @@ export function NoteSheet({
     const id = open ? (entry?._id ?? null) : null
     if (seededFor.current === id) return
     seededFor.current = id
-    if (id !== null) setValue(entry?.note ?? "")
+    // A pending draft outranks the server's note: it is either about to
+    // overwrite that note anyway (a save is in flight) or already tried to
+    // and failed, and either way the user's own words should be what they
+    // see, not whatever the last successful write happened to be.
+    if (id !== null) setValue(draftsRef.current.get(id) ?? entry?.note ?? "")
     // Cleared alongside the text. Left behind, a failed save's alarm line was
     // still sitting there the next time the sheet opened — on a different
     // entry, about a write that is no longer pending.
@@ -79,6 +110,9 @@ export function NoteSheet({
     setError(null)
     try {
       await onSave(entry._id, value)
+      // Written by the deliberate path, so nothing here still needs the
+      // in-memory backstop.
+      draftsRef.current.delete(entry._id)
       onOpenChange(false)
     } catch (thrown) {
       // Without this the dialog simply stayed open with no explanation, and the
@@ -91,8 +125,63 @@ export function NoteSheet({
     }
   }
 
+  /**
+   * Escape, a click on the backdrop, and Skip all resolve to a single
+   * `onOpenChange(false)` — Base UI funnels every dismissal reason through
+   * `Dialog.Root`'s prop, including its own `Dialog.Close` (Skip). The
+   * explicit Save button above does not run through here: it already awaits
+   * `onSave` and only closes once that has succeeded.
+   *
+   * If the draft on screen still differs from the entry's saved note, this
+   * is now the moment that gets written, not the moment it gets thrown away.
+   * The sheet still closes immediately — no blocking, no confirm dialog, the
+   * same "cheap to leave" the sheet's header comment promises — and a toast
+   * reports what happened with an Undo that puts the previous note back,
+   * exactly the vocabulary `entry-log.tsx` uses for delete and re-date.
+   */
+  const handleDismiss = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      const previous = entry.note ?? ""
+      const draft = value
+      if (draft !== previous) {
+        draftsRef.current.set(entry._id, draft)
+        const label = title === "" ? "entry" : `“${title}”`
+        void onSave(entry._id, draft)
+          .then(() => {
+            toasts.add({
+              title: `Saved note for ${label}`,
+              timeout: UNDO_MS,
+              actionProps: {
+                children: "Undo",
+                onClick: () => {
+                  draftsRef.current.set(entry._id, previous)
+                  void onSave(entry._id, previous).catch((undoThrown: unknown) => {
+                    toasts.add({ title: errorMessage(undoThrown), priority: "high" })
+                  })
+                },
+              },
+            })
+          })
+          .catch((thrown: unknown) => {
+            // The draft is already sitting in `draftsRef`, so nothing here is
+            // gone — just not yet on the server. Reopening this entry's sheet
+            // will show it again rather than silently reverting to the old
+            // note.
+            toasts.add({
+              title: `Note not saved: ${errorMessage(thrown)}`,
+              priority: "high",
+              timeout: UNDO_MS,
+            })
+          })
+      } else {
+        draftsRef.current.delete(entry._id)
+      }
+    }
+    onOpenChange(nextOpen)
+  }
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={handleDismiss}>
       <Dialog.Popup
         initialFocus={textareaRef}
         aria-label={`Note for ${title === "" ? "this entry" : title}`}
