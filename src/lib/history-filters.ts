@@ -25,6 +25,20 @@ export type Filters = {
   presets: Array<Preset>
 }
 
+/**
+ * The three filters that do not depend on a bounded range: text, project,
+ * billable. Reports layers a date range and preset chips around these;
+ * Timer's range is all of history, so these are all it can honestly offer.
+ * `Filters` satisfies this shape structurally, so `matches` and
+ * `hasClientSideFilter` below accept either without Timer having to carry a
+ * period it has no UI for and cannot express.
+ */
+export type QuickFilters = {
+  projectId: string | null
+  billableOnly: boolean
+  text: string
+}
+
 export function defaultFilters(today: DayString, weekStartDay: number): Filters {
   const week = weekWindow(today, "UTC", weekStartDay)
   return {
@@ -92,7 +106,7 @@ export function periodFilters(
  */
 export function matches(
   entry: Doc<"timeEntries">,
-  filters: Filters,
+  filters: QuickFilters & { presets?: Array<Preset> },
   projectName: (id: string | undefined) => string
 ): boolean {
   if (filters.projectId !== null) {
@@ -103,7 +117,7 @@ export function matches(
 
   if (filters.billableOnly && !entry.billable) return false
 
-  for (const preset of filters.presets) {
+  for (const preset of filters.presets ?? []) {
     if (preset === "no-project" && entry.projectId !== undefined) return false
     if (preset === "no-note" && (entry.note ?? "").trim() !== "") return false
     if (preset === "under-a-minute") {
@@ -135,11 +149,13 @@ export function matches(
 }
 
 /** True when a filter is active that the server range query cannot express. */
-export function hasClientSideFilter(filters: Filters): boolean {
+export function hasClientSideFilter(
+  filters: QuickFilters & { presets?: Array<Preset> }
+): boolean {
   return (
     filters.projectId !== null ||
     filters.billableOnly ||
-    filters.presets.length > 0 ||
+    (filters.presets?.length ?? 0) > 0 ||
     filters.text.trim() !== ""
   )
 }
