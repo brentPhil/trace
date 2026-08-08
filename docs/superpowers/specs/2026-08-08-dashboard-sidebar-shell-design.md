@@ -7,10 +7,11 @@ Replaces the top nav bar with a persistent left sidebar and lifts the timer out
 of a single page into the app shell, so a timer can be started and stopped from
 anywhere. Splits `/today` and `/history` into Toggl's arrangement: one **Timer**
 page that is the bar plus one continuous scrolling log, and one **Reports** page
-that is the filtering and totals.
+that is the filtering and totals. **Deletes the recap** (§9).
 
-No Convex function changes. No schema changes. This is entirely a client
-restructuring, and every query it needs already exists.
+The shell work needs no new Convex functions — every query it uses already
+exists. The recap removal does change the schema, and that part has an ordering
+constraint (§9.2).
 
 ---
 
@@ -30,7 +31,7 @@ inside `/today`. Two consequences:
 
 | Nav item | Route | Contents |
 |---|---|---|
-| Timer | `/timer` | Recap panel, week totals, one continuous day-grouped log with infinite scroll back |
+| Timer | `/timer` | Week totals, then one continuous day-grouped log with infinite scroll back |
 | Reports | `/reports` | Filter bar, exact range summary, filtered day-grouped list |
 | Projects | `/projects` | Unchanged |
 | Settings | `/settings` | Unchanged |
@@ -156,7 +157,7 @@ days. That forces a query change.
 |---|---|---|
 | The list | `listRange`, 30 days, cap 500 | `listPage` — the paginated query Reports already uses |
 | Today / This week totals | client-summed over those 30 days | a **separate** `listRange` bounded to the current week |
-| Recap | `recap.get(today)` | unchanged |
+| Recap | `recap.get(today)` | gone (§9) |
 
 The second row is the load-bearing decision. Summing the totals from the
 *paginated* results would silently mean "of the pages loaded so far" — exactly
@@ -209,7 +210,8 @@ the affordance does not disappear:
 - Every row without a note shows a hatched `+ add note`, always visible rather
   than hover-revealed (the Hatch Rule).
 - The day header's `N of M noted` still states the gap.
-- The recap panel is on the Timer page, directly above the log.
+- Reports searches note text, so a note remains the thing that makes an old
+  entry findable.
 
 Consequences:
 
@@ -222,7 +224,75 @@ Consequences:
 **If the noted-count drops after this ships, revisit** — a non-modal nudge on the
 just-stopped row is the next thing to try, not a return to the modal.
 
-## 9. Testing
+## 9. Removing the recap
+
+**Decision:** the recap is deleted, not hidden. Notes stay; the thing that
+consumed them does not.
+
+This is worth stating plainly because it is the larger of the two decisions and
+it compounds with §8. The plan's thesis was notes → recap → paste into a channel,
+and §2.2 justified collecting notes at all by pointing at the recap. With both
+the stop-prompt and the recap gone, a note is a description on a row: still
+useful, still searchable in Reports, still the thing that makes an old entry
+findable — but no longer feeding anything downstream. The product this leaves is
+coherent (Toggl with a real notes field, a working mobile web app, and undo);
+it is simply a different product from the one the plan describes, and the plan
+must be edited to say so rather than left implying otherwise.
+
+Deleted rather than flag-hidden because ~1,100 lines of tested code with no
+caller is exactly the dead weight the last review flagged elsewhere, and git
+keeps it recoverable.
+
+### 9.1 What goes
+
+| Path | Note |
+|---|---|
+| `convex/recap.ts` | `get`, `getAs`, `setFields`, `setFieldsAs`, the tombstone |
+| `convex/lib/recap.ts` | `assembleRecap`, `suggestBlocked`, `BULLET_CAP`, `NO_PROJECT` |
+| `convex/lib/render.ts` | `renderMrkdwn`, `renderPlain` |
+| `convex/recap.test.ts`, `convex/lib/recap.test.ts` | |
+| `src/components/recap/recap-panel.tsx` | |
+| `recapDays` table | Schema |
+| `userSettings.recapMinuteLocal` | Schema, plus `SETTINGS_DEFAULTS`, `settings.update` args, and the field in `/settings` (seven fields → six) |
+
+Verified couplings, so the deletion does not strand anything or over-reach:
+
+- **`recapDuration`** lives in `convex/lib/recap.ts`, not the shared duration
+  module, and its only callers are `lib/render.ts` and `recap-panel.tsx` — both
+  deleted. It goes with them. `formatCompactDuration`, `formatClock`,
+  `spokenDuration` and `formatDecimalHours` in `convex/lib/duration.ts` are
+  untouched and still have callers.
+- **`minutesToTime` / `timeToMinutes`** are local helpers in `settings.tsx` used
+  only by the recap-time field. They are deleted with it.
+- **`convex/settings.test.ts`** asserts against `SETTINGS_DEFAULTS` wholesale
+  rather than field by field, so it follows the change with no edit — one of the
+  17 tests added last week paying for itself.
+- **`convex/recap.test.ts:36`** seeds `recapMinuteLocal`, but the whole file is
+  deleted, so it is not a blocker.
+
+### 9.2 Schema removal has an order
+
+Convex validates existing documents against the schema, so a field or table
+cannot simply disappear from `schema.ts` while rows still carry it — the deploy
+fails. Three steps, in this order, each deployed:
+
+1. Make `recapMinuteLocal` optional (`v.optional(v.number())`) and deploy.
+2. Clear it from every `userSettings` row, and delete every `recapDays` row.
+3. Remove the field and the table from `schema.ts`, and deploy.
+
+Steps 1 and 3 cannot be collapsed. This is the only part of the whole spec that
+touches production data, and it is the only part that is not trivially
+reversible, so it is done deliberately and separately from the shell work.
+
+### 9.3 Plan edits
+
+`docs/superpowers/plans/2026-08-08-time-tracking-implementation-plan.md` needs
+§2.2's rationale, §4's function surface, §5's Phase 6, §8.3's `recapDays` open
+item, and Tier 2 #11 (recap nudge) and #14 (recap snapshots) updated. Tier 3's
+weekly/per-client recaps and per-bullet LLM entries go too — they were
+extensions of a feature that no longer exists.
+
+## 10. Testing
 
 | Unit | How |
 |---|---|
@@ -234,7 +304,7 @@ just-stopped row is the next thing to try, not a return to the modal.
 `history-filters.test.ts` and `group-entries.test.ts` are unaffected and do not
 move.
 
-## 10. Out of scope
+## 11. Out of scope
 
 Named so the work cannot silently expand:
 
@@ -242,5 +312,9 @@ Named so the work cannot silently expand:
 - No changes to Projects or Settings beyond dropping `<AppHeader>`.
 - Reports keeps its current filter behaviour exactly — no new filters, no saved
   views, no CSV.
-- No Convex function, validator or schema changes.
+- No new Convex functions or validators. The only schema changes are the two
+  recap removals in §9.2.
 - No redirects for `/today` and `/history`.
+- No replacement for the recap. Nothing is built to fill the gap it leaves —
+  if something should consume notes later, that is a new spec, not a rename of
+  this one.
