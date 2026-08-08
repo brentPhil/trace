@@ -1,18 +1,22 @@
-import { useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
+import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TotalsRow } from "@/components/entries/totals-row"
-import { Button } from "@/components/ui/button"
+import { FilterControls } from "@/components/history/filter-controls"
+import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { groupByDay } from "@/lib/group-entries"
+import { hasClientSideFilter, matches } from "@/lib/history-filters"
 import { periodTotals } from "@/lib/period-totals"
 import { dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
+import type { QuickFilters } from "@/lib/history-filters"
 
 const PAGE_SIZE = 50
 
@@ -91,9 +95,34 @@ function Timer() {
   // outlet — this page only edits rows that are already recorded.
   const editMutations = useEntryEditMutations()
 
+  const { projects, projectsById } = useClassifiers()
+
+  // Text, project and billable — never a date range, preset chip, or period
+  // step. Those stay exclusive to Reports: Timer's range is `fromMs: 0`, all
+  // of history, so it has no bounded period for a preset or a step to act on.
+  // See FilteredLogStatus below for the consequence of that: a filter here
+  // can only ever search what has already been paginated in.
+  const [filters, setFilters] = useState<QuickFilters>(() => ({
+    projectId: null,
+    billableOnly: false,
+    text: "",
+  }))
+
+  const filtering = hasClientSideFilter(filters)
+
+  const nameOf = useCallback(
+    (id: string | undefined) => (id === undefined ? "" : (projectsById.get(id)?.name ?? "")),
+    [projectsById]
+  )
+
+  const filtered = useMemo(
+    () => results.filter((entry) => matches(entry, filters, nameOf)),
+    [results, filters, nameOf]
+  )
+
   const groups = useMemo(
-    () => groupByDay(results, settings.timezone, nowMs),
-    [results, settings.timezone, nowMs]
+    () => groupByDay(filtered, settings.timezone, nowMs),
+    [filtered, settings.timezone, nowMs]
   )
 
   const totals = periodTotals(weekEntries, settings.timezone, today, nowMs)
@@ -115,27 +144,39 @@ function Timer() {
         />
       </div>
 
+      <div className="border-y border-edge-soft bg-surface px-4 py-2.5">
+        <FilterControls filters={filters} projects={projects} onChange={setFilters} />
+      </div>
+
       <div className="flex-1">
-        <EntryLog
-          groups={groups}
-          timeZone={settings.timezone}
-          use12Hour={settings.timeFormat === "12"}
-          weekStartDay={settings.weekStartDay}
-          display={settings.durationDisplay}
-        />
+        {/*
+          A filter that matches nothing here does not mean nothing is
+          tracked — EntryLog's own empty state says exactly that, onboarding
+          copy included, and would be a flatly false thing to show underneath
+          an active search. Skip it in favour of FilteredLogStatus's honest
+          "no matches (yet)" below.
+        */}
+        {filtering && groups.length === 0 && status !== "LoadingFirstPage" ? null : (
+          <EntryLog
+            groups={groups}
+            timeZone={settings.timezone}
+            use12Hour={settings.timeFormat === "12"}
+            weekStartDay={settings.weekStartDay}
+            display={settings.durationDisplay}
+          />
+        )}
 
         {/*
           A button, not scroll-triggered loading. Reports already works this
           way, the day headers are sticky and auto-loading fights them, and a
           control the user presses is one they can also choose not to press.
         */}
-        {status === "CanLoadMore" ? (
-          <div className="flex justify-center py-4">
-            <Button variant="outline" onClick={() => loadMore(PAGE_SIZE)}>
-              Load earlier entries
-            </Button>
-          </div>
-        ) : null}
+        <FilteredLogStatus
+          filtering={filtering}
+          hasResults={groups.length > 0}
+          status={status}
+          onLoadMore={() => loadMore(PAGE_SIZE)}
+        />
       </div>
     </div>
   )
