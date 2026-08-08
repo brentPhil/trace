@@ -131,15 +131,11 @@ export const runEntryTagsBackfill = internalAction({
 /**
  * One-off. REMOVED in the task that deletes the recap schema entries.
  *
- * Convex validates stored documents against the schema, so `recapMinuteLocal`
- * and the `recapDays` table cannot simply disappear from schema.ts while rows
- * still carry them — the deploy fails validation. This clears the data so the
- * final removal is legal.
- *
- * Unbounded `.collect()` is acceptable exactly here: this is a single manual
- * run on a single-user deployment with a handful of rows, not a code path any
- * user reaches. If it ever needs to run against a large deployment, bound it
- * the way convex/lib/scan.ts describes.
+ * Already ran: it purged `recapMinuteLocal` and `recapDays` before the same
+ * task removed both from schema.ts, which is what made that removal legal.
+ * Neither exists in the schema anymore, so the body that touched them no
+ * longer typechecks and is replaced with a no-op. The export itself stays —
+ * per the plan, it is deleted outright in the next task, not this one.
  */
 export const purgeRecap = internalMutation({
   args: {},
@@ -147,20 +143,7 @@ export const purgeRecap = internalMutation({
     settingsCleared: v.number(),
     recapDaysDeleted: v.number(),
   }),
-  handler: async (ctx) => {
-    const settings = await ctx.db.query("userSettings").collect()
-    let settingsCleared = 0
-    for (const row of settings) {
-      if (row.recapMinuteLocal === undefined) continue
-      // `undefined` on a patch REMOVES the field, which is what the schema
-      // removal needs — setting it to 0 would leave a value behind.
-      await ctx.db.patch(row._id, { recapMinuteLocal: undefined })
-      settingsCleared += 1
-    }
-
-    const days = await ctx.db.query("recapDays").collect()
-    for (const row of days) await ctx.db.delete(row._id)
-
-    return { settingsCleared, recapDaysDeleted: days.length }
+  handler: async () => {
+    return { settingsCleared: 0, recapDaysDeleted: 0 }
   },
 })
