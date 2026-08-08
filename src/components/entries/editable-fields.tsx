@@ -1,27 +1,19 @@
 import { InlineEdit } from "@/components/entries/inline-edit"
 import { EntryDuration } from "@/components/timer/entry-duration"
-import {
-  formatTimeOfInstant,
-  instantOfTypedTime,
-  localMinutesOf,
-} from "@/lib/format-time"
 import { parseDuration } from "@shared/duration"
-import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
 import { cn } from "@/lib/utils"
-import type { ParseOutcome } from "@/components/entries/inline-edit"
 import type { Entry } from "@/lib/group-entries"
 
 const MAX_TITLE_LENGTH = 500
 
 /**
- * The failure messages.
+ * The failure message.
  *
- * Each one names the input that would work, because "invalid" tells a person
- * only that they were wrong, and this field is being edited by someone in a
- * hurry who wants to get back to work.
+ * It names the input that would work, because "invalid" tells a person only
+ * that they were wrong, and this field is being edited by someone in a hurry
+ * who wants to get back to work.
  */
 const DURATION_HELP = "Try 1:30, 90m, or 1.5h."
-const TIME_HELP = "Try 9:15, 0915, or 2pm."
 
 export function EditableTitle({
   entry,
@@ -72,88 +64,14 @@ export function EditableTitle({
   )
 }
 
-/**
- * Start and end, each editable on its own.
- *
- * Two separate fields rather than one "09:12 – 10:58" string, because the
- * reconciliation rule turns on WHICH one moved — editing the start leaves the
- * end alone and vice versa — and a single field cannot express that. It would
- * also make correcting one timestamp require retyping both.
+/*
+ * `EditableTimeRange` used to live here: two inline text fields, start and end,
+ * `hidden` below `sm`. It was replaced by `entry-time-popover.tsx`, which can
+ * additionally express the DATE — something these fields deliberately could not,
+ * pinning `dayOffset: 0` so a typed time could never silently move an entry off
+ * the day the user was looking at. A calendar says out loud what it is doing, so
+ * the capability arrives with the control that makes it legible.
  */
-export function EditableTimeRange({
-  entry,
-  timeZone,
-  use12Hour,
-  onCommit,
-}: {
-  entry: Entry
-  timeZone: string
-  use12Hour: boolean
-  onCommit: (field: "start" | "end", instantMs: number) => Promise<void>
-}) {
-  const startMinutes = localMinutesOf(entry.startedAt, timeZone)
-
-  const parseStart = (raw: string): ParseOutcome<number> => {
-    const parsed = parseTimeOfDay(raw, startMinutes)
-    if (!parsed.ok) return { ok: false, message: TIME_HELP }
-    // dayOffset is forced to 0: a start belongs to the day it is filed under.
-    // Honouring an offset here would silently move the entry to another day,
-    // and therefore out of the total the user is looking at.
-    return {
-      ok: true,
-      value: instantOfTypedTime(
-        entry.startedAt,
-        { minutes: parsed.time.minutes, dayOffset: 0 },
-        timeZone
-      ),
-    }
-  }
-
-  const parseEnd = (raw: string): ParseOutcome<number> => {
-    const parsed = parseTimeOfDay(raw, startMinutes)
-    if (!parsed.ok) return { ok: false, message: TIME_HELP }
-    // An end earlier in the clock than the start means the next morning —
-    // 23:40 to 01:15 is the ordinary overnight case, not a typo. Anchored to
-    // the START's day, which is also how the entry is filed.
-    const resolved = resolveEndAfterStart(parsed.time, {
-      minutes: startMinutes,
-      dayOffset: 0,
-    })
-    return { ok: true, value: instantOfTypedTime(entry.startedAt, resolved, timeZone) }
-  }
-
-  return (
-    <span className="hidden shrink-0 items-center gap-0.5 text-xs text-muted-foreground tabular sm:inline-flex">
-      <InlineEdit<number>
-        display={formatTimeOfInstant(entry.startedAt, timeZone, use12Hour)}
-        initialInput={formatTimeOfInstant(entry.startedAt, timeZone, use12Hour)}
-        ariaLabel="Start time"
-        className="px-1 py-0.5"
-        inputClassName="w-[5.5rem] text-xs tabular"
-        parse={parseStart}
-        onCommit={(value) => onCommit("start", value)}
-      />
-      <span aria-hidden="true">–</span>
-      {entry.endedAt === null ? (
-        // No end exists yet. A field here would invite typing one, which is a
-        // stop — and stopping belongs to the button that says Stop.
-        <span className="px-1 py-0.5" aria-label="Still running">
-          …
-        </span>
-      ) : (
-        <InlineEdit<number>
-          display={formatTimeOfInstant(entry.endedAt, timeZone, use12Hour)}
-          initialInput={formatTimeOfInstant(entry.endedAt, timeZone, use12Hour)}
-          ariaLabel="End time"
-          className="px-1 py-0.5"
-          inputClassName="w-[5.5rem] text-xs tabular"
-          parse={parseEnd}
-          onCommit={(value) => onCommit("end", value)}
-        />
-      )}
-    </span>
-  )
-}
 
 /**
  * The duration, editable.

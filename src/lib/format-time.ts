@@ -86,6 +86,28 @@ export function instantOfDayTime(
   )
 }
 
+/**
+ * The same local time of day, on a different date.
+ *
+ * What a calendar pick means: "this happened at the same hour, but on the 5th".
+ * Deliberately NOT `instantMs + n * 86_400_000` — a whole-day shift carries the
+ * OLD offset across, so moving 09:00 BST into January lands on 08:00 GMT, and
+ * moving anything onto a spring-forward morning lands in an hour the clock
+ * skipped. Routing through `instantOfDayTime` re-resolves the offset at the
+ * destination and applies the module's DST policy.
+ */
+export function instantMovedToDay(
+  instantMs: number,
+  day: DayString,
+  timeZone: string
+): number {
+  return instantOfDayTime(
+    day,
+    { minutes: localMinutesOf(instantMs, timeZone), dayOffset: 0 },
+    timeZone
+  )
+}
+
 /** Minutes past local midnight for an instant — the parsers' reference point. */
 export function localMinutesOf(instantMs: number, timeZone: string): number {
   const parts = localPartsOf(instantMs, timeZone)

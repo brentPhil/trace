@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react"
 import { useConvexMutation } from "@convex-dev/react-query"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
+import { rangeAfterMove } from "@/lib/optimistic-range"
 import { applyTimeEdit } from "@shared/entryTimes"
 import { api } from "../../convex/_generated/api"
 import type { OptimisticLocalStore } from "convex/browser"
@@ -62,6 +63,51 @@ function dropEverywhere(
   }
 }
 
+/**
+ * The re-dating case, which `patchEverywhere` cannot express.
+ *
+ * That function rewrites a row wherever it finds it. Re-dating moves a row
+ * BETWEEN ranges — off the day it was on and onto the day it went to — so the
+ * entry has to be evicted from ranges it has left and inserted into ranges it
+ * has entered, including ones that never held it. Patching in place would leave
+ * it visible on the old day until the server replied.
+ *
+ * The row is located once, from any range that holds it, because a range it is
+ * moving INTO has no copy to patch from.
+ */
+function moveEverywhere(
+  localStore: OptimisticLocalStore,
+  entryId: Id<"timeEntries">,
+  patch: (entry: Entry) => Entry
+): void {
+  const running = localStore.getQuery(api.entries.getRunning, {})
+
+  let current: Entry | undefined =
+    running != null && running._id === entryId ? running : undefined
+  if (current === undefined) {
+    for (const { value } of localStore.getAllQueries(api.entries.listRange)) {
+      const found = value?.find((entry) => entry._id === entryId)
+      if (found !== undefined) {
+        current = found
+        break
+      }
+    }
+  }
+  // Nothing loaded to move. The server's response will bring the truth.
+  if (current === undefined) return
+
+  const moved = patch(current)
+  if (running != null && running._id === entryId) {
+    localStore.setQuery(api.entries.getRunning, {}, moved)
+  }
+
+  for (const { args, value } of localStore.getAllQueries(api.entries.listRange)) {
+    if (value === undefined) continue
+    const next = rangeAfterMove(value, args, moved)
+    if (next !== null) localStore.setQuery(api.entries.listRange, args, next)
+  }
+}
+
 function insertEverywhere(localStore: OptimisticLocalStore, entry: Entry): void {
   for (const { args, value } of localStore.getAllQueries(api.entries.listRange)) {
     if (value === undefined) continue
@@ -115,7 +161,10 @@ export function useEntryEditMutations() {
   const editTimeMutation = useLatest(
     useConvexMutation(api.entries.editTime).withOptimisticUpdate((localStore, args) => {
       const now = Date.now()
-      patchEverywhere(localStore, args.entryId, (entry) => {
+      // A `day` edit is the only one that can move a row off the range it is
+      // rendered in, so it is the only one that needs the evicting writer.
+      const write = args.field === "day" ? moveEverywhere : patchEverywhere
+      write(localStore, args.entryId, (entry) => {
         // The SAME pure function the mutation runs. This is the payoff for
         // keeping the reconciliation rule out of Convex: the optimistic result
         // and the authoritative one cannot disagree, so the row never settles

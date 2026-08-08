@@ -215,6 +215,7 @@ function History() {
             groups={groups}
             timeZone={settings.timezone}
             use12Hour={settings.timeFormat === "12"}
+            weekStartDay={settings.weekStartDay}
             display={settings.durationDisplay}
           />
         )}

@@ -243,6 +243,7 @@ function Today() {
           groups={groups}
           timeZone={settings.timezone}
           use12Hour={settings.timeFormat === "12"}
+          weekStartDay={settings.weekStartDay}
           highlightedEntryId={highlighted}
           display={settings.durationDisplay}
         />

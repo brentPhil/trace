@@ -14,6 +14,16 @@
  *     Edit end      -> duration recomputes. Start does not move.
  *     Edit duration -> END moves. Start is anchored.
  *     Edit duration on a RUNNING entry -> there is no end, so START moves.
+ *     Edit day      -> START moves to the new date. DURATION is anchored, so
+ *                      the end travels with it.
+ *
+ * The last one is the odd one out and has to be: it is the only edit where the
+ * user is correcting WHEN the work happened rather than how long it took, and
+ * it is the only one that cannot be expressed by the others. Routing "same
+ * times, yesterday" through a start edit holds the end still, stretching the
+ * entry across a day and tripping the 24-hour ceiling — a refusal on a gesture
+ * that is not asking for anything unusual. Anchoring the duration also means a
+ * date correction can never change what gets invoiced.
  *
  * Never move a timestamp the user did not type. The caller anchors the
  * immovable field visually — with weight or a glyph, never a hue.
@@ -90,6 +100,10 @@ export type TimeEdit =
   | { field: "start"; value: number }
   | { field: "end"; value: number }
   | { field: "duration"; value: number }
+  /** `value` is the new START instant, already resolved against the target
+   *  local date by the caller — that resolution needs a timezone and a DST
+   *  policy, which live in convex/lib/day.ts, not here. */
+  | { field: "day"; value: number }
 
 /**
  * Applies one field edit under the rule above.
@@ -138,6 +152,21 @@ export function applyTimeEdit(
 
       // Start is anchored; the end moves.
       return entryTimes(current.startedAt, current.startedAt + edit.value)
+    }
+
+    case "day": {
+      // A running entry has no length to carry, so the start simply moves.
+      if (current.durationMs === null) return entryTimes(edit.value, null)
+
+      // Carried, not recomputed from wall-clock arithmetic. Moving an entry
+      // onto a day that springs forward would otherwise silently lose an hour
+      // of billable time, and onto one that falls back would invent one.
+      //
+      // Deliberately NOT passed through capEditedDuration: the duration is
+      // unchanged, so a runaway timer that legitimately ran for sixty hours
+      // must stay movable. The ceiling exists for lengths a user types, and
+      // nobody typed this one.
+      return entryTimes(edit.value, edit.value + current.durationMs)
     }
   }
 }
