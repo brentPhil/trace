@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react"
 import { useConvexMutation } from "@convex-dev/react-query"
+import { insertAtPosition } from "convex/react"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { applyTimeEdit } from "@shared/entryTimes"
@@ -11,11 +12,20 @@ import type { Doc, Id } from "../../convex/_generated/dataModel"
 type Entry = Doc<"timeEntries">
 
 /**
- * The log is read through `listRange`, whose args (fromMs/toMs) depend on the
- * caller's timezone and window — so an optimistic update cannot name the query
- * instance it needs to patch. `getAllQueries` hands back every live
- * subscription with its args, which is the only way to keep a row consistent
- * across the day view and any other range mounted at the same time.
+ * The log is read through BOTH `listRange` and `listPage` — the week-totals
+ * strip still reads a plain range, but the log on Timer (the app's primary
+ * surface) now renders from the paginated `listPage`. Both queries' args
+ * (fromMs/toMs, or a page's cursor) depend on the caller's timezone and
+ * window, so an optimistic update cannot name the query instance it needs to
+ * patch. `getAllQueries` hands back every live subscription with its args,
+ * which is the only way to keep a row consistent across every range and every
+ * page mounted at the same time.
+ *
+ * Without patching `listPage` too, a save, edit, classify, delete or undo
+ * would update the week total (still `listRange`-backed) while the row on
+ * screen sat there unchanged until the next server round trip — an
+ * asymmetry that is worse than no optimism at all, because the two numbers on
+ * screen visibly disagree in the meantime.
  *
  * `getRunning` is patched alongside it, because the running entry appears in
  * BOTH the timer bar and the top of the log. Updating one and not the other is
@@ -44,6 +54,19 @@ function patchEverywhere(
     next.sort((a, b) => b.startedAt - a.startedAt)
     localStore.setQuery(api.entries.listRange, args, next)
   }
+
+  for (const { args, value } of localStore.getAllQueries(api.entries.listPage)) {
+    if (value === undefined) continue
+    const index = value.page.findIndex((entry) => entry._id === entryId)
+    if (index === -1) continue
+
+    const page = [...value.page]
+    page[index] = patch(page[index])
+    // Same re-sort as the `listRange` branch above, and for the same reason —
+    // a page is itself newest-first.
+    page.sort((a, b) => b.startedAt - a.startedAt)
+    localStore.setQuery(api.entries.listPage, args, { ...value, page })
+  }
 }
 
 function dropEverywhere(
@@ -60,6 +83,14 @@ function dropEverywhere(
     const next = value.filter((entry) => entry._id !== entryId)
     if (next.length !== value.length) localStore.setQuery(api.entries.listRange, args, next)
   }
+
+  for (const { args, value } of localStore.getAllQueries(api.entries.listPage)) {
+    if (value === undefined) continue
+    const page = value.page.filter((entry) => entry._id !== entryId)
+    if (page.length !== value.page.length) {
+      localStore.setQuery(api.entries.listPage, args, { ...value, page })
+    }
+  }
 }
 
 function insertEverywhere(localStore: OptimisticLocalStore, entry: Entry): void {
@@ -72,6 +103,48 @@ function insertEverywhere(localStore: OptimisticLocalStore, entry: Entry): void 
     if (entry.startedAt < args.fromMs || entry.startedAt >= args.toMs) continue
     const next = [...value, entry].sort((a, b) => b.startedAt - a.startedAt)
     localStore.setQuery(api.entries.listRange, args, next)
+  }
+
+  // listPage is paginated: every page loaded by ONE `usePaginatedQuery`
+  // subscription shares the same fromMs/toMs and differs only by
+  // `paginationOpts.cursor`. `getAllQueries` hands back one entry per page, so
+  // a naive per-page loop (as `listRange`'s above does) inserts a copy into
+  // EVERY loaded page — duplicate rows, since `usePaginatedQuery` concatenates
+  // pages with no dedup.
+  //
+  // `insertAtPosition` (from convex/react) is Convex's helper for exactly
+  // this: it groups pages by `paginationOpts.id` and inserts into exactly one
+  // page by sort key. It has no notion of the fromMs/toMs range filter,
+  // though, so calling it unconditionally would still insert into a
+  // subscription whose range does not contain the entry (e.g. a Reports
+  // query scoped to last month receiving today's restored row). Restrict it
+  // to the distinct {fromMs, toMs} pairs that actually contain the entry —
+  // the same bounds check the `listRange` branch above uses.
+  const pageQueries = localStore.getAllQueries(api.entries.listPage)
+  const seenRanges = new Set<string>()
+  for (const { args } of pageQueries) {
+    const rangeKey = `${args.fromMs}:${args.toMs}`
+    if (seenRanges.has(rangeKey)) continue
+    seenRanges.add(rangeKey)
+    if (entry.startedAt < args.fromMs || entry.startedAt >= args.toMs) continue
+
+    const alreadyPresent = pageQueries.some(
+      ({ args: otherArgs, value }) =>
+        otherArgs.fromMs === args.fromMs &&
+        otherArgs.toMs === args.toMs &&
+        value !== undefined &&
+        value.page.some((row) => row._id === entry._id)
+    )
+    if (alreadyPresent) continue
+
+    insertAtPosition({
+      paginatedQuery: api.entries.listPage,
+      argsToMatch: { fromMs: args.fromMs, toMs: args.toMs },
+      sortOrder: "desc",
+      sortKeyFromItem: (row) => row.startedAt,
+      localQueryStore: localStore,
+      item: entry,
+    })
   }
 }
 

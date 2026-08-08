@@ -164,7 +164,7 @@ describe("setNote", () => {
   })
 
   it("treats an emptied note as ABSENT, not as an empty string", async () => {
-    // "Has a note" is what the day header counts and the recap selects on. Two
+    // "Has a note" is what the day header counts and Reports filters on. Two
     // representations of nothing would eventually disagree with each other.
     const t = setup()
     const id = await seedEntry(t, ALICE, { note: "something" })

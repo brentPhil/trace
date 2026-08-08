@@ -5,8 +5,8 @@ import type { MutationCtx, QueryCtx } from "./_generated/server"
 /**
  * The tables whose rows belong to exactly one user.
  *
- * `userSettings` and `recapDays` are excluded deliberately: they are looked up
- * BY user rather than by id, so there is never an id from the client to verify.
+ * `userSettings` is excluded deliberately: it is looked up BY user rather than
+ * by id, so there is never an id from the client to verify.
  */
 const OWNED_TABLES = ["timeEntries", "projects", "tags"] as const
 type OwnedTable = (typeof OWNED_TABLES)[number]

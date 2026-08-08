@@ -46,6 +46,10 @@ export default defineConfig({
           name: "dom",
           environment: "jsdom",
           include: ["src/**/*.test.tsx"],
+          // jsdom has no CSS media-query evaluator and so never defines
+          // `window.matchMedia`. Anything that renders the vendored Sidebar
+          // hits it via `useIsMobile` (src/hooks/use-mobile.ts).
+          setupFiles: ["./src/test-utils/setup-dom.ts"],
         },
       },
       {

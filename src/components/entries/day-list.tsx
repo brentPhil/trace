@@ -21,7 +21,6 @@ export function DayList({
   projects,
   tags,
   actions,
-  highlightedEntryId,
   display = "hms",
 }: {
   groups: Array<DayGroup>
@@ -30,7 +29,6 @@ export function DayList({
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
-  highlightedEntryId?: string | null
   display?: DurationDisplay
 }) {
   if (groups.length === 0) return <EmptyLog />
@@ -49,8 +47,8 @@ export function DayList({
               <h2 className="text-sm font-semibold">{group.label}</h2>
               {/*
                 The note count, not a badge or a score. It states a fact and
-                creates just enough pressure to fill the gaps before the recap
-                is written -- without ever gating the timer.
+                creates just enough pressure to fill the gaps in the day --
+                without ever gating the timer.
 
                 Omitted entirely when the day has no completed entries yet.
                 Since a running entry is not a row, the count would otherwise
@@ -85,7 +83,6 @@ export function DayList({
                 projects={projects}
                 tags={tags}
                 actions={actions}
-                highlighted={entry._id === highlightedEntryId}
               />
             ))}
           </div>
@@ -111,9 +108,11 @@ function EmptyLog() {
             How do the hours come back out?
           </dt>
           <dd>
-            The recap panel above turns a day into something you can paste into
-            a channel or an email — grouped by client, with what you actually
-            did. History totals any date range and marks what was billable.
+            Write a note when you stop a timer — a sentence about what you
+            actually did. <strong className="font-medium text-foreground">Reports</strong>{" "}
+            totals any date range, marks what's billable, and searches note
+            text — so a well-noted entry is one you can find again by what
+            happened, not just when.
           </dd>
         </div>
         <div className="flex flex-col gap-0.5">

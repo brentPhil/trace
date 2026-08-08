@@ -1,7 +1,7 @@
 # Dashboard shell: sidebar, global timer, Timer/Reports split
 
 **Date:** 2026-08-08
-**Status:** approved, not implemented
+**Status:** implemented — see `docs/superpowers/plans/2026-08-08-dashboard-sidebar-shell.md` for what shipped and where it deviates.
 
 Replaces the top nav bar with a persistent left sidebar and lifts the timer out
 of a single page into the app shell, so a timer can be started and stopped from

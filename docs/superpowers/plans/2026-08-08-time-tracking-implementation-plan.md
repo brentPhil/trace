@@ -84,6 +84,14 @@ No product combines tracked durations with human-written per-entry notes. Harves
 
 **The recap, not the timer, is the product.** The timer is table stakes and must be excellent; the recap is why anyone switches.
 
+> **REMOVED 2026-08-08.** The recap was built, shipped, and then cut — see §5
+> Phase 6 and §5.9. The paragraph above is left standing because it is the
+> argument the product was designed around, and deleting it would hide the size
+> of what changed. It no longer describes what Trace does. Notes are still
+> collected and still searchable in Reports, but nothing consumes them: with the
+> recap gone, this is a time tracker with a real notes field rather than a
+> product whose output is a written summary of your day.
+
 ### 1.4 Reporting: one view
 
 Ship **the log** — reverse-chronological entries under day headers, each note rendered in full. Every "report" is that same view with a filter applied, not a different view.
@@ -120,7 +128,7 @@ Queries range on `by_user_started` with `.gte("startedAt", fromMs).lt("startedAt
 
 Consequences, accepted:
 - Changing the timezone setting re-buckets history. This is **reversible** (change it back) and user-initiated. The stored variant's failure mode is irreversible.
-- The log and the recap resolve days through the *same* function, so they cannot disagree. Under the stored design they demonstrably could ("my recap says 5h but my log says 6h" — unrecoverable in a billing tool).
+- Every surface resolves days through the *same* function, so they cannot disagree. Under the stored design they demonstrably could ("my recap says 5h but my log says 6h" — unrecoverable in a billing tool). *(The recap was removed 2026-08-08; the argument holds unchanged for the log, Reports and the day totals.)*
 - No `tzAtWrite`, no re-bucket tool, no `timezoneConfirmedAt` at MVP.
 
 **Midnight-crossing entries are attributed to their start date** (Toggl's rule, kept). Split is the manual correction, and it is fast-follow.
@@ -136,6 +144,8 @@ An LLM may later exist only as a **per-bullet, opt-in, user-invoked rewrite of t
 This follows directly from *Defensible by default* — the user bills from this data — and it is also the cheaper, faster, offline-capable, zero-cost option. The concession is real and accepted: a user who writes "pool thing fixed" gets "pool thing fixed". That is correct behaviour. It trains better notes.
 
 **Cut from MVP:** `recap.compose` (the LLM action), `recapSnapshots`, `recapOverrides`, per-bullet staleness/fingerprints, `acceptStale`, snapshot history. That is a hand-rolled conflict-resolution layer over a document that regenerates in under a millisecond. MVP recap = derive, render, copy.
+
+**REMOVED 2026-08-08.** The recap this section justifies was built, shipped, and then removed — see §5 Phase 6 and §5.9. Notes are retained regardless: they still serve search (§7 text search) and reading the log (`/reports`, renamed from `/history` the same day), independent of the recap they were originally written to feed.
 
 ### 2.3 Running-entry encoding and enforcement — DECIDED
 
@@ -189,7 +199,7 @@ They never overlap, so no optimistic update ever targets a paginated query. **Ph
 | Delete | Soft (`deletedAt`) on every table from day one + a 6 s undo toast. **The trash view is fast-follow** — the column is free now and painful to retrofit; the view, the purge cron and the permanent-delete dialog are not MVP |
 | `settings` bootstrap | `settings.ensure({ suggestedTimezone })` called from `_authed.tsx`'s **`beforeLoad`**, returning settings into route context. TanStack Router runs *loaders in parallel* — a child loader cannot assume a parent loader resolved. This is why the dependency lives in `beforeLoad`, which does chain |
 | vitest config | `test.projects` with per-project `environment`. **`environmentMatchGlobs` was removed in Vitest 3** and this project is on Vitest 4 |
-| Recap `Copy as plain` | Rendered from the same document model as mrkdwn, **not** `mrkdwn.replaceAll("*","")`. A note reading `use *args, not **kwargs` would otherwise have three asterisks silently deleted from the user's own prose — and would break bold pairing for the rest of the Slack message |
+| Recap `Copy as plain` | **CUT 2026-08-08** with the recap (§5 Phase 6). Was: rendered from the same document model as mrkdwn, **not** `mrkdwn.replaceAll("*","")`. A note reading `use *args, not **kwargs` would otherwise have three asterisks silently deleted from the user's own prose — and would break bold pairing for the rest of the Slack message |
 
 ---
 
@@ -334,7 +344,6 @@ exist:
 | `entries.weekTotals` | `{ anchorDay }` | `{ totalMs, billableMs }` | `by_user_started` |
 | `projects.list` / `tags.list` | — | live rows | `by_user_archived_name` / `by_user_name` |
 | `settings.get` | — | settings \| defaults | `by_user` |
-| `recap.getDay` | `{ day }` | `RecapDoc` + sources | `by_user_started` + `by_user_day` |
 
 `recentTitles` is an **index scan**, not a search index. A search index returns *relevance* order and cannot answer an empty prefix at all — so autocomplete-on-focus has no answer, and a freelancer whose most recent entry is a one-off would never see it.
 
@@ -354,7 +363,8 @@ exist:
 | `projects.remove` | **Refuses while live entries reference it**, surfacing "archive instead". This is what makes the absence of a project-name snapshot safe: a dangling `projectId` cannot occur, so a July invoice stays reproducible in September |
 | `tags.ensureByName` / `tags.remove` | Same referential rule |
 | `settings.ensure` / `update` | `ensure` seeds the row with the browser's suggested IANA zone on first authed load |
-| `recap.setDayFields` | `{ day, next?, blocked? }` |
+
+**REMOVED 2026-08-08.** `recap.getDay` (queries) and `recap.setDayFields` (mutations) — renamed to `recap.get` / `recap.setFields` per §5.9, then deleted along with the rest of `api.recap` when the recap was cut. See §5 Phase 6 and §8.3.
 
 ### Error taxonomy
 
@@ -466,7 +476,9 @@ The most important surface in the product.
 - Pickers reachable via `@` / `#` from inside the title input and independently from the edit row.
 - Title autocomplete inheriting **project, tags, billable — never the note**, with Resume inheriting *exactly the same set*. Toggl's two paths differ on tags, and that inconsistency erodes trust in both.
 
-### Phase 6 — The recap *(~3 d)*
+### Phase 6 — The recap *(~3 d)* — CUT 2026-08-08
+
+Built and shipped as planned below, then removed entirely on 2026-08-08 to make room for the dashboard shell; see `docs/superpowers/specs/2026-08-08-dashboard-sidebar-shell-design.md` and §5.9.
 
 The reason the product exists. Build the engine as a pure function first, tested, before any UI.
 
@@ -538,6 +550,7 @@ the plan above, it is recorded here rather than left as a silent difference.
 | Edit as a two-height slide-up sheet on mobile | Inline editing at every width; the note is the only sheet | Inline edit was already built in Phase 4 and works at 375px. A second editing model for one breakpoint is a second thing to maintain and to learn. |
 | Roving tabindex on the entry list | Native tab order | Every control on a row is a real focusable element already. Revisit if the list grows long enough that tabbing through it is the complaint. |
 | `R` / `E` row shortcuts, and the recap keyboard collision | Not bound | The collision the plan flagged was resolved by not creating it. Click-to-edit and Enter/Escape cover the same ground; `?` documents what exists. |
+| Phase 6 recap: built, per §2.2/§4 above | **Removed 2026-08-08** | Cut to make room for the dashboard shell (`docs/superpowers/specs/2026-08-08-dashboard-sidebar-shell-design.md`). `api.recap`, `recapDays`, `recapMinuteLocal`, and the client readers are gone; notes remain, retained for search and for reading the log. |
 
 **Also renamed from §4**, recorded here because §4 sets the standard that
 callers written later must not import something that does not exist:
@@ -545,7 +558,8 @@ callers written later must not import something that does not exist:
 `recap.setDayFields` → `recap.setFields`, `tags.ensureByName` → `tags.ensure`,
 `entries.log` → `entries.listPage`, `entries.listDay` → `entries.listRange`.
 `entries.weekTotals` was never built as a Convex function at all — the week
-total is summed on the client in `today.tsx` from `listRange`.
+total is summed on the client in `timer.tsx` (renamed from `today.tsx`) from
+`listRange`.
 
 **Not built, deliberately** — `hourlyRateCents` is in the schema and nothing
 reads it (§8.2, unchanged); the trash view and untracked-gap hatching remain
@@ -626,22 +640,22 @@ Ordered by value ÷ cost.
 | 8 | Clients | One table + one optional field on `projects`, **zero** backfill of entries |
 | 9 | CSV export | Accountants demand it. Be clear-eyed: multi-line prose with commas is mangled by Excel |
 | 10 | Rounding (display/export only) | Never mutate stored durations. Per-entry vs per-subtotal rounding produce materially different totals from identical data — twelve 4-minute entries rounded to 15 each is 3 h; the 48-minute total rounded is 48 m. The scope must be explicit and shown |
-| 11 | Recap nudge at `recapMinuteLocal` | Convex cron every 5 min against a `nextRecapAt` index — hourly cannot serve half-hour-offset timezones |
 | 12 | Collapse identical entries | **Off by default** — with notes attached, near-identical rows are no longer redundant, and collapsing must never hide a note |
 | 13 | Real search indexes | When history justifies the write amplification |
-| 14 | Recap snapshots | The first time someone asks "what did I send?" |
+
+**#11 (Recap nudge at `recapMinuteLocal`) and #14 (Recap snapshots) REMOVED 2026-08-08**, along with the recap they depended on. Numbering left as-shipped rather than renumbered, so earlier references to "#11" or "#14" elsewhere still resolve.
 
 ---
 
 ## 7. Tier 3 — longer term
 
 - **Document export (print/PDF)** — the highest-value non-MVP deliverable and the place to diverge hardest. Toggl's PDF is a table because Toggl's payload is numbers. Trace's must be a *document*: dated sections, project headings, notes as flowing paragraphs, hours as a quiet right-aligned tabular annotation. It should read like a consultant's status memo.
-- **Weekly and per-client recaps** — a change of grouping key, not a new document type.
-- **Per-bullet LLM "tighten this"** — opt-in, user-invoked, input is one existing note, structurally unable to see an un-noted entry (§2.2).
 - Calendar/day view with drag-create — the best gap-finder there is, but pointer-first and a full second layout with overlap/zoom/snap logic. If built: a gap-finder that prompts for a *note*, not a scheduling grid.
 - Toggl import (the one place the negative-duration adapter is allowed to exist).
 - Account deletion + full data export, with a bounded-transaction cascade strategy.
 - Copy start link, with permalink→day resolution.
+
+**REMOVED 2026-08-08** — Weekly and per-client recaps (a change of grouping key on the recap, not a new document type) and per-bullet LLM "tighten this" (opt-in, user-invoked, structurally unable to see an un-noted entry per §2.2). Both depended on the recap, which was cut the same day; see §5 Phase 6 and §5.9.
 
 **Ruled out, not deferred:** Pomodoro, OS idle detection, activity timeline, autotracker. Two need native access, and Toggl shipped Pomodoro to five clients and deliberately not the web app.
 
@@ -653,7 +667,7 @@ Three things this plan decides but that are worth a second look before Phase 2 d
 
 1. **Derived vs stored `dayKey`** (§2.1). Decided: derived. The tradeoff is that changing your timezone re-buckets history — reversible, but visible.
 2. **`hourlyRateCents` at MVP.** It is in the schema but nothing reads it until rates ship in Tier 2. Keeping it costs nothing; dropping it means a schema change later.
-3. **`recapDays` at MVP.** Two optional strings per day. Justified only because `Next`/`Blocked` are part of the recap's value proposition, not because the recap body is stored — it is not.
+3. **`recapDays` at MVP.** Two optional strings per day. Justified only because `Next`/`Blocked` are part of the recap's value proposition, not because the recap body is stored — it is not. **RESOLVED 2026-08-08:** moot — the table is gone. The recap that justified it was removed the same day; see §5 Phase 6 and §5.9.
 
 Two things deliberately left out of MVP that the design system references:
 

@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
-import { AppHeader } from "@/components/app-header"
 import { EntryLog } from "@/components/entries/entry-log"
 import { FilterBar } from "@/components/history/filter-bar"
 import { Button } from "@/components/ui/button"
@@ -22,25 +21,15 @@ import type { Filters } from "@/lib/history-filters"
 
 const PAGE_SIZE = 100
 
-export const Route = createFileRoute("/_authed/history")({
-  head: () => ({ meta: [{ title: "History — Trace" }] }),
-  component: History,
+export const Route = createFileRoute("/_authed/reports")({
+  head: () => ({ meta: [{ title: "Reports — Trace" }] }),
+  component: Reports,
   loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
-      context.queryClient.ensureQueryData(convexQuery(api.projects.list, {})),
-      context.queryClient.ensureQueryData(convexQuery(api.tags.list, {})),
-      context.queryClient.ensureQueryData(
-        convexQuery(api.auth.getAuthenticatedUser, {})
-      ),
-    ])
+    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
   },
 })
 
-function History() {
-  const { data: user } = useSuspenseQuery(
-    convexQuery(api.auth.getAuthenticatedUser, {})
-  )
+function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects, projectsById } = useClassifiers()
 
@@ -90,9 +79,9 @@ function History() {
   }, [results, filters, projectsById])
 
   /*
-   * History drops a running entry ENTIRELY — not just its row, its time too.
+   * Reports drops a running entry ENTIRELY — not just its row, its time too.
    *
-   * `/today` keeps the running time in the day total, because "today so far" is
+   * `/timer` keeps the running time in the day total, because "today so far" is
    * a live number people watch. Here it would be neither live nor complete:
    * `Date.now()` is not a dependency of this memo, so the elapsed figure freezes
    * at whenever `filtered` last changed, and `entries.rangeSummary` — the
@@ -131,9 +120,7 @@ function History() {
     filtering && (status === "CanLoadMore" || status === "LoadingMore")
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
-      <AppHeader email={user.email} />
-
+    <div className="flex flex-col">
       <div className="flex flex-col gap-3 px-4 py-3">
         <FilterBar
           filters={filters}
@@ -199,7 +186,7 @@ function History() {
         </p>
       </div>
 
-      <main className="flex-1 border-t border-edge-soft">
+      <div className="flex-1 border-t border-edge-soft">
         {/*
           `stillLoading` is part of this condition because the auto-loader
           starts from an empty filtered set: without it the page told the user
@@ -231,7 +218,7 @@ function History() {
             </Button>
           </div>
         ) : null}
-      </main>
+      </div>
     </div>
   )
 }

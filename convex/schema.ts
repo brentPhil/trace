@@ -171,28 +171,6 @@ export default defineSchema({
     runawayThresholdMs: v.number(),
     /** Opt-out for the tab-title clock, which a screen reader announces. */
     tabTitleClock: v.boolean(),
-    /** Minutes past local midnight, default 1050 (17:30). Minutes rather than
-     *  hours because the default is not on an hour, and because an hourly
-     *  schedule cannot serve Asia/Kolkata, Asia/Kathmandu or Pacific/Chatham
-     *  at all. */
-    recapMinuteLocal: v.number(),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
-
-  /**
-   * Day-scoped user prose only.
-   *
-   * The recap body itself is NEVER stored — it is a pure function of the day's
-   * entries, derived on read. Storing it would create an invalidation problem
-   * with a branch for every way an entry can change. These two optional strings
-   * are the only part of a recap the user types that is not already an entry.
-   */
-  recapDays: defineTable({
-    userId: v.string(),
-    /** "YYYY-MM-DD" in the user's timezone. */
-    day: v.string(),
-    next: v.optional(v.string()),
-    blocked: v.optional(v.string()),
-    updatedAt: v.number(),
-  }).index("by_user_day", ["userId", "day"]),
 })

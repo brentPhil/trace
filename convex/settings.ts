@@ -22,7 +22,6 @@ export type Settings = {
   timeFormat: "12" | "24"
   runawayThresholdMs: number
   tabTitleClock: boolean
-  recapMinuteLocal: number
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -32,7 +31,6 @@ export const SETTINGS_DEFAULTS: Settings = {
   timeFormat: "24",
   runawayThresholdMs: 8 * 60 * 60 * 1000,
   tabTitleClock: true,
-  recapMinuteLocal: 17 * 60 + 30,
 }
 
 async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
@@ -49,7 +47,6 @@ const settingsReturns = v.object({
   timeFormat: v.union(v.literal("12"), v.literal("24")),
   runawayThresholdMs: v.number(),
   tabTitleClock: v.boolean(),
-  recapMinuteLocal: v.number(),
 })
 
 async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
@@ -62,7 +59,6 @@ async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
     timeFormat: row.timeFormat,
     runawayThresholdMs: row.runawayThresholdMs,
     tabTitleClock: row.tabTitleClock,
-    recapMinuteLocal: row.recapMinuteLocal,
   }
 }
 
@@ -139,7 +135,6 @@ const updateArgs = {
   timeFormat: v.optional(v.union(v.literal("12"), v.literal("24"))),
   runawayThresholdMs: v.optional(v.number()),
   tabTitleClock: v.optional(v.boolean()),
-  recapMinuteLocal: v.optional(v.number()),
 }
 
 type UpdateArgs = {
@@ -149,7 +144,6 @@ type UpdateArgs = {
   timeFormat?: "12" | "24"
   runawayThresholdMs?: number
   tabTitleClock?: boolean
-  recapMinuteLocal?: number
 }
 
 async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {

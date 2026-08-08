@@ -15,10 +15,10 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignupRouteImport } from './routes/signup'
-import { Route as AuthedHistoryRouteImport } from './routes/_authed/history'
 import { Route as AuthedProjectsRouteImport } from './routes/_authed/projects'
+import { Route as AuthedReportsRouteImport } from './routes/_authed/reports'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
-import { Route as AuthedTodayRouteImport } from './routes/_authed/today'
+import { Route as AuthedTimerRouteImport } from './routes/_authed/timer'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -50,14 +50,14 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthedHistoryRoute = AuthedHistoryRouteImport.update({
-  id: '/history',
-  path: '/history',
-  getParentRoute: () => AuthedRoute,
-} as any)
 const AuthedProjectsRoute = AuthedProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedReportsRoute = AuthedReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
@@ -65,9 +65,9 @@ const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthedRoute,
 } as any)
-const AuthedTodayRoute = AuthedTodayRouteImport.update({
-  id: '/today',
-  path: '/today',
+const AuthedTimerRoute = AuthedTimerRouteImport.update({
+  id: '/timer',
+  path: '/timer',
   getParentRoute: () => AuthedRoute,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -82,10 +82,10 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/history': typeof AuthedHistoryRoute
   '/projects': typeof AuthedProjectsRoute
+  '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
-  '/today': typeof AuthedTodayRoute
+  '/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -94,10 +94,10 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/history': typeof AuthedHistoryRoute
   '/projects': typeof AuthedProjectsRoute
+  '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
-  '/today': typeof AuthedTodayRoute
+  '/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -108,10 +108,10 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/_authed/history': typeof AuthedHistoryRoute
   '/_authed/projects': typeof AuthedProjectsRoute
+  '/_authed/reports': typeof AuthedReportsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
-  '/_authed/today': typeof AuthedTodayRoute
+  '/_authed/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
@@ -122,10 +122,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
-    | '/history'
     | '/projects'
+    | '/reports'
     | '/settings'
-    | '/today'
+    | '/timer'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -134,10 +134,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
-    | '/history'
     | '/projects'
+    | '/reports'
     | '/settings'
-    | '/today'
+    | '/timer'
     | '/api/auth/$'
   id:
     | '__root__'
@@ -147,10 +147,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
-    | '/_authed/history'
     | '/_authed/projects'
+    | '/_authed/reports'
     | '/_authed/settings'
-    | '/_authed/today'
+    | '/_authed/timer'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
@@ -208,18 +208,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authed/history': {
-      id: '/_authed/history'
-      path: '/history'
-      fullPath: '/history'
-      preLoaderRoute: typeof AuthedHistoryRouteImport
-      parentRoute: typeof AuthedRoute
-    }
     '/_authed/projects': {
       id: '/_authed/projects'
       path: '/projects'
       fullPath: '/projects'
       preLoaderRoute: typeof AuthedProjectsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/reports': {
+      id: '/_authed/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthedReportsRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/settings': {
@@ -229,11 +229,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsRouteImport
       parentRoute: typeof AuthedRoute
     }
-    '/_authed/today': {
-      id: '/_authed/today'
-      path: '/today'
-      fullPath: '/today'
-      preLoaderRoute: typeof AuthedTodayRouteImport
+    '/_authed/timer': {
+      id: '/_authed/timer'
+      path: '/timer'
+      fullPath: '/timer'
+      preLoaderRoute: typeof AuthedTimerRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/api/auth/$': {
@@ -247,17 +247,17 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedRouteChildren {
-  AuthedHistoryRoute: typeof AuthedHistoryRoute
   AuthedProjectsRoute: typeof AuthedProjectsRoute
+  AuthedReportsRoute: typeof AuthedReportsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
-  AuthedTodayRoute: typeof AuthedTodayRoute
+  AuthedTimerRoute: typeof AuthedTimerRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
-  AuthedHistoryRoute: AuthedHistoryRoute,
   AuthedProjectsRoute: AuthedProjectsRoute,
+  AuthedReportsRoute: AuthedReportsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
-  AuthedTodayRoute: AuthedTodayRoute,
+  AuthedTimerRoute: AuthedTimerRoute,
 }
 
 const AuthedRouteWithChildren =

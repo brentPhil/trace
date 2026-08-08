@@ -290,7 +290,7 @@ Step 3 of the migration. Only legal because Task 2 cleared the data.
 - Modify: `convex/schema.ts`, `convex/settings.ts`
 
 **Interfaces:**
-- Consumes: `internal.purgeRecap.run` must have been run.
+- Consumes: `internal.migrations.purgeRecap` must have been run.
 - Produces: nothing. `api.recap` ceases to exist.
 
 - [ ] **Step 1: Confirm nothing outside the deleted set imports these**
@@ -389,6 +389,8 @@ Six sites referenced a feature that no longer exists. Marked as cut with the
 date and reason rather than deleted outright — the plan is a record of what was
 decided, and silently erasing a shipped-then-removed phase makes it a worse one."
 ```
+
+**Deployment risk this leaves behind.** `purgeRecap` (`internal.migrations.purgeRecap`) existed for exactly one reason: Convex validates stored documents against the schema, so `recapMinuteLocal` and the `recapDays` table could not be dropped from `schema.ts` while any row still carried them. Step 1 above deletes that migration once this developer's own deployment has already been purged and the schema change has landed. Any OTHER deployment — a prod or preview environment that was seeded or restored from a snapshot taken before this branch's Task 2 ran — still has rows carrying `recapMinuteLocal` or sitting in `recapDays`, and its first deploy of this schema will fail validation with nothing left in the codebase to fix it. If that happens, resurrect `purgeRecap` from commit `8824cb7` (`convex/migrations.ts`), run it against that deployment, then delete it again.
 
 ---
 
