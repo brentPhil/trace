@@ -154,7 +154,13 @@ function Settings() {
               type="checkbox"
               checked={settings.tabTitleClock}
               onChange={(event) => save({ tabTitleClock: event.target.checked })}
-              className="size-4 accent-[var(--enlarger)]"
+              // NOT `--enlarger`: this checkbox's own CHECKED state is a
+              // setting being toggled, not a timer running — the Cold Light
+              // Rule reads it the same way it reads a checked box anywhere
+              // else in Settings, and this was the only unconditional
+              // `--enlarger` in the codebase. Matches the neutral `--ink`
+              // accent the `Radio` controls in this file already use.
+              className="size-4 accent-[var(--ink)]"
             />
             Show the running timer in the browser tab
           </label>

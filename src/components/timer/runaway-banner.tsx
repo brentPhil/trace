@@ -98,7 +98,22 @@ function BannerAction({
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         destructive
           ? "text-muted-foreground hover:text-alarm"
-          : "text-foreground hover:text-enlarger"
+          : // NOT `--enlarger`. The banner is genuinely ABOUT a running timer,
+            // but that does not license spending cold light on a hover state:
+            // the Cold Light Rule reserves it for the signal that something
+            // IS running (the bar's border, icon, "Recording", the tab
+            // clock) precisely so it stays a singular, unambiguous marker in
+            // peripheral vision. A button's :hover feedback is decoration —
+            // the Two Temperatures Rule's own words for the one use it
+            // explicitly rules out — regardless of what the button is on.
+            //
+            // Not a plain `hover:text-foreground` either: this action is
+            // already `text-foreground` at rest (full ink, more prominent
+            // than "Discard it" beside it, matching its status as the
+            // default of the two), so that would be a no-op. Dimming
+            // slightly on hover keeps a real, visible state change without
+            // reaching for a second hue.
+            "text-foreground hover:text-foreground/80"
       )}
     >
       {children}

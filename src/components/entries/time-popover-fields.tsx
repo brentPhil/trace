@@ -244,7 +244,13 @@ function DayCell({
         "tabular size-8 rounded-md text-sm transition-colors",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         selected
-          ? "bg-enlarger font-medium text-ground"
+          ? // NOT cold light: this marks which DAY is selected in a date
+            // picker, not whether anything is running — a popover opened on
+            // a completed entry would otherwise show cold light next to a
+            // dash where the end time goes. `bg-primary`/`text-primary-foreground`
+            // is the same "affirmative action, deliberately not enlarger"
+            // treatment the start/stop button itself uses when idle.
+            "bg-primary font-medium text-primary-foreground"
           : "text-foreground hover:bg-surface-raised"
       )}
     >
