@@ -20,7 +20,11 @@ import type { LucideIcon } from "lucide-react"
  * edit. Toggl's web app has a two-level nav with a dozen entries and the tracker
  * itself is one of them.
  */
-export const NAV_ITEMS: Array<{ to: string; label: string; icon: LucideIcon }> = [
+export const NAV_ITEMS: Array<{
+  to: "/timer" | "/reports" | "/projects" | "/settings"
+  label: string
+  icon: LucideIcon
+}> = [
   { to: "/timer", label: "Timer", icon: Clock },
   { to: "/reports", label: "Reports", icon: Table2 },
   { to: "/projects", label: "Projects", icon: FolderKanban },
@@ -41,14 +45,8 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        {/* `to={NAV_ITEMS[0].to}`, not a `"/timer"` literal. `/timer` itself
-            landed in Task 10 (renaming `/today`) and would typecheck fine now,
-            but `NAV_ITEMS` is typed as a group and `/reports` — Task 11's
-            rename of `/history` — does not exist in the route tree yet, so
-            tightening the array's `to` field to a literal union still fails
-            compilation. Routing through the already-`string`-typed NAV_ITEMS
-            entry widens the type before it reaches `Link`, same destination
-            either way; revisit once `/reports` lands. */}
+        {/* `to={NAV_ITEMS[0].to}`, not a `"/timer"` literal, so the header
+            link always points at whatever the first nav destination is. */}
         <Link
           to={NAV_ITEMS[0].to}
           className="flex items-center gap-2 px-2 py-1.5 text-base font-medium tracking-tight"

@@ -7,7 +7,7 @@ const DEL = String.fromCharCode(0x7f)
 
 describe("safeRedirect", () => {
   it("allows same-origin absolute paths", () => {
-    expect(safeRedirect("/today")).toBe("/today")
+    expect(safeRedirect("/timer")).toBe("/timer")
     expect(safeRedirect("/")).toBe("/")
     expect(safeRedirect("/a/b/c?x=1#frag")).toBe("/a/b/c?x=1#frag")
   })
@@ -17,7 +17,7 @@ describe("safeRedirect", () => {
     expect(safeRedirect(null)).toBe("/")
     expect(safeRedirect("")).toBe("/")
     expect(safeRedirect(42)).toBe("/")
-    expect(safeRedirect({ toString: () => "/today" })).toBe("/")
+    expect(safeRedirect({ toString: () => "/timer" })).toBe("/")
   })
 
   it("rejects absolute URLs to another origin", () => {
@@ -40,12 +40,12 @@ describe("safeRedirect", () => {
   // DEL in source is invisible in every editor and diff, which makes the test
   // unreadable and easy to break by accident.
   it("rejects control characters and whitespace used to smuggle values", () => {
-    expect(safeRedirect("/today\nSet-Cookie: x=1")).toBe("/")
-    expect(safeRedirect("/today\tmore")).toBe("/")
+    expect(safeRedirect("/timer\nSet-Cookie: x=1")).toBe("/")
+    expect(safeRedirect("/timer\tmore")).toBe("/")
     expect(safeRedirect("/ /evil.example")).toBe("/")
-    expect(safeRedirect(" /today")).toBe("/")
-    expect(safeRedirect(NUL + "/today")).toBe("/")
-    expect(safeRedirect("/today" + DEL)).toBe("/")
+    expect(safeRedirect(" /timer")).toBe("/")
+    expect(safeRedirect(NUL + "/timer")).toBe("/")
+    expect(safeRedirect("/timer" + DEL)).toBe("/")
   })
 
   it("honours a custom fallback", () => {
