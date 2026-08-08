@@ -38,12 +38,15 @@ const TITLE_DEBOUNCE_MS = 400
  * What the bar is allowed to do.
  *
  * Passed in rather than reached for with a hook, matching `EntryRowActions`.
- * The bar is rendered against fixtures in the design harness, and a component
- * that reaches for live mutations internally cannot be rendered inertly — it
- * fired real writes at the backend with fixture ids, and had the harness been
- * viewed while signed in, its start button would have stopped a real timer.
- * Making the writes an argument is what makes "render this without a backend"
- * expressible at all.
+ *
+ * This began as a bug fix. A design harness rendered the bar against fixtures
+ * while the bar reached for live mutations internally, so it fired real writes
+ * at the backend carrying fixture ids — and had that page been opened while
+ * signed in, its start button would have stopped a real timer. The harness is
+ * gone, but the invariant it forced is the more valuable half: making the writes
+ * an argument is what makes "render this with no backend" expressible, which is
+ * why every test in `timer-bar.test.tsx` can assert on what WOULD have been
+ * written without a server anywhere near it.
  */
 export type Classification = {
   projectId: Id<"projects"> | null
@@ -85,6 +88,7 @@ export function TimerBar({
   tags,
   suggestions = [],
   onStopped,
+  onError,
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
@@ -103,6 +107,18 @@ export function TimerBar({
    * just did is the moment they say they have stopped doing it.
    */
   onStopped?: (entry: Doc<"timeEntries">) => void
+  /**
+   * Called when a start, stop or discard REJECTS.
+   *
+   * A prop rather than a toast raised in here, for the same reason the writes
+   * are props: the bar should not reach for the app's toast manager, and it has
+   * to stay renderable in a test with no provider above it.
+   *
+   * Optional, but its absence is a real gap wherever the bar is used for real —
+   * a start that silently did not happen is the worst outcome this product has,
+   * since the user walks away believing time is being recorded.
+   */
+  onError?: (thrown: unknown) => void
 }) {
   const { start, stop, discard, setTitle, classify } = actions
   const [pending, setPending] = useState(false)
@@ -360,6 +376,20 @@ export function TimerBar({
         )
         inputRef.current?.focus()
       }
+    } catch (thrown) {
+      // Previously only `finally`, so a rejected start or stop was an unhandled
+      // promise rejection and the user saw nothing at all. Both call sites are
+      // `void onToggle()`, so this is the only place the failure can surface.
+      //
+      // Announced as well as reported, because the button's icon does not move
+      // on failure — for anyone not watching it, silence is indistinguishable
+      // from success.
+      announce(
+        running !== null
+          ? "The timer did not stop. It is still running."
+          : "The timer did not start. Nothing is being recorded."
+      )
+      onError?.(thrown)
     } finally {
       setPending(false)
     }
@@ -538,7 +568,10 @@ export function TimerBar({
             )}
           >
             {matches.map((s, index) => (
-              <li key={`${s.title}-${index}`}>
+              // `role="none"`: a listbox must own its options directly, and a
+              // plain <li> keeps its implicit `listitem` role and sits between
+              // the two in the accessibility tree.
+              <li role="none" key={`${s.title}-${index}`}>
                 <button
                   type="button"
                   id={`timer-suggestion-${index}`}
@@ -590,8 +623,23 @@ export function TimerBar({
           <button
             type="button"
             onClick={() => {
-              announce("Timer discarded. Nothing was recorded.")
               void discard()
+                .then(() => {
+                  // Announced AFTER the write lands, not before. Announcing
+                  // first told a screen-reader user the timer was discarded
+                  // while it was in fact still running, if the write failed.
+                  announce("Timer discarded. Nothing was recorded.")
+                  // This whole row unmounts on success, taking the focused
+                  // button with it — focus falls to <body> and the next Tab
+                  // restarts from the top of the document. Hand it to the title
+                  // field, which is where someone who just discarded a timer is
+                  // going next anyway.
+                  inputRef.current?.focus()
+                })
+                .catch((thrown: unknown) => {
+                  announce("The timer was not discarded. It is still running.")
+                  onError?.(thrown)
+                })
             }}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-destructive"
           >

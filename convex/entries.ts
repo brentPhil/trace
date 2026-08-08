@@ -1,13 +1,16 @@
 import { v } from "convex/values"
-import { paginationOptsValidator } from "convex/server"
+import { paginationOptsValidator, paginationResultValidator } from "convex/server"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { assertOwned, getOwned, getOwnedIncludingDeleted } from "./owned"
 import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
+import { timeEntryDoc } from "./lib/docs"
+import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
 import type { EntryTimes, TimeEdit, TimesResult } from "./lib/entryTimes"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
+import type { PaginationOptions } from "convex/server"
 
 /** A start timestamp further ahead than this is treated as a wrong clock. */
 const CLOCK_SKEW_TOLERANCE_MS = 60_000
@@ -174,6 +177,7 @@ async function getRunningImpl(
 
 export const getRunning = query({
   args: {},
+  returns: v.union(timeEntryDoc, v.null()),
   handler: async (ctx) => await getRunningImpl(ctx, await requireUserId(ctx)),
 })
 
@@ -223,6 +227,7 @@ const listRangeArgs = {
 
 export const listRange = query({
   args: listRangeArgs,
+  returns: v.array(timeEntryDoc),
   handler: async (ctx, args) =>
     await listRangeImpl(
       ctx,
@@ -255,27 +260,41 @@ export const listRangeAs = internalQuery({
  * ragged. That is correct rather than convenient: the alternative is a second
  * index on deletedAt whose only purpose is to make page sizes tidy.
  */
-export const listPage = query({
-  args: {
-    fromMs: v.number(),
-    toMs: v.number(),
-    paginationOpts: paginationOptsValidator,
-  },
-  handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx)
-    const result = await ctx.db
-      .query("timeEntries")
-      .withIndex("by_user_started", (q) =>
-        q.eq("userId", userId).gte("startedAt", args.fromMs).lt("startedAt", args.toMs)
-      )
-      .order("desc")
-      .paginate(args.paginationOpts)
+async function listPageImpl(
+  ctx: QueryCtx,
+  userId: string,
+  args: { fromMs: number; toMs: number; paginationOpts: PaginationOptions }
+) {
+  const result = await ctx.db
+    .query("timeEntries")
+    .withIndex("by_user_started", (q) =>
+      q.eq("userId", userId).gte("startedAt", args.fromMs).lt("startedAt", args.toMs)
+    )
+    .order("desc")
+    .paginate(args.paginationOpts)
 
-    return {
-      ...result,
-      page: result.page.filter((row) => row.deletedAt === null),
-    }
-  },
+  return {
+    ...result,
+    page: result.page.filter((row) => row.deletedAt === null),
+  }
+}
+
+const listPageArgs = {
+  fromMs: v.number(),
+  toMs: v.number(),
+  paginationOpts: paginationOptsValidator,
+}
+
+export const listPage = query({
+  args: listPageArgs,
+  returns: paginationResultValidator(timeEntryDoc),
+  handler: async (ctx, args) => await listPageImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const listPageAs = internalQuery({
+  args: { ...listPageArgs, userId: v.string() },
+  returns: paginationResultValidator(timeEntryDoc),
+  handler: async (ctx, { userId, ...args }) => await listPageImpl(ctx, userId, args),
 })
 
 const summaryReturns = v.object({
@@ -288,9 +307,6 @@ const summaryReturns = v.object({
   /** True when the range holds more entries than this scan looked at. */
   truncated: v.boolean(),
 })
-
-/** Above this, the summary stops being exact and says so. */
-const SUMMARY_SCAN_LIMIT = 5_000
 
 /**
  * Exact totals for a whole range, independent of how much of it is paginated

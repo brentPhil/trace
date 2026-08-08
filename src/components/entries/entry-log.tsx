@@ -1,4 +1,4 @@
-﻿import { useCallback, useState } from "react"
+import { useCallback, useState } from "react"
 import { DayList } from "@/components/entries/day-list"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { Toast } from "@/components/ui/toast"
@@ -54,13 +54,13 @@ export function EntryLog({
    * Deletes, then offers the way back.
    *
    * The snapshot is captured BEFORE the mutation, because after it the row is
-   * gone from every query the toast could read it from â€” and the toast has to
+   * gone from every query the toast could read it from — and the toast has to
    * be able to name what it removed and to put that exact row back.
    */
   const onRemove = useCallback(
     (entry: Entry) => {
       const title = entry.title.trim()
-      const label = title === "" ? "entry" : `â€œ${title}â€`
+      const label = title === "" ? "entry" : `“${title}”`
 
       void (async () => {
         try {

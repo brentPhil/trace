@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
@@ -23,7 +23,7 @@ import type { Filters } from "@/lib/history-filters"
 const PAGE_SIZE = 100
 
 export const Route = createFileRoute("/_authed/history")({
-  head: () => ({ meta: [{ title: "History â€” Trace" }] }),
+  head: () => ({ meta: [{ title: "History — Trace" }] }),
   component: History,
   loader: async ({ context }) => {
     await Promise.all([
@@ -72,7 +72,7 @@ function History() {
    *
    * Text and the preset chips are scans over what has been fetched, so a
    * half-loaded period would silently search a prefix of itself and report a
-   * total for it â€” a number that looks authoritative and is not. The date
+   * total for it — a number that looks authoritative and is not. The date
    * filter bounds the range, so this terminates. Browsing without a filter
    * still paginates normally.
    */
@@ -82,7 +82,7 @@ function History() {
   }, [filtering, status, loadMore])
 
   const filtered = useMemo(() => {
-    // Built inside the memo so the dependency list is honest â€” a `nameOf`
+    // Built inside the memo so the dependency list is honest — a `nameOf`
     // declared outside would be a new function every render.
     const nameOf = (id: string | undefined) =>
       id === undefined ? "" : (projectsById.get(id)?.name ?? "")
@@ -99,7 +99,7 @@ function History() {
   /*
    * "LoadingMore" counts as still loading, not just "CanLoadMore".
    *
-   * The auto-loader spends almost all of its time in LoadingMore â€” CanLoadMore
+   * The auto-loader spends almost all of its time in LoadingMore — CanLoadMore
    * is the instant between two fetches. Checking only the latter meant the
    * partial filtered total was presented as final for essentially the whole
    * bulk load: exactly the half-loaded number this page goes out of its way to
@@ -122,14 +122,14 @@ function History() {
         />
 
         {/*
-          Totals as a sentence, not a dashboard â€” and two different sentences,
+          Totals as a sentence, not a dashboard — and two different sentences,
           because the honest claim genuinely changes. Unfiltered, the server has
           counted the whole range exactly. Filtered, the number describes what
           is on screen, and says so.
         */}
         <p aria-live="polite" className="text-sm text-muted-foreground">
           {stillLoading ? (
-            "Loading the rest of this periodâ€¦"
+            "Loading the rest of this period…"
           ) : filtering ? (
             <>
               <strong className="font-medium tabular text-foreground">
@@ -169,7 +169,7 @@ function History() {
               {summary.truncated ? (
                 <span className="text-alarm">
                   {" "}
-                  This period is too large to total exactly â€” narrow the dates.
+                  This period is too large to total exactly — narrow the dates.
                 </span>
               ) : null}
             </>

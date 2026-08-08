@@ -147,13 +147,24 @@ export function EntryRow({
               type="button"
               onClick={() => actions.onNoteOpen(entry)}
               className={cn(
-                "touch-target -mx-1 max-w-full truncate rounded-sm px-1 py-0.5 text-left",
+                "touch-target -mx-1 min-w-0 max-w-full rounded-sm px-1 py-0.5 text-left",
                 "text-xs text-muted-foreground transition-colors",
                 "hover:bg-surface-raised/70 hover:text-foreground",
                 "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               )}
             >
-              {note}
+              {/*
+                `truncate` lives on this span rather than on the button, and it
+                has to. `truncate` sets overflow:hidden, and `.touch-target` sets
+                position:relative — which makes the button the containing block
+                for its OWN ::after, so the 2px the pseudo-element hangs above
+                and below is clipped off by the overflow rule meant for the text.
+                The control silently stayed 20px and missed WCAG 2.2 SC 2.5.8,
+                while the class that was supposed to fix it was right there in
+                the list. Clipping the text one level in leaves the button's own
+                overflow visible.
+              */}
+              <span className="block truncate">{note}</span>
             </button>
           ) : (
           // ALWAYS visible, never a hover reveal. PRODUCT.md: missing notes are

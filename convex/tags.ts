@@ -3,6 +3,8 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { requireUserId } from "./auth"
 import { getOwned } from "./owned"
 import { traceError } from "./errors"
+import { ENTRY_SCAN_LIMIT } from "./lib/scan"
+import { tagDoc } from "./lib/docs"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
@@ -53,6 +55,7 @@ async function listImpl(ctx: QueryCtx, userId: string): Promise<Array<Doc<"tags"
 
 export const list = query({
   args: {},
+  returns: v.array(tagDoc),
   handler: async (ctx) => await listImpl(ctx, await requireUserId(ctx)),
 })
 
@@ -162,27 +165,31 @@ export const renameAs = internalMutation({
 // ---------------------------------------------------------------------------
 
 /**
- * The most entries a tag delete will read before giving up.
- *
- * Convex enforces a per-transaction read limit, and exceeding it fails the
- * mutation with an internal error rather than anything a user could act on.
- * A bound turns that into a refusal with a sentence.
- */
-const TAG_SCAN_LIMIT = 4_096
-
-/**
  * Deletes a tag, and REFUSES while any live entry carries it.
  *
  * Same contract as projects, for the same reason: no dangling reference means
  * no denormalised copy, which means a rename fixes history everywhere.
  *
  * There is no index on `tagIds` — Convex cannot index array membership — so
- * this scans. The scan is BOUNDED: an unbounded `.collect()` over every entry a
- * heavy user has ever recorded blows the per-transaction read limit, and the
- * failure is an internal error rather than something the user can do anything
- * with. Deleting a tag is rare and deliberate, so a bound that occasionally
- * says "too many to check" is a far better outcome than one that occasionally
- * throws.
+ * proving a tag is unused means reading EVERY entry the account has, not just
+ * the ones that carry it. That is the difference from `projects.remove`, which
+ * has `by_user_project` and reads only its own.
+ *
+ * The scan is bounded, because an unbounded `.collect()` over a long history
+ * exceeds the per-transaction byte limit and fails with an internal error the
+ * user can do nothing with.
+ *
+ * KNOWN LIMITATION, stated plainly because the bound is not the whole story:
+ * the scan is not filtered by tag, so once an account passes ENTRY_SCAN_LIMIT
+ * entries in total, this refuses for EVERY tag, permanently — including a tag
+ * created this morning and used on nothing. It is not an occasional refusal
+ * that a heavy user meets now and then; past the threshold, tag deletion simply
+ * stops working. Renaming still works and still reaches every entry, so the tag
+ * remains manageable, but it cannot be removed.
+ *
+ * The fix is an `entryTags` join table indexed by tag, which turns this whole
+ * function into a single indexed lookup. That is a schema change with a
+ * backfill, so it is recorded as follow-up work rather than smuggled in here.
  */
 async function removeImpl(ctx: MutationCtx, userId: string, tagId: Id<"tags">) {
   const tag = await getOwned(ctx, userId, "tags", tagId)
@@ -190,10 +197,10 @@ async function removeImpl(ctx: MutationCtx, userId: string, tagId: Id<"tags">) {
   const entries = await ctx.db
     .query("timeEntries")
     .withIndex("by_user_started", (q) => q.eq("userId", userId))
-    .take(TAG_SCAN_LIMIT + 1)
+    .take(ENTRY_SCAN_LIMIT + 1)
 
   const live = entries
-    .slice(0, TAG_SCAN_LIMIT)
+    .slice(0, ENTRY_SCAN_LIMIT)
     .filter((entry) => entry.deletedAt === null && entry.tagIds.includes(tag._id))
 
   if (live.length > 0) {
@@ -205,12 +212,16 @@ async function removeImpl(ctx: MutationCtx, userId: string, tagId: Id<"tags">) {
   }
 
   // Nothing found, but not everything was looked at — so "it is unused" is not
-  // a claim this can make. Renaming the tag to something harmless is the
-  // available answer, and it is one the user can actually take.
-  if (entries.length > TAG_SCAN_LIMIT) {
+  // a claim this can make, and it does not make it.
+  //
+  // The message does not offer renaming as a substitute. Renaming is a useful
+  // thing to do and it does reach every entry, but it does not delete the tag,
+  // and telling someone to rename when they asked to delete is answering a
+  // question they did not ask. Better to say what is true.
+  if (entries.length > ENTRY_SCAN_LIMIT) {
     traceError(
       "IN_USE",
-      "You have too many entries to check this tag against. Rename it instead — every entry that carries it will follow."
+      "This account has too many entries to check a tag against, so deleting one is not possible here. Renaming it still works and reaches every entry that carries it."
     )
   }
 

@@ -23,39 +23,71 @@ import { v } from "convex/values"
  *     encoding is not adopted: a field whose units flip with its sign turns
  *     every sum into a place to forget a branch.
  */
+/*
+ * The field shapes are named consts rather than object literals inline in
+ * `defineTable`, so `convex/lib/docs.ts` can build the `returns` validators for
+ * the public queries from the SAME definitions the tables are declared with.
+ * Hand-copied return validators drift from the schema silently, and a validator
+ * that has drifted is worse than none: it rejects documents that are in fact
+ * correct, at runtime, in production.
+ */
+export const timeEntryFields = {
+  userId: v.string(),
+  /** UUIDv7 minted by the client before the mutation is sent. Makes a create
+   *  idempotent, so a retry after a lost response returns the existing row
+   *  instead of duplicating the entry — which is exactly what happens on a
+   *  phone with bad signal, when nobody is watching. */
+  clientKey: v.string(),
+  /** "" is allowed and normal. Blocking start on a missing title would
+   *  destroy the reason the product exists. Also the grouping and
+   *  autocomplete key. */
+  title: v.string(),
+  /** The differentiator. Never a grouping, matching, or autocomplete key —
+   *  that is the mistake that makes Toggl's single description field
+   *  unusable for prose. */
+  note: v.optional(v.string()),
+  startedAt: v.number(),
+  /** null means running. */
+  endedAt: v.union(v.number(), v.null()),
+  /** Denormalised because Convex has no generated columns and every total in
+   *  the product sums it. convex/lib/entryTimes.ts is the sole writer, which
+   *  is what keeps it honest. null exactly when endedAt is null. */
+  durationMs: v.union(v.number(), v.null()),
+  projectId: v.optional(v.id("projects")),
+  /** Unique, sorted, capped. Flat by design — hierarchy is what turns tags
+   *  into a second project taxonomy. */
+  tagIds: v.array(v.id("tags")),
+  billable: v.boolean(),
+  /** "web" | "import" | "api". The cheapest observability there is. */
+  source: v.string(),
+  updatedAt: v.number(),
+  deletedAt: v.union(v.number(), v.null()),
+}
+
+export const projectFields = {
+  userId: v.string(),
+  name: v.string(),
+  /** A key into a fixed palette, not a free-form colour. Legibility, never
+   *  the sole carrier of meaning. */
+  color: v.string(),
+  /** Archive, never delete. Last year's entries must still render their
+   *  project name. */
+  archived: v.boolean(),
+  billableByDefault: v.boolean(),
+  hourlyRateCents: v.optional(v.number()),
+  updatedAt: v.number(),
+  deletedAt: v.union(v.number(), v.null()),
+}
+
+export const tagFields = {
+  userId: v.string(),
+  name: v.string(),
+  updatedAt: v.number(),
+  deletedAt: v.union(v.number(), v.null()),
+}
+
 export default defineSchema({
-  timeEntries: defineTable({
-    userId: v.string(),
-    /** UUIDv7 minted by the client before the mutation is sent. Makes a create
-     *  idempotent, so a retry after a lost response returns the existing row
-     *  instead of duplicating the entry — which is exactly what happens on a
-     *  phone with bad signal, when nobody is watching. */
-    clientKey: v.string(),
-    /** "" is allowed and normal. Blocking start on a missing title would
-     *  destroy the reason the product exists. Also the grouping and
-     *  autocomplete key. */
-    title: v.string(),
-    /** The differentiator. Never a grouping, matching, or autocomplete key —
-     *  that is the mistake that makes Toggl's single description field
-     *  unusable for prose. */
-    note: v.optional(v.string()),
-    startedAt: v.number(),
-    /** null means running. */
-    endedAt: v.union(v.number(), v.null()),
-    /** Denormalised because Convex has no generated columns and every total in
-     *  the product sums it. convex/lib/entryTimes.ts is the sole writer, which
-     *  is what keeps it honest. null exactly when endedAt is null. */
-    durationMs: v.union(v.number(), v.null()),
-    projectId: v.optional(v.id("projects")),
-    /** Unique, sorted, capped. Flat by design — hierarchy is what turns tags
-     *  into a second project taxonomy. */
-    tagIds: v.array(v.id("tags")),
-    billable: v.boolean(),
-    /** "web" | "import" | "api". The cheapest observability there is. */
-    source: v.string(),
-    updatedAt: v.number(),
-    deletedAt: v.union(v.number(), v.null()),
-  })
+  timeEntries: defineTable(timeEntryFields)
     // userId leads every index: ownership is a key prefix, not a filter that
     // someone can forget on the one query that matters.
     .index("by_user_ended", ["userId", "endedAt"])
@@ -63,27 +95,13 @@ export default defineSchema({
     .index("by_user_clientKey", ["userId", "clientKey"])
     .index("by_user_project", ["userId", "projectId"]),
 
-  projects: defineTable({
-    userId: v.string(),
-    name: v.string(),
-    /** A key into a fixed palette, not a free-form colour. Legibility, never
-     *  the sole carrier of meaning. */
-    color: v.string(),
-    /** Archive, never delete. Last year's entries must still render their
-     *  project name. */
-    archived: v.boolean(),
-    billableByDefault: v.boolean(),
-    hourlyRateCents: v.optional(v.number()),
-    updatedAt: v.number(),
-    deletedAt: v.union(v.number(), v.null()),
-  }).index("by_user_archived_name", ["userId", "archived", "name"]),
+  projects: defineTable(projectFields).index("by_user_archived_name", [
+    "userId",
+    "archived",
+    "name",
+  ]),
 
-  tags: defineTable({
-    userId: v.string(),
-    name: v.string(),
-    updatedAt: v.number(),
-    deletedAt: v.union(v.number(), v.null()),
-  }).index("by_user_name", ["userId", "name"]),
+  tags: defineTable(tagFields).index("by_user_name", ["userId", "name"]),
 
   userSettings: defineTable({
     userId: v.string(),

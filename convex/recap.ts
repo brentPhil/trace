@@ -1,4 +1,4 @@
-﻿import { v } from "convex/values"
+import { v } from "convex/values"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { SETTINGS_DEFAULTS } from "./settings"
@@ -9,12 +9,56 @@ import type { MutationCtx, QueryCtx } from "./_generated/server"
 
 const MAX_FIELD_LENGTH = 500
 
+/**
+ * The wire shape of a `RecapDoc`.
+ *
+ * Written out rather than derived, because unlike the table documents there is
+ * no schema to spread — the recap is assembled, not stored. `convex/lib/recap.ts`
+ * remains the single definition of the TYPE; this is the runtime check that the
+ * assembled value matches it, and `recap.test.ts` fails if the two drift.
+ */
+const recapBullet = v.object({
+  kind: v.union(
+    v.literal("noted"),
+    v.literal("title-only"),
+    v.literal("unlabelled"),
+    v.literal("rollup")
+  ),
+  text: v.string(),
+  durationMs: v.number(),
+  entryIds: v.array(v.string()),
+})
+
+const recapBlock = v.object({
+  projectId: v.union(v.string(), v.null()),
+  projectName: v.string(),
+  projectColor: v.union(v.string(), v.null()),
+  durationMs: v.number(),
+  billableMs: v.number(),
+  bullets: v.array(recapBullet),
+  omittedCount: v.number(),
+  omittedMs: v.number(),
+})
+
+const recapDoc = v.object({
+  day: v.string(),
+  dayLabel: v.string(),
+  totalMs: v.number(),
+  billableMs: v.number(),
+  entryCount: v.number(),
+  notedCount: v.number(),
+  blocks: v.array(recapBlock),
+  next: v.optional(v.string()),
+  blocked: v.optional(v.string()),
+  blockedIsSuggestion: v.boolean(),
+})
+
 /*
  * The recap.
  *
  * The BODY is never stored. It is a pure function of the day's entries, so
  * storing it would create an invalidation problem with a branch for every way
- * an entry can change â€” edit a note at 18:00 and a stored recap from 17:30 is
+ * an entry can change — edit a note at 18:00 and a stored recap from 17:30 is
  * silently wrong, with nothing to say so.
  *
  * The only things persisted are the two strings the user types that are not
@@ -121,6 +165,7 @@ async function buildImpl(
 
 export const get = query({
   args: { day: v.string() },
+  returns: recapDoc,
   handler: async (ctx, args) => await buildImpl(ctx, await requireUserId(ctx), args.day),
 })
 
@@ -147,7 +192,7 @@ type SetFieldsArgs = {
  * Stores `Next` / `Blocked` for a day.
  *
  * `null` clears; absent leaves alone. Without the distinction there is no way
- * to remove a Blocked line once written â€” and the prefill would then reappear
+ * to remove a Blocked line once written — and the prefill would then reappear
  * every time, which reads as the app arguing with you.
  */
 async function setFieldsImpl(ctx: MutationCtx, userId: string, args: SetFieldsArgs) {
@@ -170,7 +215,7 @@ async function setFieldsImpl(ctx: MutationCtx, userId: string, args: SetFieldsAr
     .first()
 
   if (existing === null) {
-    // A clear on a day with no row still has to be RECORDED, not skipped â€”
+    // A clear on a day with no row still has to be RECORDED, not skipped —
     // otherwise there is nothing to distinguish it from never having written
     // one, and the prefill comes back. `next` has no prefill, so nothing needs
     // storing when it is merely absent.
@@ -196,7 +241,7 @@ async function setFieldsImpl(ctx: MutationCtx, userId: string, args: SetFieldsAr
 /**
  * An empty string is a TOMBSTONE: "the user cleared this".
  *
- * Deleting the field instead â€” the obvious implementation â€” makes "cleared"
+ * Deleting the field instead — the obvious implementation — makes "cleared"
  * indistinguishable from "never set", and the read path falls through to
  * `suggestBlocked` and puts the sentence the user just deleted straight back
  * into the field. They then delete it again, and it returns again. There is no

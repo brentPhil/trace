@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
@@ -15,7 +15,7 @@ import { api } from "../../../convex/_generated/api"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 export const Route = createFileRoute("/_authed/projects")({
-  head: () => ({ meta: [{ title: "Projects â€” Trace" }] }),
+  head: () => ({ meta: [{ title: "Projects — Trace" }] }),
   component: Projects,
   loader: async ({ context }) => {
     await Promise.all([
@@ -50,7 +50,7 @@ function Projects() {
           </div>
           {live.length === 0 ? (
             <Empty>
-              No projects yet. A project is who the work is for â€” a client, or a
+              No projects yet. A project is who the work is for — a client, or a
               product. You can also make one straight from the timer bar.
             </Empty>
           ) : (
@@ -84,8 +84,8 @@ function Projects() {
           <div className="flex flex-col gap-1">
             <h2 className="text-sm font-semibold">Tags</h2>
             <p className="max-w-prose text-xs text-muted-foreground">
-              Flat by design. Tags cut across projects â€” â€œdeep-workâ€, â€œmeetingâ€,
-              â€œreworkâ€ â€” which is the one thing a project cannot tell you.
+              Flat by design. Tags cut across projects — “deep-work”, “meeting”,
+              “rework” — which is the one thing a project cannot tell you.
             </p>
           </div>
           {tags.length === 0 ? (
@@ -150,7 +150,7 @@ function ProjectRow({ project }: { project: Doc<"projects"> }) {
       {/*
         Billable-by-default is a checkbox rather than a toggle icon, because
         unlike the per-entry control this one is a SETTING and needs its own
-        label. It applies at creation only â€” changing it never rewrites work
+        label. It applies at creation only — changing it never rewrites work
         that has already been recorded, let alone invoiced.
       */}
       <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">

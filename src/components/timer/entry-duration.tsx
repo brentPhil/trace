@@ -1,14 +1,14 @@
-import { useElapsedMs, useMinute } from "@/hooks/use-clock"
+import { useElapsedMs } from "@/hooks/use-clock"
 import { formatClock, msToIsoDuration, spokenDuration } from "@shared/duration"
 import { cn } from "@/lib/utils"
 
 /**
  * A duration, live if the entry is still running.
  *
- * This is the ONLY component that subscribes to the clock, which is what keeps
- * a ticking timer from re-rendering the entry list around it. A completed entry
- * creates no subscription at all, so a page of finished rows costs nothing per
- * second.
+ * Only a RUNNING entry subscribes to the clock, which is what keeps a ticking
+ * timer from re-rendering the entry list around it. A completed entry creates no
+ * subscription at all, so a page of finished rows costs nothing per second — see
+ * `useElapsedMs`, where that is arranged.
  */
 export function EntryDuration({
   startedAt,
@@ -20,13 +20,13 @@ export function EntryDuration({
   className?: string
 }) {
   const ms = useElapsedMs(startedAt, endedAt)
-  const minute = useMinute()
   const running = endedAt === null
 
-  // Derived from the minute, not the second: an aria-label that changes every
-  // second is announced every second, which is unusable. The visible digits
-  // still tick.
-  void minute
+  // `spokenDuration` is minute-granular above a minute, so the label is already
+  // stable second to second without being derived from a separate minute clock.
+  // An earlier version subscribed to `useMinute()` to arrange that and then
+  // discarded the value — a second subscription, and a wasted re-render per row
+  // per second, buying a property the formatter already had.
   const label = spokenDuration(ms)
 
   return (

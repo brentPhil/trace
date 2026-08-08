@@ -13,6 +13,7 @@ import schema from "./schema"
 import { api, internal } from "./_generated/api"
 import { traceErrorCode } from "./lib/codes"
 import { PROJECT_COLORS } from "./lib/palette"
+import { ENTRY_SCAN_LIMIT } from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
 
 const modules = import.meta.glob("./**/*.*s")
@@ -76,13 +77,60 @@ async function entryOn(
 // ---------------------------------------------------------------------------
 
 describe("authorization", () => {
-  it("rejects anonymous callers", async () => {
+  it("rejects anonymous callers on every public function", async () => {
     const t = setup()
+    // Real ids, owned by a real user: a fabricated string fails argument
+    // validation before the handler runs, so the call would never reach the
+    // auth check the test is meant to be about.
+    const projectId = await project(t, ALICE, "Acme")
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+
     await expectCode(t.query(api.projects.list, {}), "UNAUTHENTICATED")
     await expectCode(t.mutation(api.projects.create, { name: "X" }), "UNAUTHENTICATED")
+    await expectCode(
+      t.mutation(api.projects.update, { projectId, name: "X" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.projects.setArchived, { projectId, archived: true }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.projects.remove, { projectId }),
+      "UNAUTHENTICATED"
+    )
     await expectCode(t.query(api.tags.list, {}), "UNAUTHENTICATED")
     await expectCode(t.mutation(api.tags.ensure, { name: "x" }), "UNAUTHENTICATED")
+    await expectCode(
+      t.mutation(api.tags.rename, { tagId, name: "x" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(t.mutation(api.tags.remove, { tagId }), "UNAUTHENTICATED")
     await expectCode(t.query(api.entries.titleSuggestions, {}), "UNAUTHENTICATED")
+  })
+
+  it("will not let one user rename or delete another's tag", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "alices",
+    })
+
+    await expectCode(
+      t.mutation(internal.tags.renameAs, { userId: BOB, tagId, name: "mine" }),
+      "NOT_FOUND"
+    )
+    await expectCode(
+      t.mutation(internal.tags.removeAs, { userId: BOB, tagId }),
+      "NOT_FOUND"
+    )
+
+    // And Alice's tag is untouched by either attempt.
+    const tags = await t.query(internal.tags.listAs, { userId: ALICE })
+    expect(tags.map((row) => row.name)).toEqual(["alices"])
   })
 
   it("keeps one user's projects and tags invisible to another", async () => {
@@ -401,4 +449,115 @@ describe("title autocomplete", () => {
     })
     expect(suggestions).toHaveLength(0)
   })
+})
+
+// ---------------------------------------------------------------------------
+// Deleting, and the bounded scans behind it
+// ---------------------------------------------------------------------------
+
+describe("removing a classifier that is genuinely unused", () => {
+  it("soft-deletes a tag nothing carries", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "throwaway",
+    })
+
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
+
+    // The refusal path had tests; the success path did not, so nothing asserted
+    // the row is actually marked deleted rather than merely left alone.
+    expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
+    const row = await t.run(async (ctx) => await ctx.db.get(tagId))
+    expect(row?.deletedAt).not.toBeNull()
+  })
+
+  it("soft-deletes a project nothing references", async () => {
+    const t = setup()
+    const projectId = await project(t, ALICE, "Abandoned")
+
+    await t.mutation(internal.projects.removeAs, { userId: ALICE, projectId })
+
+    expect(await t.query(internal.projects.listAs, { userId: ALICE })).toHaveLength(0)
+    const row = await t.run(async (ctx) => await ctx.db.get(projectId))
+    expect(row?.deletedAt).not.toBeNull()
+  })
+
+  it("still allows deletion when only a SOFT-DELETED entry carries the tag", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "gone",
+    })
+    await entryOn(t, ALICE, { tagIds: [tagId], deletedAt: Date.now() })
+
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
+    expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
+  })
+})
+
+/**
+ * The bounded scans, exercised at their actual boundary.
+ *
+ * These are slow — they build ENTRY_SCAN_LIMIT + 1 rows — and they are worth
+ * it, because the saturation branch is the one that was WRONG and untested: the
+ * comment claimed a refusal a heavy user would meet "occasionally", while the
+ * code refuses unconditionally for every tag once the account passes the limit,
+ * since the scan is not filtered by tag. A test at the boundary is what makes
+ * that behaviour a decision rather than a surprise.
+ */
+describe("the bounded scans at their boundary", () => {
+  async function bulkEntries(t: Harness, userId: string, n: number) {
+    const start = Date.now() - 400 * 24 * HOUR
+    // Batched, because one t.run per row is what makes this take minutes.
+    const BATCH = 500
+    for (let offset = 0; offset < n; offset += BATCH) {
+      await t.run(async (ctx) => {
+        for (let i = offset; i < Math.min(offset + BATCH, n); i += 1) {
+          await ctx.db.insert("timeEntries", {
+            userId,
+            clientKey: `bulk-${i}`,
+            title: "Work",
+            startedAt: start + i * 60_000,
+            endedAt: start + i * 60_000 + 60_000,
+            durationMs: 60_000,
+            tagIds: [],
+            billable: false,
+            source: "web",
+            updatedAt: start,
+            deletedAt: null,
+          })
+        }
+      })
+    }
+  }
+
+  it("refuses to delete an unused tag once the account exceeds the scan limit", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "brand-new",
+    })
+    await bulkEntries(t, ALICE, ENTRY_SCAN_LIMIT + 1)
+
+    // Nothing carries this tag. It still cannot be deleted, because proving
+    // that would mean reading every entry — which is the known limitation
+    // documented on tags.removeImpl, pinned here so it cannot change silently.
+    await expectCode(
+      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId }),
+      "IN_USE"
+    )
+  }, 60_000)
+
+  it("still deletes an unused tag one row BELOW the limit", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "brand-new",
+    })
+    await bulkEntries(t, ALICE, ENTRY_SCAN_LIMIT)
+
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
+    expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
+  }, 60_000)
 })

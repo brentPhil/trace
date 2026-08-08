@@ -1,4 +1,4 @@
-﻿import { useCallback } from "react"
+import { useCallback } from "react"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { useLatest } from "@/hooks/use-latest"
@@ -10,7 +10,7 @@ import type { Doc, Id } from "../../convex/_generated/dataModel"
  *
  * Both lists are small, bounded by how many clients a freelancer has, and are
  * needed by the timer bar, every row in the log, the history filters and the
- * recap. A single reactive query per list is cheaper and â€” more importantly â€”
+ * recap. A single reactive query per list is cheaper and — more importantly —
  * cannot disagree with itself across those surfaces.
  */
 export function useClassifiers() {

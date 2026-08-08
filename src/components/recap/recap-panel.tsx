@@ -338,7 +338,11 @@ function Field({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault()
-              commit()
+              // Blur ONLY — `onBlur` is what commits. Calling `commit()` here
+              // as well sent the mutation twice on every Enter: `committed`
+              // does not move until the write resolves (deliberately, see
+              // above), so the guard inside `commit` has not yet been armed
+              // when the blur handler runs a moment later.
               event.currentTarget.blur()
             } else if (event.key === "Escape") {
               event.preventDefault()

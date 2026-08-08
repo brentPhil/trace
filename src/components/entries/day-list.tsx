@@ -1,4 +1,4 @@
-﻿import { EntryRow } from "@/components/entries/entry-row"
+import { EntryRow } from "@/components/entries/entry-row"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
 import type { EntryRowActions } from "@/components/entries/entry-row"
@@ -10,7 +10,7 @@ import type { Doc } from "../../../convex/_generated/dataModel"
  * The log: entries under day headers, newest first.
  *
  * This is the only list view in the product. Every "report" is this same view
- * with a filter applied, because Trace's entries are meaningful one at a time â€”
+ * with a filter applied, because Trace's entries are meaningful one at a time —
  * the aggregation layer a conventional tracker needs exists to compensate for
  * prose being absent, and here it is not.
  */
@@ -56,7 +56,13 @@ export function DayList({
                 {group.notedCount} of {group.entries.length} noted
               </span>
             </div>
-            <span className="text-base font-semibold tabular text-muted-foreground">
+            <span
+              // Includes a running entry's live elapsed time, so the server's
+              // value and the client's first render legitimately differ. See
+              // the same attribute in `totals-row.tsx`.
+              suppressHydrationWarning
+              className="text-base font-semibold tabular text-muted-foreground"
+            >
               {formatTotal(group.totalMs, display)}
             </span>
           </header>
