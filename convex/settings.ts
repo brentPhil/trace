@@ -162,7 +162,7 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
       args.weekStartDay < 0 ||
       args.weekStartDay > 6)
   ) {
-    traceError("INVALID_TIMEZONE", "Week start day must be 0-6.")
+    traceError("INVALID_WEEK_START", "Week start day must be 0-6.")
   }
 
   const row = await readSettings(ctx, userId)

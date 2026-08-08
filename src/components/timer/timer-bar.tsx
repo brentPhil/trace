@@ -623,6 +623,13 @@ export function TimerBar({
           <button
             type="button"
             onClick={() => {
+              // Same re-entrancy guard as onToggle. Discard is idempotent on
+              // the server, so a second press does not discard twice — but it
+              // does send a second mutation and announce the result twice, and
+              // a screen-reader user hearing "Timer discarded" repeated has no
+              // way to tell that from two timers having gone.
+              if (pending) return
+              setPending(true)
               void discard()
                 .then(() => {
                   // Announced AFTER the write lands, not before. Announcing
@@ -640,6 +647,7 @@ export function TimerBar({
                   announce("The timer was not discarded. It is still running.")
                   onError?.(thrown)
                 })
+                .finally(() => setPending(false))
             }}
             className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-destructive"
           >

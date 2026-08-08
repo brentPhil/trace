@@ -35,6 +35,11 @@ export type TraceErrorCode =
   | "NOT_READY"
   /** A timezone string this runtime cannot resolve. */
   | "INVALID_TIMEZONE"
+  /** A week start outside 0-6. Its own code rather than borrowing
+   *  INVALID_TIMEZONE: both arrive from the same settings form, and a caller
+   *  branching on the code would send someone to fix their timezone over a
+   *  number that has nothing to do with one. */
+  | "INVALID_WEEK_START"
   /** More than one running entry existed. Should be impossible; reported rather
    *  than swallowed, because the recovery path stops all of them and the user
    *  deserves to know their data was repaired. */

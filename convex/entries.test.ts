@@ -92,6 +92,18 @@ describe("authorization", () => {
       t.mutation(api.entries.restore, { entryId: nowhere }),
       "UNAUTHENTICATED"
     )
+    await expectCode(
+      t.mutation(api.entries.update, { entryId: nowhere, title: "x" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.editTime, { entryId: nowhere, field: "start", value: 1 }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.create, { clientKey: key(2), startedAt: 0, endedAt: 1 }),
+      "UNAUTHENTICATED"
+    )
   })
 
   it("keeps one user's running entry invisible to another", async () => {

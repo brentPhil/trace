@@ -225,18 +225,21 @@ describe("update", () => {
   })
 
   it("refuses a week start day outside 0-6", async () => {
+    // INVALID_WEEK_START, not INVALID_TIMEZONE. Both refusals come from the
+    // same settings form, so a caller branching on the code would otherwise
+    // send someone to fix a timezone that is perfectly fine.
     const t = setup()
     await expectCode(
       t.mutation(internal.settings.updateAs, { userId: ALICE, weekStartDay: 7 }),
-      "INVALID_TIMEZONE"
+      "INVALID_WEEK_START"
     )
     await expectCode(
       t.mutation(internal.settings.updateAs, { userId: ALICE, weekStartDay: -1 }),
-      "INVALID_TIMEZONE"
+      "INVALID_WEEK_START"
     )
     await expectCode(
       t.mutation(internal.settings.updateAs, { userId: ALICE, weekStartDay: 1.5 }),
-      "INVALID_TIMEZONE"
+      "INVALID_WEEK_START"
     )
   })
 

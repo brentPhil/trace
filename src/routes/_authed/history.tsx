@@ -100,18 +100,23 @@ function History() {
    * its total. Leaving it in meant a day header quietly disagreeing with the
    * summary directly below it, using a stale number, for time that now has no
    * row to explain it.
+   *
+   * Derived ONCE and used for the rows, the total and the count alike. Filtering
+   * only where the rows are built left a running entry counted but not drawn:
+   * the sentence claimed a match, the total it was added to gained nothing, and
+   * no row appeared to account for either. "1 entry" above an empty list.
    */
-  const groups = useMemo(
-    () =>
-      groupByDay(
-        filtered.filter((entry) => entry.durationMs !== null),
-        settings.timezone,
-        Date.now()
-      ),
-    [filtered, settings.timezone]
+  const completed = useMemo(
+    () => filtered.filter((entry) => entry.durationMs !== null),
+    [filtered]
   )
 
-  const shownMs = filtered.reduce((n, e) => n + (e.durationMs ?? 0), 0)
+  const groups = useMemo(
+    () => groupByDay(completed, settings.timezone, Date.now()),
+    [completed, settings.timezone]
+  )
+
+  const shownMs = completed.reduce((n, e) => n + (e.durationMs ?? 0), 0)
 
   /*
    * "LoadingMore" counts as still loading, not just "CanLoadMore".
@@ -152,7 +157,7 @@ function History() {
               <strong className="font-medium tabular text-foreground">
                 {formatTotal(shownMs, settings.durationDisplay)}
               </strong>{" "}
-              across {filtered.length} {filtered.length === 1 ? "entry" : "entries"}{" "}
+              across {completed.length} {completed.length === 1 ? "entry" : "entries"}{" "}
               matching these filters.
             </>
           ) : (
