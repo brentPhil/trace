@@ -60,10 +60,36 @@ export function DateRangePicker({
     setDraft({ from: dayToDate(from), to: dayToDate(to) })
   }, [open, from, to])
 
-  const handleSelect = (range: DateRange | undefined) => {
-    setDraft(range)
-    if (range?.from === undefined || range.to === undefined) return
-    const committed = { from: dateToDay(range.from), to: dateToDay(range.to) }
+  const handleSelect = (range: DateRange | undefined, triggerDate: Date) => {
+    /*
+     * react-day-picker's own `min={1}` + `resetOnSelect` combination (needed
+     * below to force the two-click contract — see the `Calendar` props)
+     * has a gap: clicking the SAME day twice, to pick just that one day,
+     * collapses the selection to `undefined` instead of completing it as
+     * `{ from: day, to: day }`.
+     *
+     * `min={1}` exists so the FIRST click of a pair never completes a range
+     * on its own — without it, `addToRange` would set `to` equal to `from`
+     * immediately, and the second click would extend an already-"complete"
+     * one-day range instead of arming a fresh `from` (see the comment on
+     * `min` below). react-day-picker applies that identical "don't complete
+     * yet" rule to the SECOND click when it lands back on the day already
+     * armed as `from` — but that click is exactly the "just this one day"
+     * gesture, the one case completing immediately is correct for. Rather
+     * than relax `min` (and reopen the very bug it prevents), this
+     * intercepts only that one transition — a pending `from` with no `to`
+     * yet, re-clicked — and completes it by hand.
+     */
+    const collapsedToSingleDay =
+      range === undefined &&
+      draft?.from !== undefined &&
+      draft.to === undefined &&
+      dateToDay(draft.from) === dateToDay(triggerDate)
+    const next = collapsedToSingleDay ? { from: triggerDate, to: triggerDate } : range
+
+    setDraft(next)
+    if (next?.from === undefined || next.to === undefined) return
+    const committed = { from: dateToDay(next.from), to: dateToDay(next.to) }
     announce(`Range set to ${formatDayRange(committed.from, committed.to)}.`)
     onChange(committed)
     setOpen(false)

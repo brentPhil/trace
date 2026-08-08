@@ -146,6 +146,21 @@ describe("DateRangePicker calendar", () => {
     expect(onChange).toHaveBeenCalledTimes(1)
     expect(onChange).not.toHaveBeenCalledWith({ from: "2026-08-09", to: "2026-08-03" })
   })
+
+  it("selects a single past day by clicking it twice", () => {
+    // The Day/Week/Month control can already select TODAY as a one-day
+    // range; this is the same shape of range for an arbitrary PAST day,
+    // reached the same two-click way as any other custom range — "just the
+    // 3rd of August" while reconstructing an invoice.
+    const { onChange } = open({ from: "2026-08-01", to: "2026-08-01" })
+
+    fireEvent.click(dayButton(3))
+    expect(onChange).not.toHaveBeenCalled()
+
+    fireEvent.click(dayButton(3))
+    expect(onChange).toHaveBeenCalledWith({ from: "2026-08-03", to: "2026-08-03" })
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("DateRangePicker keyboard", () => {
