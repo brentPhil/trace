@@ -144,7 +144,8 @@ export function NoteSheet({
           />
           {error === null ? (
             <p className="text-xs text-muted-foreground">
-              This is what the recap is written from.
+              Reports searches note text, so this is what makes the entry
+              findable later.
             </p>
           ) : (
             <p role="alert" className="text-xs text-alarm">

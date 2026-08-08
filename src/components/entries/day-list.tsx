@@ -111,9 +111,10 @@ function EmptyLog() {
             How do the hours come back out?
           </dt>
           <dd>
-            The recap panel above turns a day into something you can paste into
-            a channel or an email — grouped by client, with what you actually
-            did. History totals any date range and marks what was billable.
+            Write a note when you stop a timer — a sentence about what you
+            actually did. <strong className="font-medium text-foreground">Reports</strong>{" "}
+            searches note text, so a well-noted entry is one you can find
+            again by what happened, not just when.
           </dd>
         </div>
         <div className="flex flex-col gap-0.5">

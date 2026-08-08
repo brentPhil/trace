@@ -50,7 +50,7 @@ function Settings() {
 
         <Section
           title="Time zone"
-          hint="Every day boundary in the app comes from this — which entries fall on which day, what the week totals cover, and when a recap is for. Changing it re-files history rather than rewriting it, so nothing is lost, but old days may shift."
+          hint="Every day boundary in the app comes from this — which entries fall on which day, and what the week totals cover. Changing it re-files history rather than rewriting it, so nothing is lost, but old days may shift."
         >
           <TimezoneField
             value={settings.timezone}
@@ -75,7 +75,7 @@ function Settings() {
 
         <Section
           title="Durations"
-          hint="Decimal hours are floored to two places, so no figure ever shows more time than was recorded and the parts never sum above the whole. It applies to totals and exports — never to a single entry's own row, and never to the recap, where a span reads better as a span."
+          hint="Decimal hours are floored to two places, so no figure ever shows more time than was recorded and the parts never sum above the whole. It applies to totals and exports — never to a single entry's own row, where a span reads better as a span."
         >
           <div className="flex flex-col gap-2">
             <Radio

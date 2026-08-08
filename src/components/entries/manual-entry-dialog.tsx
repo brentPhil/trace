@@ -197,7 +197,7 @@ export function ManualEntryDialog({
               rows={2}
               maxLength={2_000}
               onChange={(event) => setNote(event.target.value)}
-              placeholder="Optional — this is what the recap is written from."
+              placeholder="Optional — Reports searches note text to find this later."
               className={cn(fieldClass, "resize-none leading-relaxed")}
             />
           </Labelled>
