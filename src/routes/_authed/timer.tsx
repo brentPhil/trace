@@ -4,6 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
+import { LogSkeleton } from "@/components/entries/day-list"
 import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TotalsRow } from "@/components/entries/totals-row"
@@ -150,13 +151,22 @@ function Timer() {
 
       <div className="flex-1">
         {/*
-          A filter that matches nothing here does not mean nothing is
-          tracked — EntryLog's own empty state says exactly that, onboarding
-          copy included, and would be a flatly false thing to show underneath
-          an active search. Skip it in favour of FilteredLogStatus's honest
-          "no matches (yet)" below.
+          `status === "LoadingFirstPage"` is checked before either empty-state
+          branch below, because `groups` reads as `[]` for the entire first
+          round trip regardless of whether a filter is active — and an empty
+          array used to fall straight into "nothing tracked yet", flashing the
+          onboarding copy at a freelancer whose day is fully logged, for as
+          long as that fetch took.
+
+          Once loading has actually settled: a filter that matches nothing
+          here does not mean nothing is tracked — EntryLog's own empty state
+          says exactly that, onboarding copy included, and would be a flatly
+          false thing to show underneath an active search. Skip it in favour
+          of FilteredLogStatus's honest "no matches (yet)" below.
         */}
-        {filtering && groups.length === 0 && status !== "LoadingFirstPage" ? null : (
+        {status === "LoadingFirstPage" ? (
+          <LogSkeleton />
+        ) : filtering && groups.length === 0 ? null : (
           <EntryLog
             groups={groups}
             timeZone={settings.timezone}

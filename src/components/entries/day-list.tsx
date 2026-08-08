@@ -1,6 +1,8 @@
 import { EntryRow } from "@/components/entries/entry-row"
+import { Skeleton } from "@/components/ui/skeleton"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
+import type { ReactNode } from "react"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { DayGroup } from "@/lib/group-entries"
 import type { DurationDisplay } from "@/lib/format-total"
@@ -23,6 +25,7 @@ export function DayList({
   tags,
   actions,
   display = "hms",
+  empty,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -32,8 +35,17 @@ export function DayList({
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
   display?: DurationDisplay
+  /**
+   * What to show for zero groups. Defaults to the Timer onboarding copy
+   * below, which is only true on Timer: an empty Timer log really does mean
+   * "nothing tracked yet". Reports reaches the same zero-groups state while
+   * a filter matches nothing, or a date range holds no entries — neither of
+   * which is onboarding, so it supplies its own message here instead of
+   * inheriting Timer's.
+   */
+  empty?: ReactNode
 }) {
-  if (groups.length === 0) return <EmptyLog />
+  if (groups.length === 0) return <>{empty ?? <EmptyLog />}</>
 
   return (
     <div className="flex flex-col">
@@ -136,6 +148,48 @@ function EmptyLog() {
         so is everything else — the note can wait until you stop, and it is the
         part this is really for.
       </p>
+    </div>
+  )
+}
+
+/**
+ * What the log looks like before the first page has arrived.
+ *
+ * Both `/timer` and `/reports` used to render nothing for `groups` while
+ * `status === "LoadingFirstPage"`, which fell into the same zero-groups
+ * branch as a genuinely empty log — so a page holding six tracked hours
+ * said "Nothing tracked yet" for one render before correcting itself. An
+ * empty state has to mean "empty"; while the answer isn't known yet, this is
+ * what renders instead. Two day-shaped blocks, not one: a single skeleton
+ * row reads as "there is one entry", which is its own false claim.
+ */
+export function LogSkeleton() {
+  return (
+    <div aria-hidden="true" className="flex flex-col">
+      {[0, 1].map((group) => (
+        <div key={group} className="flex flex-col">
+          <div
+            className={cn(
+              "flex items-baseline justify-between gap-3",
+              "border-b border-edge-soft px-4 py-2"
+            )}
+          >
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-4 w-14" />
+          </div>
+          <div className="flex flex-col">
+            {[0, 1, 2].map((row) => (
+              <div
+                key={row}
+                className="flex h-[50px] items-center gap-3 border-b border-edge-soft px-4"
+              >
+                <Skeleton className="h-4 flex-1 max-w-64" />
+                <Skeleton className="h-4 w-16 shrink-0" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

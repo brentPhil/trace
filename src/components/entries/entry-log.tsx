@@ -11,6 +11,7 @@ import { dayLabel } from "@/lib/group-entries"
 import { addDays, dayOf } from "@shared/day"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
+import type { ReactNode } from "react"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayGroup, Entry } from "@/lib/group-entries"
@@ -31,6 +32,7 @@ export function EntryLog({
   use12Hour,
   weekStartDay,
   display,
+  empty,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -38,6 +40,9 @@ export function EntryLog({
   /** 0 = Sunday. The calendar's first column must match the week totals. */
   weekStartDay: number
   display?: DurationDisplay
+  /** Forwarded to `DayList` — see there for why the default isn't right for
+   * every page that renders a log. */
+  empty?: ReactNode
 }) {
   const { setNote, update, editTime, remove, restore } = useEntryEditMutations()
   const { resume } = useEntryMutations()
@@ -193,6 +198,7 @@ export function EntryLog({
         tags={tags}
         actions={actions}
         display={display}
+        empty={empty}
       />
       <NoteSheet
         entry={liveNoteEntry}

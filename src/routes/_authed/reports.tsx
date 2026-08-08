@@ -4,6 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
+import { LogSkeleton } from "@/components/entries/day-list"
 import { FilterBar } from "@/components/history/filter-bar"
 import { Button } from "@/components/ui/button"
 import { useClassifiers } from "@/hooks/use-classifiers"
@@ -119,6 +120,15 @@ function Reports() {
   const stillLoading =
     filtering && (status === "CanLoadMore" || status === "LoadingMore")
 
+  // Covers the plain, unfiltered first fetch too — `stillLoading` above is
+  // deliberately scoped to the filtered bulk-load case only (see its own
+  // comment), so on its own it says nothing about the ordinary cold load
+  // every visit to this page starts from. Without this, `groups` reads as
+  // `[]` for that first round trip and the log falls through to the
+  // zero-groups branch below, showing Timer's onboarding empty state on the
+  // page a freelancer opens to check their invoice numbers.
+  const logLoading = status === "LoadingFirstPage" || stillLoading
+
   return (
     <div className="flex flex-col">
       <div className="flex flex-col gap-3 px-4 py-3">
@@ -188,15 +198,17 @@ function Reports() {
 
       <div className="flex-1 border-t border-edge-soft">
         {/*
-          `stillLoading` is part of this condition because the auto-loader
-          starts from an empty filtered set: without it the page told the user
-          to widen the range or clear the filters at the exact moment it was
-          fetching the pages that would answer them.
+          An onboarding-empty-state flash is the bug this guards against: while
+          `logLoading` is true, `groups` is `[]` for reasons that have nothing
+          to do with the account being empty, so a skeleton renders instead of
+          asking EntryLog to draw any conclusion from an empty array. Once
+          loading is settled, a real empty result gets Reports' own sentence —
+          passed to `EntryLog` rather than substituted for it, so the log and
+          its empty state are always the same component swapping states, not
+          two different branches that can drift apart.
         */}
-        {groups.length === 0 && status !== "LoadingFirstPage" && !stillLoading ? (
-          <p className="px-4 py-12 text-sm text-muted-foreground">
-            Nothing here. Try a wider date range, or clear the filters.
-          </p>
+        {logLoading ? (
+          <LogSkeleton />
         ) : (
           <EntryLog
             groups={groups}
@@ -204,6 +216,11 @@ function Reports() {
             use12Hour={settings.timeFormat === "12"}
             weekStartDay={settings.weekStartDay}
             display={settings.durationDisplay}
+            empty={
+              <p className="px-4 py-12 text-sm text-muted-foreground">
+                Nothing here. Try a wider date range, or clear the filters.
+              </p>
+            }
           />
         )}
 
