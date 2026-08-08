@@ -120,7 +120,23 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      {/*
+        `suppressHydrationWarning` here is for BROWSER EXTENSIONS, not for our
+        own markup.
+
+        Grammarly and friends write attributes onto <body> before React
+        hydrates — `data-gr-ext-installed`, `data-new-gr-c-s-check-loaded` — so
+        the client body carries attributes the server never rendered, and React
+        reports a mismatch on every single load. A warning that always fires is
+        a warning nobody reads, which is expensive here: a real mismatch would
+        appear in the same place and be dismissed as the usual noise.
+
+        The scope is narrow on purpose. React applies this to THIS element's own
+        attributes and text only — it does not extend to descendants — so
+        nothing in the app tree is silenced by it. Genuine hydration bugs inside
+        {children} still report normally.
+      */}
+      <body suppressHydrationWarning>
         {children}
         <TanStackDevtools
           config={{
