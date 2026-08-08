@@ -413,7 +413,26 @@ export function TimerBar({
       aria-label="Timer"
       className={cn(
         "flex flex-col rounded-md border bg-surface",
-        isRunning ? "border-enlarger/50" : "border-edge-soft"
+        // The visible focus indicator lives HERE, not on the input — see the
+        // input's own `outline-none` below for why. `focus-within:ring-3
+        // focus-within:ring-ring/30` is the exact vocabulary `button.tsx`
+        // uses (measured at 7.60:1), so the bar gains the same indicator
+        // every other control already had rather than a one-off invention.
+        //
+        // `focus-within:border-ring` is withheld while running: the cold
+        // border is the Cold Light Rule's signal that something IS
+        // recording, and swapping it for the neutral ring colour on focus
+        // would dim that signal at the exact moment someone is typing into
+        // the field a running entry's title lives in. The ring halo alone
+        // is still a real, visible indicator in that state — SC 2.4.11 asks
+        // for a visible focus appearance, not specifically a border change.
+        "focus-within:ring-3 focus-within:ring-ring/30",
+        // `border-edge`, not `border-edge-soft`: the bar's own doc comment
+        // above says the section IS the primary input's boundary, which
+        // makes it an interactive control boundary under WCAG 2.2 SC
+        // 1.4.11 (3:1), not a decorative divider (no minimum). Idle only —
+        // while running the cold border already carries the signal.
+        isRunning ? "border-enlarger/50" : "border-edge focus-within:border-ring"
       )}
     >
       {/*
@@ -487,12 +506,21 @@ export function TimerBar({
           // `pr-2` because the classifier icons are hidden below `sm`, and
           // without them the text runs straight into the elapsed time with no
           // gap at all — the title and the clock read as one string.
+          //
+          // `outline-none` with no ring of its own is deliberate, not the bug
+          // it used to be: the indicator moved to the `<section>` above
+          // (`focus-within:ring-3`), because this is the single most-used
+          // control in the app and the only place Enter starts the timer —
+          // "am I focused here?" has to be answerable without a pointer. It
+          // was previously answerable only by the text caret, which measured
+          // as no visible indicator at all once transitions were accounted
+          // for.
           className={cn(
             // A floor on the width: `flex-1` alone lets a long elapsed time and
             // a wide control cluster squeeze this to nothing, and the field the
             // whole product is built around must never be the thing that gives.
             "min-w-[7rem] flex-1 bg-transparent pr-2 text-base outline-none sm:text-lg",
-            "placeholder:text-muted-foreground focus-visible:ring-0"
+            "placeholder:text-muted-foreground"
           )}
         />
 
