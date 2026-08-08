@@ -31,6 +31,13 @@ export function parseSidebarOpen(cookieHeader: string | undefined): boolean {
  * Reading a cookie during SSR is safe in a way that reading a TIMEZONE is not
  * (see the implementation plan's section 5.9) — a cookie travels with the
  * request, so the server and the client observe the same value.
+ *
+ * The two branches are not quite symmetric: `getCookie` runs the value through
+ * `decodeURIComponent`, while `document.cookie` is parsed raw. That cannot
+ * diverge today, because the only writer of this cookie is
+ * `src/components/ui/sidebar.tsx`, which stringifies a boolean — `true` and
+ * `false` need no encoding. Widen this cookie's value space and the client
+ * branch has to decode too.
  */
 export const readSidebarOpen = createIsomorphicFn()
   .server(() => getCookie(COOKIE_NAME) !== "false")
