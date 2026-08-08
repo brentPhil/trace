@@ -87,7 +87,6 @@ export function TimerBar({
   projects,
   tags,
   suggestions = [],
-  onStopped,
   onError,
 }: {
   running: Doc<"timeEntries"> | null
@@ -100,13 +99,6 @@ export function TimerBar({
    * on every character typed.
    */
   suggestions?: Array<TitleSuggestion>
-  /**
-   * Called with the entry as it was the instant it stopped — closed, with a
-   * real duration — so the note sheet can name it without reading a query that
-   * has not caught up yet. The single most valuable moment to ask what someone
-   * just did is the moment they say they have stopped doing it.
-   */
-  onStopped?: (entry: Doc<"timeEntries">) => void
   /**
    * Called when a start, stop or discard REJECTS.
    *
@@ -351,11 +343,6 @@ export function TimerBar({
           announce(
             `Stopped ${stopped.title.trim() === "" ? "the timer" : stopped.title.trim()}. ${spokenDuration(elapsed)} recorded.`
           )
-          onStopped?.({
-            ...stopped,
-            endedAt: result.serverNow,
-            durationMs: elapsed,
-          })
         }
       } else {
         await start({

@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
-import { AppHeader } from "@/components/app-header"
 import { EntryLog } from "@/components/entries/entry-log"
 import { FilterBar } from "@/components/history/filter-bar"
 import { Button } from "@/components/ui/button"
@@ -26,21 +25,11 @@ export const Route = createFileRoute("/_authed/history")({
   head: () => ({ meta: [{ title: "History — Trace" }] }),
   component: History,
   loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
-      context.queryClient.ensureQueryData(convexQuery(api.projects.list, {})),
-      context.queryClient.ensureQueryData(convexQuery(api.tags.list, {})),
-      context.queryClient.ensureQueryData(
-        convexQuery(api.auth.getAuthenticatedUser, {})
-      ),
-    ])
+    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
   },
 })
 
 function History() {
-  const { data: user } = useSuspenseQuery(
-    convexQuery(api.auth.getAuthenticatedUser, {})
-  )
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects, projectsById } = useClassifiers()
 
@@ -131,9 +120,7 @@ function History() {
     filtering && (status === "CanLoadMore" || status === "LoadingMore")
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
-      <AppHeader email={user.email} />
-
+    <div className="flex flex-col">
       <div className="flex flex-col gap-3 px-4 py-3">
         <FilterBar
           filters={filters}

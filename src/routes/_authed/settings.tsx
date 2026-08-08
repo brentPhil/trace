@@ -2,7 +2,6 @@ import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
-import { AppHeader } from "@/components/app-header"
 import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
@@ -14,12 +13,7 @@ export const Route = createFileRoute("/_authed/settings")({
   head: () => ({ meta: [{ title: "Settings — Trace" }] }),
   component: Settings,
   loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
-      context.queryClient.ensureQueryData(
-        convexQuery(api.auth.getAuthenticatedUser, {})
-      ),
-    ])
+    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
   },
 })
 
@@ -39,9 +33,6 @@ const WEEKDAYS = [
 const RUNAWAY_CHOICES = [4, 6, 8, 10, 12, 24]
 
 function Settings() {
-  const { data: user } = useSuspenseQuery(
-    convexQuery(api.auth.getAuthenticatedUser, {})
-  )
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const update = useLatest(useConvexMutation(api.settings.update))
   const toasts = Toast.useToastManager()
@@ -53,9 +44,7 @@ function Settings() {
   }
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
-      <AppHeader email={user.email} />
-
+    <div className="flex flex-col">
       <main className="flex flex-1 flex-col gap-8 px-4 py-6">
         <h1 className="text-sm font-semibold">Settings</h1>
 

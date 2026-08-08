@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { Archive, ArchiveRestore, Plus, Trash2 } from "lucide-react"
-import { AppHeader } from "@/components/app-header"
 import { InlineEdit } from "@/components/entries/inline-edit"
 import { Button } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
@@ -17,21 +16,9 @@ import type { Doc } from "../../../convex/_generated/dataModel"
 export const Route = createFileRoute("/_authed/projects")({
   head: () => ({ meta: [{ title: "Projects — Trace" }] }),
   component: Projects,
-  loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(convexQuery(api.projects.list, {})),
-      context.queryClient.ensureQueryData(convexQuery(api.tags.list, {})),
-      context.queryClient.ensureQueryData(
-        convexQuery(api.auth.getAuthenticatedUser, {})
-      ),
-    ])
-  },
 })
 
 function Projects() {
-  const { data: user } = useSuspenseQuery(
-    convexQuery(api.auth.getAuthenticatedUser, {})
-  )
   const { data: projects } = useSuspenseQuery(convexQuery(api.projects.list, {}))
   const { data: tags } = useSuspenseQuery(convexQuery(api.tags.list, {}))
 
@@ -39,9 +26,7 @@ function Projects() {
   const archived = projects.filter((p) => p.archived)
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
-      <AppHeader email={user.email} />
-
+    <div className="flex flex-col">
       <main className="flex flex-1 flex-col gap-10 px-4 py-6">
         <section className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-3">
