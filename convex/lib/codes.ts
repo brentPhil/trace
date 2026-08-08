@@ -28,6 +28,11 @@ export type TraceErrorCode =
   | "IN_USE"
   /** Text past its stored limit. */
   | "TOO_LONG"
+  /** A one-off data migration has not finished, so the index the operation
+   *  would consult does not yet cover all of history. Distinct from IN_USE
+   *  because it says nothing about the row the user asked about — reading it as
+   *  "in use" would send them looking for entries that do not exist. */
+  | "NOT_READY"
   /** A timezone string this runtime cannot resolve. */
   | "INVALID_TIMEZONE"
   /** More than one running entry existed. Should be impossible; reported rather

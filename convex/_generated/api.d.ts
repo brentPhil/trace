@@ -11,6 +11,7 @@
 import type * as auth from "../auth.js";
 import type * as email from "../email.js";
 import type * as entries from "../entries.js";
+import type * as entryTags from "../entryTags.js";
 import type * as errors from "../errors.js";
 import type * as healthcheck from "../healthcheck.js";
 import type * as http from "../http.js";
@@ -25,6 +26,7 @@ import type * as lib_render from "../lib/render.js";
 import type * as lib_scan from "../lib/scan.js";
 import type * as lib_timeOfDay from "../lib/timeOfDay.js";
 import type * as maintenance from "../maintenance.js";
+import type * as migrations from "../migrations.js";
 import type * as owned from "../owned.js";
 import type * as projects from "../projects.js";
 import type * as recap from "../recap.js";
@@ -41,6 +43,7 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   email: typeof email;
   entries: typeof entries;
+  entryTags: typeof entryTags;
   errors: typeof errors;
   healthcheck: typeof healthcheck;
   http: typeof http;
@@ -55,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   "lib/scan": typeof lib_scan;
   "lib/timeOfDay": typeof lib_timeOfDay;
   maintenance: typeof maintenance;
+  migrations: typeof migrations;
   owned: typeof owned;
   projects: typeof projects;
   recap: typeof recap;
