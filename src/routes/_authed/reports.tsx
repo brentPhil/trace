@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
@@ -17,6 +17,7 @@ import {
 } from "@/lib/history-filters"
 import { dayOf } from "@shared/day"
 import { formatTotal } from "@/lib/format-total"
+import { cn } from "@/lib/utils"
 import { api } from "../../../convex/_generated/api"
 import type { Filters } from "@/lib/history-filters"
 
@@ -26,11 +27,34 @@ export const Route = createFileRoute("/_authed/reports")({
   head: () => ({ meta: [{ title: "Reports — Trace" }] }),
   component: Reports,
   loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
+    const settings = await context.queryClient.ensureQueryData(
+      convexQuery(api.settings.get, {})
+    )
+
+    // The component below reads this exact range with `useQuery` for the
+    // headline total. Without prefetching it here, the very first paint would
+    // sit in the "no data yet" branch of that hook for a round trip AFTER
+    // this loader has already resolved — the same reason `/timer`'s loader
+    // prefetches its own week range (see timer.tsx).
+    const today = dayOf(Date.now(), settings.timezone)
+    const range = rangeOf(defaultFilters(today, settings.weekStartDay), settings.timezone)
+    await context.queryClient.ensureQueryData(
+      convexQuery(api.entries.rangeSummary, { fromMs: range.fromMs, toMs: range.toMs })
+    )
   },
 })
 
-function Reports() {
+/** What the sentence below shows before any real summary has ever arrived. */
+const EMPTY_SUMMARY = { totalMs: 0, billableMs: 0, count: 0, runningCount: 0, truncated: false }
+
+// A dimmed-but-still-legible affordance for "this is the last thing we knew,
+// not the answer to the question just asked" — never colour alone (DESIGN.md),
+// paired everywhere it's used with an explicit "Updating…" or `aria-busy`.
+// The transition is real motion, so it gets the reduced-motion opt-out every
+// animation in this app carries.
+const STALE_CLASSES = "opacity-60 transition-opacity duration-150 motion-reduce:transition-none"
+
+export function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects, projectsById } = useClassifiers()
 
@@ -43,18 +67,65 @@ function Reports() {
     () => rangeOf(filters, settings.timezone),
     [filters, settings.timezone]
   )
+  // A plain string so it can be compared with `===` below — `range` itself is
+  // a fresh object every render even when its contents did not change.
+  const rangeKey = `${range.fromMs}:${range.toMs}`
 
-  const { results, status, loadMore } = usePaginatedQuery(
+  const rawPage = usePaginatedQuery(
     api.entries.listPage,
     { fromMs: range.fromMs, toMs: range.toMs },
     { initialNumItems: PAGE_SIZE }
   )
 
-  // Exact, and computed by the server over the WHOLE range rather than derived
-  // from the pages that happen to be loaded. See entries.rangeSummary.
-  const { data: summary } = useSuspenseQuery(
-    convexQuery(api.entries.rangeSummary, { fromMs: range.fromMs, toMs: range.toMs })
-  )
+  /*
+   * `usePaginatedQuery` resets `results` to `[]` and `status` to
+   * "LoadingFirstPage" the INSTANT its args change — synchronously, before
+   * the new first page has round-tripped. Left alone, that is this file's
+   * headline bug all over again, one level down: every date-range change
+   * would swap the log for `LogSkeleton`, wiping the very rows the user was
+   * just reading. There is no `placeholderData` option here the way there is
+   * for `rangeSummary` below, so this ref reimplements "keep the previous
+   * page on screen while the new one loads" by hand: it remembers the last
+   * range that finished loading a first page, and the render below prefers
+   * ITS results over the live (possibly just-reset) ones until the new
+   * range's first page actually lands — at which point they swap atomically,
+   * never through an empty/skeleton state in between.
+   */
+  const settledPageRef = useRef({ rangeKey, results: rawPage.results })
+  if (rawPage.status !== "LoadingFirstPage") {
+    settledPageRef.current = { rangeKey, results: rawPage.results }
+  }
+  const logIsStale = settledPageRef.current.rangeKey !== rangeKey
+  const results = logIsStale ? settledPageRef.current.results : rawPage.results
+  const { status, loadMore } = rawPage
+
+  /*
+   * `useQuery`, not `useSuspenseQuery` — deliberately. `fromMs`/`toMs` are
+   * part of the query key, so any filter change that moves the range mints a
+   * brand new key with nothing cached for it yet. `useSuspenseQuery` answers
+   * that by THROWING, which unmounts this whole component up to the nearest
+   * Suspense boundary — FilterBar, the log, everything — and swaps in its
+   * fallback. That throw-and-unmount is exactly the "the whole page briefly
+   * goes blank" bug reported against this file.
+   *
+   * `placeholderData: (previous) => previous` (v5's replacement for
+   * `keepPreviousData`) keeps the OLD range's summary on screen across the
+   * key change instead of discarding it, and `isPlaceholderData` says
+   * whether what render sees is that carried-over summary or the new range's
+   * own — driving `summaryIsStale` below rather than ever presenting a
+   * previous period's total as though it were the answer to the question
+   * just asked.
+   */
+  const { data: summary, isPlaceholderData } = useQuery({
+    ...convexQuery(api.entries.rangeSummary, { fromMs: range.fromMs, toMs: range.toMs }),
+    placeholderData: (previous) => previous,
+  })
+  // `summary === undefined` only on a render before ANY summary has ever
+  // arrived — the loader above prefetches the default range so this should
+  // not happen in practice, but a filter changed before that prefetch landed
+  // is still an honest "we don't know yet", not a green light to show zero.
+  const summaryIsStale = summary === undefined || isPlaceholderData
+  const shownSummary = summary ?? EMPTY_SUMMARY
 
   /*
    * With a client-side filter active, pull the whole range before drawing any
@@ -127,7 +198,13 @@ function Reports() {
   // `[]` for that first round trip and the log falls through to the
   // zero-groups branch below, showing Timer's onboarding empty state on the
   // page a freelancer opens to check their invoice numbers.
-  const logLoading = status === "LoadingFirstPage" || stillLoading
+  //
+  // `!logIsStale` matters just as much as `status` does: once a range change
+  // has SETTLED results to show (even a previous range's), showing those
+  // beats swapping the whole log for a skeleton a second time on the same
+  // visit — that skeleton swap is the log's own version of the blank this
+  // file exists to avoid.
+  const logLoading = (status === "LoadingFirstPage" && !logIsStale) || stillLoading
 
   return (
     <div className="flex flex-col">
@@ -150,24 +227,33 @@ function Reports() {
           {stillLoading ? (
             "Loading the rest of this period…"
           ) : filtering ? (
-            <>
+            <span
+              aria-busy={logIsStale}
+              className={cn("inline", logIsStale && STALE_CLASSES)}
+            >
               <strong className="font-medium tabular text-foreground">
                 {formatTotal(shownMs, settings.durationDisplay)}
               </strong>{" "}
               across {completed.length} {completed.length === 1 ? "entry" : "entries"}{" "}
               matching these filters.
-            </>
+              {logIsStale ? (
+                <span className="italic"> Updating for the new range…</span>
+              ) : null}
+            </span>
           ) : (
-            <>
+            <span
+              aria-busy={summaryIsStale}
+              className={cn("inline", summaryIsStale && STALE_CLASSES)}
+            >
               <strong className="font-medium tabular text-foreground">
-                {formatTotal(summary.totalMs, settings.durationDisplay)}
+                {formatTotal(shownSummary.totalMs, settings.durationDisplay)}
               </strong>{" "}
-              across {summary.count} {summary.count === 1 ? "entry" : "entries"}
-              {summary.billableMs > 0 ? (
+              across {shownSummary.count} {shownSummary.count === 1 ? "entry" : "entries"}
+              {shownSummary.billableMs > 0 ? (
                 <>
                   , of which{" "}
                   <strong className="font-medium tabular text-brass">
-                    {formatTotal(summary.billableMs, settings.durationDisplay)}
+                    {formatTotal(shownSummary.billableMs, settings.durationDisplay)}
                   </strong>{" "}
                   billable
                 </>
@@ -179,24 +265,34 @@ function Reports() {
                 the day header directly beneath it, which counts live elapsed
                 time on the client.
               */}
-              {summary.runningCount > 0 ? (
+              {shownSummary.runningCount > 0 ? (
                 <>
                   {" "}
                   One entry is still running and is not counted.
                 </>
               ) : null}
-              {summary.truncated ? (
+              {shownSummary.truncated ? (
                 <span className="text-alarm">
                   {" "}
                   This period is too large to total exactly — narrow the dates.
                 </span>
               ) : null}
-            </>
+              {/*
+                The figure above is a PREVIOUS range's total the instant this
+                is true — see the `useQuery` comment above. Dimming alone is
+                not enough (DESIGN.md: meaning never by colour, and opacity is
+                easy to miss at a glance on a number nobody is staring at), so
+                it is also said outright.
+              */}
+              {summaryIsStale ? <span className="italic"> Updating…</span> : null}
+            </span>
           )}
         </p>
       </div>
 
-      <div className="flex-1 border-t border-edge-soft">
+      <div
+        className={cn("flex-1 border-t border-edge-soft", logIsStale && STALE_CLASSES)}
+      >
         {/*
           An onboarding-empty-state flash is the bug this guards against: while
           `logLoading` is true, `groups` is `[]` for reasons that have nothing
@@ -240,4 +336,3 @@ function Reports() {
     </div>
   )
 }
-
