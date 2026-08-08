@@ -226,7 +226,7 @@ export function NoteSheet({
               }
             }}
             className={cn(
-              "w-full resize-none rounded-md border border-edge-soft bg-ground",
+              "w-full resize-none rounded-md border border-edge bg-ground",
               "px-3 py-2 text-sm leading-relaxed placeholder:text-muted-foreground",
               "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             )}

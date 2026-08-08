@@ -40,7 +40,7 @@ export function FilterControls<T extends QuickFilters>({
           }}
           placeholder="Search titles, notes and projects"
           className={cn(
-            "w-full rounded-md border border-edge-soft bg-ground py-1.5 pr-2 pl-7",
+            "w-full rounded-md border border-edge bg-ground py-1.5 pr-2 pl-7",
             "text-sm placeholder:text-muted-foreground",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           )}
@@ -55,7 +55,7 @@ export function FilterControls<T extends QuickFilters>({
           onChange((f) => ({ ...f, projectId: value === "all" ? null : value }))
         }}
         className={cn(
-          "rounded-md border border-edge-soft bg-ground px-2 py-1.5 text-sm",
+          "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
       >
@@ -103,7 +103,7 @@ export function Chip({
         "motion-reduce:transition-none",
         active
           ? "border-edge bg-surface-raised font-medium text-foreground"
-          : "border-edge-soft text-muted-foreground hover:text-foreground"
+          : "border-edge text-muted-foreground hover:text-foreground"
       )}
     >
       {children}
@@ -130,7 +130,7 @@ function BillableChip({ active, onClick }: { active: boolean; onClick: () => voi
         "motion-reduce:transition-none",
         active
           ? "border-brass/60 font-medium text-brass"
-          : "border-edge-soft text-muted-foreground hover:text-foreground"
+          : "border-edge text-muted-foreground hover:text-foreground"
       )}
     >
       Billable

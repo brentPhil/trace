@@ -268,6 +268,6 @@ function Sample({ children }: { children: React.ReactNode }) {
 }
 
 const fieldClass = cn(
-  "rounded-md border border-edge-soft bg-ground px-2 py-1.5 text-sm",
+  "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )

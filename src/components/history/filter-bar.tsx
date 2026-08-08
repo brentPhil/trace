@@ -147,7 +147,7 @@ function DateInput({
           if (event.target.value !== "") onChange(event.target.value)
         }}
         className={cn(
-          "rounded-md border border-edge-soft bg-ground px-2 py-1 text-sm tabular",
+          "rounded-md border border-edge bg-ground px-2 py-1 text-sm tabular",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
       />
@@ -199,7 +199,7 @@ function IconButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "rounded-md border border-edge-soft p-1.5 text-muted-foreground transition-colors",
+        "rounded-md border border-edge p-1.5 text-muted-foreground transition-colors",
         "hover:text-foreground motion-reduce:transition-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       )}

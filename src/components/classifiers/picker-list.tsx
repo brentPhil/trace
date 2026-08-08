@@ -139,7 +139,7 @@ export function PickerList({
             // intercepting it here would leave the popup open with no way out.
           }}
           className={cn(
-            "w-full rounded-md border border-edge-soft bg-ground px-2 py-1.5 text-sm",
+            "w-full rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
             "placeholder:text-muted-foreground",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           )}

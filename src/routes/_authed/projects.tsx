@@ -335,7 +335,7 @@ function NewProject() {
         aria-invalid={error !== null}
         className={cn(
           "w-48 rounded-md border bg-ground px-2 py-1 text-sm",
-          error === null ? "border-edge-soft" : "border-alarm",
+          error === null ? "border-edge" : "border-alarm",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
       />
@@ -358,7 +358,10 @@ function TagRow({ tag }: { tag: Doc<"tags"> }) {
   const toasts = Toast.useToastManager()
 
   return (
-    <li className="flex items-center gap-1 rounded-md border border-edge-soft px-2 py-1">
+    // `border-edge`, not `border-edge-soft`: this pill is the boundary of an
+    // editable, deletable control (an inline-edit field plus a delete
+    // button), the same job a filter chip does — not a passive divider.
+    <li className="flex items-center gap-1 rounded-md border border-edge px-2 py-1">
       <InlineEdit<string>
         display={<span className="text-xs">{tag.name}</span>}
         initialInput={tag.name}

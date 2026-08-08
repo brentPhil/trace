@@ -170,7 +170,7 @@ export function TimePopoverFields({
 }
 
 const inputClass = cn(
-  "tabular h-8 w-full rounded-md border border-edge-soft bg-ground px-2 text-sm",
+  "tabular h-8 w-full rounded-md border border-edge bg-ground px-2 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
 
@@ -200,7 +200,7 @@ function MonthButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "rounded-md border border-edge-soft p-1 text-muted-foreground",
+        "rounded-md border border-edge p-1 text-muted-foreground",
         "transition-colors hover:text-foreground",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       )}

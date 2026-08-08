@@ -227,7 +227,7 @@ export function ManualEntryDialog({
 }
 
 const fieldClass = cn(
-  "w-full rounded-md border border-edge-soft bg-ground px-3 py-2 text-sm",
+  "w-full rounded-md border border-edge bg-ground px-3 py-2 text-sm",
   "placeholder:text-muted-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
