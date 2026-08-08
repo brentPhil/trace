@@ -12,8 +12,10 @@
  * cases to handle.
  *
  * ONE SUBSCRIBER PER SCREEN. A single store means one timer for the whole page,
- * and only the component that renders a duration subscribes to it, so a ticking
- * clock never re-renders the entry list.
+ * and only a component rendering a RUNNING duration subscribes to it, so a
+ * ticking clock never re-renders the entry list. The qualifier matters: a
+ * completed row must not subscribe, and arranging that takes more than an early
+ * return — see `useElapsedMs`.
  */
 
 type Listener = () => void

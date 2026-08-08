@@ -6,13 +6,34 @@ export type Entry = Doc<"timeEntries">
 export type DayGroup = {
   /** "YYYY-MM-DD" in the user's timezone. */
   day: string
-  /** "Today" / "Yesterday" / "Thu, 6 Aug". */
+  /** "Today" / "Yesterday" / "Thu 6 Aug". */
   label: string
+  /**
+   * COMPLETED entries only — the rows the log renders.
+   *
+   * A running entry is deliberately absent. It is already on screen, larger and
+   * live, in the timer bar; a second copy of it as a log row is the same fact
+   * twice, and the copy is the worse one — it cannot be edited meaningfully, its
+   * end time renders as an em dash, and it pushes the day's real work down. It
+   * appears here the moment it is stopped, which is also the moment it becomes
+   * a thing you can say something about.
+   */
   entries: Array<Entry>
+  /**
+   * INCLUDES a running entry's elapsed time, unlike `entries`.
+   *
+   * The two disagree on purpose. The row is a duplicate of the timer bar; the
+   * total is not — "today so far" is the number people check, and a day total
+   * that ignored the timer currently running would read 0:00:00 while the bar
+   * above it counted, which is the kind of disagreement that makes someone stop
+   * trusting both numbers.
+   */
   totalMs: number
   billableMs: number
-  /** How many carry a note — the day header's quiet nudge. */
+  /** How many of `entries` carry a note — the day header's quiet nudge. */
   notedCount: number
+  /** Running entries on this day. They are counted, never rendered as rows. */
+  runningCount: number
 }
 
 /**
@@ -24,7 +45,8 @@ export type DayGroup = {
  * not fetched alongside them.
  *
  * A running entry contributes its elapsed time to the day total via `now`, so
- * the header ticks with the timer instead of jumping when it stops.
+ * the header ticks with the timer instead of jumping when it stops — but it is
+ * kept OUT of `entries`, so it is never drawn as a row. See `DayGroup`.
  */
 export function groupByDay(
   entries: Array<Entry>,
@@ -48,30 +70,42 @@ export function groupByDay(
     .map(([day, dayEntries]) => {
       dayEntries.sort((a, b) => b.startedAt - a.startedAt)
 
+      const completed: Array<Entry> = []
       let totalMs = 0
       let billableMs = 0
       let notedCount = 0
+      let runningCount = 0
+
       for (const entry of dayEntries) {
-        const ms =
-          entry.durationMs ?? Math.max(0, now - entry.startedAt) // running
+        const running = entry.durationMs === null
+        const ms = entry.durationMs ?? Math.max(0, now - entry.startedAt)
+
+        // Time is counted for BOTH; only completed entries become rows.
         totalMs += ms
         if (entry.billable) billableMs += ms
+
+        if (running) {
+          runningCount += 1
+          continue
+        }
+        completed.push(entry)
         if ((entry.note ?? "").trim() !== "") notedCount++
       }
 
       return {
         day,
         label: dayLabel(day, today, yesterday),
-        entries: dayEntries,
+        entries: completed,
         totalMs,
         billableMs,
         notedCount,
+        runningCount,
       }
     })
 }
 
 /**
- * "Today" / "Yesterday" / "Thu, 6 Aug".
+ * "Today" / "Yesterday" / "Thu 6 Aug".
  *
  * Relative labels only for the two days a person actually thinks of that way.
  * "3 days ago" is arithmetic the reader has to undo to find a date, which is

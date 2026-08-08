@@ -1,13 +1,17 @@
 import { v } from "convex/values"
-import { paginationOptsValidator } from "convex/server"
+import { paginationOptsValidator, paginationResultValidator } from "convex/server"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { assertOwned, getOwned, getOwnedIncludingDeleted } from "./owned"
+import { dropEntryTags, syncEntryTags } from "./entryTags"
 import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
+import { timeEntryDoc } from "./lib/docs"
+import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
 import type { EntryTimes, TimeEdit, TimesResult } from "./lib/entryTimes"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
+import type { PaginationOptions } from "convex/server"
 
 /** A start timestamp further ahead than this is treated as a wrong clock. */
 const CLOCK_SKEW_TOLERANCE_MS = 60_000
@@ -174,6 +178,7 @@ async function getRunningImpl(
 
 export const getRunning = query({
   args: {},
+  returns: v.union(timeEntryDoc, v.null()),
   handler: async (ctx) => await getRunningImpl(ctx, await requireUserId(ctx)),
 })
 
@@ -223,6 +228,7 @@ const listRangeArgs = {
 
 export const listRange = query({
   args: listRangeArgs,
+  returns: v.array(timeEntryDoc),
   handler: async (ctx, args) =>
     await listRangeImpl(
       ctx,
@@ -255,27 +261,41 @@ export const listRangeAs = internalQuery({
  * ragged. That is correct rather than convenient: the alternative is a second
  * index on deletedAt whose only purpose is to make page sizes tidy.
  */
-export const listPage = query({
-  args: {
-    fromMs: v.number(),
-    toMs: v.number(),
-    paginationOpts: paginationOptsValidator,
-  },
-  handler: async (ctx, args) => {
-    const userId = await requireUserId(ctx)
-    const result = await ctx.db
-      .query("timeEntries")
-      .withIndex("by_user_started", (q) =>
-        q.eq("userId", userId).gte("startedAt", args.fromMs).lt("startedAt", args.toMs)
-      )
-      .order("desc")
-      .paginate(args.paginationOpts)
+async function listPageImpl(
+  ctx: QueryCtx,
+  userId: string,
+  args: { fromMs: number; toMs: number; paginationOpts: PaginationOptions }
+) {
+  const result = await ctx.db
+    .query("timeEntries")
+    .withIndex("by_user_started", (q) =>
+      q.eq("userId", userId).gte("startedAt", args.fromMs).lt("startedAt", args.toMs)
+    )
+    .order("desc")
+    .paginate(args.paginationOpts)
 
-    return {
-      ...result,
-      page: result.page.filter((row) => row.deletedAt === null),
-    }
-  },
+  return {
+    ...result,
+    page: result.page.filter((row) => row.deletedAt === null),
+  }
+}
+
+const listPageArgs = {
+  fromMs: v.number(),
+  toMs: v.number(),
+  paginationOpts: paginationOptsValidator,
+}
+
+export const listPage = query({
+  args: listPageArgs,
+  returns: paginationResultValidator(timeEntryDoc),
+  handler: async (ctx, args) => await listPageImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const listPageAs = internalQuery({
+  args: { ...listPageArgs, userId: v.string() },
+  returns: paginationResultValidator(timeEntryDoc),
+  handler: async (ctx, { userId, ...args }) => await listPageImpl(ctx, userId, args),
 })
 
 const summaryReturns = v.object({
@@ -288,9 +308,6 @@ const summaryReturns = v.object({
   /** True when the range holds more entries than this scan looked at. */
   truncated: v.boolean(),
 })
-
-/** Above this, the summary stops being exact and says so. */
-const SUMMARY_SCAN_LIMIT = 5_000
 
 /**
  * Exact totals for a whole range, independent of how much of it is paginated
@@ -577,6 +594,7 @@ async function startImpl(ctx: MutationCtx, userId: string, args: StartArgs) {
     updatedAt: now,
     deletedAt: null,
   })
+  await syncEntryTags(ctx, userId, entryId, tagIds)
 
   return { entryId, stoppedEntryIds, serverNow: now, replayed: false }
 }
@@ -710,6 +728,7 @@ async function discardRunningImpl(ctx: MutationCtx, userId: string) {
   const discardedEntryIds: Array<Id<"timeEntries">> = []
   for (const entry of running) {
     if (await closeEntry(ctx, entry, now, now, { deletedAt: now })) {
+      await dropEntryTags(ctx, userId, entry._id)
       discardedEntryIds.push(entry._id)
     }
   }
@@ -832,6 +851,11 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   }
 
   await ctx.db.patch(entry._id, patch)
+  // Only when tags were part of the patch. `getOwned` above already refused a
+  // soft-deleted entry, so this row is live and its join rows should exist.
+  if (patch.tagIds !== undefined) {
+    await syncEntryTags(ctx, userId, entry._id, patch.tagIds)
+  }
   return null
 }
 
@@ -957,10 +981,19 @@ async function removeImpl(ctx: MutationCtx, userId: string, entryId: Id<"timeEnt
   if (entry.deletedAt !== null) return { removedEntryIds: [] }
 
   if (entry.endedAt === null) {
-    await closeEntry(ctx, entry, now, now, { deletedAt: now })
+    // Guarded, matching discardRunning. If the close did not happen the row is
+    // still live, and dropping its join rows anyway would leave a live entry
+    // whose tags nothing protects — a fail-open on the one invariant this table
+    // exists to hold. Unreachable given closeEntry's clamp; free to rule out.
+    if (!(await closeEntry(ctx, entry, now, now, { deletedAt: now }))) {
+      return { removedEntryIds: [] }
+    }
   } else {
     await ctx.db.patch(entry._id, { deletedAt: now, updatedAt: now })
   }
+  // The row is no longer live, so it no longer holds its tags. `tagIds` is left
+  // alone — the entry is in the trash, not edited — and restore reads it back.
+  await dropEntryTags(ctx, userId, entry._id)
   return { removedEntryIds: [entry._id] }
 }
 
@@ -1000,6 +1033,9 @@ async function restoreImpl(ctx: MutationCtx, userId: string, entryId: Id<"timeEn
   } else {
     await ctx.db.patch(entry._id, { deletedAt: null, updatedAt: now })
   }
+  // Live again, so it holds its tags again. Rebuilt from `tagIds`, which the
+  // delete deliberately left intact.
+  await syncEntryTags(ctx, userId, entry._id, entry.tagIds)
   return { restoredEntryIds: [entry._id] }
 }
 
@@ -1102,6 +1138,7 @@ async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
     updatedAt: now,
     deletedAt: null,
   })
+  await syncEntryTags(ctx, userId, entryId, tagIds)
 
   return { entryId, replayed: false }
 }

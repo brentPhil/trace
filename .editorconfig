@@ -1,0 +1,18 @@
+root = true
+
+# Every source file in this repo is UTF-8 without a BOM.
+#
+# Nine files were once committed with UTF-8 bytes re-read as CP-1252 and a BOM
+# prepended, which shipped "Today â€” Trace" as three page titles and mojibake
+# in the undo toast. An editor that guesses the encoding is how that happened,
+# so the encoding is stated rather than inferred.
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+[*.md]
+trim_trailing_whitespace = false

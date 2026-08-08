@@ -16,12 +16,18 @@ import { cn } from "@/lib/utils"
  */
 export function AppHeader({ email }: { email?: string }) {
   return (
-    <header className="flex items-center justify-between gap-4 px-4 py-3">
-      <div className="flex min-w-0 items-baseline gap-5">
-        <Link to="/today" className="text-base font-medium tracking-tight">
+    // `flex-wrap` and `min-w-0` on the nav, because neither was here and the
+    // header could not fit 375px: four nav labels plus the wordmark plus Sign
+    // out come to roughly 410px of intrinsic content, and a flex item defaults
+    // to `min-width: auto` so the nav could not shrink to let it. The 375px
+    // audit that fixed the timer bar measured the design harness, which never
+    // rendered this component — so this surface had never been looked at narrow.
+    <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3">
+      <div className="flex min-w-0 flex-1 items-baseline gap-5">
+        <Link to="/today" className="shrink-0 text-base font-medium tracking-tight">
           Trace
         </Link>
-        <nav className="flex items-baseline gap-4 text-sm">
+        <nav className="flex min-w-0 items-baseline gap-4 overflow-x-auto text-sm">
           <NavLink to="/today">Today</NavLink>
           <NavLink to="/history">History</NavLink>
           <NavLink to="/projects">Projects</NavLink>

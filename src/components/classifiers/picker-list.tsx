@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 
 export type PickerOption = {
@@ -45,9 +45,16 @@ export function PickerList({
   emptyLabel: string
   footer?: React.ReactNode
 }) {
-  const [active, setActive] = useState(0)
+  const [activeRow, setActive] = useState(0)
   const listRef = useRef<HTMLUListElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Generated, not hardcoded. `aria-activedescendant` resolves an id against the
+  // whole document, so two pickers open at once — the timer bar tracks project
+  // and tag open-state as independent booleans, so nothing prevents it — would
+  // give every option a duplicate id and point the field at whichever came
+  // first in the DOM.
+  const listId = useId()
 
   const trimmed = query.trim()
 
@@ -71,9 +78,13 @@ export function PickerList({
 
   // Clamped rather than reset, so filtering does not throw the highlight back
   // to the top on every keystroke — which would make arrow-then-type unusable.
-  useEffect(() => {
-    setActive((current) => (rowCount === 0 ? 0 : Math.min(current, rowCount - 1)))
-  }, [rowCount])
+  //
+  // Clamped DURING RENDER rather than in an effect. An effect runs after the
+  // browser has the markup, so for one frame after a filter narrows the list,
+  // `aria-activedescendant` names an id that is no longer in the document —
+  // which a screen reader can read, and which is a broken reference by the
+  // time it does. Deriving it here means the dangling state never exists.
+  const active = rowCount === 0 ? 0 : Math.min(activeRow, rowCount - 1)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -107,16 +118,19 @@ export function PickerList({
           aria-label={placeholder}
           role="combobox"
           aria-expanded="true"
-          aria-controls="picker-list"
-          aria-activedescendant={rowCount === 0 ? undefined : `picker-option-${active}`}
+          aria-controls={listId}
+          aria-activedescendant={rowCount === 0 ? undefined : `${listId}-option-${active}`}
           autoComplete="off"
           onKeyDown={(event) => {
+            // Stepped from the CLAMPED `active`, not from the raw state, so a
+            // move made right after the list narrowed starts from the row the
+            // user can actually see highlighted.
             if (event.key === "ArrowDown") {
               event.preventDefault()
-              setActive((c) => (rowCount === 0 ? 0 : (c + 1) % rowCount))
+              setActive(rowCount === 0 ? 0 : (active + 1) % rowCount)
             } else if (event.key === "ArrowUp") {
               event.preventDefault()
-              setActive((c) => (rowCount === 0 ? 0 : (c - 1 + rowCount) % rowCount))
+              setActive(rowCount === 0 ? 0 : (active - 1 + rowCount) % rowCount)
             } else if (event.key === "Enter") {
               event.preventDefault()
               take(active)
@@ -133,22 +147,32 @@ export function PickerList({
       </div>
 
       <ul
-        id="picker-list"
+        id={listId}
         ref={listRef}
         role="listbox"
         className="min-h-0 flex-1 overflow-y-auto p-1"
       >
+        {/*
+          `role="none"` on every <li>, here and below.
+
+          A listbox must own `option` elements directly. Left as plain list
+          items, the <li> keeps its implicit `listitem` role and sits BETWEEN
+          the listbox and its options in the accessibility tree — so the listbox
+          owns no options, and "2 of 5" either goes wrong or goes unsaid
+          depending on the screen reader. The <li> is here for markup reasons
+          only; stripping its role hands ownership straight to the buttons.
+        */}
         {rowCount === 0 ? (
-          <li className="px-2 py-3 text-center text-xs text-muted-foreground">
+          <li role="none" className="px-2 py-3 text-center text-xs text-muted-foreground">
             {emptyLabel}
           </li>
         ) : null}
 
         {visible.map((option, index) => (
-          <li key={option.id}>
+          <li role="none" key={option.id}>
             <button
               type="button"
-              id={`picker-option-${index}`}
+              id={`${listId}-option-${index}`}
               role="option"
               aria-selected={option.selected ?? false}
               // Out of the tab order. The text field keeps DOM focus and drives
@@ -183,10 +207,10 @@ export function PickerList({
         ))}
 
         {canCreate ? (
-          <li>
+          <li role="none">
             <button
               type="button"
-              id={`picker-option-${visible.length}`}
+              id={`${listId}-option-${visible.length}`}
               role="option"
               aria-selected="false"
               tabIndex={-1}

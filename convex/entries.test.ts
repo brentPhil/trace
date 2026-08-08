@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest"
 import schema from "./schema"
 import { api, internal } from "./_generated/api"
 import { traceErrorCode } from "./lib/codes"
+import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
 
 // convex-test discovers function modules by globbing from the file that calls
@@ -40,13 +41,69 @@ describe("authorization", () => {
    */
   it("rejects anonymous callers on every public function", async () => {
     const t = setup()
+    // A REAL id belonging to a real user. A made-up string fails argument
+    // validation before the handler runs, so the call never reaches the auth
+    // check and the test would pass without proving anything about it.
+    await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(99) })
+    const running = await t.query(internal.entries.getRunningAs, { userId: ALICE })
+    const nowhere = running!._id
+
+    // Named "every", and it means every. An earlier version of this test
+    // covered four of them, which read as a complete sweep to anyone auditing
+    // coverage by test name — the most expensive kind of gap, because it looks
+    // closed.
     await expectCode(t.query(api.entries.getRunning, {}), "UNAUTHENTICATED")
+    await expectCode(
+      t.query(api.entries.listRange, { fromMs: 0, toMs: 1 }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.query(api.entries.listPage, {
+        fromMs: 0,
+        toMs: 1,
+        paginationOpts: { numItems: 5, cursor: null },
+      }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.query(api.entries.rangeSummary, { fromMs: 0, toMs: 1 }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(t.query(api.entries.titleSuggestions, {}), "UNAUTHENTICATED")
     await expectCode(
       t.mutation(api.entries.start, { clientKey: key(1) }),
       "UNAUTHENTICATED"
     )
     await expectCode(t.mutation(api.entries.stop, {}), "UNAUTHENTICATED")
     await expectCode(t.mutation(api.entries.discardRunning, {}), "UNAUTHENTICATED")
+    await expectCode(
+      t.mutation(api.entries.setTitle, { entryId: nowhere, title: "x" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.setNote, { entryId: nowhere, note: "x" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.remove, { entryId: nowhere }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.restore, { entryId: nowhere }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.update, { entryId: nowhere, title: "x" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.editTime, { entryId: nowhere, field: "start", value: 1 }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.entries.create, { clientKey: key(2), startedAt: 0, endedAt: 1 }),
+      "UNAUTHENTICATED"
+    )
   })
 
   it("keeps one user's running entry invisible to another", async () => {
@@ -486,5 +543,279 @@ describe("getRunning", () => {
       })
     })
     expect(await t.query(internal.entries.getRunningAs, { userId: ALICE })).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// listPage
+// ---------------------------------------------------------------------------
+
+/**
+ * `listPage` shipped with no tests at all — a public paginated query whose
+ * range bounds, soft-delete filtering and cross-user isolation nothing checked.
+ * It is the read path behind the whole history view.
+ */
+describe("listPage", () => {
+  const DAY = 24 * HOUR
+  const T0 = 1_700_000_000_000
+
+  /** `n` completed one-hour entries, one per day, oldest first. */
+  async function days(t: ReturnType<typeof setup>, userId: string, n: number) {
+    const ids: Array<Id<"timeEntries">> = []
+    for (let i = 0; i < n; i += 1) {
+      const startedAt = T0 + i * DAY
+      ids.push(
+        await t.run(
+          async (ctx) =>
+            await ctx.db.insert("timeEntries", {
+              userId,
+              clientKey: `lp-${userId}-${i}`,
+              title: `Day ${i}`,
+              startedAt,
+              endedAt: startedAt + HOUR,
+              durationMs: HOUR,
+              tagIds: [],
+              billable: false,
+              source: "web",
+              updatedAt: startedAt,
+              deletedAt: null,
+            })
+        )
+      )
+    }
+    return ids
+  }
+
+  const opts = (numItems: number, cursor: string | null = null) => ({
+    numItems,
+    cursor,
+  })
+
+  it("rejects anonymous callers", async () => {
+    const t = setup()
+    await expectCode(
+      t.query(api.entries.listPage, {
+        fromMs: 0,
+        toMs: T0 + 100 * DAY,
+        paginationOpts: opts(10),
+      }),
+      "UNAUTHENTICATED"
+    )
+  })
+
+  it("returns newest first", async () => {
+    const t = setup()
+    await days(t, ALICE, 5)
+
+    const result = await t.query(internal.entries.listPageAs, {
+      userId: ALICE,
+      fromMs: T0,
+      toMs: T0 + 5 * DAY,
+      paginationOpts: opts(10),
+    })
+
+    expect(result.page.map((row) => row.title)).toEqual([
+      "Day 4",
+      "Day 3",
+      "Day 2",
+      "Day 1",
+      "Day 0",
+    ])
+  })
+
+  it("honours the half-open range on startedAt", async () => {
+    const t = setup()
+    await days(t, ALICE, 5)
+
+    // [Day 1, Day 3) — so Day 1 and Day 2, and neither boundary neighbour.
+    const result = await t.query(internal.entries.listPageAs, {
+      userId: ALICE,
+      fromMs: T0 + 1 * DAY,
+      toMs: T0 + 3 * DAY,
+      paginationOpts: opts(10),
+    })
+
+    expect(result.page.map((row) => row.title)).toEqual(["Day 2", "Day 1"])
+  })
+
+  it("walks the whole range across pages without repeating or dropping a row", async () => {
+    const t = setup()
+    await days(t, ALICE, 7)
+
+    const seen: Array<string> = []
+    let cursor: string | null = null
+    for (let guard = 0; guard < 10; guard += 1) {
+      const result: Awaited<
+        ReturnType<typeof t.query<typeof internal.entries.listPageAs>>
+      > = await t.query(internal.entries.listPageAs, {
+        userId: ALICE,
+        fromMs: T0,
+        toMs: T0 + 7 * DAY,
+        paginationOpts: opts(3, cursor),
+      })
+      seen.push(...result.page.map((row) => row.title))
+      if (result.isDone) break
+      cursor = result.continueCursor
+    }
+
+    expect(seen).toEqual([
+      "Day 6",
+      "Day 5",
+      "Day 4",
+      "Day 3",
+      "Day 2",
+      "Day 1",
+      "Day 0",
+    ])
+  })
+
+  it("omits soft-deleted rows", async () => {
+    const t = setup()
+    const ids = await days(t, ALICE, 4)
+    await t.run(async (ctx) => await ctx.db.patch(ids[2], { deletedAt: Date.now() }))
+
+    const result = await t.query(internal.entries.listPageAs, {
+      userId: ALICE,
+      fromMs: T0,
+      toMs: T0 + 4 * DAY,
+      paginationOpts: opts(10),
+    })
+
+    expect(result.page.map((row) => row.title)).toEqual(["Day 3", "Day 1", "Day 0"])
+  })
+
+  /**
+   * The documented consequence of filtering AFTER the page is taken: a page can
+   * come back shorter than `numItems` while more rows remain. A client that
+   * treats a short page as the end would silently truncate history, so this
+   * pins that `isDone` — not the page length — is the thing to trust.
+   */
+  it("can return a short page that is not the last page", async () => {
+    const t = setup()
+    const ids = await days(t, ALICE, 6)
+    await t.run(async (ctx) => await ctx.db.patch(ids[5], { deletedAt: Date.now() }))
+
+    const result = await t.query(internal.entries.listPageAs, {
+      userId: ALICE,
+      fromMs: T0,
+      toMs: T0 + 6 * DAY,
+      paginationOpts: opts(2),
+    })
+
+    expect(result.page).toHaveLength(1)
+    expect(result.isDone).toBe(false)
+  })
+
+  it("never returns another user's entries", async () => {
+    const t = setup()
+    await days(t, ALICE, 3)
+    await days(t, BOB, 3)
+
+    const result = await t.query(internal.entries.listPageAs, {
+      userId: BOB,
+      fromMs: T0,
+      toMs: T0 + 3 * DAY,
+      paginationOpts: opts(50),
+    })
+
+    expect(result.page).toHaveLength(3)
+    expect(result.page.every((row) => row.userId === BOB)).toBe(true)
+  })
+
+  it("returns an empty page for a range with nothing in it", async () => {
+    const t = setup()
+    await days(t, ALICE, 3)
+
+    const result = await t.query(internal.entries.listPageAs, {
+      userId: ALICE,
+      fromMs: T0 + 50 * DAY,
+      toMs: T0 + 60 * DAY,
+      paginationOpts: opts(10),
+    })
+
+    expect(result.page).toEqual([])
+    expect(result.isDone).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// rangeSummary — the truncation boundary
+// ---------------------------------------------------------------------------
+
+/**
+ * `truncated` was shipped untested, which meant the flag, the slice boundary
+ * and the whole partial-total contract rested on inspection alone. It is the
+ * mechanism that stops the history view putting an understated figure on screen
+ * with nothing to reveal it, so it is worth the cost of building the rows.
+ */
+describe("rangeSummary truncation", () => {
+  const T0 = 1_700_000_000_000
+
+  async function bulk(t: ReturnType<typeof setup>, userId: string, n: number) {
+    const BATCH = 500
+    for (let offset = 0; offset < n; offset += BATCH) {
+      await t.run(async (ctx) => {
+        for (let i = offset; i < Math.min(offset + BATCH, n); i += 1) {
+          await ctx.db.insert("timeEntries", {
+            userId,
+            clientKey: `sum-${i}`,
+            title: "Work",
+            startedAt: T0 + i * 60_000,
+            endedAt: T0 + i * 60_000 + 60_000,
+            durationMs: 60_000,
+            tagIds: [],
+            billable: false,
+            source: "web",
+            updatedAt: T0,
+            deletedAt: null,
+          })
+        }
+      })
+    }
+  }
+
+  const range = { fromMs: T0 - 1, toMs: T0 + 10_000 * 60_000 }
+
+  it("reports an exact total, unflagged, at exactly the scan limit", async () => {
+    const t = setup()
+    await bulk(t, ALICE, SUMMARY_SCAN_LIMIT)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.truncated).toBe(false)
+    expect(summary.count).toBe(SUMMARY_SCAN_LIMIT)
+    expect(summary.totalMs).toBe(SUMMARY_SCAN_LIMIT * 60_000)
+  }, 60_000)
+
+  it("flags the total as truncated one row above the limit", async () => {
+    const t = setup()
+    await bulk(t, ALICE, SUMMARY_SCAN_LIMIT + 1)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.truncated).toBe(true)
+    // The extra row is NOT counted: the scan slices to the limit, so the number
+    // returned is a floor rather than a wrong total.
+    expect(summary.count).toBe(SUMMARY_SCAN_LIMIT)
+  }, 60_000)
+
+  it("is exact and unflagged for an ordinary range", async () => {
+    const t = setup()
+    await bulk(t, ALICE, 12)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.truncated).toBe(false)
+    expect(summary.count).toBe(12)
+    expect(summary.totalMs).toBe(12 * 60_000)
   })
 })

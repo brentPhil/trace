@@ -532,28 +532,81 @@ the plan above, it is recorded here rather than left as a silent difference.
 
 | Plan said | Built | Why |
 |---|---|---|
+| `settings.ensure` called from `_authed.tsx`'s `beforeLoad` (§2.6) | A client-only `useEffect` (`use-ensure-settings.ts`) | **The most consequential deviation, and it was missing from this table until a code review found it.** §2.6's reasoning was right that loaders run in parallel while `beforeLoad` chains — and the conclusion was still wrong, because `beforeLoad` also runs on the SERVER during SSR, where the resolved timezone is the deployment region's, not the user's. Since `ensure` is idempotent, that first write is permanent: every day boundary in the product would be filed under the server's clock forever, silently, and invisibly to anyone who happens to deploy in their own timezone. |
 | `/history` totals from `usePaginatedQuery` | Pagination for the LIST; `entries.rangeSummary` for the TOTALS | A total derived from loaded pages silently means "of the rows fetched so far". That is the number that ends up understated on an invoice with nothing on screen to reveal it. |
 | Text search filters "the loaded range" | With any client-side filter active, the whole period is auto-loaded first | Otherwise a half-loaded month silently searches a prefix of itself and reports a total for it. The date filter bounds the range, so it terminates. |
 | Edit as a two-height slide-up sheet on mobile | Inline editing at every width; the note is the only sheet | Inline edit was already built in Phase 4 and works at 375px. A second editing model for one breakpoint is a second thing to maintain and to learn. |
 | Roving tabindex on the entry list | Native tab order | Every control on a row is a real focusable element already. Revisit if the list grows long enough that tabbing through it is the complaint. |
 | `R` / `E` row shortcuts, and the recap keyboard collision | Not bound | The collision the plan flagged was resolved by not creating it. Click-to-edit and Enter/Escape cover the same ground; `?` documents what exists. |
 
+**Also renamed from §4**, recorded here because §4 sets the standard that
+callers written later must not import something that does not exist:
+`recentTitles` → `titleSuggestions`, `recap.getDay` → `recap.get`,
+`recap.setDayFields` → `recap.setFields`, `tags.ensureByName` → `tags.ensure`,
+`entries.log` → `entries.listPage`, `entries.listDay` → `entries.listRange`.
+`entries.weekTotals` was never built as a Convex function at all — the week
+total is summed on the client in `today.tsx` from `listRange`.
+
 **Not built, deliberately** — `hourlyRateCents` is in the schema and nothing
 reads it (§8.2, unchanged); the trash view and untracked-gap hatching remain
-Tier 2, so `DESIGN.md`'s Hatch Rule is still two-thirds implemented.
+Tier 2. `DESIGN.md`'s Hatch Rule covers gaps, untracked time, and entries
+missing a note; MVP implements **only the third**.
 
 **Verification status**
 
-- 298 tests across three projects; typecheck and lint clean.
+- 378 tests across three projects; typecheck and lint clean. (341 at the time
+  this section was first written; the `entryTags` work below added the rest.)
 - The pure layers — day boundaries, durations, the recap assembler and both
   renderers, history filters — are covered directly and adversarially.
-- Convex functions are covered by `convex-test`, including every authorization
-  refusal and cross-user isolation case.
-- Components that hold tricky state (the timer bar's draft, the pickers) have
-  DOM tests, and each was verified to go red when its defect is reintroduced.
-- **Not verified end-to-end in a browser while signed in.** Every authed route
-  renders under SSR and redirects correctly when signed out, but no one has
-  driven the real app with a real session. That is the first thing to do.
+- Convex functions are covered by `convex-test`. Every module now has a test
+  file, including `settings.ts`, which had none until a code review pointed out
+  that the value every day boundary derives from was entirely unexercised.
+  Anonymous-caller rejection is asserted for every public function in
+  `entries`, `projects`, `tags` and `settings`, and cross-user isolation for
+  every function that takes an id.
+- Components that hold tricky state (the timer bar's draft, the pickers, the
+  clock subscription) have DOM tests, and each was verified to go red when its
+  defect is reintroduced.
+
+**~~Known limitation~~ — FIXED, see
+`docs/superpowers/specs/2026-08-08-entry-tags-join-table-design.md`.** As
+shipped, deleting a *tag* stopped working once an account exceeded
+`ENTRY_SCAN_LIMIT` (2,000) entries, for every tag, permanently — including one
+created that day and used on nothing. Convex cannot index array membership, so
+proving a tag unused meant reading every entry, and the scan was bounded to
+avoid exceeding the per-transaction byte limit; saturating that bound had to be
+read as "cannot prove", which is a refusal.
+
+The `entryTags` join table named there as the fix has since been built. A row
+exists exactly when a live entry carries the tag, so `tags.remove` is now one
+indexed read on `by_user_tag`, finding nothing *proves* the tag is unused, and
+the saturation refusal is gone. `ENTRY_SCAN_LIMIT` still bounds the read, but
+only to cap the count shown in the message — hitting it can make a refusal
+vaguer, never invent one. Deploying it to an instance that already has entries
+requires `npx convex run migrations:runEntryTagsBackfill` — nothing runs it
+automatically — and until it finishes `tags.remove` refuses with `NOT_READY`,
+because an unbackfilled table reads identically to "no tag is used anywhere". A
+deployment with no entries is exempt and needs no migration.
+
+Projects never had this problem — `by_user_project` means their check reads only
+their own entries.
+
+**What has NOT been verified**
+
+- **Nothing has been driven in a browser, signed in or signed out.** There is
+  no route test, no SSR harness and no browser run of any kind; `src/routes/**`
+  has no coverage. The auth guard, the redirect, and every page's rendering
+  have been established by *reading the code*, which is not the same claim and
+  should not be written as though it were. An earlier version of this section
+  asserted that every authed route "renders under SSR and redirects correctly
+  when signed out" as established fact. It was not established, and the nine
+  files of mojibake that shipped in three page titles are the proof that nobody
+  had loaded a page.
+- The 375px fix to `AppHeader` is reasoned, not measured.
+- **First thing to do:** sign in and confirm `settings.ensure` seeds your real
+  timezone on first load. Every day boundary depends on it, it is idempotent so
+  only the first write counts, and the arrangement that makes it correct shipped
+  without a browser ever exercising it.
 
 ---
 
@@ -604,5 +657,5 @@ Three things this plan decides but that are worth a second look before Phase 2 d
 
 Two things deliberately left out of MVP that the design system references:
 
-- Untracked gaps (Tier 2 #2) — `DESIGN.md`'s Hatch Rule is only two-thirds implemented at MVP.
+- Untracked gaps (Tier 2 #2) — the Hatch Rule covers gaps, untracked time, and entries missing a note; MVP implements only the last of the three.
 - The trash view (Tier 2 #3) — the `deletedAt` column ships now, the view does not.

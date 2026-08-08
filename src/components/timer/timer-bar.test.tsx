@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { TimerBar } from "@/components/timer/timer-bar"
+import { Announcer } from "@/components/a11y/announcer"
 import { optimisticIdFor } from "@/lib/optimistic-id"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
@@ -63,10 +64,12 @@ function Bar({
   running,
   actions,
   onStopped,
+  onError,
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
   onStopped?: (stopped: Doc<"timeEntries">) => void
+  onError?: (thrown: unknown) => void
 }) {
   return (
     <TimerBar
@@ -75,6 +78,7 @@ function Bar({
       projects={[]}
       tags={[]}
       onStopped={onStopped}
+      onError={onError}
     />
   )
 }
@@ -396,5 +400,100 @@ describe("title autocomplete", () => {
 
     fireEvent.change(input(), { target: { value: "check" } })
     expect(screen.queryByRole("option")).toBeNull()
+  })
+})
+
+/*
+ * Every write in here was fired with a bare `void`, so a rejection was an
+ * unhandled promise and the user saw nothing at all. For stop and discard that
+ * is worse than silence: both carry an optimistic update that clears the
+ * running entry, so the timer vanished and then reappeared on rollback with no
+ * explanation offered for either movement.
+ */
+describe("a failed write is reported rather than swallowed", () => {
+  const boom = () => Promise.reject(new Error("network"))
+
+  it("reports a start that rejected", async () => {
+    const onError = vi.fn()
+    const { actions } = makeActions({ start: vi.fn(boom) })
+    render(<Bar running={null} actions={actions} onError={onError} />)
+
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports a stop that rejected", async () => {
+    const onError = vi.fn()
+    const { actions } = makeActions({ stop: vi.fn(boom) })
+    render(
+      <Bar
+        running={entry({ clientKey: "k1", _id: REAL_ID })}
+        actions={actions}
+        onError={onError}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText("Stop timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  it("reports a discard that rejected", async () => {
+    const onError = vi.fn()
+    const { actions } = makeActions({ discard: vi.fn(boom) })
+    render(
+      <Bar
+        running={entry({ clientKey: "k1", _id: REAL_ID })}
+        actions={actions}
+        onError={onError}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Discard/ }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onError).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * The announcement used to be made BEFORE the write was sent, so a discard
+   * that failed told a screen-reader user the timer was discarded while it was
+   * still running. Nothing in the visual UI says otherwise either — the row
+   * simply stays. This asserts the write is what triggers the claim.
+   */
+  it("does not claim the timer was discarded until the write lands", async () => {
+    // Held on an object rather than in a `let`: control-flow analysis cannot
+    // see the assignment inside a promise executor, so a bare variable narrows
+    // to `never` at the call below.
+    const deferred = { settle: () => {} }
+    const discard = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          deferred.settle = resolve
+        })
+    )
+    const { actions } = makeActions({ discard })
+    // Wrapped in the real Announcer: `useAnnounce` falls back to a no-op
+    // without a provider, so an unwrapped render would make both assertions
+    // below pass no matter what the component did.
+    render(
+      <Announcer>
+        <Bar running={entry({ clientKey: "k1", _id: REAL_ID })} actions={actions} />
+      </Announcer>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Discard/ }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(discard).toHaveBeenCalledTimes(1)
+    // In flight: the claim has not been made yet.
+    expect(screen.queryByText(/Timer discarded/)).toBeNull()
+
+    deferred.settle()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByText(/Timer discarded/)).toBeTruthy()
   })
 })

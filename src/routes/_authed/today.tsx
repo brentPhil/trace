@@ -1,7 +1,9 @@
-﻿import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
+import { Toast } from "@/components/ui/toast"
+import { errorMessage } from "@/lib/error-message"
 import { AppHeader } from "@/components/app-header"
 import { TimerBar } from "@/components/timer/timer-bar"
 import { EntryLog } from "@/components/entries/entry-log"
@@ -26,7 +28,7 @@ import type { Doc } from "../../../convex/_generated/dataModel"
 const LOG_DAYS = 30
 
 export const Route = createFileRoute("/_authed/today")({
-  head: () => ({ meta: [{ title: "Today â€” Trace" }] }),
+  head: () => ({ meta: [{ title: "Today — Trace" }] }),
   component: Today,
   loader: async ({ context }) => {
     // Settings first and awaited: every day boundary below depends on the
@@ -50,6 +52,17 @@ export const Route = createFileRoute("/_authed/today")({
       context.queryClient.ensureQueryData(
         convexQuery(api.recap.get, { day: dayOf(now, settings.timezone) })
       ),
+      // The three below are read with `useSuspenseQuery` during render — via
+      // `useClassifiers()` and the suggestions query. Left out of the loader
+      // they do not simply arrive later: the component SUSPENDS on each in
+      // turn, so the app's primary page paid three sequential server round
+      // trips after the loader had already finished. `/history` and `/projects`
+      // both prefetch their classifiers; this was the outlier.
+      context.queryClient.ensureQueryData(convexQuery(api.projects.list, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.tags.list, {})),
+      context.queryClient.ensureQueryData(
+        convexQuery(api.entries.titleSuggestions, { limit: 40 })
+      ),
     ])
   },
 })
@@ -67,7 +80,7 @@ function Today() {
   const second = useSecond()
   const nowMs = (second ?? Math.floor(Date.now() / 1000)) * 1000
 
-  // A day string, so it changes once a day rather than once a second â€” which
+  // A day string, so it changes once a day rather than once a second — which
   // is what keeps the query key below stable and stops the subscription being
   // torn down and rebuilt on every tick.
   const today = dayOf(nowMs, settings.timezone)
@@ -102,6 +115,21 @@ function Today() {
   )
   const { data: recap } = useSuspenseQuery(convexQuery(api.recap.get, { day: today }))
   const setRecapFields = useConvexMutation(api.recap.setFields)
+
+  const toasts = Toast.useToastManager()
+
+  /**
+   * The one place a failed timer write becomes visible.
+   *
+   * Start, stop and discard were all fired with a bare `void`, so a rejection
+   * was an unhandled promise with nothing on screen. Because stop and discard
+   * carry an optimistic update that clears the running entry, the failure mode
+   * was worse than silence: the timer vanished, then reappeared on rollback,
+   * with no explanation for either.
+   */
+  const report = (thrown: unknown) => {
+    toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
+  }
 
   // Which entry a recap bullet was drilled into. Cleared when the day changes,
   // since the id would then point at a row no longer on screen.
@@ -176,14 +204,15 @@ function Today() {
             setStopped(entry)
             setNoteOpen(true)
           }}
+          onError={report}
         />
       </div>
 
       <RunawayBanner
         running={running}
         thresholdMs={settings.runawayThresholdMs}
-        onStop={() => void entryMutations.stop()}
-        onDiscard={() => void entryMutations.discard()}
+        onStop={() => void entryMutations.stop().catch(report)}
+        onDiscard={() => void entryMutations.discard().catch(report)}
       />
 
       <div className="flex items-center justify-between gap-3 pr-2">

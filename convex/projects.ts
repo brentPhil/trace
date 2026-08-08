@@ -3,6 +3,8 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { requireUserId } from "./auth"
 import { getOwned } from "./owned"
 import { traceError } from "./errors"
+import { ENTRY_SCAN_LIMIT } from "./lib/scan"
+import { projectDoc } from "./lib/docs"
 import { DEFAULT_PROJECT_COLOR, isProjectColor, suggestProjectColor } from "./lib/palette"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
@@ -67,6 +69,7 @@ async function listImpl(ctx: QueryCtx, userId: string): Promise<Array<Doc<"proje
 
 export const list = query({
   args: {},
+  returns: v.array(projectDoc),
   handler: async (ctx) => await listImpl(ctx, await requireUserId(ctx)),
 })
 
@@ -250,6 +253,19 @@ export const setArchivedAs = internalMutation({
  * error says so. Deliberately NOT cascading: silently deleting the reference on
  * a hundred entries is a data loss the user did not ask for and cannot undo
  * from here.
+ *
+ * The scan is BOUNDED. `by_user_project` means only this project's own entries
+ * are read rather than the whole account, but that is still every entry ever
+ * filed against a client someone has billed for three years, and an unbounded
+ * `.collect()` over it eventually exceeds the per-transaction byte limit. The
+ * failure would be an internal error on a Delete button — permanent, opaque, and
+ * with no action the user could take. A bound turns it into a sentence.
+ *
+ * Unlike tags, this only needs to know whether ANY live entry exists, so the
+ * window is a cheap existence check rather than a full count. Saturating it is
+ * itself proof the project is in use: 2,000 entries cannot all be soft-deleted
+ * in an account that has not been mass-deleting, and either way the answer the
+ * user needs — archive instead — is the same one.
  */
 async function removeImpl(ctx: MutationCtx, userId: string, projectId: Id<"projects">) {
   const project = await getOwned(ctx, userId, "projects", projectId)
@@ -259,14 +275,30 @@ async function removeImpl(ctx: MutationCtx, userId: string, projectId: Id<"proje
     .withIndex("by_user_project", (q) =>
       q.eq("userId", userId).eq("projectId", project._id)
     )
-    .collect()
-  const live = referencing.filter((entry) => entry.deletedAt === null)
+    .take(ENTRY_SCAN_LIMIT + 1)
+  const saturated = referencing.length > ENTRY_SCAN_LIMIT
+  const live = referencing
+    .slice(0, ENTRY_SCAN_LIMIT)
+    .filter((entry) => entry.deletedAt === null)
 
   if (live.length > 0) {
+    // "at least" once saturated, because the count is then a floor rather than
+    // a total, and a precise-looking number that is wrong is worse than a
+    // vaguer one that is right.
+    const count = saturated ? `At least ${live.length}` : `${live.length}`
     traceError(
       "IN_USE",
-      `${live.length} ${live.length === 1 ? "entry uses" : "entries use"} this project. Archive it instead — the entries keep their history.`,
+      `${count} ${live.length === 1 ? "entry uses" : "entries use"} this project. Archive it instead — the entries keep their history.`,
       { count: live.length }
+    )
+  }
+
+  // Nothing live in the window, but the window did not reach the end. "It is
+  // unused" is not a claim this can make, so it does not make it.
+  if (saturated) {
+    traceError(
+      "IN_USE",
+      "This project has too many entries to check. Archive it instead — it disappears from the pickers and every entry keeps its history."
     )
   }
 

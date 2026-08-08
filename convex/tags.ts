@@ -3,6 +3,9 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { requireUserId } from "./auth"
 import { getOwned } from "./owned"
 import { traceError } from "./errors"
+import { assertEntryTagsBackfilled } from "./entryTags"
+import { ENTRY_SCAN_LIMIT } from "./lib/scan"
+import { tagDoc } from "./lib/docs"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
@@ -53,6 +56,7 @@ async function listImpl(ctx: QueryCtx, userId: string): Promise<Array<Doc<"tags"
 
 export const list = query({
   args: {},
+  returns: v.array(tagDoc),
   handler: async (ctx) => await listImpl(ctx, await requireUserId(ctx)),
 })
 
@@ -162,55 +166,56 @@ export const renameAs = internalMutation({
 // ---------------------------------------------------------------------------
 
 /**
- * The most entries a tag delete will read before giving up.
- *
- * Convex enforces a per-transaction read limit, and exceeding it fails the
- * mutation with an internal error rather than anything a user could act on.
- * A bound turns that into a refusal with a sentence.
- */
-const TAG_SCAN_LIMIT = 4_096
-
-/**
  * Deletes a tag, and REFUSES while any live entry carries it.
  *
  * Same contract as projects, for the same reason: no dangling reference means
  * no denormalised copy, which means a rename fixes history everywhere.
  *
- * There is no index on `tagIds` — Convex cannot index array membership — so
- * this scans. The scan is BOUNDED: an unbounded `.collect()` over every entry a
- * heavy user has ever recorded blows the per-transaction read limit, and the
- * failure is an internal error rather than something the user can do anything
- * with. Deleting a tag is rare and deliberate, so a bound that occasionally
- * says "too many to check" is a far better outcome than one that occasionally
- * throws.
+ * Convex cannot index array membership, so `timeEntries.tagIds` is unreachable
+ * by index and this used to read EVERY entry in the account to answer a
+ * question about one tag. Bounded, because an unbounded `.collect()` over a
+ * long history exceeds the per-transaction byte limit — and since the bound
+ * could not be filtered by tag, saturating it meant refusing. The result was
+ * that past 2,000 entries tag deletion stopped working for EVERY tag,
+ * permanently, including one created that morning and used on nothing.
+ *
+ * `entryTags` is the index Convex would not build. A row exists exactly when a
+ * live entry carries the tag, so the read is keyed by the tag itself, reads
+ * only rows that are actual answers, and — this is the part that matters —
+ * finding NOTHING now proves the tag is unused rather than proving only that
+ * the window ended. There is no saturation refusal left to write.
+ *
+ * `by_user_entry` keeps that table honest on every write; convex/entryTags.ts
+ * is its sole writer and says how.
+ *
+ * The take() that remains bounds the COUNT, not the answer. It reports how many
+ * entries to go and fix, matching projects.remove including its "At least"
+ * wording once the number is a floor rather than a total. A join row is a
+ * userId, two ids and nothing else, so 2,001 of them is a rounding error
+ * against the byte ceiling — and unlike the old scan, hitting this bound can
+ * only ever make a refusal vaguer, never turn an unused tag into a refused one.
  */
 async function removeImpl(ctx: MutationCtx, userId: string, tagId: Id<"tags">) {
   const tag = await getOwned(ctx, userId, "tags", tagId)
+  // AFTER the ownership check, so someone else's tag is still NOT_FOUND and the
+  // migration's progress cannot be used to probe for ids that exist.
+  await assertEntryTagsBackfilled(ctx)
 
-  const entries = await ctx.db
-    .query("timeEntries")
-    .withIndex("by_user_started", (q) => q.eq("userId", userId))
-    .take(TAG_SCAN_LIMIT + 1)
+  const carrying = await ctx.db
+    .query("entryTags")
+    .withIndex("by_user_tag", (q) => q.eq("userId", userId).eq("tagId", tag._id))
+    .take(ENTRY_SCAN_LIMIT + 1)
 
-  const live = entries
-    .slice(0, TAG_SCAN_LIMIT)
-    .filter((entry) => entry.deletedAt === null && entry.tagIds.includes(tag._id))
-
-  if (live.length > 0) {
+  if (carrying.length > 0) {
+    // No deletedAt filter: a row exists only while its entry is live, which is
+    // the invariant that lets this be one indexed read.
+    const saturated = carrying.length > ENTRY_SCAN_LIMIT
+    const shown = Math.min(carrying.length, ENTRY_SCAN_LIMIT)
+    const count = saturated ? `At least ${shown}` : `${shown}`
     traceError(
       "IN_USE",
-      `${live.length} ${live.length === 1 ? "entry carries" : "entries carry"} this tag. Remove it from them first.`,
-      { count: live.length }
-    )
-  }
-
-  // Nothing found, but not everything was looked at — so "it is unused" is not
-  // a claim this can make. Renaming the tag to something harmless is the
-  // available answer, and it is one the user can actually take.
-  if (entries.length > TAG_SCAN_LIMIT) {
-    traceError(
-      "IN_USE",
-      "You have too many entries to check this tag against. Rename it instead — every entry that carries it will follow."
+      `${count} ${shown === 1 ? "entry carries" : "entries carry"} this tag. Remove it from them first.`,
+      { count: shown }
     )
   }
 

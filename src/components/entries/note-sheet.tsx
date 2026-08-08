@@ -62,6 +62,10 @@ export function NoteSheet({
     if (seededFor.current === id) return
     seededFor.current = id
     if (id !== null) setValue(entry?.note ?? "")
+    // Cleared alongside the text. Left behind, a failed save's alarm line was
+    // still sitting there the next time the sheet opened — on a different
+    // entry, about a write that is no longer pending.
+    setError(null)
   }, [open, entry?._id, entry?.note])
 
   if (entry === null) return null

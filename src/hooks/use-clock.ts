@@ -34,14 +34,31 @@ export function useMinute(): number | null {
   return second === null ? null : Math.floor(second / 60)
 }
 
+/** A subscribe function that never fires, for a value that cannot change. */
+function subscribeToNothing(): () => void {
+  return () => {}
+}
+
 /**
  * Elapsed milliseconds for an entry.
  *
- * A completed entry needs no clock at all and creates no subscription, so a
- * list of finished rows costs nothing per second.
+ * A completed entry needs no clock, and creates no subscription — so a page of
+ * finished rows costs nothing per second.
+ *
+ * That has to be arranged by swapping the SUBSCRIBE function rather than by
+ * returning early, which is the obvious version and does not work: a hook call
+ * cannot sit behind a condition, so `useSecond()` followed by an early return
+ * still registers every completed row as a listener. A month of history then
+ * wakes two hundred components a second to recompute a number none of them will
+ * repaint. The store is the same one either way; only the subscription differs.
  */
 export function useElapsedMs(startedAt: number, endedAt: number | null): number {
-  const second = useSecond()
+  const running = endedAt === null
+  const second = useSyncExternalStore(
+    running ? subscribeToClock : subscribeToNothing,
+    running ? getClockSnapshot : getClockServerSnapshot,
+    getClockServerSnapshot
+  )
   if (endedAt !== null) return endedAt - startedAt
 
   // On the server and during hydration the store has no value, so read the
