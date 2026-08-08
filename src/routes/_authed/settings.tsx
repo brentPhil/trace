@@ -150,22 +150,6 @@ function Settings() {
         </Section>
 
         <Section
-          title="Recap reminder"
-          hint="The time of day the recap is worth writing. Used to decide when a nudge is due."
-        >
-          <input
-            type="time"
-            aria-label="Recap time"
-            value={minutesToTime(settings.recapMinuteLocal)}
-            onChange={(event) => {
-              const minutes = timeToMinutes(event.target.value)
-              if (minutes !== null) save({ recapMinuteLocal: minutes })
-            }}
-            className={cn(fieldClass, "tabular")}
-          />
-        </Section>
-
-        <Section
           title="Tab title"
           hint="Announced by screen readers whenever it changes, which is why it can be switched off. It updates once a minute rather than once a second for the same reason."
         >
@@ -291,17 +275,3 @@ const fieldClass = cn(
   "rounded-md border border-edge-soft bg-ground px-2 py-1.5 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
-
-function minutesToTime(minutes: number): string {
-  const safe = Math.min(1439, Math.max(0, Math.round(minutes)))
-  const h = Math.floor(safe / 60)
-  const m = safe % 60
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
-}
-
-function timeToMinutes(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value)
-  if (match === null) return null
-  const minutes = Number(match[1]) * 60 + Number(match[2])
-  return Number.isFinite(minutes) && minutes >= 0 && minutes < 1440 ? minutes : null
-}
