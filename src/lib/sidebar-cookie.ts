@@ -1,5 +1,5 @@
 import { createIsomorphicFn } from "@tanstack/react-start"
-import { getCookie } from "@tanstack/react-start/server"
+import { getRequestHeader } from "@tanstack/react-start/server"
 
 const COOKIE_NAME = "sidebar_state"
 
@@ -32,13 +32,14 @@ export function parseSidebarOpen(cookieHeader: string | undefined): boolean {
  * (see the implementation plan's section 5.9) — a cookie travels with the
  * request, so the server and the client observe the same value.
  *
- * The two branches are not quite symmetric: `getCookie` runs the value through
- * `decodeURIComponent`, while `document.cookie` is parsed raw. That cannot
- * diverge today, because the only writer of this cookie is
- * `src/components/ui/sidebar.tsx`, which stringifies a boolean — `true` and
- * `false` need no encoding. Widen this cookie's value space and the client
- * branch has to decode too.
+ * Both branches now run the SAME parser, `parseSidebarOpen`, over the raw
+ * cookie header — `getRequestHeader("cookie")` on the server,
+ * `document.cookie` on the client. Previously the server branch used
+ * `getCookie(COOKIE_NAME) !== "false"` instead, a second implementation of
+ * the same rule that shared no code with the tested one — so the tested code
+ * was never the code that actually ran on the server. Using one parser for
+ * both means the tests above cover both branches, not just the client one.
  */
 export const readSidebarOpen = createIsomorphicFn()
-  .server(() => getCookie(COOKIE_NAME) !== "false")
+  .server(() => parseSidebarOpen(getRequestHeader("cookie")))
   .client(() => parseSidebarOpen(document.cookie))

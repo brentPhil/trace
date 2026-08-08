@@ -24,7 +24,19 @@ export const Route = createFileRoute("/_authed/timer")({
     // stored timezone. It is loaded here rather than in a parent loader
     // because TanStack Router runs loaders in PARALLEL across matched routes,
     // so a child cannot assume a parent's loader has resolved.
-    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
+    const settings = await context.queryClient.ensureQueryData(
+      convexQuery(api.settings.get, {})
+    )
+
+    // The component below reads this exact range with `useSuspenseQuery` for
+    // the week totals. Without prefetching it here, the page suspends on a
+    // round trip AFTER this loader has already resolved — the deleted
+    // today.tsx prefetched its own range for the same reason.
+    const today = dayOf(Date.now(), settings.timezone)
+    const week = weekWindow(today, settings.timezone, settings.weekStartDay)
+    await context.queryClient.ensureQueryData(
+      convexQuery(api.entries.listRange, { fromMs: week.fromMs, toMs: week.toMs })
+    )
   },
 })
 
@@ -44,12 +56,13 @@ function Timer() {
 
   const week = weekWindow(today, settings.timezone, settings.weekStartDay)
 
+  // `weekWindow` already returns the boundary as fromMs/toMs (see
+  // convex/lib/day.ts) — recomputing it a second way from firstDay/lastDay
+  // here would be two sources of truth for one boundary, which is exactly
+  // what that module exists to prevent.
   const weekRange = useMemo(
-    () => ({
-      fromMs: dayWindow(week.firstDay, settings.timezone).fromMs,
-      toMs: dayWindow(week.lastDay, settings.timezone).toMs,
-    }),
-    [week.firstDay, week.lastDay, settings.timezone]
+    () => ({ fromMs: week.fromMs, toMs: week.toMs }),
+    [week.fromMs, week.toMs]
   )
 
   // Bounded to the current week and used ONLY for the totals. See
@@ -60,14 +73,16 @@ function Timer() {
 
   // The log itself, all the way back. `toMs` is the end of today rather than
   // Infinity so a clock-skewed future entry cannot sit permanently on top.
-  const listRange = useMemo(
+  // Named distinctly from the real `api.entries.listRange` call just above —
+  // these are the args to `listPage`, not to `listRange`.
+  const logRange = useMemo(
     () => ({ fromMs: 0, toMs: dayWindow(today, settings.timezone).toMs }),
     [today, settings.timezone]
   )
 
   const { results, status, loadMore } = usePaginatedQuery(
     api.entries.listPage,
-    listRange,
+    logRange,
     { initialNumItems: PAGE_SIZE }
   )
 
