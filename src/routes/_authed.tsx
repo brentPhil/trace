@@ -6,10 +6,26 @@ import {
   useLocation,
 } from "@tanstack/react-router"
 import { ConvexError } from "convex/values"
+import { useSuspenseQuery } from "@tanstack/react-query"
+import { convexQuery } from "@convex-dev/react-query"
 import { buttonVariants } from "@/components/ui/button"
+import { Toast } from "@/components/ui/toast"
 import { AuthShell } from "@/components/auth-shell"
+import { AppShell } from "@/components/shell/app-shell"
+import { TimerBar } from "@/components/timer/timer-bar"
+import { RunawayBanner } from "@/components/timer/runaway-banner"
+import { readSidebarOpen } from "@/lib/sidebar-cookie"
+import { signOutAndLeave } from "@/lib/auth-client"
+import { errorMessage } from "@/lib/error-message"
 import { useEnsureSettings } from "@/hooks/use-ensure-settings"
+import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
+import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
+import { useEntryMutations } from "@/hooks/use-entry-mutations"
+import { useReplayPendingStart, useTabTitleClock } from "@/hooks/use-timer-effects"
 import { cn } from "@/lib/utils"
+import { api } from "../../convex/_generated/api"
+import type { TimerBarActions } from "@/components/timer/timer-bar"
+import { useMemo } from "react"
 
 /**
  * Pathless layout route. Anything nested under `_authed/` requires a session.
@@ -28,6 +44,25 @@ export const Route = createFileRoute("/_authed")({
         search: { redirect: location.href },
       })
     }
+    // Read here, not in the shell: the value must be known before the first
+    // render on the server, or the rail's width changes at hydration.
+    return { sidebarOpen: readSidebarOpen() }
+  },
+  loader: async ({ context }) => {
+    // Fetched once for the session rather than once per page, now that the
+    // timer bar lives above the outlet and every page needs the same data.
+    await Promise.all([
+      context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
+      context.queryClient.ensureQueryData(
+        convexQuery(api.auth.getAuthenticatedUser, {})
+      ),
+      context.queryClient.ensureQueryData(convexQuery(api.entries.getRunning, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.projects.list, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.tags.list, {})),
+      context.queryClient.ensureQueryData(
+        convexQuery(api.entries.titleSuggestions, { limit: 40 })
+      ),
+    ])
   },
   errorComponent: AuthedErrorBoundary,
   component: AuthedLayout,
@@ -36,10 +71,84 @@ export const Route = createFileRoute("/_authed")({
 /**
  * Every authed page hangs off this, which is why the settings seed lives here:
  * it needs to run once per session on the client, wherever the user landed.
+ *
+ * This also owns the running entry, its mutations and the classifier lists —
+ * the timer bar sits above the outlet, so a timer can be started and stopped
+ * from any page rather than only from Today.
  */
 function AuthedLayout() {
   useEnsureSettings()
-  return <Outlet />
+
+  const { sidebarOpen } = Route.useRouteContext()
+  const { data: user } = useSuspenseQuery(
+    convexQuery(api.auth.getAuthenticatedUser, {})
+  )
+  const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
+  const { data: running } = useSuspenseQuery(convexQuery(api.entries.getRunning, {}))
+  const { data: suggestions } = useSuspenseQuery(
+    convexQuery(api.entries.titleSuggestions, { limit: 40 })
+  )
+
+  useTabTitleClock(running, settings.tabTitleClock)
+  useReplayPendingStart(running)
+
+  const entryMutations = useEntryMutations()
+  const editMutations = useEntryEditMutations()
+  const { projects, tags } = useClassifiers()
+  const { createProject, ensureTag } = useClassifierMutations()
+
+  const toasts = Toast.useToastManager()
+  const report = (thrown: unknown) => {
+    toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
+  }
+
+  const timerActions: TimerBarActions = useMemo(
+    () => ({
+      start: entryMutations.start,
+      stop: entryMutations.stop,
+      discard: entryMutations.discard,
+      setTitle: entryMutations.setTitle,
+      classify: async (entryId, change) => {
+        await editMutations.update({
+          entryId,
+          ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
+          ...(change.tagIds !== undefined ? { tagIds: change.tagIds } : {}),
+          ...(change.billable !== undefined ? { billable: change.billable } : {}),
+        })
+      },
+      createProject: async (name) => await createProject({ name }),
+      createTag: async (name) => await ensureTag(name),
+    }),
+    [entryMutations, editMutations, createProject, ensureTag]
+  )
+
+  return (
+    <AppShell
+      email={user.email}
+      onSignOut={() => signOutAndLeave()}
+      sidebarDefaultOpen={sidebarOpen}
+      timer={
+        <>
+          <TimerBar
+            running={running}
+            actions={timerActions}
+            projects={projects}
+            tags={tags}
+            suggestions={suggestions}
+            onError={report}
+          />
+          <RunawayBanner
+            running={running}
+            thresholdMs={settings.runawayThresholdMs}
+            onStop={() => void entryMutations.stop().catch(report)}
+            onDiscard={() => void entryMutations.discard().catch(report)}
+          />
+        </>
+      }
+    >
+      <Outlet />
+    </AppShell>
+  )
 }
 
 /**

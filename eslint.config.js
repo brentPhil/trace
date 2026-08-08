@@ -29,6 +29,11 @@ export default [
       ".prettierrc",
       "convex/_generated/**",
       "convex/*.ts",
+      // Agent worktrees. `git worktree add` puts a full second checkout inside
+      // the repo, so a bare `eslint .` lints another branch's working copy and
+      // reports failures that have nothing to do with the tree being verified.
+      ".claude/**",
+      ".superpowers/**",
     ],
   },
 ]

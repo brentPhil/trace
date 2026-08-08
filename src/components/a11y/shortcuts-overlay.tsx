@@ -31,7 +31,7 @@ const SHORTCUTS: Array<{ group: string; items: Array<[string, string]> }> = [
     ],
   },
   {
-    group: "History",
+    group: "Reports",
     items: [
       ["←", "Previous period, keeping every filter"],
       ["→", "Next period"],
@@ -40,6 +40,7 @@ const SHORTCUTS: Array<{ group: string; items: Array<[string, string]> }> = [
   {
     group: "Anywhere",
     items: [
+      ["⌘ / Ctrl + B", "Collapse or expand the sidebar"],
       ["?", "This list"],
       ["F6", "Move focus into a toast, to reach Undo"],
     ],

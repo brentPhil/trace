@@ -117,9 +117,9 @@ function unwrapTimes(result: TimesResult): EntryTimes {
 /**
  * An empty note is an ABSENT note, not a stored empty string.
  *
- * Both would render the same today, but "has a note" is the field the recap
- * selects on and the day header counts, so two representations of nothing would
- * eventually disagree. `undefined` deletes the field in a Convex patch.
+ * Both would render the same today, but "has a note" is the field the day
+ * header counts and Reports filters on, so two representations of nothing
+ * would eventually disagree. `undefined` deletes the field in a Convex patch.
  */
 function normaliseNote(note: string | undefined): string | undefined {
   if (note === undefined) return undefined
@@ -196,7 +196,8 @@ export const getRunningAs = internalQuery({
  *
  * Ranges on `startedAt` because there is no stored day key — see the plan §2.1.
  * The caller converts a local date to instants with convex/lib/day.ts, so the
- * log and the recap resolve days through the same function and cannot disagree.
+ * log, the day totals, and Reports resolve days through the same function and
+ * cannot disagree.
  *
  * Attribution is by START. An entry running from 23:00 to 01:30 belongs wholly
  * to the day it began, and Split is the manual correction — the same rule Toggl

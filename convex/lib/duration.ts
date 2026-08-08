@@ -156,7 +156,7 @@ export function formatClock(ms: number): string {
 }
 
 /**
- * `5h 44m` / `2h 05m` / `4h` / `47m` / `<1m` — day headers, totals, the recap.
+ * `5h 44m` / `2h 05m` / `4h` / `47m` / `<1m` — day headers, totals, Reports.
  *
  * Truncates rather than rounds, deliberately. Flooring guarantees a property
  * worth having on a document that sits next to an invoice: no line ever

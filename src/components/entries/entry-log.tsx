@@ -30,7 +30,6 @@ export function EntryLog({
   timeZone,
   use12Hour,
   weekStartDay,
-  highlightedEntryId,
   display,
 }: {
   groups: Array<DayGroup>
@@ -38,8 +37,6 @@ export function EntryLog({
   use12Hour: boolean
   /** 0 = Sunday. The calendar's first column must match the week totals. */
   weekStartDay: number
-  /** Set by a recap drill-down. The row scrolls into view and marks itself. */
-  highlightedEntryId?: string | null
   display?: DurationDisplay
 }) {
   const { setNote, update, editTime, remove, restore } = useEntryEditMutations()
@@ -174,9 +171,10 @@ export function EntryLog({
     },
   }
 
-  // The sheet reads a snapshot rather than the live row, so it does not
-  // re-render out from under someone mid-sentence. Its own save is what puts
-  // the new note back into the list.
+  // The sheet reads the LIVE row when one is still found in `groups`, falling
+  // back to the snapshot only if the entry has since been removed (deleted,
+  // or paginated out from under it) — so it stays in sync with edits made
+  // elsewhere while it is open, rather than going stale mid-sentence.
   const liveNoteEntry =
     noteEntry === null
       ? null
@@ -194,7 +192,6 @@ export function EntryLog({
         projects={projects}
         tags={tags}
         actions={actions}
-        highlightedEntryId={highlightedEntryId}
         display={display}
       />
       <NoteSheet

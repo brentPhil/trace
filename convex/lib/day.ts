@@ -4,7 +4,7 @@
  * Entries are stored as UTC instants and grouped by the user's local day.
  * Nothing in this product stores a local date — see the plan, §2.1. That means
  * every "which day is this" question routes through this file, and every
- * grouping the user sees (the log, the day totals, the recap) resolves through
+ * grouping the user sees (the log, the day totals, Reports) resolves through
  * the same two functions, so they cannot disagree with each other.
  *
  * Pure. No Convex imports, no DOM. Runs identically on both sides of the wire.

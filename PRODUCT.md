@@ -19,6 +19,13 @@ and be able to say what was actually accomplished without reconstructing it from
 memory. The output is used two ways — a recap for the user's own record or
 standup, and a defensible account of the work behind an invoice.
 
+> **REMOVED 2026-08-08.** The recap was built, shipped, and then cut to make
+> room for the dashboard shell — see
+> `docs/superpowers/plans/2026-08-08-dashboard-sidebar-shell.md`. Notes are
+> retained: they now serve **Reports**, which searches note text, rather than
+> composing into a recap. The paragraph above is left standing because it is
+> the argument the product was designed around.
+
 ## Product Purpose
 
 A time tracker that captures what was accomplished, not only how long it took.
@@ -36,6 +43,12 @@ essentially written, because capture during the day cost them almost nothing.
 
 The initial core is deliberately narrow — start/stop and manage entries, title
 each session, attach an optional note, review history, generate a daily recap.
+
+> **REMOVED 2026-08-08.** "Generate a daily recap" and the two paragraphs
+> above describing it were the plan, not the shipped product — the recap was
+> cut the same day the dashboard shell landed. What remains: start/stop and
+> manage entries, title each session, attach an optional note, and search
+> across all of it in Reports. See the shell plan for why.
 
 ## Brand Personality
 
@@ -74,8 +87,10 @@ friction added to the note path is a direct attack on the core value.
 
 **Recede, then report.** The interface is in peripheral vision for eight hours
 and read closely for two minutes. Ambient state must be legible at a glance and
-must not compete for attention; the recap is the one moment the product is
-allowed to be assertive.
+must not compete for attention; the recap was the one moment the product was
+allowed to be assertive. **REMOVED 2026-08-08** along with the recap itself —
+Reports is the closest surviving moment of assertiveness, and it is a table,
+not prose.
 
 **Never lose time.** A tracker that drops an entry is worse than no tracker,
 because the user stops trusting it and the data becomes unusable for billing.

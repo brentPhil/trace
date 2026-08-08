@@ -63,12 +63,10 @@ function makeActions(over: Partial<TimerBarActions> = {}) {
 function Bar({
   running,
   actions,
-  onStopped,
   onError,
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
-  onStopped?: (stopped: Doc<"timeEntries">) => void
   onError?: (thrown: unknown) => void
 }) {
   return (
@@ -77,7 +75,6 @@ function Bar({
       actions={actions}
       projects={[]}
       tags={[]}
-      onStopped={onStopped}
       onError={onError}
     />
   )
@@ -286,12 +283,11 @@ describe("starting and stopping", () => {
     expect(classify).not.toHaveBeenCalled()
   })
 
-  it("reports the stopped entry with a real end and duration", async () => {
+  it("announces the stopped entry with its real duration", async () => {
     const serverNow = 1_800_000_000_000
     const { actions } = makeActions({
       stop: vi.fn(async () => ({ stoppedEntryIds: [REAL_ID], serverNow })),
     })
-    const onStopped = vi.fn()
     const running = entry({
       clientKey: "k1",
       title: "Work",
@@ -299,32 +295,36 @@ describe("starting and stopping", () => {
       _id: REAL_ID,
     })
 
-    render(<Bar running={running} actions={actions} onStopped={onStopped} />)
+    // Wrapped in the real Announcer: `useAnnounce` falls back to a no-op
+    // without a provider, so an unwrapped render would make this assertion
+    // pass no matter what the component did.
+    render(
+      <Announcer>
+        <Bar running={running} actions={actions} />
+      </Announcer>
+    )
     fireEvent.click(screen.getByLabelText("Stop timer"))
     await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(0)
 
-    expect(onStopped).toHaveBeenCalledWith(
-      expect.objectContaining({ endedAt: serverNow, durationMs: 90_000 })
-    )
+    expect(screen.getByText(/Stopped Work\. 1 minute recorded\./)).toBeTruthy()
   })
 
-  it("does not raise the note sheet when another tab already stopped it", async () => {
-    // An empty stoppedEntryIds means there was nothing to do. Asking for a note
-    // about an entry the user did not just finish is a non-sequitur.
+  it("does not announce a stop when another tab already stopped it", async () => {
+    // An empty stoppedEntryIds means there was nothing to do. Announcing a
+    // stop for an entry the user did not just finish is a non-sequitur.
     const { actions } = makeActions()
-    const onStopped = vi.fn()
     render(
-      <Bar
-        running={entry({ clientKey: "k1", _id: REAL_ID })}
-        actions={actions}
-        onStopped={onStopped}
-      />
+      <Announcer>
+        <Bar running={entry({ clientKey: "k1", _id: REAL_ID })} actions={actions} />
+      </Announcer>
     )
 
     fireEvent.click(screen.getByLabelText("Stop timer"))
     await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(0)
 
-    expect(onStopped).not.toHaveBeenCalled()
+    expect(screen.queryByText(/Stopped/)).toBeNull()
   })
 })
 

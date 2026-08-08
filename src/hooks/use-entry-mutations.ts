@@ -19,9 +19,12 @@ import type { Doc, Id } from "../../convex/_generated/dataModel"
  * there is exactly one optimistic mechanism in the app rather than two that
  * could disagree.
  *
- * This works because `/today` reads a plain reactive query. It would NOT work
- * against a paginated list, whose pages live in a different cache shape — which
- * is why the history view deliberately does not use optimistic updates.
+ * This hook only ever touches `getRunning`, a plain reactive query, so that
+ * part is simple. The paginated `listPage` the log itself renders from is a
+ * different cache shape — `page` arrays inside pagination results rather than
+ * a bare array — which is why `use-entry-edit-mutations.ts`'s `patchEverywhere`
+ * and friends walk `getAllQueries(api.entries.listPage)` explicitly instead of
+ * relying on this same trick.
  */
 function optimisticEntry(args: {
   clientKey: string

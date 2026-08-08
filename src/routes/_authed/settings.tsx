@@ -2,7 +2,6 @@ import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
-import { AppHeader } from "@/components/app-header"
 import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
@@ -14,12 +13,7 @@ export const Route = createFileRoute("/_authed/settings")({
   head: () => ({ meta: [{ title: "Settings — Trace" }] }),
   component: Settings,
   loader: async ({ context }) => {
-    await Promise.all([
-      context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
-      context.queryClient.ensureQueryData(
-        convexQuery(api.auth.getAuthenticatedUser, {})
-      ),
-    ])
+    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
   },
 })
 
@@ -39,9 +33,6 @@ const WEEKDAYS = [
 const RUNAWAY_CHOICES = [4, 6, 8, 10, 12, 24]
 
 function Settings() {
-  const { data: user } = useSuspenseQuery(
-    convexQuery(api.auth.getAuthenticatedUser, {})
-  )
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const update = useLatest(useConvexMutation(api.settings.update))
   const toasts = Toast.useToastManager()
@@ -53,15 +44,13 @@ function Settings() {
   }
 
   return (
-    <div className="mx-auto flex min-h-svh w-full max-w-4xl flex-col">
-      <AppHeader email={user.email} />
-
-      <main className="flex flex-1 flex-col gap-8 px-4 py-6">
+    <div className="flex flex-col">
+      <div className="flex flex-1 flex-col gap-8 px-4 py-6">
         <h1 className="text-sm font-semibold">Settings</h1>
 
         <Section
           title="Time zone"
-          hint="Every day boundary in the app comes from this — which entries fall on which day, what the week totals cover, and when a recap is for. Changing it re-files history rather than rewriting it, so nothing is lost, but old days may shift."
+          hint="Every day boundary in the app comes from this — which entries fall on which day, and what the week totals cover. Changing it re-files history rather than rewriting it, so nothing is lost, but old days may shift."
         >
           <TimezoneField
             value={settings.timezone}
@@ -86,7 +75,7 @@ function Settings() {
 
         <Section
           title="Durations"
-          hint="Decimal hours are floored to two places, so no figure ever shows more time than was recorded and the parts never sum above the whole. It applies to totals and exports — never to a single entry's own row, and never to the recap, where a span reads better as a span."
+          hint="Decimal hours are floored to two places, so no figure ever shows more time than was recorded and the parts never sum above the whole. It applies to totals and exports — never to a single entry's own row, where a span reads better as a span."
         >
           <div className="flex flex-col gap-2">
             <Radio
@@ -150,22 +139,6 @@ function Settings() {
         </Section>
 
         <Section
-          title="Recap reminder"
-          hint="The time of day the recap is worth writing. Used to decide when a nudge is due."
-        >
-          <input
-            type="time"
-            aria-label="Recap time"
-            value={minutesToTime(settings.recapMinuteLocal)}
-            onChange={(event) => {
-              const minutes = timeToMinutes(event.target.value)
-              if (minutes !== null) save({ recapMinuteLocal: minutes })
-            }}
-            className={cn(fieldClass, "tabular")}
-          />
-        </Section>
-
-        <Section
           title="Tab title"
           hint="Announced by screen readers whenever it changes, which is why it can be switched off. It updates once a minute rather than once a second for the same reason."
         >
@@ -179,7 +152,7 @@ function Settings() {
             Show the running timer in the browser tab
           </label>
         </Section>
-      </main>
+      </div>
     </div>
   )
 }
@@ -291,17 +264,3 @@ const fieldClass = cn(
   "rounded-md border border-edge-soft bg-ground px-2 py-1.5 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
-
-function minutesToTime(minutes: number): string {
-  const safe = Math.min(1439, Math.max(0, Math.round(minutes)))
-  const h = Math.floor(safe / 60)
-  const m = safe % 60
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
-}
-
-function timeToMinutes(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value)
-  if (match === null) return null
-  const minutes = Number(match[1]) * 60 + Number(match[2])
-  return Number.isFinite(minutes) && minutes >= 0 && minutes < 1440 ? minutes : null
-}

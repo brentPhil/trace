@@ -32,8 +32,8 @@ function App() {
               .
             </p>
             <div className="flex gap-3">
-              <Link to="/today" className={cn(buttonVariants())}>
-                Go to today
+              <Link to="/timer" className={cn(buttonVariants())}>
+                Go to timer
               </Link>
               <Button variant="outline" onClick={() => signOutAndLeave()}>
                 Sign out

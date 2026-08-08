@@ -130,9 +130,9 @@ describe("formatCompactDuration", () => {
   })
 
   /**
-   * The property the recap depends on: bullets in a block can never sum to
-   * more than the block subtotal, because every part is floored and the whole
-   * is floored from the true sum.
+   * The property day headers and Reports subtotals depend on: entries grouped
+   * under a total can never sum to more than that total, because every part
+   * is floored and the whole is floored from the true sum.
    */
   it("parts never exceed the whole", () => {
     const items = [1_234_567, 7_654_321, 999, 3_600_001, 59_999]

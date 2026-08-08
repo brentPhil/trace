@@ -137,6 +137,8 @@ default developer monos, keeping numbers from reading as terminal output.
 - **Title** (500, `1rem`, 1.4, `-0.01em`): Entry titles. The most-read text in
   the product.
 - **Body** (400, `0.9375rem`, 1.6): Notes and recap prose. Capped at 65–75ch.
+  *(The recap was **REMOVED 2026-08-08**; this size still applies to notes,
+  the only prose that remains.)*
 - **Duration** (400, mono, `tnum`, `-0.02em`): Every duration, timestamp, and
   total, at any size.
 - **Label** (500, `0.8125rem`): Field labels and column headers. Sentence case.
@@ -237,7 +239,10 @@ sidecar.
 - **Don't** build a **playful consumer app** — no rounded-everything, bright
   illustration, emoji-forward copy, or cheerful anthropomorphism.
 - **Don't** let the recap render as an **analytics dashboard**. It is written
-  prose the user can paste into Slack, not a chart grid.
+  prose the user can paste into Slack, not a chart grid. **REMOVED 2026-08-08**
+  along with the recap — Reports is the surface that took its place, and it
+  is deliberately a table: the rule this line stated no longer has anything
+  to guard.
 - **Don't** use uppercase tracked-out eyebrow labels above sections.
 - **Don't** use `border-left` or `border-right` above 1px as a coloured accent
   stripe on rows, cards, or callouts.
