@@ -15,8 +15,8 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignupRouteImport } from './routes/signup'
-import { Route as AuthedHistoryRouteImport } from './routes/_authed/history'
 import { Route as AuthedProjectsRouteImport } from './routes/_authed/projects'
+import { Route as AuthedReportsRouteImport } from './routes/_authed/reports'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedTimerRouteImport } from './routes/_authed/timer'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -50,14 +50,14 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthedHistoryRoute = AuthedHistoryRouteImport.update({
-  id: '/history',
-  path: '/history',
-  getParentRoute: () => AuthedRoute,
-} as any)
 const AuthedProjectsRoute = AuthedProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedReportsRoute = AuthedReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
@@ -82,8 +82,8 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/history': typeof AuthedHistoryRoute
   '/projects': typeof AuthedProjectsRoute
+  '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
   '/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -94,8 +94,8 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/history': typeof AuthedHistoryRoute
   '/projects': typeof AuthedProjectsRoute
+  '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
   '/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -108,8 +108,8 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/_authed/history': typeof AuthedHistoryRoute
   '/_authed/projects': typeof AuthedProjectsRoute
+  '/_authed/reports': typeof AuthedReportsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
   '/_authed/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -122,8 +122,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
-    | '/history'
     | '/projects'
+    | '/reports'
     | '/settings'
     | '/timer'
     | '/api/auth/$'
@@ -134,8 +134,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
-    | '/history'
     | '/projects'
+    | '/reports'
     | '/settings'
     | '/timer'
     | '/api/auth/$'
@@ -147,8 +147,8 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
-    | '/_authed/history'
     | '/_authed/projects'
+    | '/_authed/reports'
     | '/_authed/settings'
     | '/_authed/timer'
     | '/api/auth/$'
@@ -208,18 +208,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authed/history': {
-      id: '/_authed/history'
-      path: '/history'
-      fullPath: '/history'
-      preLoaderRoute: typeof AuthedHistoryRouteImport
-      parentRoute: typeof AuthedRoute
-    }
     '/_authed/projects': {
       id: '/_authed/projects'
       path: '/projects'
       fullPath: '/projects'
       preLoaderRoute: typeof AuthedProjectsRouteImport
+      parentRoute: typeof AuthedRoute
+    }
+    '/_authed/reports': {
+      id: '/_authed/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof AuthedReportsRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/_authed/settings': {
@@ -247,15 +247,15 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedRouteChildren {
-  AuthedHistoryRoute: typeof AuthedHistoryRoute
   AuthedProjectsRoute: typeof AuthedProjectsRoute
+  AuthedReportsRoute: typeof AuthedReportsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedTimerRoute: typeof AuthedTimerRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
-  AuthedHistoryRoute: AuthedHistoryRoute,
   AuthedProjectsRoute: AuthedProjectsRoute,
+  AuthedReportsRoute: AuthedReportsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedTimerRoute: AuthedTimerRoute,
 }

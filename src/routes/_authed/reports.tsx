@@ -21,15 +21,15 @@ import type { Filters } from "@/lib/history-filters"
 
 const PAGE_SIZE = 100
 
-export const Route = createFileRoute("/_authed/history")({
-  head: () => ({ meta: [{ title: "History — Trace" }] }),
-  component: History,
+export const Route = createFileRoute("/_authed/reports")({
+  head: () => ({ meta: [{ title: "Reports — Trace" }] }),
+  component: Reports,
   loader: async ({ context }) => {
     await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
   },
 })
 
-function History() {
+function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects, projectsById } = useClassifiers()
 
