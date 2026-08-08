@@ -130,7 +130,14 @@ function Timer() {
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center justify-between gap-3 pr-2">
+      {/*
+        `justify-between` used to put this cluster hard left and "+ Add
+        entry" at the far right — opposite corners of a 1344px+ row, for a
+        button whose entire reason to exist is "I forgot to start the timer",
+        prompted BY the numbers to its left. Capped and adjacent instead, so
+        the control sits next to the totals it relates to.
+      */}
+      <div className="mx-auto flex w-full max-w-[1100px] items-center gap-4 pr-2">
         <TotalsRow
           className="py-3"
           todayMs={totals.todayMs}

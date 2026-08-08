@@ -45,7 +45,14 @@ function Settings() {
 
   return (
     <div className="flex flex-col">
-      <div className="flex flex-1 flex-col gap-8 px-4 py-6">
+      {/*
+        `max-w-[46rem]`: every `Section` below carries a full-width
+        `border-b`, and at 1600px unconstrained that was a 1329px hairline
+        running underneath a 272px `<select>`, six times down the page. This
+        is a column of settings controls, not content that wants the log's
+        full-bleed width.
+      */}
+      <div className="flex max-w-[46rem] flex-1 flex-col gap-8 px-4 py-6">
         <h1 className="text-sm font-semibold">Settings</h1>
 
         <Section

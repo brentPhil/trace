@@ -53,38 +53,46 @@ export function DayList({
         <section key={group.day} aria-label={group.label} className="flex flex-col">
           <header
             className={cn(
-              "sticky top-0 z-10 flex items-baseline justify-between gap-3",
-              "border-b border-edge-soft bg-ground/95 px-4 py-2 backdrop-blur-sm"
+              "sticky top-0 z-10 border-b border-edge-soft bg-ground/95",
+              "px-4 py-2 backdrop-blur-sm"
             )}
           >
-            <div className="flex items-baseline gap-3">
-              <h2 className="text-sm font-semibold">{group.label}</h2>
-              {/*
-                The note count, not a badge or a score. It states a fact and
-                creates just enough pressure to fill the gaps in the day --
-                without ever gating the timer.
+            {/*
+              Capped and centred like the rows below it, so the label and the
+              total stay a bound pair instead of the most-glanced-at line on
+              the page stretching to the full log width — the header's own
+              background and border stay on the element above, uncapped.
+            */}
+            <div className="mx-auto flex max-w-[1100px] items-baseline justify-between gap-3">
+              <div className="flex items-baseline gap-3">
+                <h2 className="text-sm font-semibold">{group.label}</h2>
+                {/*
+                  The note count, not a badge or a score. It states a fact and
+                  creates just enough pressure to fill the gaps in the day --
+                  without ever gating the timer.
 
-                Omitted entirely when the day has no completed entries yet.
-                Since a running entry is not a row, the count would otherwise
-                read "0 of 0 noted" for the whole of the first timer of the day
-                — a sentence that states nothing, in the position where the
-                nudge is supposed to be.
-              */}
-              {group.entries.length === 0 ? null : (
-                <span className="text-xs text-muted-foreground">
-                  {group.notedCount} of {group.entries.length} noted
-                </span>
-              )}
+                  Omitted entirely when the day has no completed entries yet.
+                  Since a running entry is not a row, the count would otherwise
+                  read "0 of 0 noted" for the whole of the first timer of the day
+                  — a sentence that states nothing, in the position where the
+                  nudge is supposed to be.
+                */}
+                {group.entries.length === 0 ? null : (
+                  <span className="text-xs text-muted-foreground">
+                    {group.notedCount} of {group.entries.length} noted
+                  </span>
+                )}
+              </div>
+              <span
+                // Includes a running entry's live elapsed time, so the server's
+                // value and the client's first render legitimately differ. See
+                // the same attribute in `totals-row.tsx`.
+                suppressHydrationWarning
+                className="text-base font-semibold tabular text-muted-foreground"
+              >
+                {formatTotal(group.totalMs, display)}
+              </span>
             </div>
-            <span
-              // Includes a running entry's live elapsed time, so the server's
-              // value and the client's first render legitimately differ. See
-              // the same attribute in `totals-row.tsx`.
-              suppressHydrationWarning
-              className="text-base font-semibold tabular text-muted-foreground"
-            >
-              {formatTotal(group.totalMs, display)}
-            </span>
           </header>
 
           <div className="flex flex-col">

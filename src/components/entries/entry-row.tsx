@@ -80,186 +80,194 @@ export function EntryRow({
   return (
     <div
       className={cn(
-        "group flex min-h-[50px] items-center gap-2 px-3",
-        "border-b border-edge-soft/60 last:border-b-0",
+        "group border-b border-edge-soft/60 last:border-b-0",
         "transition-colors hover:bg-surface/60"
       )}
     >
       {/*
+        The row's CONTENT is capped at 1100px and centred; the outer element
+        above keeps the full-bleed border and hover fill, so the log still
+        reads as edge-to-edge bands. Uncapped, the title/note column that
+        grows to fill whatever room it is given spent the extra width on gap
+        rather than on either — measured at 1600px as ~1000px of nothing
+        between a four-word title and the classifier cluster.
+
         4 + 20 + 2 + 20 + 4 = the 50px the row is specified at, so `min-h` is a
         floor the content sits exactly on rather than a number it fights. The
         note slot is a fixed 20px box because the hatch carries a border and the
         written note does not — left to size themselves, a day of mixed rows
         would ripple by two pixels down the whole column.
       */}
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <EditableTitle
-            entry={entry}
-            onCommit={(next) => actions.onTitleChange(entry, next)}
-          />
-          {entry.billable ? (
-            // Brass means money — The Two Temperatures Rule. Paired with a
-            // glyph so it survives without colour.
-            // `sm:hidden` because the BillableToggle below carries this at
-            // wider widths, where it is also editable. Below `sm` the toggle is
-            // dropped for room, so this static mark is what keeps billable
-            // visible on a phone rather than merely absent.
-            //
-            // `leading-5` matters as much as the colour here: an unsized span
-            // establishes a 24px line box from the inherited 16px base, so
-            // without it every billable row is four pixels taller than every
-            // non-billable one and the whole log develops a stutter.
-            <span
-              className="flex shrink-0 items-center text-xs leading-5 text-brass sm:hidden"
-              title="Billable"
-            >
-              <span aria-hidden="true" className="font-semibold">
-                $
+      <div className="mx-auto flex min-h-[50px] max-w-[1100px] items-center gap-2 px-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <EditableTitle
+              entry={entry}
+              onCommit={(next) => actions.onTitleChange(entry, next)}
+            />
+            {entry.billable ? (
+              // Brass means money — The Two Temperatures Rule. Paired with a
+              // glyph so it survives without colour.
+              // `sm:hidden` because the BillableToggle below carries this at
+              // wider widths, where it is also editable. Below `sm` the toggle is
+              // dropped for room, so this static mark is what keeps billable
+              // visible on a phone rather than merely absent.
+              //
+              // `leading-5` matters as much as the colour here: an unsized span
+              // establishes a 24px line box from the inherited 16px base, so
+              // without it every billable row is four pixels taller than every
+              // non-billable one and the whole log develops a stutter.
+              <span
+                className="flex shrink-0 items-center text-xs leading-5 text-brass sm:hidden"
+                title="Billable"
+              >
+                <span aria-hidden="true" className="font-semibold">
+                  $
+                </span>
+                <span className="sr-only">Billable</span>
               </span>
-              <span className="sr-only">Billable</span>
-            </span>
-          ) : null}
+            ) : null}
+          </div>
+
+          {/*
+            The slot is 20px so the row lands on 50, but a 20px control is under
+            WCAG 2.2's 24px target minimum. `touch-target` (styles.css) extends
+            the hit area with a pseudo-element instead of padding, so the target
+            grows without the row growing with it.
+          */}
+          <div className="flex h-5 min-w-0 items-center">
+            {hasNote ? (
+              <button
+                type="button"
+                onClick={() => actions.onNoteOpen(entry)}
+                className={cn(
+                  "touch-target -mx-1 min-w-0 max-w-full rounded-sm px-1 py-0.5 text-left",
+                  "text-xs text-muted-foreground transition-colors",
+                  "hover:bg-surface-raised/70 hover:text-foreground",
+                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                )}
+              >
+                {/*
+                  `truncate` lives on this span rather than on the button, and it
+                  has to. `truncate` sets overflow:hidden, and `.touch-target` sets
+                  position:relative — which makes the button the containing block
+                  for its OWN ::after, so the 2px the pseudo-element hangs above
+                  and below is clipped off by the overflow rule meant for the text.
+                  The control silently stayed 20px and missed WCAG 2.2 SC 2.5.8,
+                  while the class that was supposed to fix it was right there in
+                  the list. Clipping the text one level in leaves the button's own
+                  overflow visible.
+                */}
+                <span className="block truncate">{note}</span>
+              </button>
+            ) : (
+              // ALWAYS visible, never a hover reveal. PRODUCT.md: missing notes are
+              // "visible, not absent". Hiding this until hover would make the one
+              // thing the product exists to capture the one thing you cannot see is
+              // missing — and it leaves a dead gap in the row besides.
+              //
+              // The hatch is the carrier (The Hatch Rule): absence is a texture,
+              // never a colour, so it survives colour blindness and reads in
+              // peripheral vision. It is an invitation, not a warning — which is
+              // why it is quiet, and why nothing about it blocks or nags.
+              <button
+                type="button"
+                onClick={() => actions.onNoteOpen(entry)}
+                className={cn(
+                  "hatch-empty touch-target -mx-0.5 flex h-5 items-center rounded-sm px-1.5 text-xs",
+                  "text-muted-foreground/70 transition-colors",
+                  "hover:text-foreground focus-visible:text-foreground",
+                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                )}
+              >
+                + add note
+              </button>
+            )}
+          </div>
         </div>
 
         {/*
-          The slot is 20px so the row lands on 50, but a 20px control is under
-          WCAG 2.2's 24px target minimum. `touch-target` (styles.css) extends
-          the hit area with a pseudo-element instead of padding, so the target
-          grows without the row growing with it.
+          The classifiers, editable in place like everything else on the row.
+          Same three controls in the same order as the timer bar — a project is
+          set the same way whether the work is running or finished, because a
+          second way to do it is a second thing to remember.
+
+          A control that HOLDS something is always visible, because it is data. An
+          EMPTY one is only an affordance, and is revealed on hover like the row's
+          other controls. Showing all three on every row put a dollar sign beside
+          every entry in the log, which is exactly how "brass means money" stops
+          meaning anything.
         */}
-        <div className="flex h-5 min-w-0 items-center">
-          {hasNote ? (
-            <button
-              type="button"
-              onClick={() => actions.onNoteOpen(entry)}
-              className={cn(
-                "touch-target -mx-1 min-w-0 max-w-full rounded-sm px-1 py-0.5 text-left",
-                "text-xs text-muted-foreground transition-colors",
-                "hover:bg-surface-raised/70 hover:text-foreground",
-                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              )}
-            >
-              {/*
-                `truncate` lives on this span rather than on the button, and it
-                has to. `truncate` sets overflow:hidden, and `.touch-target` sets
-                position:relative — which makes the button the containing block
-                for its OWN ::after, so the 2px the pseudo-element hangs above
-                and below is clipped off by the overflow rule meant for the text.
-                The control silently stayed 20px and missed WCAG 2.2 SC 2.5.8,
-                while the class that was supposed to fix it was right there in
-                the list. Clipping the text one level in leaves the button's own
-                overflow visible.
-              */}
-              <span className="block truncate">{note}</span>
-            </button>
-          ) : (
-          // ALWAYS visible, never a hover reveal. PRODUCT.md: missing notes are
-          // "visible, not absent". Hiding this until hover would make the one
-          // thing the product exists to capture the one thing you cannot see is
-          // missing — and it leaves a dead gap in the row besides.
-          //
-          // The hatch is the carrier (The Hatch Rule): absence is a texture,
-          // never a colour, so it survives colour blindness and reads in
-          // peripheral vision. It is an invitation, not a warning — which is
-          // why it is quiet, and why nothing about it blocks or nags.
-            <button
-              type="button"
-              onClick={() => actions.onNoteOpen(entry)}
-              className={cn(
-                "hatch-empty touch-target -mx-0.5 flex h-5 items-center rounded-sm px-1.5 text-xs",
-                "text-muted-foreground/70 transition-colors",
-                "hover:text-foreground focus-visible:text-foreground",
-                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              )}
-            >
-              + add note
-            </button>
-          )}
+        <div className="flex shrink-0 items-center gap-0.5">
+          <ProjectPicker
+            projects={projects}
+            value={entry.projectId ?? null}
+            onCreate={actions.onCreateProject}
+            onChange={(projectId) => actions.onClassify(entry, { projectId })}
+            className={cn("max-w-[8rem]", entry.projectId === undefined && revealed)}
+            // The dot survives at every width; the name is what gets dropped when
+            // there is no room, because the dot plus the row's own context is
+            // enough to tell two clients apart at a glance.
+            nameClassName="hidden md:inline"
+          />
+          <TagPicker
+            tags={tags}
+            value={entry.tagIds}
+            onCreate={actions.onCreateTag}
+            onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
+            className={cn("hidden sm:inline-flex", entry.tagIds.length === 0 && revealed)}
+          />
+          <BillableToggle
+            value={entry.billable}
+            onChange={(billable) => actions.onClassify(entry, { billable })}
+            className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
+          />
         </div>
-      </div>
 
-      {/*
-        The classifiers, editable in place like everything else on the row.
-        Same three controls in the same order as the timer bar — a project is
-        set the same way whether the work is running or finished, because a
-        second way to do it is a second thing to remember.
-
-        A control that HOLDS something is always visible, because it is data. An
-        EMPTY one is only an affordance, and is revealed on hover like the row's
-        other controls. Showing all three on every row put a dollar sign beside
-        every entry in the log, which is exactly how "brass means money" stops
-        meaning anything.
-      */}
-      <div className="flex shrink-0 items-center gap-0.5">
-        <ProjectPicker
-          projects={projects}
-          value={entry.projectId ?? null}
-          onCreate={actions.onCreateProject}
-          onChange={(projectId) => actions.onClassify(entry, { projectId })}
-          className={cn("max-w-[8rem]", entry.projectId === undefined && revealed)}
-          // The dot survives at every width; the name is what gets dropped when
-          // there is no room, because the dot plus the row's own context is
-          // enough to tell two clients apart at a glance.
-          nameClassName="hidden md:inline"
+        {/*
+          Visible at EVERY width. The inline fields this replaced were
+          `hidden sm:inline-flex`, so on a phone an entry's times could not be
+          corrected at all — the surface Toggl abandoned, again.
+        */}
+        <EntryTimePopover
+          entry={entry}
+          timeZone={timeZone}
+          use12Hour={use12Hour}
+          weekStartDay={weekStartDay}
+          onCommitTime={(field, value) => actions.onTimeChange(entry, field, value)}
+          onCommitDay={(day) => actions.onDayChange(entry, day)}
         />
-        <TagPicker
-          tags={tags}
-          value={entry.tagIds}
-          onCreate={actions.onCreateTag}
-          onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
-          className={cn("hidden sm:inline-flex", entry.tagIds.length === 0 && revealed)}
+
+        <EditableDuration
+          entry={entry}
+          onCommit={(ms) => actions.onDurationChange(entry, ms)}
         />
-        <BillableToggle
-          value={entry.billable}
-          onChange={(billable) => actions.onClassify(entry, { billable })}
-          className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
-        />
-      </div>
 
-      {/*
-        Visible at EVERY width. The inline fields this replaced were
-        `hidden sm:inline-flex`, so on a phone an entry's times could not be
-        corrected at all — the surface Toggl abandoned, again.
-      */}
-      <EntryTimePopover
-        entry={entry}
-        timeZone={timeZone}
-        use12Hour={use12Hour}
-        weekStartDay={weekStartDay}
-        onCommitTime={(field, value) => actions.onTimeChange(entry, field, value)}
-        onCommitDay={(day) => actions.onDayChange(entry, day)}
-      />
+        {/*
+          Row controls stay in the layout at all times and fade in on hover or
+          focus, rather than being added and removed. Reserving the space means
+          the columns to their left do not shift when the pointer crosses a row —
+          and it is what lets the keyboard reach them at all.
 
-      <EditableDuration
-        entry={entry}
-        onCommit={(ms) => actions.onDurationChange(entry, ms)}
-      />
-
-      {/*
-        Row controls stay in the layout at all times and fade in on hover or
-        focus, rather than being added and removed. Reserving the space means
-        the columns to their left do not shift when the pointer crosses a row —
-        and it is what lets the keyboard reach them at all.
-
-        On a touch screen they are simply always visible. There is no hover on a
-        phone, so a hover-revealed control is not subtle there, it is absent:
-        delete and resume would be unreachable by any means.
-      */}
-      <div className="flex shrink-0 items-center gap-0.5">
-        <RowButton
-          label={`Resume ${title === "" ? "this entry" : title}`}
-          onClick={() => actions.onResume(entry)}
-        >
-          <Play className="size-4" />
-        </RowButton>
-        <RowButton
-          label={`Delete ${title === "" ? "this entry" : title}`}
-          onClick={() => actions.onRemove(entry)}
-          destructive
-        >
-          <Trash2 className="size-4" />
-        </RowButton>
+          On a touch screen they are simply always visible. There is no hover on a
+          phone, so a hover-revealed control is not subtle there, it is absent:
+          delete and resume would be unreachable by any means.
+        */}
+        <div className="flex shrink-0 items-center gap-0.5">
+          <RowButton
+            label={`Resume ${title === "" ? "this entry" : title}`}
+            onClick={() => actions.onResume(entry)}
+          >
+            <Play className="size-4" />
+          </RowButton>
+          <RowButton
+            label={`Delete ${title === "" ? "this entry" : title}`}
+            onClick={() => actions.onRemove(entry)}
+            destructive
+          >
+            <Trash2 className="size-4" />
+          </RowButton>
+        </div>
       </div>
     </div>
   )
