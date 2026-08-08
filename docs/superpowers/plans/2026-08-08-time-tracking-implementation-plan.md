@@ -137,6 +137,8 @@ This follows directly from *Defensible by default* — the user bills from this 
 
 **Cut from MVP:** `recap.compose` (the LLM action), `recapSnapshots`, `recapOverrides`, per-bullet staleness/fingerprints, `acceptStale`, snapshot history. That is a hand-rolled conflict-resolution layer over a document that regenerates in under a millisecond. MVP recap = derive, render, copy.
 
+**REMOVED 2026-08-08.** The recap this section justifies was built, shipped, and then removed — see §5 Phase 6 and §5.9. Notes are retained regardless: they still serve search (§7 text search) and reading the log (`/history`), independent of the recap they were originally written to feed.
+
 ### 2.3 Running-entry encoding and enforcement — DECIDED
 
 A running entry is `endedAt === null`, stored as `v.union(v.number(), v.null())` — **not** `v.optional`, so it is indexable.
@@ -334,7 +336,6 @@ exist:
 | `entries.weekTotals` | `{ anchorDay }` | `{ totalMs, billableMs }` | `by_user_started` |
 | `projects.list` / `tags.list` | — | live rows | `by_user_archived_name` / `by_user_name` |
 | `settings.get` | — | settings \| defaults | `by_user` |
-| `recap.getDay` | `{ day }` | `RecapDoc` + sources | `by_user_started` + `by_user_day` |
 
 `recentTitles` is an **index scan**, not a search index. A search index returns *relevance* order and cannot answer an empty prefix at all — so autocomplete-on-focus has no answer, and a freelancer whose most recent entry is a one-off would never see it.
 
@@ -354,7 +355,8 @@ exist:
 | `projects.remove` | **Refuses while live entries reference it**, surfacing "archive instead". This is what makes the absence of a project-name snapshot safe: a dangling `projectId` cannot occur, so a July invoice stays reproducible in September |
 | `tags.ensureByName` / `tags.remove` | Same referential rule |
 | `settings.ensure` / `update` | `ensure` seeds the row with the browser's suggested IANA zone on first authed load |
-| `recap.setDayFields` | `{ day, next?, blocked? }` |
+
+**REMOVED 2026-08-08.** `recap.getDay` (queries) and `recap.setDayFields` (mutations) — renamed to `recap.get` / `recap.setFields` per §5.9, then deleted along with the rest of `api.recap` when the recap was cut. See §5 Phase 6 and §8.3.
 
 ### Error taxonomy
 
@@ -466,7 +468,9 @@ The most important surface in the product.
 - Pickers reachable via `@` / `#` from inside the title input and independently from the edit row.
 - Title autocomplete inheriting **project, tags, billable — never the note**, with Resume inheriting *exactly the same set*. Toggl's two paths differ on tags, and that inconsistency erodes trust in both.
 
-### Phase 6 — The recap *(~3 d)*
+### Phase 6 — The recap *(~3 d)* — CUT 2026-08-08
+
+Built and shipped as planned below, then removed entirely on 2026-08-08 to make room for the dashboard shell; see `docs/superpowers/specs/2026-08-08-dashboard-sidebar-shell-design.md` and §5.9.
 
 The reason the product exists. Build the engine as a pure function first, tested, before any UI.
 
@@ -538,6 +542,7 @@ the plan above, it is recorded here rather than left as a silent difference.
 | Edit as a two-height slide-up sheet on mobile | Inline editing at every width; the note is the only sheet | Inline edit was already built in Phase 4 and works at 375px. A second editing model for one breakpoint is a second thing to maintain and to learn. |
 | Roving tabindex on the entry list | Native tab order | Every control on a row is a real focusable element already. Revisit if the list grows long enough that tabbing through it is the complaint. |
 | `R` / `E` row shortcuts, and the recap keyboard collision | Not bound | The collision the plan flagged was resolved by not creating it. Click-to-edit and Enter/Escape cover the same ground; `?` documents what exists. |
+| Phase 6 recap: built, per §2.2/§4 above | **Removed 2026-08-08** | Cut to make room for the dashboard shell (`docs/superpowers/specs/2026-08-08-dashboard-sidebar-shell-design.md`). `api.recap`, `recapDays`, `recapMinuteLocal`, and the client readers are gone; notes remain, retained for search and for reading the log. |
 
 **Also renamed from §4**, recorded here because §4 sets the standard that
 callers written later must not import something that does not exist:
@@ -626,22 +631,22 @@ Ordered by value ÷ cost.
 | 8 | Clients | One table + one optional field on `projects`, **zero** backfill of entries |
 | 9 | CSV export | Accountants demand it. Be clear-eyed: multi-line prose with commas is mangled by Excel |
 | 10 | Rounding (display/export only) | Never mutate stored durations. Per-entry vs per-subtotal rounding produce materially different totals from identical data — twelve 4-minute entries rounded to 15 each is 3 h; the 48-minute total rounded is 48 m. The scope must be explicit and shown |
-| 11 | Recap nudge at `recapMinuteLocal` | Convex cron every 5 min against a `nextRecapAt` index — hourly cannot serve half-hour-offset timezones |
 | 12 | Collapse identical entries | **Off by default** — with notes attached, near-identical rows are no longer redundant, and collapsing must never hide a note |
 | 13 | Real search indexes | When history justifies the write amplification |
-| 14 | Recap snapshots | The first time someone asks "what did I send?" |
+
+**#11 (Recap nudge at `recapMinuteLocal`) and #14 (Recap snapshots) REMOVED 2026-08-08**, along with the recap they depended on. Numbering left as-shipped rather than renumbered, so earlier references to "#11" or "#14" elsewhere still resolve.
 
 ---
 
 ## 7. Tier 3 — longer term
 
 - **Document export (print/PDF)** — the highest-value non-MVP deliverable and the place to diverge hardest. Toggl's PDF is a table because Toggl's payload is numbers. Trace's must be a *document*: dated sections, project headings, notes as flowing paragraphs, hours as a quiet right-aligned tabular annotation. It should read like a consultant's status memo.
-- **Weekly and per-client recaps** — a change of grouping key, not a new document type.
-- **Per-bullet LLM "tighten this"** — opt-in, user-invoked, input is one existing note, structurally unable to see an un-noted entry (§2.2).
 - Calendar/day view with drag-create — the best gap-finder there is, but pointer-first and a full second layout with overlap/zoom/snap logic. If built: a gap-finder that prompts for a *note*, not a scheduling grid.
 - Toggl import (the one place the negative-duration adapter is allowed to exist).
 - Account deletion + full data export, with a bounded-transaction cascade strategy.
 - Copy start link, with permalink→day resolution.
+
+**REMOVED 2026-08-08** — Weekly and per-client recaps (a change of grouping key on the recap, not a new document type) and per-bullet LLM "tighten this" (opt-in, user-invoked, structurally unable to see an un-noted entry per §2.2). Both depended on the recap, which was cut the same day; see §5 Phase 6 and §5.9.
 
 **Ruled out, not deferred:** Pomodoro, OS idle detection, activity timeline, autotracker. Two need native access, and Toggl shipped Pomodoro to five clients and deliberately not the web app.
 
@@ -653,7 +658,7 @@ Three things this plan decides but that are worth a second look before Phase 2 d
 
 1. **Derived vs stored `dayKey`** (§2.1). Decided: derived. The tradeoff is that changing your timezone re-buckets history — reversible, but visible.
 2. **`hourlyRateCents` at MVP.** It is in the schema but nothing reads it until rates ship in Tier 2. Keeping it costs nothing; dropping it means a schema change later.
-3. **`recapDays` at MVP.** Two optional strings per day. Justified only because `Next`/`Blocked` are part of the recap's value proposition, not because the recap body is stored — it is not.
+3. **`recapDays` at MVP.** Two optional strings per day. Justified only because `Next`/`Blocked` are part of the recap's value proposition, not because the recap body is stored — it is not. **RESOLVED 2026-08-08:** moot — the table is gone. The recap that justified it was removed the same day; see §5 Phase 6 and §5.9.
 
 Two things deliberately left out of MVP that the design system references:
 

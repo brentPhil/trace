@@ -127,23 +127,3 @@ export const runEntryTagsBackfill = internalAction({
     }
   },
 })
-
-/**
- * One-off. REMOVED in the task that deletes the recap schema entries.
- *
- * Already ran: it purged `recapMinuteLocal` and `recapDays` before the same
- * task removed both from schema.ts, which is what made that removal legal.
- * Neither exists in the schema anymore, so the body that touched them no
- * longer typechecks and is replaced with a no-op. The export itself stays —
- * per the plan, it is deleted outright in the next task, not this one.
- */
-export const purgeRecap = internalMutation({
-  args: {},
-  returns: v.object({
-    settingsCleared: v.number(),
-    recapDaysDeleted: v.number(),
-  }),
-  handler: async () => {
-    return { settingsCleared: 0, recapDaysDeleted: 0 }
-  },
-})
