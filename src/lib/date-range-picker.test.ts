@@ -1,73 +1,48 @@
 import { describe, expect, it } from "vitest"
-import {
-  formatDayRange,
-  previewRange,
-  rangeTriggerLabel,
-  selectDay,
-} from "./date-range-picker"
+import { dateToDay, dayToDate, formatDayRange, rangeTriggerLabel } from "./date-range-picker"
 
 /*
- * The arithmetic behind the range picker, tested without a DOM: the two-click
- * state machine, the hover preview it drives, and the trigger's label.
+ * The arithmetic behind the range picker, tested without a DOM: the
+ * `DayString` <-> `Date` boundary conversion, and the trigger's label.
+ *
+ * The two-click selection state machine (`selectDay` / `previewRange`) that
+ * used to be tested here is DELETED along with the hand-built calendar —
+ * react-day-picker's own `mode="range"` owns selection now, and
+ * `date-range-picker.test.tsx` covers it through the composed component.
  */
 
-describe("selectDay", () => {
-  it("arms a start on the first click, with nothing committed yet", () => {
-    const result = selectDay(null, "2026-08-03")
-    expect(result.state).toEqual({ anchor: "2026-08-03" })
-    expect(result.committed).toBeNull()
+describe("dayToDate / dateToDay", () => {
+  it("round-trips a DayString through a Date and back", () => {
+    expect(dateToDay(dayToDate("2026-08-03"))).toBe("2026-08-03")
   })
 
-  it("commits the range on the second click, forward from the anchor", () => {
-    const armed = selectDay(null, "2026-08-03").state
-    const result = selectDay(armed, "2026-08-09")
-    expect(result.committed).toEqual({ from: "2026-08-03", to: "2026-08-09" })
-    expect(result.state).toBeNull()
+  it("round-trips the first and last day of a month", () => {
+    expect(dateToDay(dayToDate("2026-01-01"))).toBe("2026-01-01")
+    expect(dateToDay(dayToDate("2026-12-31"))).toBe("2026-12-31")
   })
 
-  it("commits a single-day range when the second click repeats the anchor", () => {
-    const armed = selectDay(null, "2026-08-03").state
-    const result = selectDay(armed, "2026-08-03")
-    expect(result.committed).toEqual({ from: "2026-08-03", to: "2026-08-03" })
+  it("round-trips a leap day", () => {
+    expect(dateToDay(dayToDate("2024-02-29"))).toBe("2024-02-29")
   })
 
-  it("restarts from an earlier click rather than inverting the range", () => {
-    // The trap this exists to close: clicking 1 Aug after arming 9 Aug must
-    // not produce { from: "2026-08-09", to: "2026-08-01" }.
-    const armed = selectDay(null, "2026-08-09").state
-    const result = selectDay(armed, "2026-08-01")
-    expect(result.committed).toBeNull()
-    expect(result.state).toEqual({ anchor: "2026-08-01" })
+  it("produces a Date whose LOCAL calendar fields match the DayString", () => {
+    // The trap this guards against: `new Date("2026-08-03")` parses as UTC
+    // midnight, which prints as 2 August in every zone west of Greenwich.
+    // `dayToDate` must never do that — it writes into local fields directly,
+    // so the local getters below see 2026-08-03 no matter what zone this
+    // test happens to run in.
+    const date = dayToDate("2026-08-03")
+    expect(date.getFullYear()).toBe(2026)
+    expect(date.getMonth()).toBe(7) // 0-indexed: August
+    expect(date.getDate()).toBe(3)
   })
 
-  it("a restarted selection still completes normally on its own second click", () => {
-    const armed = selectDay(null, "2026-08-09").state
-    const restarted = selectDay(armed, "2026-08-01").state
-    const result = selectDay(restarted, "2026-08-05")
-    expect(result.committed).toEqual({ from: "2026-08-01", to: "2026-08-05" })
-  })
-})
-
-describe("previewRange", () => {
-  it("is null with nothing armed", () => {
-    expect(previewRange(null, "2026-08-05")).toBeNull()
-  })
-
-  it("previews forward from the anchor to the hovered day", () => {
-    const armed = { anchor: "2026-08-03" }
-    expect(previewRange(armed, "2026-08-09")).toEqual({
-      from: "2026-08-03",
-      to: "2026-08-09",
-    })
-  })
-
-  it("previews only the hovered day when it precedes the anchor", () => {
-    // Matches what a click there would actually do: restart, not invert.
-    const armed = { anchor: "2026-08-09" }
-    expect(previewRange(armed, "2026-08-01")).toEqual({
-      from: "2026-08-01",
-      to: "2026-08-01",
-    })
+  it("is not fooled by a Date at a local time other than midnight", () => {
+    // dateToDay must read the calendar day a Date falls on locally, not
+    // reconstruct it via an instant — a Date built from local fields with an
+    // afternoon hour is still "the same day" in dateToDay's terms.
+    const date = new Date(2026, 7, 3, 23, 30)
+    expect(dateToDay(date)).toBe("2026-08-03")
   })
 })
 
