@@ -116,7 +116,7 @@ async function migrationRow(ctx: QueryCtx | MutationCtx) {
 export async function assertEntryTagsBackfilled(
   ctx: MutationCtx
 ): Promise<void> {
-  if ((await migrationRow(ctx)) !== null) return
+  if (await entryTagsBackfilled(ctx)) return
 
   if ((await ctx.db.query("timeEntries").first()) === null) {
     await markEntryTagsBackfilled(ctx)
@@ -132,11 +132,66 @@ export async function assertEntryTagsBackfilled(
   )
 }
 
+/** True once the backfill has run to the END of the table, not merely started. */
+export async function entryTagsBackfilled(
+  ctx: QueryCtx | MutationCtx
+): Promise<boolean> {
+  const row = await migrationRow(ctx)
+  return row !== null && row.completedAt !== null
+}
+
+/**
+ * Where the next page starts.
+ *
+ * Read from the database rather than taken from the caller. An externally
+ * supplied starting point silently defines COVERAGE: hand in a cursor from the
+ * middle of the table and every earlier entry goes unreconciled, while the run
+ * still reaches the end and records itself complete. `tags.remove` then trusts
+ * an index covering a fraction of history and deletes tags that live entries
+ * carry. Resumability is worth having; it is not worth an argument that can
+ * quietly narrow what "done" means.
+ */
+export async function readEntryTagsCursor(
+  ctx: MutationCtx
+): Promise<string | null> {
+  return (await migrationRow(ctx))?.cursor ?? null
+}
+
+/**
+ * Advances the checkpoint.
+ *
+ * Called in the SAME mutation as the page it describes, so the rows and the
+ * record of having written them commit together. A crash between the two is
+ * therefore not a state this can be in.
+ */
+export async function saveEntryTagsCursor(
+  ctx: MutationCtx,
+  cursor: string
+): Promise<void> {
+  const row = await migrationRow(ctx)
+  if (row === null) {
+    await ctx.db.insert("migrationState", {
+      name: ENTRY_TAGS_MIGRATION,
+      cursor,
+      completedAt: null,
+    })
+    return
+  }
+  await ctx.db.patch(row._id, { cursor })
+}
+
 /** Records that the backfill reached the end. Idempotent. */
 export async function markEntryTagsBackfilled(ctx: MutationCtx): Promise<void> {
-  if ((await migrationRow(ctx)) !== null) return
-  await ctx.db.insert("migrationState", {
-    name: ENTRY_TAGS_MIGRATION,
-    completedAt: Date.now(),
-  })
+  const row = await migrationRow(ctx)
+  const completedAt = Date.now()
+  if (row === null) {
+    await ctx.db.insert("migrationState", {
+      name: ENTRY_TAGS_MIGRATION,
+      cursor: null,
+      completedAt,
+    })
+    return
+  }
+  if (row.completedAt !== null) return
+  await ctx.db.patch(row._id, { cursor: null, completedAt })
 }

@@ -1,7 +1,13 @@
 import { v } from "convex/values"
 import { internalAction, internalMutation } from "./_generated/server"
 import { internal } from "./_generated/api"
-import { markEntryTagsBackfilled, syncEntryTags } from "./entryTags"
+import {
+  entryTagsBackfilled,
+  markEntryTagsBackfilled,
+  readEntryTagsCursor,
+  saveEntryTagsCursor,
+  syncEntryTags,
+} from "./entryTags"
 
 /**
  * One-off data migrations.
@@ -22,7 +28,6 @@ const BACKFILL_PAGE = 200
 
 /** What one page of the backfill reports back. */
 type BackfillPage = {
-  cursor: string | null
   isDone: boolean
   scanned: number
 }
@@ -30,30 +35,37 @@ type BackfillPage = {
 /**
  * Fills `entryTags` from the `tagIds` already on every entry.
  *
- * Returns its cursor rather than looping internally, so one call is one bounded
- * transaction and a deployment with years of history does not fail atomically
- * and repair nothing. `runEntryTagsBackfill` below is the loop.
+ * One call is one page and one bounded transaction, so a deployment with years
+ * of history does not fail atomically and repair nothing. `runEntryTagsBackfill`
+ * below is the loop.
  *
- * Idempotent, because `syncEntryTags` reconciles rather than inserts. Re-running
- * over pages already done is a no-op, which is what makes it safe to restart
- * after a timeout without tracking how far it got.
+ * Where to resume is read from and written to `migrationState`, in the same
+ * transaction as the page itself — NOT taken as an argument. A caller-supplied
+ * cursor decides coverage: start from the middle and every earlier entry goes
+ * unreconciled, while the run still reaches the end and marks itself complete.
+ * The gate would then vouch for an index covering part of history, which is the
+ * exact failure it exists to prevent.
+ *
+ * Idempotent twice over: `syncEntryTags` reconciles rather than inserts, so a
+ * page redone after a failed transaction is a no-op, and a completed migration
+ * short-circuits instead of walking the table again.
  *
  * Paginates the table unindexed and on purpose: this has to reach EVERY entry
  * of every user, and an index would only narrow it.
  */
 export const backfillEntryTags = internalMutation({
-  args: {
-    cursor: v.optional(v.union(v.string(), v.null())),
-    numItems: v.optional(v.number()),
-  },
+  args: { numItems: v.optional(v.number()) },
   returns: v.object({
-    cursor: v.union(v.string(), v.null()),
     isDone: v.boolean(),
     scanned: v.number(),
   }),
   handler: async (ctx, args) => {
+    // Already finished: do not walk the table again, and do not reopen a
+    // checkpoint that has been closed.
+    if (await entryTagsBackfilled(ctx)) return { isDone: true, scanned: 0 }
+
     const page = await ctx.db.query("timeEntries").paginate({
-      cursor: args.cursor ?? null,
+      cursor: await readEntryTagsCursor(ctx),
       numItems: args.numItems ?? BACKFILL_PAGE,
     })
 
@@ -72,12 +84,11 @@ export const backfillEntryTags = internalMutation({
     // Only at the very end. The flag is what unblocks tag deletion, and it must
     // not be set while any page is still uncovered.
     if (page.isDone) await markEntryTagsBackfilled(ctx)
+    else await saveEntryTagsCursor(ctx, page.continueCursor)
 
-    return {
-      cursor: page.continueCursor,
-      isDone: page.isDone,
-      scanned: page.page.length,
-    }
+    // The cursor is deliberately NOT returned. It is not the caller's to hold,
+    // and handing it back is how it ends up being handed in again.
+    return { isDone: page.isDone, scanned: page.page.length }
   },
 })
 
@@ -88,18 +99,17 @@ export const backfillEntryTags = internalMutation({
  *
  * An action rather than a mutation because the loop must span transactions;
  * each page is its own atomic write.
+ *
+ * Safe to run again if it dies partway — an action has a wall-clock ceiling,
+ * and hitting it leaves the checkpoint in the database, so a second run picks
+ * up where the first stopped. That is why there is no resume argument: the
+ * migration already knows, and asking the operator would mean trusting them to
+ * be right about how much has been covered.
  */
 export const runEntryTagsBackfill = internalAction({
-  args: {
-    numItems: v.optional(v.number()),
-    /** Resume point. An action has a wall-clock ceiling, and without this a run
-     *  that hit it on a large deployment could only start again from row zero.
-     *  Take it from the last `backfillEntryTags` result in the logs. */
-    cursor: v.optional(v.union(v.string(), v.null())),
-  },
+  args: { numItems: v.optional(v.number()) },
   returns: v.object({ pages: v.number(), scanned: v.number() }),
   handler: async (ctx, args) => {
-    let cursor: string | null = args.cursor ?? null
     let pages = 0
     let scanned = 0
 
@@ -109,12 +119,11 @@ export const runEntryTagsBackfill = internalAction({
       // depends on this call — TS7022, a circularity tsc reports as `any`.
       const result: BackfillPage = await ctx.runMutation(
         internal.migrations.backfillEntryTags,
-        { cursor, numItems: args.numItems }
+        { numItems: args.numItems }
       )
       pages += 1
       scanned += result.scanned
       if (result.isDone) return { pages, scanned }
-      cursor = result.cursor
     }
   },
 })

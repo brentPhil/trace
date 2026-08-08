@@ -141,7 +141,14 @@ export default defineSchema({
    */
   migrationState: defineTable({
     name: v.string(),
-    completedAt: v.number(),
+    /** Where the next page starts. null before the first page and once
+     *  finished. Held HERE rather than passed in by the caller: a starting
+     *  point supplied from outside can skip rows the run then declares
+     *  covered, and `completedAt` is trusted absolutely. Optional only so a
+     *  row written by an earlier build of this migration still validates. */
+    cursor: v.optional(v.union(v.string(), v.null())),
+    /** null until the final page reports done. */
+    completedAt: v.union(v.number(), v.null()),
   }).index("by_name", ["name"]),
 
   entryTags: defineTable(entryTagFields)

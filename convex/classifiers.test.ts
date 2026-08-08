@@ -778,16 +778,20 @@ async function legacyEntry(
   )
 }
 
-/** Runs the backfill to completion, the way the operator's action does. */
+/**
+ * Runs the backfill to completion, the way the operator's action does.
+ *
+ * Note there is no cursor to thread. Where the next page starts is the
+ * migration's own business, held in the database — see the resume test below
+ * for why it must not be an argument.
+ */
 async function runBackfill(t: Harness, numItems = 50) {
-  let cursor: string | null = null
   for (;;) {
-    const result: { cursor: string | null; isDone: boolean } = await t.mutation(
+    const result: { isDone: boolean } = await t.mutation(
       internal.migrations.backfillEntryTags,
-      { cursor, numItems }
+      { numItems }
     )
     if (result.isDone) return
-    cursor = result.cursor
   }
 }
 
@@ -926,7 +930,6 @@ describe("the entryTags backfill", () => {
     for (let i = 0; i < 12; i += 1) await legacyEntry(t, ALICE, { tagIds: [tagId] })
 
     const first = await t.mutation(internal.migrations.backfillEntryTags, {
-      cursor: null,
       numItems: 5,
     })
     expect(first.isDone).toBe(false)
@@ -935,6 +938,45 @@ describe("the entryTags backfill", () => {
       t.mutation(internal.tags.removeAs, { userId: ALICE, tagId }),
       "NOT_READY"
     )
+  })
+
+  it("resumes from its own stored checkpoint, so coverage cannot be skipped", async () => {
+    // Where the next page starts is held in the database and advanced in the
+    // SAME transaction as the page it describes. It used to be an argument,
+    // which was a hole rather than a convenience: a caller handing in a cursor
+    // from the middle would leave every earlier entry unreconciled, and the run
+    // would still reach the end and record itself COMPLETE. The gate would then
+    // vouch for an index covering a fraction of history, and tags a live entry
+    // carries would delete cleanly.
+    //
+    // Three pages of five over twelve rows. If each call restarted, the third
+    // would never report done and only five would ever be covered.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    for (let i = 0; i < 12; i += 1) await legacyEntry(t, ALICE, { tagIds: [tagId] })
+
+    const first = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+    const second = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+    const third = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+
+    expect([first.isDone, second.isDone, third.isDone]).toEqual([false, false, true])
+    expect(await joinRows(t)).toHaveLength(12)
+  })
+
+  it("is a no-op once it has already finished", async () => {
+    // A re-run after completion must not walk the table again, and must not
+    // reopen a checkpoint that has been closed.
+    const t = setup()
+    await legacyEntry(t, ALICE, { tagIds: [] })
+    await runBackfill(t)
+
+    const again = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+
+    expect(again.isDone).toBe(true)
+    expect(again.scanned).toBe(0)
   })
 
   it("takes the join rows with it when a user is purged", async () => {

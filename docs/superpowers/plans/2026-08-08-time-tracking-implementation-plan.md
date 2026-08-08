@@ -554,7 +554,7 @@ missing a note; MVP implements **only the third**.
 
 **Verification status**
 
-- 373 tests across three projects; typecheck and lint clean. (341 at the time
+- 378 tests across three projects; typecheck and lint clean. (341 at the time
   this section was first written; the `entryTags` work below added the rest.)
 - The pure layers — day boundaries, durations, the recap assembler and both
   renderers, history filters — are covered directly and adversarially.

@@ -110,17 +110,29 @@ plainly that it means different things to each: a byte-safety limit for
 
 `convex/migrations.ts` holds `backfillEntryTags`, an internal mutation that
 paginates `timeEntries` 200 at a time and calls `syncEntryTags` per row — live
-entries get their rows, soft-deleted ones get theirs dropped. It returns its
-cursor rather than looping internally, so one call is one bounded transaction
-and a deployment with years of history cannot fail atomically and repair
-nothing. `runEntryTagsBackfill` is the operator's loop:
+entries get their rows, soft-deleted ones get theirs dropped. One call is one
+page and one bounded transaction, so a deployment with years of history cannot
+fail atomically and repair nothing. `runEntryTagsBackfill` is the operator's
+loop:
 
 ```bash
 npx convex run migrations:runEntryTagsBackfill
 ```
 
-It is idempotent because `syncEntryTags` reconciles, so a restart after a
-timeout needs no record of how far it got.
+**Where to resume is held in `migrationState`, not passed in.** The checkpoint
+is advanced in the same transaction as the page it describes, so the rows and
+the record of having written them commit together. It is deliberately not an
+argument: a caller-supplied cursor silently decides *coverage*, and a run
+started from the middle leaves every earlier entry unreconciled while still
+reaching the end and marking itself complete — at which point the gate below
+vouches for an index covering a fraction of history, which is precisely the
+failure it exists to prevent. Resumability is worth having; it is not worth an
+argument that can narrow what "done" means.
+
+Idempotent twice over: `syncEntryTags` reconciles rather than inserts, so a page
+redone after a failed transaction is a no-op, and a completed migration
+short-circuits instead of walking the table again. A run killed partway — an
+action has a wall-clock ceiling — is resumed by simply running it again.
 
 **This is a manual step, and nothing enforces it.** There is no cron and no
 `postDeployCommand`; an operator has to run the command above. The gate below is
