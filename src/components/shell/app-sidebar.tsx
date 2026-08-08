@@ -41,13 +41,14 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        {/* `to={NAV_ITEMS[0].to}`, not a `"/timer"` literal: `/timer` doesn't
-            exist in the generated route tree yet (it lands in Task 10, by
-            renaming `/today`), so TanStack's typed `Link` would reject the
-            literal at compile time. Routing through the already-`string`-typed
-            NAV_ITEMS entry is the same escape hatch `NavLink` in the
-            soon-to-be-deleted app-header.tsx uses: a `to: string` prop widens
-            the type before it reaches `Link`, same destination either way. */}
+        {/* `to={NAV_ITEMS[0].to}`, not a `"/timer"` literal. `/timer` itself
+            landed in Task 10 (renaming `/today`) and would typecheck fine now,
+            but `NAV_ITEMS` is typed as a group and `/reports` — Task 11's
+            rename of `/history` — does not exist in the route tree yet, so
+            tightening the array's `to` field to a literal union still fails
+            compilation. Routing through the already-`string`-typed NAV_ITEMS
+            entry widens the type before it reaches `Link`, same destination
+            either way; revisit once `/reports` lands. */}
         <Link
           to={NAV_ITEMS[0].to}
           className="flex items-center gap-2 px-2 py-1.5 text-base font-medium tracking-tight"

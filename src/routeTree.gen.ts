@@ -18,7 +18,7 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AuthedHistoryRouteImport } from './routes/_authed/history'
 import { Route as AuthedProjectsRouteImport } from './routes/_authed/projects'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
-import { Route as AuthedTodayRouteImport } from './routes/_authed/today'
+import { Route as AuthedTimerRouteImport } from './routes/_authed/timer'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -65,9 +65,9 @@ const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthedRoute,
 } as any)
-const AuthedTodayRoute = AuthedTodayRouteImport.update({
-  id: '/today',
-  path: '/today',
+const AuthedTimerRoute = AuthedTimerRouteImport.update({
+  id: '/timer',
+  path: '/timer',
   getParentRoute: () => AuthedRoute,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -85,7 +85,7 @@ export interface FileRoutesByFullPath {
   '/history': typeof AuthedHistoryRoute
   '/projects': typeof AuthedProjectsRoute
   '/settings': typeof AuthedSettingsRoute
-  '/today': typeof AuthedTodayRoute
+  '/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesByTo {
@@ -97,7 +97,7 @@ export interface FileRoutesByTo {
   '/history': typeof AuthedHistoryRoute
   '/projects': typeof AuthedProjectsRoute
   '/settings': typeof AuthedSettingsRoute
-  '/today': typeof AuthedTodayRoute
+  '/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRoutesById {
@@ -111,7 +111,7 @@ export interface FileRoutesById {
   '/_authed/history': typeof AuthedHistoryRoute
   '/_authed/projects': typeof AuthedProjectsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
-  '/_authed/today': typeof AuthedTodayRoute
+  '/_authed/timer': typeof AuthedTimerRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
 }
 export interface FileRouteTypes {
@@ -125,7 +125,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/projects'
     | '/settings'
-    | '/today'
+    | '/timer'
     | '/api/auth/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -137,7 +137,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/projects'
     | '/settings'
-    | '/today'
+    | '/timer'
     | '/api/auth/$'
   id:
     | '__root__'
@@ -150,7 +150,7 @@ export interface FileRouteTypes {
     | '/_authed/history'
     | '/_authed/projects'
     | '/_authed/settings'
-    | '/_authed/today'
+    | '/_authed/timer'
     | '/api/auth/$'
   fileRoutesById: FileRoutesById
 }
@@ -229,11 +229,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedSettingsRouteImport
       parentRoute: typeof AuthedRoute
     }
-    '/_authed/today': {
-      id: '/_authed/today'
-      path: '/today'
-      fullPath: '/today'
-      preLoaderRoute: typeof AuthedTodayRouteImport
+    '/_authed/timer': {
+      id: '/_authed/timer'
+      path: '/timer'
+      fullPath: '/timer'
+      preLoaderRoute: typeof AuthedTimerRouteImport
       parentRoute: typeof AuthedRoute
     }
     '/api/auth/$': {
@@ -250,14 +250,14 @@ interface AuthedRouteChildren {
   AuthedHistoryRoute: typeof AuthedHistoryRoute
   AuthedProjectsRoute: typeof AuthedProjectsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
-  AuthedTodayRoute: typeof AuthedTodayRoute
+  AuthedTimerRoute: typeof AuthedTimerRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedHistoryRoute: AuthedHistoryRoute,
   AuthedProjectsRoute: AuthedProjectsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,
-  AuthedTodayRoute: AuthedTodayRoute,
+  AuthedTimerRoute: AuthedTimerRoute,
 }
 
 const AuthedRouteWithChildren =
