@@ -145,7 +145,7 @@ This follows directly from *Defensible by default* — the user bills from this 
 
 **Cut from MVP:** `recap.compose` (the LLM action), `recapSnapshots`, `recapOverrides`, per-bullet staleness/fingerprints, `acceptStale`, snapshot history. That is a hand-rolled conflict-resolution layer over a document that regenerates in under a millisecond. MVP recap = derive, render, copy.
 
-**REMOVED 2026-08-08.** The recap this section justifies was built, shipped, and then removed — see §5 Phase 6 and §5.9. Notes are retained regardless: they still serve search (§7 text search) and reading the log (`/history`), independent of the recap they were originally written to feed.
+**REMOVED 2026-08-08.** The recap this section justifies was built, shipped, and then removed — see §5 Phase 6 and §5.9. Notes are retained regardless: they still serve search (§7 text search) and reading the log (`/reports`, renamed from `/history` the same day), independent of the recap they were originally written to feed.
 
 ### 2.3 Running-entry encoding and enforcement — DECIDED
 
@@ -558,7 +558,8 @@ callers written later must not import something that does not exist:
 `recap.setDayFields` → `recap.setFields`, `tags.ensureByName` → `tags.ensure`,
 `entries.log` → `entries.listPage`, `entries.listDay` → `entries.listRange`.
 `entries.weekTotals` was never built as a Convex function at all — the week
-total is summed on the client in `today.tsx` from `listRange`.
+total is summed on the client in `timer.tsx` (renamed from `today.tsx`) from
+`listRange`.
 
 **Not built, deliberately** — `hourlyRateCents` is in the schema and nothing
 reads it (§8.2, unchanged); the trash view and untracked-gap hatching remain

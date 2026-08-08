@@ -81,7 +81,7 @@ function Reports() {
   /*
    * History drops a running entry ENTIRELY — not just its row, its time too.
    *
-   * `/today` keeps the running time in the day total, because "today so far" is
+   * `/timer` keeps the running time in the day total, because "today so far" is
    * a live number people watch. Here it would be neither live nor complete:
    * `Date.now()` is not a dependency of this memo, so the elapsed figure freezes
    * at whenever `filtered` last changed, and `entries.rangeSummary` — the

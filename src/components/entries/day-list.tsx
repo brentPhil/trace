@@ -21,7 +21,6 @@ export function DayList({
   projects,
   tags,
   actions,
-  highlightedEntryId,
   display = "hms",
 }: {
   groups: Array<DayGroup>
@@ -30,7 +29,6 @@ export function DayList({
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
-  highlightedEntryId?: string | null
   display?: DurationDisplay
 }) {
   if (groups.length === 0) return <EmptyLog />
@@ -85,7 +83,6 @@ export function DayList({
                 projects={projects}
                 tags={tags}
                 actions={actions}
-                highlighted={entry._id === highlightedEntryId}
               />
             ))}
           </div>
