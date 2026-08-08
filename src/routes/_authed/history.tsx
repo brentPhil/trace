@@ -89,8 +89,25 @@ function History() {
     return results.filter((entry) => matches(entry, filters, nameOf))
   }, [results, filters, projectsById])
 
+  /*
+   * History drops a running entry ENTIRELY — not just its row, its time too.
+   *
+   * `/today` keeps the running time in the day total, because "today so far" is
+   * a live number people watch. Here it would be neither live nor complete:
+   * `Date.now()` is not a dependency of this memo, so the elapsed figure freezes
+   * at whenever `filtered` last changed, and `entries.rangeSummary` — the
+   * sentence underneath these groups — already excludes running entries from
+   * its total. Leaving it in meant a day header quietly disagreeing with the
+   * summary directly below it, using a stale number, for time that now has no
+   * row to explain it.
+   */
   const groups = useMemo(
-    () => groupByDay(filtered, settings.timezone, Date.now()),
+    () =>
+      groupByDay(
+        filtered.filter((entry) => entry.durationMs !== null),
+        settings.timezone,
+        Date.now()
+      ),
     [filtered, settings.timezone]
   )
 

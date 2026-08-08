@@ -51,10 +51,18 @@ export function DayList({
                 The note count, not a badge or a score. It states a fact and
                 creates just enough pressure to fill the gaps before the recap
                 is written -- without ever gating the timer.
+
+                Omitted entirely when the day has no completed entries yet.
+                Since a running entry is not a row, the count would otherwise
+                read "0 of 0 noted" for the whole of the first timer of the day
+                — a sentence that states nothing, in the position where the
+                nudge is supposed to be.
               */}
-              <span className="text-xs text-muted-foreground">
-                {group.notedCount} of {group.entries.length} noted
-              </span>
+              {group.entries.length === 0 ? null : (
+                <span className="text-xs text-muted-foreground">
+                  {group.notedCount} of {group.entries.length} noted
+                </span>
+              )}
             </div>
             <span
               // Includes a running entry's live elapsed time, so the server's
