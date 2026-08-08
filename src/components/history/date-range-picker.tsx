@@ -132,38 +132,46 @@ export function DateRangePicker({
     switch (event.key) {
       case "ArrowLeft":
         event.preventDefault()
+        event.stopPropagation()
         moveFocus(addDays(day, -1))
         return
       case "ArrowRight":
         event.preventDefault()
+        event.stopPropagation()
         moveFocus(addDays(day, 1))
         return
       case "ArrowUp":
         event.preventDefault()
+        event.stopPropagation()
         moveFocus(addDays(day, -7))
         return
       case "ArrowDown":
         event.preventDefault()
+        event.stopPropagation()
         moveFocus(addDays(day, 7))
         return
       case "Home": {
         event.preventDefault()
+        event.stopPropagation()
         const offset = (weekdayOf(day) - weekStartDay + 7) % 7
         moveFocus(addDays(day, -offset))
         return
       }
       case "End": {
         event.preventDefault()
+        event.stopPropagation()
         const offset = (weekdayOf(day) - weekStartDay + 7) % 7
         moveFocus(addDays(day, 6 - offset))
         return
       }
       case "PageUp":
         event.preventDefault()
+        event.stopPropagation()
         moveFocus(addMonths(day, -1))
         return
       case "PageDown":
         event.preventDefault()
+        event.stopPropagation()
         moveFocus(addMonths(day, 1))
         return
       case "Enter":
@@ -173,6 +181,7 @@ export function DateRangePicker({
         // an explicit handler behaves identically (and only once, thanks to
         // preventDefault below) in both.
         event.preventDefault()
+        event.stopPropagation()
         pick(day)
         return
       default:
@@ -420,8 +429,13 @@ function DayCell({
         "tabular relative size-8 rounded-md text-sm text-foreground transition-colors",
         "motion-reduce:transition-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        !endpoint && !inRange && "hover:bg-surface-raised",
-        inRange && !endpoint && "rounded-none bg-surface-raised",
+        // The popover itself is already `--surface-raised` (see
+        // `ui/popover.tsx`), so a band or hover tinted the SAME tone would be
+        // invisible against its own container — stepping the ramp only works
+        // where there is a step left to take. An ink-tinted overlay stays
+        // inside the tonal-layering vocabulary without inventing a colour.
+        !endpoint && !inRange && "hover:bg-foreground/10",
+        inRange && !endpoint && "rounded-none bg-foreground/16",
         endpoint &&
           // Ink on ground, the same "affirmative, deliberately not enlarger"
           // treatment used everywhere else a selected day is marked — see The
