@@ -61,4 +61,32 @@ describe("FilterBar's date range picker", () => {
     expect(state.from).toBe("2026-08-03")
     expect(state.to).toBe("2026-08-09")
   })
+
+  // Regression test for `2b25007`: FilterBar binds ArrowLeft/ArrowRight at
+  // the document level to step Day/Week/Month. Before that fix, the same
+  // keys bubbled up from an OPEN calendar and shifted the whole period out
+  // from under the picker mid-navigation.
+  //
+  // react-day-picker stops propagation on arrow keys itself for a focused
+  // DAY cell, so that half is covered for free now. It does NOT do this for
+  // its own month-nav buttons, which are plain buttons with no arrow-key
+  // handling of their own — so THAT is where DateRangePicker's own
+  // catch-all (`stopGridNavigationKeys` in date-range-picker.tsx) is the
+  // only thing standing between an arrow key and the document listener.
+  it("does not let arrow keys inside the open calendar step the period", () => {
+    render(<Harness />)
+
+    const before = JSON.parse(screen.getByTestId("state").textContent)
+
+    fireEvent.click(screen.getByRole("button", { name: /date range/i }))
+    const previousMonth = screen.getByRole("button", {
+      name: /previous month/i,
+    })
+    previousMonth.focus()
+    fireEvent.keyDown(previousMonth, { key: "ArrowRight" })
+    fireEvent.keyDown(previousMonth, { key: "ArrowLeft" })
+
+    const after = JSON.parse(screen.getByTestId("state").textContent)
+    expect(after).toEqual(before)
+  })
 })
