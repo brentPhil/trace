@@ -554,7 +554,8 @@ missing a note; MVP implements **only the third**.
 
 **Verification status**
 
-- 341 tests across three projects; typecheck and lint clean.
+- 378 tests across three projects; typecheck and lint clean. (341 at the time
+  this section was first written; the `entryTags` work below added the rest.)
 - The pure layers — day boundaries, durations, the recap assembler and both
   renderers, history filters — are covered directly and adversarially.
 - Convex functions are covered by `convex-test`. Every module now has a test
@@ -567,16 +568,28 @@ missing a note; MVP implements **only the third**.
   clock subscription) have DOM tests, and each was verified to go red when its
   defect is reintroduced.
 
-**Known limitation, not a bug to be found later.** Deleting a *tag* stops
-working once an account exceeds `ENTRY_SCAN_LIMIT` (2,000) entries, for every
-tag, permanently — including one created today and used on nothing. Convex
-cannot index array membership, so proving a tag is unused means reading every
-entry, and the scan is bounded to avoid exceeding the per-transaction byte
-limit. Renaming still works and still reaches every entry. The fix is an
-`entryTags` join table indexed by tag; it needs a schema change and a backfill,
-so it is follow-up work rather than something smuggled into a review. Projects
-do not have this problem — `by_user_project` means their check reads only their
-own entries.
+**~~Known limitation~~ — FIXED, see
+`docs/superpowers/specs/2026-08-08-entry-tags-join-table-design.md`.** As
+shipped, deleting a *tag* stopped working once an account exceeded
+`ENTRY_SCAN_LIMIT` (2,000) entries, for every tag, permanently — including one
+created that day and used on nothing. Convex cannot index array membership, so
+proving a tag unused meant reading every entry, and the scan was bounded to
+avoid exceeding the per-transaction byte limit; saturating that bound had to be
+read as "cannot prove", which is a refusal.
+
+The `entryTags` join table named there as the fix has since been built. A row
+exists exactly when a live entry carries the tag, so `tags.remove` is now one
+indexed read on `by_user_tag`, finding nothing *proves* the tag is unused, and
+the saturation refusal is gone. `ENTRY_SCAN_LIMIT` still bounds the read, but
+only to cap the count shown in the message — hitting it can make a refusal
+vaguer, never invent one. Deploying it to an instance that already has entries
+requires `npx convex run migrations:runEntryTagsBackfill` — nothing runs it
+automatically — and until it finishes `tags.remove` refuses with `NOT_READY`,
+because an unbackfilled table reads identically to "no tag is used anywhere". A
+deployment with no entries is exempt and needs no migration.
+
+Projects never had this problem — `by_user_project` means their check reads only
+their own entries.
 
 **What has NOT been verified**
 

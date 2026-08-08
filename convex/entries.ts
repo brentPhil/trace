@@ -3,6 +3,7 @@ import { paginationOptsValidator, paginationResultValidator } from "convex/serve
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { assertOwned, getOwned, getOwnedIncludingDeleted } from "./owned"
+import { dropEntryTags, syncEntryTags } from "./entryTags"
 import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
 import { timeEntryDoc } from "./lib/docs"
@@ -593,6 +594,7 @@ async function startImpl(ctx: MutationCtx, userId: string, args: StartArgs) {
     updatedAt: now,
     deletedAt: null,
   })
+  await syncEntryTags(ctx, userId, entryId, tagIds)
 
   return { entryId, stoppedEntryIds, serverNow: now, replayed: false }
 }
@@ -726,6 +728,7 @@ async function discardRunningImpl(ctx: MutationCtx, userId: string) {
   const discardedEntryIds: Array<Id<"timeEntries">> = []
   for (const entry of running) {
     if (await closeEntry(ctx, entry, now, now, { deletedAt: now })) {
+      await dropEntryTags(ctx, userId, entry._id)
       discardedEntryIds.push(entry._id)
     }
   }
@@ -848,6 +851,11 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   }
 
   await ctx.db.patch(entry._id, patch)
+  // Only when tags were part of the patch. `getOwned` above already refused a
+  // soft-deleted entry, so this row is live and its join rows should exist.
+  if (patch.tagIds !== undefined) {
+    await syncEntryTags(ctx, userId, entry._id, patch.tagIds)
+  }
   return null
 }
 
@@ -973,10 +981,19 @@ async function removeImpl(ctx: MutationCtx, userId: string, entryId: Id<"timeEnt
   if (entry.deletedAt !== null) return { removedEntryIds: [] }
 
   if (entry.endedAt === null) {
-    await closeEntry(ctx, entry, now, now, { deletedAt: now })
+    // Guarded, matching discardRunning. If the close did not happen the row is
+    // still live, and dropping its join rows anyway would leave a live entry
+    // whose tags nothing protects — a fail-open on the one invariant this table
+    // exists to hold. Unreachable given closeEntry's clamp; free to rule out.
+    if (!(await closeEntry(ctx, entry, now, now, { deletedAt: now }))) {
+      return { removedEntryIds: [] }
+    }
   } else {
     await ctx.db.patch(entry._id, { deletedAt: now, updatedAt: now })
   }
+  // The row is no longer live, so it no longer holds its tags. `tagIds` is left
+  // alone — the entry is in the trash, not edited — and restore reads it back.
+  await dropEntryTags(ctx, userId, entry._id)
   return { removedEntryIds: [entry._id] }
 }
 
@@ -1016,6 +1033,9 @@ async function restoreImpl(ctx: MutationCtx, userId: string, entryId: Id<"timeEn
   } else {
     await ctx.db.patch(entry._id, { deletedAt: null, updatedAt: now })
   }
+  // Live again, so it holds its tags again. Rebuilt from `tagIds`, which the
+  // delete deliberately left intact.
+  await syncEntryTags(ctx, userId, entry._id, entry.tagIds)
   return { restoredEntryIds: [entry._id] }
 }
 
@@ -1118,6 +1138,7 @@ async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
     updatedAt: now,
     deletedAt: null,
   })
+  await syncEntryTags(ctx, userId, entryId, tagIds)
 
   return { entryId, replayed: false }
 }

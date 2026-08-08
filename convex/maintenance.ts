@@ -52,6 +52,25 @@ export const purgeUser = internalMutation({
     const limit = args.limit ?? 500
     let deleted = 0
 
+    // entryTags first, and by INDEX rather than by filter.
+    //
+    // First, because it is derived from the other three: draining it ahead of
+    // them means a purge that runs out of budget partway leaves the index
+    // describing rows that still exist rather than rows that are gone.
+    //
+    // By index, because it is the only one of the four that has a userId index
+    // and also the one that can dwarf the others — up to ten rows per entry. A
+    // `.filter()` here would scan the whole table looking for one user's rows,
+    // on every call of a loop the caller runs until it reports nothing left.
+    const joins = await ctx.db
+      .query("entryTags")
+      .withIndex("by_user_tag", (q) => q.eq("userId", args.userId))
+      .take(limit)
+    for (const row of joins) {
+      await ctx.db.delete(row._id)
+      deleted++
+    }
+
     for (const table of ["timeEntries", "projects", "tags"] as const) {
       const rows = await ctx.db
         .query(table)

@@ -11,7 +11,8 @@ import { convexTest } from "convex-test"
 import { describe, expect, it } from "vitest"
 import schema from "./schema"
 import { api, internal } from "./_generated/api"
-import { traceErrorCode } from "./lib/codes"
+import { isTraceError, traceErrorCode } from "./lib/codes"
+import type { TraceErrorData } from "./lib/codes"
 import { PROJECT_COLORS } from "./lib/palette"
 import { ENTRY_SCAN_LIMIT } from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
@@ -33,6 +34,17 @@ async function expectCode(promise: Promise<unknown>, code: string): Promise<void
   throw new Error(`expected rejection with code ${code}, but it resolved`)
 }
 
+/** The same, but hands back the payload so a test can assert on the sentence. */
+async function expectFailure(promise: Promise<unknown>): Promise<TraceErrorData> {
+  try {
+    await promise
+  } catch (error) {
+    if (isTraceError(error)) return error.data
+    throw error
+  }
+  throw new Error("expected a rejection, but it resolved")
+}
+
 type Harness = ReturnType<typeof setup>
 
 async function project(t: Harness, userId: string, name: string, over = {}) {
@@ -44,6 +56,20 @@ async function project(t: Harness, userId: string, name: string, over = {}) {
   return projectId
 }
 
+/**
+ * An entry, through the REAL mutation rather than a raw insert.
+ *
+ * It used to insert straight into the table, which was harmless while the only
+ * thing linking an entry to a tag was the `tagIds` array on the row itself.
+ * With the `entryTags` join table it is not harmless: a raw insert writes no
+ * join row, so every "REFUSES to delete a tag in use" test below would have
+ * been asserting a refusal against a tag the server could see no use of —
+ * passing for the wrong reason today and passing vacuously forever after.
+ *
+ * `deleted` goes through `entries.remove` for the same reason: that is the path
+ * that drops the join rows, and a test wanting a trashed entry wants the one
+ * the product produces.
+ */
 async function entryOn(
   t: Harness,
   userId: string,
@@ -51,27 +77,24 @@ async function entryOn(
     projectId: Id<"projects">
     tagIds: Array<Id<"tags">>
     title: string
-    deletedAt: number | null
+    clientKey: string
+    deleted: boolean
   }> = {}
 ) {
   const startedAt = Date.now() - 2 * HOUR
-  return await t.run(
-    async (ctx) =>
-      await ctx.db.insert("timeEntries", {
-        userId,
-        clientKey: `k-${Math.random()}`,
-        title: over.title ?? "Work",
-        startedAt,
-        endedAt: startedAt + HOUR,
-        durationMs: HOUR,
-        projectId: over.projectId,
-        tagIds: over.tagIds ?? [],
-        billable: false,
-        source: "web",
-        updatedAt: startedAt,
-        deletedAt: over.deletedAt ?? null,
-      })
-  )
+  const { entryId } = await t.mutation(internal.entries.createAs, {
+    userId,
+    clientKey: over.clientKey ?? `k-${Math.random()}`,
+    title: over.title ?? "Work",
+    startedAt,
+    endedAt: startedAt + HOUR,
+    projectId: over.projectId,
+    tagIds: over.tagIds,
+  })
+  if (over.deleted === true) {
+    await t.mutation(internal.entries.removeAs, { userId, entryId })
+  }
+  return entryId
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +245,7 @@ describe("projects", () => {
   it("allows the delete once only soft-deleted entries reference it", async () => {
     const t = setup()
     const projectId = await project(t, ALICE, "Acme")
-    await entryOn(t, ALICE, { projectId, deletedAt: Date.now() })
+    await entryOn(t, ALICE, { projectId, deleted: true })
 
     await t.mutation(internal.projects.removeAs, { userId: ALICE, projectId })
     expect(await t.query(internal.projects.listAs, { userId: ALICE })).toHaveLength(0)
@@ -325,6 +348,7 @@ describe("tags", () => {
       name: "urgent",
     })
     await entryOn(t, ALICE, { tagIds: [tagId] })
+    await runBackfill(t)
 
     await expectCode(
       t.mutation(internal.tags.removeAs, { userId: ALICE, tagId }),
@@ -440,9 +464,8 @@ describe("title autocomplete", () => {
 
   it("skips untitled and soft-deleted entries", async () => {
     const t = setup()
-    const startedAt = Date.now() - HOUR
     await entryOn(t, ALICE, { title: "" })
-    await entryOn(t, ALICE, { title: "Deleted work", deletedAt: startedAt })
+    await entryOn(t, ALICE, { title: "Deleted work", deleted: true })
 
     const suggestions = await t.query(internal.entries.titleSuggestionsAs, {
       userId: ALICE,
@@ -462,6 +485,7 @@ describe("removing a classifier that is genuinely unused", () => {
       userId: ALICE,
       name: "throwaway",
     })
+    await runBackfill(t)
 
     await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
 
@@ -489,27 +513,526 @@ describe("removing a classifier that is genuinely unused", () => {
       userId: ALICE,
       name: "gone",
     })
-    await entryOn(t, ALICE, { tagIds: [tagId], deletedAt: Date.now() })
+    await entryOn(t, ALICE, { tagIds: [tagId], deleted: true })
+    await runBackfill(t)
 
     await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
     expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
   })
+
+  it("follows the tags an entry actually carries when they are changed", async () => {
+    // The refusal has to track edits, in both directions. A tag taken off the
+    // last entry carrying it becomes deletable; the tag put on in its place
+    // becomes protected. Getting only the first half right is the failure that
+    // leaves a tag undeletable forever on the strength of an entry that has not
+    // carried it for a year.
+    const t = setup()
+    const before = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "before",
+    })
+    const after = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "after",
+    })
+    const entryId = await entryOn(t, ALICE, { tagIds: [before.tagId] })
+    await runBackfill(t)
+
+    await t.mutation(internal.entries.updateAs, {
+      userId: ALICE,
+      entryId,
+      tagIds: [after.tagId],
+    })
+
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId: before.tagId })
+    await expectCode(
+      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId: after.tagId }),
+      "IN_USE"
+    )
+  })
+
+  it("re-protects a tag when the entry carrying it comes back from the trash", async () => {
+    // Delete an entry, and its tags are released. Undo, and they must be held
+    // again — otherwise the window between the two is a window in which a tag
+    // can be deleted out from under an entry that is about to exist again.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    const entryId = await entryOn(t, ALICE, { tagIds: [tagId] })
+    await runBackfill(t)
+    await t.mutation(internal.entries.removeAs, { userId: ALICE, entryId })
+
+    await t.mutation(internal.entries.restoreAs, { userId: ALICE, entryId })
+
+    await expectCode(
+      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId }),
+      "IN_USE"
+    )
+  })
+
+  it("does not let one user's entry protect another user's tag", async () => {
+    // by_user_tag leads with userId, so this should be structural rather than
+    // lucky — but "structural" is what everyone says before the leak.
+    const t = setup()
+    const alices = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    const bobs = await t.mutation(internal.tags.ensureAs, { userId: BOB, name: "urgent" })
+    await entryOn(t, BOB, { tagIds: [bobs.tagId] })
+    await runBackfill(t)
+
+    // Bob's entry blocks Bob's tag and says nothing about Alice's.
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId: alices.tagId })
+    await expectCode(
+      t.mutation(internal.tags.removeAs, { userId: BOB, tagId: bobs.tagId }),
+      "IN_USE"
+    )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The entryTags join table
+// ---------------------------------------------------------------------------
+
+/** Every join row in the deployment, so the invariant can be asserted directly. */
+async function joinRows(t: Harness) {
+  return await t.run(async (ctx) => await ctx.db.query("entryTags").collect())
+}
+
+describe("the entryTags join table", () => {
+  it("writes a row per tag when an entry is created", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+
+    const entryId = await entryOn(t, ALICE, { tagIds: [tagId] })
+
+    expect(await joinRows(t)).toEqual([
+      expect.objectContaining({ userId: ALICE, entryId, tagId }),
+    ])
+  })
+
+  it("writes rows when a timer is STARTED with tags", async () => {
+    // start and create are separate inserts, so each needs its own proof. A
+    // missing call on one of them would leave the table right for manual
+    // entries and silently wrong for everything the timer produces.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+
+    const { entryId } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: "s1",
+      tagIds: [tagId],
+    })
+
+    expect(await joinRows(t)).toEqual([
+      expect.objectContaining({ userId: ALICE, entryId, tagId }),
+    ])
+  })
+
+  it("reconciles to exactly the new set when an entry's tags change", async () => {
+    // Not "adds the new ones": the OLD row has to go, or the tag it points at
+    // is protected from deletion forever by an entry that no longer carries it.
+    const t = setup()
+    const a = await t.mutation(internal.tags.ensureAs, { userId: ALICE, name: "a" })
+    const b = await t.mutation(internal.tags.ensureAs, { userId: ALICE, name: "b" })
+    const c = await t.mutation(internal.tags.ensureAs, { userId: ALICE, name: "c" })
+    const entryId = await entryOn(t, ALICE, { tagIds: [a.tagId, b.tagId] })
+
+    await t.mutation(internal.entries.updateAs, {
+      userId: ALICE,
+      entryId,
+      tagIds: [b.tagId, c.tagId],
+    })
+
+    const rows = await joinRows(t)
+    expect(rows.map((row) => row.tagId).sort()).toEqual([b.tagId, c.tagId].sort())
+    expect(rows.every((row) => row.entryId === entryId)).toBe(true)
+  })
+
+  it("drops an entry's rows when it is soft-deleted", async () => {
+    // This is what keeps "a tag carried only by trashed entries is deletable"
+    // true without putting a liveness column on the join row.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    const entryId = await entryOn(t, ALICE, { tagIds: [tagId] })
+
+    await t.mutation(internal.entries.removeAs, { userId: ALICE, entryId })
+
+    expect(await joinRows(t)).toEqual([])
+  })
+
+  it("puts the rows back when a deleted entry is restored", async () => {
+    // The undo toast. Without this, deleting an entry would permanently release
+    // its tags, and restoring it would produce a live entry carrying a tag that
+    // nothing protects — the dangling reference the whole model forbids.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    const entryId = await entryOn(t, ALICE, { tagIds: [tagId] })
+    await t.mutation(internal.entries.removeAs, { userId: ALICE, entryId })
+
+    await t.mutation(internal.entries.restoreAs, { userId: ALICE, entryId })
+
+    expect(await joinRows(t)).toEqual([
+      expect.objectContaining({ userId: ALICE, entryId, tagId }),
+    ])
+  })
+
+  it("drops the rows of a discarded running entry", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: "s1",
+      tagIds: [tagId],
+    })
+
+    await t.mutation(internal.entries.discardRunningAs, { userId: ALICE })
+
+    expect(await joinRows(t)).toEqual([])
+  })
+
+  it("does not duplicate rows when a create is replayed", async () => {
+    // start and create are idempotent on clientKey. Note this passes even
+    // WITHOUT the early return, because syncEntryTags reconciles — it is an
+    // invariant check, not a defence of that branch. The test below is.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    await entryOn(t, ALICE, { tagIds: [tagId], clientKey: "same" })
+    await entryOn(t, ALICE, { tagIds: [tagId], clientKey: "same" })
+
+    expect(await joinRows(t)).toHaveLength(1)
+  })
+
+  it("does not resurrect rows when a create is replayed after the entry was trashed", async () => {
+    // What makes the early return in createImpl load-bearing, and the case a
+    // "simplification" that synced on the replay path too would break: the
+    // rows would come back for a soft-deleted entry, protecting the tag
+    // forever on the strength of something in the bin. That is exactly the
+    // refusal-nobody-can-act-on that this table exists to prevent, and it
+    // would be reached by a retry the user never knew happened.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    const entryId = await entryOn(t, ALICE, { tagIds: [tagId], clientKey: "same" })
+    await t.mutation(internal.entries.removeAs, { userId: ALICE, entryId })
+
+    await entryOn(t, ALICE, { tagIds: [tagId], clientKey: "same" })
+
+    expect(await joinRows(t)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The backfill, and the gate that makes it safe to deploy
+// ---------------------------------------------------------------------------
+
+/**
+ * An entry inserted the way rows existed BEFORE the join table — straight into
+ * the table, with no join rows. Simulates a deployment's history at the moment
+ * the schema change lands.
+ */
+async function legacyEntry(
+  t: Harness,
+  userId: string,
+  over: Partial<{ tagIds: Array<Id<"tags">>; deletedAt: number | null }> = {}
+) {
+  const startedAt = Date.now() - 2 * HOUR
+  return await t.run(
+    async (ctx) =>
+      await ctx.db.insert("timeEntries", {
+        userId,
+        clientKey: `legacy-${Math.random()}`,
+        title: "Work",
+        startedAt,
+        endedAt: startedAt + HOUR,
+        durationMs: HOUR,
+        tagIds: over.tagIds ?? [],
+        billable: false,
+        source: "web",
+        updatedAt: startedAt,
+        deletedAt: over.deletedAt ?? null,
+      })
+  )
+}
+
+/**
+ * Runs the backfill to completion, the way the operator's action does.
+ *
+ * Note there is no cursor to thread. Where the next page starts is the
+ * migration's own business, held in the database — see the resume test below
+ * for why it must not be an argument.
+ */
+async function runBackfill(t: Harness, numItems = 50) {
+  for (;;) {
+    const result: { isDone: boolean } = await t.mutation(
+      internal.migrations.backfillEntryTags,
+      { numItems }
+    )
+    if (result.isDone) return
+  }
+}
+
+describe("the entryTags backfill", () => {
+  it("writes rows for entries that predate the join table", async () => {
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    const entryId = await legacyEntry(t, ALICE, { tagIds: [tagId] })
+
+    await runBackfill(t)
+
+    expect(await joinRows(t)).toEqual([
+      expect.objectContaining({ userId: ALICE, entryId, tagId }),
+    ])
+  })
+
+  it("writes nothing for a soft-deleted legacy entry", async () => {
+    // A trashed entry does not hold its tags, so backfilling one would resurrect
+    // a refusal the live rules say should not exist.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "gone",
+    })
+    await legacyEntry(t, ALICE, { tagIds: [tagId], deletedAt: Date.now() })
+
+    await runBackfill(t)
+
+    expect(await joinRows(t)).toEqual([])
+  })
+
+  it("produces the same table when run twice", async () => {
+    // It will be run twice — a timed-out loop, a nervous operator, a redeploy.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    await legacyEntry(t, ALICE, { tagIds: [tagId] })
+
+    await runBackfill(t)
+    await runBackfill(t)
+
+    expect(await joinRows(t)).toHaveLength(1)
+  })
+
+  it("crosses page boundaries rather than stopping at the first one", async () => {
+    // The bug this pins is a backfill that reports done after one page and
+    // leaves most of the history uncovered — which would then read as "no tag
+    // is in use anywhere" and let every tag be deleted.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    for (let i = 0; i < 12; i += 1) await legacyEntry(t, ALICE, { tagIds: [tagId] })
+
+    await runBackfill(t, 5)
+
+    expect(await joinRows(t)).toHaveLength(12)
+  })
+
+  it("refuses every tag delete until the backfill has finished", async () => {
+    // The window this closes: between the schema landing and the backfill
+    // finishing, entryTags is empty — and an empty index reads exactly like
+    // "nothing carries this tag". Deleting on that reading destroys tags a
+    // whole history references.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "throwaway",
+    })
+    // History the backfill has not covered yet. Without this the deployment
+    // has nothing to index and is not gated at all — see the test below.
+    await legacyEntry(t, BOB, { tagIds: [] })
+
+    await expectCode(
+      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId }),
+      "NOT_READY"
+    )
+  })
+
+  it("does not gate a deployment that has no entries at all", async () => {
+    // A fresh deployment — a new dev instance, a preview branch, a first
+    // install — has no history, so entryTags is complete by virtue of there
+    // being nothing to cover. The gate's whole argument is that an empty index
+    // cannot be distinguished from an unindexed one; with an empty timeEntries
+    // there is nothing to distinguish, and refusing here would wedge every new
+    // environment behind a migration over zero rows.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "throwaway",
+    })
+
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
+
+    expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
+  })
+
+  it("stays open once opened, rather than re-gating on the first entry", async () => {
+    // The trap in the rule above: if emptiness were re-checked on every call,
+    // a deployment would work, then silently stop the moment its user tracked
+    // anything. Recognising an empty deployment RECORDS completion, so the
+    // answer does not flap.
+    const t = setup()
+    const first = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "one",
+    })
+    const second = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "two",
+    })
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId: first.tagId })
+
+    // Now there is history, and it was written through the live path.
+    await entryOn(t, ALICE, {})
+
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId: second.tagId })
+    expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
+  })
+
+  it("stays closed while the backfill is only PARTLY done", async () => {
+    // The flag has to be set by the last page, not the first. A backfill that
+    // announced itself complete after one page would open the gate on a table
+    // covering a fraction of history.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    for (let i = 0; i < 12; i += 1) await legacyEntry(t, ALICE, { tagIds: [tagId] })
+
+    const first = await t.mutation(internal.migrations.backfillEntryTags, {
+      numItems: 5,
+    })
+    expect(first.isDone).toBe(false)
+
+    await expectCode(
+      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId }),
+      "NOT_READY"
+    )
+  })
+
+  it("resumes from its own stored checkpoint, so coverage cannot be skipped", async () => {
+    // Where the next page starts is held in the database and advanced in the
+    // SAME transaction as the page it describes. It used to be an argument,
+    // which was a hole rather than a convenience: a caller handing in a cursor
+    // from the middle would leave every earlier entry unreconciled, and the run
+    // would still reach the end and record itself COMPLETE. The gate would then
+    // vouch for an index covering a fraction of history, and tags a live entry
+    // carries would delete cleanly.
+    //
+    // Three pages of five over twelve rows. If each call restarted, the third
+    // would never report done and only five would ever be covered.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    for (let i = 0; i < 12; i += 1) await legacyEntry(t, ALICE, { tagIds: [tagId] })
+
+    const first = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+    const second = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+    const third = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+
+    expect([first.isDone, second.isDone, third.isDone]).toEqual([false, false, true])
+    expect(await joinRows(t)).toHaveLength(12)
+  })
+
+  it("is a no-op once it has already finished", async () => {
+    // A re-run after completion must not walk the table again, and must not
+    // reopen a checkpoint that has been closed.
+    const t = setup()
+    await legacyEntry(t, ALICE, { tagIds: [] })
+    await runBackfill(t)
+
+    const again = await t.mutation(internal.migrations.backfillEntryTags, { numItems: 5 })
+
+    expect(again.isDone).toBe(true)
+    expect(again.scanned).toBe(0)
+  })
+
+  it("takes the join rows with it when a user is purged", async () => {
+    // purgeUser is the account-deletion cascade. A join table it does not know
+    // about leaves rows pointing at entries and tags that no longer exist.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+    await entryOn(t, ALICE, { tagIds: [tagId] })
+    expect(await joinRows(t)).toHaveLength(1)
+
+    await t.mutation(internal.maintenance.purgeUser, { userId: ALICE })
+
+    expect(await joinRows(t)).toEqual([])
+  })
+
+  it("does not gate RENAMING, which never needed the index", async () => {
+    // Renaming reaches every entry through the id the entry already stores. It
+    // has no reason to wait for a migration, and telling someone their tags are
+    // frozen when only one verb is would be a lie.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "urgent",
+    })
+
+    await t.mutation(internal.tags.renameAs, { userId: ALICE, tagId, name: "critical" })
+
+    const rows = await t.query(internal.tags.listAs, { userId: ALICE })
+    expect(rows[0].name).toBe("critical")
+  })
 })
 
 /**
- * The bounded scans, exercised at their actual boundary.
+ * Past the old boundary, where tag deletion used to stop working.
  *
- * These are slow — they build ENTRY_SCAN_LIMIT + 1 rows — and they are worth
- * it, because the saturation branch is the one that was WRONG and untested: the
- * comment claimed a refusal a heavy user would meet "occasionally", while the
- * code refuses unconditionally for every tag once the account passes the limit,
- * since the scan is not filtered by tag. A test at the boundary is what makes
- * that behaviour a decision rather than a surprise.
+ * These are slow — they build ENTRY_SCAN_LIMIT + 1 rows — and they are the
+ * point of the whole join table, so they stay. The first one INVERTS a test
+ * that used to assert the opposite: it pinned the known limitation, which was
+ * that once an account passed 2,000 entries no tag could ever be deleted again,
+ * including one created that morning and used on nothing. That is now fixed
+ * rather than documented, and this is what says so.
  */
-describe("the bounded scans at their boundary", () => {
-  async function bulkEntries(t: Harness, userId: string, n: number) {
+describe("tag deletion past the old scan limit", () => {
+  async function bulkEntries(
+    t: Harness,
+    userId: string,
+    n: number,
+    tagIds: Array<Id<"tags">> = []
+  ) {
     const start = Date.now() - 400 * 24 * HOUR
-    // Batched, because one t.run per row is what makes this take minutes.
+    // Inserted raw and batched: raw because these stand in for history written
+    // before the join table existed, batched because one t.run per row is what
+    // makes this take minutes.
     const BATCH = 500
     for (let offset = 0; offset < n; offset += BATCH) {
       await t.run(async (ctx) => {
@@ -521,7 +1044,7 @@ describe("the bounded scans at their boundary", () => {
             startedAt: start + i * 60_000,
             endedAt: start + i * 60_000 + 60_000,
             durationMs: 60_000,
-            tagIds: [],
+            tagIds,
             billable: false,
             source: "web",
             updatedAt: start,
@@ -532,32 +1055,57 @@ describe("the bounded scans at their boundary", () => {
     }
   }
 
-  it("refuses to delete an unused tag once the account exceeds the scan limit", async () => {
+  it("DELETES an unused tag in an account well past the old limit", async () => {
     const t = setup()
     const { tagId } = await t.mutation(internal.tags.ensureAs, {
       userId: ALICE,
       name: "brand-new",
     })
     await bulkEntries(t, ALICE, ENTRY_SCAN_LIMIT + 1)
+    await runBackfill(t, 500)
 
-    // Nothing carries this tag. It still cannot be deleted, because proving
-    // that would mean reading every entry — which is the known limitation
-    // documented on tags.removeImpl, pinned here so it cannot change silently.
-    await expectCode(
-      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId }),
-      "IN_USE"
-    )
+    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
+
+    expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
   }, 60_000)
 
-  it("still deletes an unused tag one row BELOW the limit", async () => {
+  it("still refuses when the only entry carrying it sits beyond the old window", async () => {
+    // The sharpest proof that the index is doing real work. The old scan read
+    // the first 2,000 entries by start time; an entry at position 2,001 was
+    // never looked at. Reached now because the lookup is keyed by TAG, not by
+    // position in history.
     const t = setup()
     const { tagId } = await t.mutation(internal.tags.ensureAs, {
       userId: ALICE,
-      name: "brand-new",
+      name: "urgent",
     })
-    await bulkEntries(t, ALICE, ENTRY_SCAN_LIMIT)
+    await bulkEntries(t, ALICE, ENTRY_SCAN_LIMIT + 1)
+    // Newest, so it falls outside a window that starts at the oldest row.
+    await entryOn(t, ALICE, { tagIds: [tagId] })
+    await runBackfill(t, 500)
 
-    await t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
-    expect(await t.query(internal.tags.listAs, { userId: ALICE })).toHaveLength(0)
+    const failure = await expectFailure(
+      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
+    )
+    expect(failure.code).toBe("IN_USE")
+    expect(failure.meta?.count).toBe(1)
+  }, 60_000)
+
+  it("says 'At least' rather than an exact number it cannot stand behind", async () => {
+    // Matches projects.remove. A precise-looking count that is really a floor
+    // is worse than a vaguer one that is true.
+    const t = setup()
+    const { tagId } = await t.mutation(internal.tags.ensureAs, {
+      userId: ALICE,
+      name: "everywhere",
+    })
+    await bulkEntries(t, ALICE, ENTRY_SCAN_LIMIT + 1, [tagId])
+    await runBackfill(t, 500)
+
+    const failure = await expectFailure(
+      t.mutation(internal.tags.removeAs, { userId: ALICE, tagId })
+    )
+    expect(failure.code).toBe("IN_USE")
+    expect(failure.message).toContain("At least")
   }, 60_000)
 })
