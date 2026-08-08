@@ -20,7 +20,8 @@
 - **Files are UTF-8 without BOM, LF line endings.** `.editorconfig` and `.gitattributes` enforce this. Never write a BOM — nine files once shipped mojibake into page titles this way.
 - **Components take their writes as props.** Nothing under `src/components/**` may import `useMutation`, `useConvexMutation`, `convexQuery`, or `convex/_generated/api`. The one existing exception is `entry-log.tsx`. Do not add a second.
 - **Every Convex public function needs `args` and `returns` validators.** Read `convex/_generated/ai/guidelines.md` before touching `convex/`.
-- **Baseline at plan start:** 354 tests across 18 files, all green.
+- **Baseline at plan start:** 378 tests across 18 files, all green, at commit `6f315ea`.
+- **`entryTags`, `migrationState` and `convex/migrations.ts` are off limits.** They landed from separate work while this plan was being written. The recap schema edits must remove `recapDays` and `recapMinuteLocal` and touch nothing else in `schema.ts`.
 - **Do not `git push`.** Commit only.
 
 ---
@@ -46,11 +47,11 @@
 | `src/test-utils/router.tsx` | Memory-router harness for DOM tests |
 | `src/routes/_authed/timer.tsx` | Was `today.tsx` |
 | `src/routes/_authed/reports.tsx` | Was `history.tsx` |
-| `convex/purgeRecap.ts` | One-off internal migration, deleted in Task 4 |
+| — | *(no new Convex file: the recap purge is added to the existing `convex/migrations.ts` and removed again in Task 4)* |
 
 **Deleted**
 
-`src/components/app-header.tsx`, `src/components/recap/recap-panel.tsx`, `src/routes/_authed/today.tsx`, `src/routes/_authed/history.tsx`, `convex/recap.ts`, `convex/lib/recap.ts`, `convex/lib/render.ts`, `convex/recap.test.ts`, `convex/lib/recap.test.ts`, `convex/purgeRecap.ts`.
+`src/components/app-header.tsx`, `src/components/recap/recap-panel.tsx`, `src/routes/_authed/today.tsx`, `src/routes/_authed/history.tsx`, `convex/recap.ts`, `convex/lib/recap.ts`, `convex/lib/render.ts`, `convex/recap.test.ts`, `convex/lib/recap.test.ts`.
 
 **Modified**
 
@@ -156,13 +157,15 @@ recap-time setting. The Convex side still stands; nothing reads it now."
 Convex validates existing documents against the schema, so the field cannot be removed while rows carry it. This is step 1 and step 2 of the three-step migration in spec §9.2.
 
 **Files:**
-- Modify: `convex/schema.ts:123`
+- Modify: `convex/schema.ts` (the `recapMinuteLocal` line in `userSettings`)
 - Modify: `convex/settings.ts`
-- Create: `convex/purgeRecap.ts`
+- Modify: `convex/migrations.ts`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `internal.purgeRecap.run` — an `internalMutation` taking no args, returning `{ settingsCleared: number, recapDaysDeleted: number }`. Deleted in Task 4.
+- Produces: `internal.migrations.purgeRecap` — an `internalMutation` taking no args, returning `{ settingsCleared: number, recapDaysDeleted: number }`. Removed again in Task 4.
+
+**Note:** `convex/migrations.ts` already exists and holds the `entryTags` backfill. Add to it; do not restructure it, and do not touch `backfillEntryTags`, `runEntryTagsBackfill`, or anything importing from `entryTags.ts`.
 
 - [ ] **Step 1: Make the field optional in the schema**
 
@@ -190,14 +193,13 @@ In `convex/settings.ts`, three edits so the optional field still type-checks:
 
 - [ ] **Step 3: Write the one-off purge mutation**
 
-Create `convex/purgeRecap.ts`:
+Append to `convex/migrations.ts`, which already holds the `entryTags` backfill
+and states the convention ("hand-rolled rather than `@convex-dev/migrations`").
+Leave everything already in that file alone.
 
 ```ts
-import { v } from "convex/values"
-import { internalMutation } from "./_generated/server"
-
 /**
- * One-off migration. DELETED in the task that removes the schema entries.
+ * One-off. REMOVED in the task that deletes the recap schema entries.
  *
  * Convex validates stored documents against the schema, so `recapMinuteLocal`
  * and the `recapDays` table cannot simply disappear from schema.ts while rows
@@ -209,7 +211,7 @@ import { internalMutation } from "./_generated/server"
  * user reaches. If it ever needs to run against a large deployment, bound it
  * the way convex/lib/scan.ts describes.
  */
-export const run = internalMutation({
+export const purgeRecap = internalMutation({
   args: {},
   returns: v.object({
     settingsCleared: v.number(),
@@ -245,7 +247,7 @@ Expected: `Convex functions ready!` with no schema validation error.
 - [ ] **Step 5: Run the purge**
 
 ```bash
-node node_modules/convex/bin/main.js run purgeRecap:run
+node node_modules/convex/bin/main.js run migrations:purgeRecap
 ```
 
 Expected: JSON like `{ "settingsCleared": 1, "recapDaysDeleted": 0 }`. Any numbers are fine; a validation error is not.
@@ -348,17 +350,21 @@ in the spec's section 9."
 ## Task 4: Delete the migration and update the plan document
 
 **Files:**
-- Delete: `convex/purgeRecap.ts`
+- Modify: `convex/migrations.ts`
 - Modify: `docs/superpowers/plans/2026-08-08-time-tracking-implementation-plan.md`
 
-- [ ] **Step 1: Delete the one-off**
+- [ ] **Step 1: Remove the one-off**
+
+Delete the `purgeRecap` export and its docblock from `convex/migrations.ts`.
+**Keep everything else in that file** — `backfillEntryTags` and
+`runEntryTagsBackfill` belong to separate, already-shipped work.
 
 ```bash
-git rm convex/purgeRecap.ts
+grep -n "purgeRecap\|recapDays" convex/migrations.ts
 node node_modules/convex/bin/main.js dev --once
 ```
 
-Expected: `Convex functions ready!`.
+Expected: no grep output, then `Convex functions ready!`.
 
 - [ ] **Step 2: Update the plan's six recap references**
 
