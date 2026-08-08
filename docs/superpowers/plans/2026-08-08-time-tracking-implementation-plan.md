@@ -84,6 +84,14 @@ No product combines tracked durations with human-written per-entry notes. Harves
 
 **The recap, not the timer, is the product.** The timer is table stakes and must be excellent; the recap is why anyone switches.
 
+> **REMOVED 2026-08-08.** The recap was built, shipped, and then cut — see §5
+> Phase 6 and §5.9. The paragraph above is left standing because it is the
+> argument the product was designed around, and deleting it would hide the size
+> of what changed. It no longer describes what Trace does. Notes are still
+> collected and still searchable in Reports, but nothing consumes them: with the
+> recap gone, this is a time tracker with a real notes field rather than a
+> product whose output is a written summary of your day.
+
 ### 1.4 Reporting: one view
 
 Ship **the log** — reverse-chronological entries under day headers, each note rendered in full. Every "report" is that same view with a filter applied, not a different view.
@@ -120,7 +128,7 @@ Queries range on `by_user_started` with `.gte("startedAt", fromMs).lt("startedAt
 
 Consequences, accepted:
 - Changing the timezone setting re-buckets history. This is **reversible** (change it back) and user-initiated. The stored variant's failure mode is irreversible.
-- The log and the recap resolve days through the *same* function, so they cannot disagree. Under the stored design they demonstrably could ("my recap says 5h but my log says 6h" — unrecoverable in a billing tool).
+- Every surface resolves days through the *same* function, so they cannot disagree. Under the stored design they demonstrably could ("my recap says 5h but my log says 6h" — unrecoverable in a billing tool). *(The recap was removed 2026-08-08; the argument holds unchanged for the log, Reports and the day totals.)*
 - No `tzAtWrite`, no re-bucket tool, no `timezoneConfirmedAt` at MVP.
 
 **Midnight-crossing entries are attributed to their start date** (Toggl's rule, kept). Split is the manual correction, and it is fast-follow.
@@ -191,7 +199,7 @@ They never overlap, so no optimistic update ever targets a paginated query. **Ph
 | Delete | Soft (`deletedAt`) on every table from day one + a 6 s undo toast. **The trash view is fast-follow** — the column is free now and painful to retrofit; the view, the purge cron and the permanent-delete dialog are not MVP |
 | `settings` bootstrap | `settings.ensure({ suggestedTimezone })` called from `_authed.tsx`'s **`beforeLoad`**, returning settings into route context. TanStack Router runs *loaders in parallel* — a child loader cannot assume a parent loader resolved. This is why the dependency lives in `beforeLoad`, which does chain |
 | vitest config | `test.projects` with per-project `environment`. **`environmentMatchGlobs` was removed in Vitest 3** and this project is on Vitest 4 |
-| Recap `Copy as plain` | Rendered from the same document model as mrkdwn, **not** `mrkdwn.replaceAll("*","")`. A note reading `use *args, not **kwargs` would otherwise have three asterisks silently deleted from the user's own prose — and would break bold pairing for the rest of the Slack message |
+| Recap `Copy as plain` | **CUT 2026-08-08** with the recap (§5 Phase 6). Was: rendered from the same document model as mrkdwn, **not** `mrkdwn.replaceAll("*","")`. A note reading `use *args, not **kwargs` would otherwise have three asterisks silently deleted from the user's own prose — and would break bold pairing for the rest of the Slack message |
 
 ---
 
