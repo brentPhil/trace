@@ -290,7 +290,7 @@ Step 3 of the migration. Only legal because Task 2 cleared the data.
 - Modify: `convex/schema.ts`, `convex/settings.ts`
 
 **Interfaces:**
-- Consumes: `internal.purgeRecap.run` must have been run.
+- Consumes: `internal.migrations.purgeRecap` must have been run.
 - Produces: nothing. `api.recap` ceases to exist.
 
 - [ ] **Step 1: Confirm nothing outside the deleted set imports these**
