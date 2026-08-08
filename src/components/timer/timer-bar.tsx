@@ -336,8 +336,8 @@ export function TimerBar({
         // immediately re-seed it from an entry that is on its way out.
         setDraft({ key: null, text: "", dirty: false })
         // Only when something actually stopped. A second tab having already
-        // stopped it returns an empty list, and raising a note sheet for an
-        // entry the user did not just finish would be a non-sequitur.
+        // stopped it returns an empty list, and announcing that THIS entry
+        // was just stopped would be a non-sequitur when it was not.
         if (result.stoppedEntryIds.length > 0) {
           const elapsed = Math.max(1, result.serverNow - stopped.startedAt)
           announce(

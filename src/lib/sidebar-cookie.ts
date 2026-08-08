@@ -37,8 +37,11 @@ export function parseSidebarOpen(cookieHeader: string | undefined): boolean {
  * `document.cookie` on the client. Previously the server branch used
  * `getCookie(COOKIE_NAME) !== "false"` instead, a second implementation of
  * the same rule that shared no code with the tested one — so the tested code
- * was never the code that actually ran on the server. Using one parser for
- * both means the tests above cover both branches, not just the client one.
+ * was never the code that actually ran on the server. The tests above still
+ * only call `parseSidebarOpen` directly, not either branch here — what
+ * sharing one parser buys is removing the divergence risk: the two branches
+ * cannot disagree with each other, because there is only one rule left to
+ * implement wrong.
  */
 export const readSidebarOpen = createIsomorphicFn()
   .server(() => parseSidebarOpen(getRequestHeader("cookie")))
