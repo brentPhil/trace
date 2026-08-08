@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Chip, FilterControls } from "@/components/history/filter-controls"
+import { DateRangePicker } from "@/components/history/date-range-picker"
 import { periodFilters, stepPeriod } from "@/lib/history-filters"
 import { cn } from "@/lib/utils"
 import type { Filters, Preset } from "@/lib/history-filters"
@@ -83,21 +84,14 @@ export function FilterBar({
           ))}
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <DateInput
-            label="From"
-            value={filters.from}
-            onChange={(from) => onChange((f) => ({ ...f, period: "custom", from }))}
-          />
-          <span aria-hidden="true" className="text-muted-foreground">
-            –
-          </span>
-          <DateInput
-            label="To"
-            value={filters.to}
-            onChange={(to) => onChange((f) => ({ ...f, period: "custom", to }))}
-          />
-        </div>
+        <DateRangePicker
+          from={filters.from}
+          to={filters.to}
+          period={filters.period}
+          today={today}
+          weekStartDay={weekStartDay}
+          onChange={(range) => onChange((f) => ({ ...f, period: "custom", ...range }))}
+        />
       </div>
 
       <FilterControls filters={filters} projects={projects} onChange={onChange} />
@@ -124,36 +118,6 @@ export function FilterBar({
 }
 
 // ---------------------------------------------------------------------------
-
-function DateInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <label>
-      <span className="sr-only">{label}</span>
-      <input
-        type="date"
-        value={value}
-        // The native picker emits "" mid-edit, and an empty bound would make
-        // the range meaningless — so a half-typed date is ignored rather than
-        // applied.
-        onChange={(event) => {
-          if (event.target.value !== "") onChange(event.target.value)
-        }}
-        className={cn(
-          "rounded-md border border-edge bg-ground px-2 py-1 text-sm tabular",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        )}
-      />
-    </label>
-  )
-}
 
 function PresetChip({
   filters,
