@@ -22,7 +22,7 @@ export type Settings = {
   timeFormat: "12" | "24"
   runawayThresholdMs: number
   tabTitleClock: boolean
-  recapMinuteLocal: number
+  recapMinuteLocal?: number
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -49,7 +49,7 @@ const settingsReturns = v.object({
   timeFormat: v.union(v.literal("12"), v.literal("24")),
   runawayThresholdMs: v.number(),
   tabTitleClock: v.boolean(),
-  recapMinuteLocal: v.number(),
+  recapMinuteLocal: v.optional(v.number()),
 })
 
 async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {

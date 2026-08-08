@@ -175,7 +175,7 @@ export default defineSchema({
      *  hours because the default is not on an hour, and because an hourly
      *  schedule cannot serve Asia/Kolkata, Asia/Kathmandu or Pacific/Chatham
      *  at all. */
-    recapMinuteLocal: v.number(),
+    recapMinuteLocal: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 

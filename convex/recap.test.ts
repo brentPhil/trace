@@ -33,7 +33,6 @@ async function useLondon(t: Harness, userId: string) {
       timeFormat: "24",
       runawayThresholdMs: 8 * HOUR,
       tabTitleClock: true,
-      recapMinuteLocal: 1050,
       updatedAt: 0,
     })
   })
