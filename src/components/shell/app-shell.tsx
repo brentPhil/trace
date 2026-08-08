@@ -66,9 +66,23 @@ export function AppShell({
             <div className="min-w-0 flex-1">{timer}</div>
           </div>
 
-          <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-0 md:px-2">
-            {children}
-          </div>
+          {/*
+            Full width, not a centred measure.
+
+            This carried `mx-auto max-w-4xl` from before the sidebar existed,
+            when the page was a centred column under a top nav and a reading
+            measure was the right call. With a rail on the left, that same
+            constraint puts the log in a narrow band with dead space to its
+            right — and the log is a TABLE, not prose: the width goes to the
+            title and the note, which are the two things a row has too little
+            room for. The reading-measure argument still holds for actual
+            paragraphs, so anything prose-shaped constrains itself locally
+            rather than making every page pay for it.
+
+            Padding is left as it was so the rows stay aligned with the timer
+            bar above them: DayList already applies its own `px-4` internally.
+          */}
+          <div className="flex w-full flex-1 flex-col px-0 md:px-2">{children}</div>
 
           {/*
             Reserves the fixed bar's height so the last row of a log can
