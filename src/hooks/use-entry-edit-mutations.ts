@@ -1,5 +1,6 @@
 import { useCallback, useRef } from "react"
 import { useConvexMutation } from "@convex-dev/react-query"
+import { insertAtPosition } from "convex/react"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { applyTimeEdit } from "@shared/entryTimes"
@@ -104,12 +105,46 @@ function insertEverywhere(localStore: OptimisticLocalStore, entry: Entry): void 
     localStore.setQuery(api.entries.listRange, args, next)
   }
 
-  for (const { args, value } of localStore.getAllQueries(api.entries.listPage)) {
-    if (value === undefined) continue
-    if (value.page.some((row) => row._id === entry._id)) continue
+  // listPage is paginated: every page loaded by ONE `usePaginatedQuery`
+  // subscription shares the same fromMs/toMs and differs only by
+  // `paginationOpts.cursor`. `getAllQueries` hands back one entry per page, so
+  // a naive per-page loop (as `listRange`'s above does) inserts a copy into
+  // EVERY loaded page — duplicate rows, since `usePaginatedQuery` concatenates
+  // pages with no dedup.
+  //
+  // `insertAtPosition` (from convex/react) is Convex's helper for exactly
+  // this: it groups pages by `paginationOpts.id` and inserts into exactly one
+  // page by sort key. It has no notion of the fromMs/toMs range filter,
+  // though, so calling it unconditionally would still insert into a
+  // subscription whose range does not contain the entry (e.g. a Reports
+  // query scoped to last month receiving today's restored row). Restrict it
+  // to the distinct {fromMs, toMs} pairs that actually contain the entry —
+  // the same bounds check the `listRange` branch above uses.
+  const pageQueries = localStore.getAllQueries(api.entries.listPage)
+  const seenRanges = new Set<string>()
+  for (const { args } of pageQueries) {
+    const rangeKey = `${args.fromMs}:${args.toMs}`
+    if (seenRanges.has(rangeKey)) continue
+    seenRanges.add(rangeKey)
     if (entry.startedAt < args.fromMs || entry.startedAt >= args.toMs) continue
-    const page = [...value.page, entry].sort((a, b) => b.startedAt - a.startedAt)
-    localStore.setQuery(api.entries.listPage, args, { ...value, page })
+
+    const alreadyPresent = pageQueries.some(
+      ({ args: otherArgs, value }) =>
+        otherArgs.fromMs === args.fromMs &&
+        otherArgs.toMs === args.toMs &&
+        value !== undefined &&
+        value.page.some((row) => row._id === entry._id)
+    )
+    if (alreadyPresent) continue
+
+    insertAtPosition({
+      paginatedQuery: api.entries.listPage,
+      argsToMatch: { fromMs: args.fromMs, toMs: args.toMs },
+      sortOrder: "desc",
+      sortKeyFromItem: (row) => row.startedAt,
+      localQueryStore: localStore,
+      item: entry,
+    })
   }
 }
 
