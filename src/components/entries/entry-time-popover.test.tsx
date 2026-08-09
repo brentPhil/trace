@@ -1,7 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
+import type * as PopoverForceCloseModule from "@/lib/popover-force-close"
 import type { Entry } from "@/lib/group-entries"
+
+type PopoverForceClose = typeof PopoverForceCloseModule
+
+/*
+ * One shared actions ref, swapped in for the hook the component calls.
+ *
+ * Base UI populates `actionsRef` through `useImperativeHandle` inside
+ * `Popover.Root`, so a ref that comes back non-null is proof the prop actually
+ * reached it. Without this, DELETING `actionsRef={actionsRef}` — and with it
+ * every force-close guarantee — was invisible to the whole suite: nothing else
+ * in jsdom observes that prop.
+ */
+type Actions = { unmount: () => void; close: () => void }
+
+const { sharedActionsRef } = vi.hoisted(() => {
+  const ref: { current: Actions | null } = { current: null }
+  return { sharedActionsRef: ref }
+})
+
+vi.mock("@/lib/popover-force-close", async (importOriginal) => {
+  const actual = await importOriginal<PopoverForceClose>()
+  return { ...actual, usePopoverActionsRef: () => sharedActionsRef }
+})
 
 /*
  * The times control.
@@ -20,6 +44,7 @@ beforeEach(() => {
   ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
     NoopResizeObserver
   Element.prototype.scrollIntoView = function scrollIntoView() {}
+  sharedActionsRef.current = null
 })
 
 afterEach(cleanup)
@@ -101,6 +126,38 @@ describe("EntryTimePopover", () => {
     expect(onCommitDay).toHaveBeenCalledWith("2026-08-12")
   })
 
+  it("re-picking the day already selected writes nothing", () => {
+    // It used to fire a real `editTime("day", …)`. Before `instantMovedToDay`
+    // learned to keep seconds that moved the entry by up to 59.999s and
+    // dragged its end along via the anchored duration; it also raised a
+    // "Moved to Today" toast offering Undo for a move that never happened. On
+    // a running entry it moved the live start.
+    const { onCommitDay } = open()
+
+    const selected = screen.getByRole("button", { pressed: true })
+    expect(selected.textContent).toBe("7")
+    fireEvent.click(selected)
+
+    expect(onCommitDay).not.toHaveBeenCalled()
+  })
+
+  it("closes on a day pick either way", () => {
+    // The no-op guard above must not turn re-picking into a dead click.
+    open()
+    fireEvent.click(screen.getByRole("button", { pressed: true }))
+    expect(screen.queryByLabelText("Start time")).toBeNull()
+  })
+
+  /*
+   * NOT TESTED HERE, deliberately: the `.catch` backstop on `onCommitDay`.
+   * An attempt at it passed against the unfixed bare `void onCommitDay(day)`
+   * too — vitest installs its own `unhandledRejection` handling, so a dropped
+   * promise is not observable from inside a test — and a test that cannot go
+   * red is worse than none. The behaviour that MATTERS, a rejected day change
+   * reaching the user, is pinned where it is actually reportable:
+   * `timer-bar.test.tsx` > "reports a day change that rejected".
+   */
+
   it("commits a typed start time as an instant", () => {
     const { onCommitTime } = open()
 
@@ -166,6 +223,14 @@ describe("EntryTimePopover", () => {
     expect(screen.getByText("September 2026")).toBeTruthy()
 
     expect(onCommitDay).not.toHaveBeenCalled()
+  })
+
+  it("hands its actions ref to Popover.Root", () => {
+    // The force-close safety net is only reachable through this prop, and
+    // nothing else in jsdom can tell whether it was passed — see the mock at
+    // the top of this file for why that mattered.
+    open()
+    expect(typeof sharedActionsRef.current?.unmount).toBe("function")
   })
 
   it("offers no end field while the entry is running", () => {

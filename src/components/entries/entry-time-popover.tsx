@@ -8,7 +8,7 @@ import {
   localMinutesOf,
 } from "@/lib/format-time"
 import { cn } from "@/lib/utils"
-import { forceClosePopover, usePopoverActionsRef } from "@/lib/popover-force-close"
+import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { dayOf } from "@shared/day"
 import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
@@ -59,6 +59,13 @@ export function EntryTimePopover({
    * The DAY, not an instant. Resolving a date against the entry's own local
    * time-of-day needs the stored zone and a DST policy, and the caller owns
    * both — along with the undo that has to put the entry back.
+   *
+   * MUST REPORT ITS OWN FAILURE. Unlike `onCommitTime`, which commits into a
+   * popover that is still on screen and can show the error inline, a day pick
+   * closes this popover as it fires — there is no surface left here by the
+   * time the write can reject. Both implementations raise a toast; the
+   * `.catch` at the call site is only the backstop that keeps a third one from
+   * producing an unhandled rejection.
    */
   onCommitDay: (day: DayString) => Promise<void>
   className?: string
@@ -82,6 +89,7 @@ export function EntryTimePopover({
   const [end, setEnd] = useState("")
   const [error, setError] = useState<string | null>(null)
   const actionsRef = usePopoverActionsRef()
+  useForceCloseWhenClosed(open, actionsRef)
 
   /*
    * Re-seed every time it OPENS, not once at mount.
@@ -142,7 +150,13 @@ export function EntryTimePopover({
               type="button"
               aria-label={`Edit times — ${formatTimeRange(entry.startedAt, entry.endedAt, timeZone, use12Hour)}`}
               className={cn(
-                "tabular shrink-0 rounded-sm px-1 py-0.5 text-xs text-muted-foreground",
+                // `touch-target`: the box is a 16px `text-xs` line plus
+                // `py-0.5`, so ~20px — under WCAG 2.2 SC 2.5.8's 24px. That
+                // was survivable while the control was `hidden sm:inline-flex`
+                // and desktop-only; it is now the phone affordance for editing
+                // a time. The class grows the hit area to 24px without growing
+                // the box, which the 50px row height depends on.
+                "touch-target tabular shrink-0 rounded-sm px-1 py-0.5 text-xs text-muted-foreground",
                 "transition-colors hover:bg-surface-raised/70 hover:text-foreground",
                 "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                 className
@@ -175,8 +189,17 @@ export function EntryTimePopover({
           weekStartDay={weekStartDay}
           onPickDay={(day) => {
             setOpen(false)
-            forceClosePopover(actionsRef)
-            void onCommitDay(day)
+            // Re-picking the day already selected is not an edit. It used to
+            // fire a real `editTime("day", …)` — which, before
+            // `instantMovedToDay` learned to keep seconds, moved the entry by
+            // up to 59.999s and dragged its end along with it — and then
+            // raised a "Moved to Today" toast offering Undo for a move that
+            // never happened. On a running entry it moved the live start.
+            if (day === entryDay) return
+            void onCommitDay(day).catch(() => {
+              // The popup is already gone, so there is nowhere in HERE to put
+              // this. `onCommitDay` owns reporting it; see its prop docs.
+            })
           }}
         />
       </Popover.Popup>
