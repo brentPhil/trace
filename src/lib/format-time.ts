@@ -28,6 +28,26 @@ export function formatTimeOfInstant(
   return formatter(timeZone, use12Hour).format(new Date(instantMs)).toUpperCase()
 }
 
+const dateCache = new Map<string, Intl.DateTimeFormat>()
+
+function dateFormatter(timeZone: string): Intl.DateTimeFormat {
+  let f = dateCache.get(timeZone)
+  if (f === undefined) {
+    f = new Intl.DateTimeFormat("en-GB", { timeZone, month: "short", day: "numeric" })
+    dateCache.set(timeZone, f)
+  }
+  return f
+}
+
+/**
+ * `9 Aug`, in the user's stored zone. Only ever shown alongside a time when
+ * the two disagree with today's date — see the timer bar's staged-start
+ * indicator, the one caller that needs to say "not today" out loud.
+ */
+export function formatShortDate(instantMs: number, timeZone: string): string {
+  return dateFormatter(timeZone).format(new Date(instantMs))
+}
+
 /**
  * `09:12 – 10:58`, or `09:12 – …` while running.
  *
