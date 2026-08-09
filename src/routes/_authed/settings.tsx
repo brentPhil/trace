@@ -7,6 +7,7 @@ import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
+import { SUPPORTED_CURRENCIES } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 
 export const Route = createFileRoute("/_authed/settings")({
@@ -147,7 +148,21 @@ function Settings() {
 
         <Section
           title="Currency"
-          hint="Formats every rate and billable amount — on /projects and /reports — with this currency's own symbol, placement and decimal count, rather than assuming a symbol that is wrong for you."
+          /*
+           * The second sentence is the one that matters, and it was missing.
+           * Rates are stored per PROJECT as a plain number of hundredths;
+           * currency is a single per-USER label applied to all of them. So
+           * switching from USD to EUR re-labels a $10.00/hr project as
+           * €10.00/hr — no conversion, no rate touched, and every historical
+           * figure on /reports re-labelled with it. Saying only "symbol,
+           * placement and decimal count" made that sound cosmetic.
+           *
+           * Deliberately a permanent sentence rather than a confirm dialog:
+           * every other control on this page saves the instant you change it,
+           * and a modal that appears only when some project happens to have a
+           * rate is a warning most users would never see at all.
+           */
+          hint="Formats every rate and billable amount — on /projects and /reports — with this currency's own symbol and placement, rather than assuming a symbol that is wrong for you. Changing it RE-LABELS the rates you have already set; it does not convert them. A project at 10.00 stays the number 10.00 and simply starts reading as 10.00 of the new currency, on past reports as well as future ones. Only currencies divided into hundredths are offered, because that is what a rate is stored as."
         >
           <CurrencyField
             value={settings.currency}
@@ -228,9 +243,18 @@ function TimezoneField({
 }
 
 /**
- * Same idea as `TimezoneField`: the list comes from the runtime's own
- * formatter rather than a bundled ISO 4217 table, so a code offered here can
- * never be one `formatMoney` then fails to format.
+ * Same idea as `TimezoneField`, with one extra narrowing.
+ *
+ * The list is `money.SUPPORTED_CURRENCIES` — the runtime's own ISO 4217 codes,
+ * minus the ones whose minor unit is not a hundredth. That is the SAME
+ * constant `settings.update`'s server-side guard checks against, so the picker
+ * and the validator cannot disagree: previously the picker offered all 162
+ * codes while the guard accepted any three letters, and neither matched what
+ * `formatMoney` could actually render honestly (JPY silently rounded stored
+ * hundredths away; KWD showed a third decimal `parseMoney` then refused).
+ *
+ * A stored code outside the list is still shown, so a value already saved is
+ * never silently swapped for something else under the user.
  */
 function CurrencyField({
   value,
@@ -239,13 +263,9 @@ function CurrencyField({
   value: string
   onChange: (value: string) => void
 }) {
-  const [codes] = useState<Array<string>>(() => {
-    try {
-      return Intl.supportedValuesOf("currency")
-    } catch {
-      return [value, "USD"]
-    }
-  })
+  const [codes] = useState<Array<string>>(() =>
+    SUPPORTED_CURRENCIES.length > 0 ? [...SUPPORTED_CURRENCIES] : [value, "USD"]
+  )
 
   const options = codes.includes(value) ? codes : [value, ...codes]
 
