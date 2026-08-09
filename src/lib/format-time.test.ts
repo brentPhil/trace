@@ -23,8 +23,21 @@ describe("instantMovedToDay", () => {
   })
 
   it("is a no-op when the target is the day it is already on", () => {
-    const at = Date.parse("2026-08-07T20:00:00Z")
+    // Seconds and milliseconds on purpose. Every real `startedAt` comes from
+    // `Date.now()`, so a whole-minute fixture asserts nothing: it passed just
+    // as happily while the composition truncated to the minute, which made
+    // re-picking the day already selected a silent up-to-59.999s shift of the
+    // entry (and, via the anchored duration, of its end too).
+    const at = Date.parse("2026-08-07T20:00:37.123Z")
     expect(instantMovedToDay(at, "2026-08-07", LONDON)).toBe(at)
+  })
+
+  it("carries the seconds across to the new day", () => {
+    const at = Date.parse("2026-08-07T20:00:37.123Z") // 21:00:37.123 BST
+    const moved = instantMovedToDay(at, "2026-08-05", LONDON)
+
+    expect(dayOf(moved, LONDON)).toBe("2026-08-05")
+    expect(moved).toBe(Date.parse("2026-08-05T20:00:37.123Z"))
   })
 
   it("re-resolves the offset rather than shifting by whole days", () => {

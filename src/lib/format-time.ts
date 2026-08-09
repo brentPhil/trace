@@ -115,16 +115,32 @@ export function instantOfDayTime(
  * moving anything onto a spring-forward morning lands in an hour the clock
  * skipped. Routing through `instantOfDayTime` re-resolves the offset at the
  * destination and applies the module's DST policy.
+ *
+ * The sub-minute remainder is carried across by hand, because `TimeOfDay` is
+ * minutes-only and `instantOfLocal` takes whole seconds. Without it this
+ * truncated: every real `startedAt` comes from `Date.now()` and so carries
+ * seconds, which made "pick the day the entry is already on" a write that
+ * moved the entry by up to 59.999 seconds — dragging its end along via the
+ * anchored duration — under a toast that said it had been moved somewhere.
+ * Offsets are whole minutes for every zone a running clock can be in, so the
+ * remainder survives the re-resolution unchanged.
  */
 export function instantMovedToDay(
   instantMs: number,
   day: DayString,
   timeZone: string
 ): number {
-  return instantOfDayTime(
-    day,
-    { minutes: localMinutesOf(instantMs, timeZone), dayOffset: 0 },
-    timeZone
+  const parts = localPartsOf(instantMs, timeZone)
+  // Floored, not truncated: `%` on a pre-epoch instant is negative in JS.
+  const millisecond = instantMs - Math.floor(instantMs / 1000) * 1000
+  return (
+    instantOfDayTime(
+      day,
+      { minutes: parts.hour * 60 + parts.minute, dayOffset: 0 },
+      timeZone
+    ) +
+    parts.second * 1000 +
+    millisecond
   )
 }
 
