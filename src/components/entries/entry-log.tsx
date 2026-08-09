@@ -110,11 +110,25 @@ export function EntryLog({
    * restores the exact time. Re-deriving it from a day string would re-resolve
    * the offset and could land an hour out across a DST boundary — putting the
    * entry back somewhere it never was.
+   *
+   * The write is caught here rather than left to propagate, unlike the other
+   * row edits. Those commit into a control that is still on screen and can
+   * reopen with the rejected value in it; this one closes its popover as it
+   * fires, so a rejection had nowhere to land at all — the optimistic update
+   * moved the row, Convex rolled it back, the row jumped home with no
+   * explanation, and the failure surfaced only as an unhandled promise
+   * rejection in the console. Same treatment `onRemove` above already gives a
+   * delete that fails.
    */
   const onDayChange = useCallback(
     async (entry: Entry, day: string) => {
       const from = entry.startedAt
-      await editTime(entry._id, "day", instantMovedToDay(from, day, timeZone))
+      try {
+        await editTime(entry._id, "day", instantMovedToDay(from, day, timeZone))
+      } catch (thrown) {
+        toasts.add({ title: errorMessage(thrown), priority: "high", timeout: UNDO_MS })
+        return
+      }
 
       // The same label the day headers use, so the toast names the heading the
       // row has just gone to rather than a raw date string.
