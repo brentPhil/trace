@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Play, Square, Trash2 } from "lucide-react"
+import { Clock, Play, Square, Trash2 } from "lucide-react"
 import {
   BillableToggle,
   ProjectPicker,
@@ -9,8 +9,10 @@ import { ProjectDot } from "@/components/classifiers/project-dot"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { TimerDurationPopover } from "@/components/timer/timer-duration-popover"
 import { isOptimisticId } from "@/lib/optimistic-id"
+import { formatShortDate, formatTimeOfInstant } from "@/lib/format-time"
 import { cn } from "@/lib/utils"
 import { spokenDuration } from "@shared/duration"
+import { dayOf } from "@shared/day"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 const TITLE_DEBOUNCE_MS = 400
@@ -57,6 +59,8 @@ export type Classification = {
 export type TimerBarActions = {
   start: (input?: {
     title?: string
+    /** A backdated instant — the staged start below. Absent means now. */
+    startedAt?: number
     projectId?: Id<"projects">
     tagIds?: Array<Id<"tags">>
     billable?: boolean
@@ -98,6 +102,35 @@ export type TitleSuggestion = {
   projectId?: Id<"projects">
   tagIds: Array<Id<"tags">>
   billable: boolean
+}
+
+/**
+ * Whether a staged start is still current enough to honour.
+ *
+ * Anchored to WHEN the value was staged, not to the instant it targets — a
+ * deliberately-picked past or future time survives normally through the rest
+ * of the session it was set in. Only a tab genuinely left open past local
+ * midnight loses it, the same "a tab left open since yesterday must not
+ * offer yesterday's moment today" reasoning `IdleDurationPopover` already
+ * applies to its own reseed-on-open, applied here to the stage itself so
+ * pressing Play the next morning cannot silently backdate an entry across a
+ * day nobody meant to cross.
+ */
+function resolveStagedStart(
+  stagedStartAt: number | null,
+  stagedStartSetAt: number | null,
+  timeZone: string
+): number | null {
+  if (stagedStartAt === null || stagedStartSetAt === null) return null
+  if (dayOf(stagedStartSetAt, timeZone) !== dayOf(Date.now(), timeZone)) return null
+  return stagedStartAt
+}
+
+/** "4:06 AM", or "4:06 AM on 6 Aug" when the staged day is not today. */
+function describeStagedStart(instantMs: number, timeZone: string, use12Hour: boolean): string {
+  const time = formatTimeOfInstant(instantMs, timeZone, use12Hour)
+  if (dayOf(instantMs, timeZone) === dayOf(Date.now(), timeZone)) return time
+  return `${time} on ${formatShortDate(instantMs, timeZone)}`
 }
 
 export function TimerBar({
@@ -160,6 +193,37 @@ export function TimerBar({
     tagIds: [],
     billable: false,
   })
+
+  /*
+   * The start instant before a timer exists — the same "no row to write to
+   * yet" reasoning as `staged` above, extended to WHEN rather than only WHAT.
+   *
+   * Two fields rather than one: `stagedStartSetAt` records when the value was
+   * last staged, independent of the instant it targets, which is what lets
+   * `resolveStagedStart` tell "set five minutes ago for 4:06 AM" (honour it)
+   * apart from "set yesterday evening for 4:06 AM" (a tab left open overnight;
+   * drop it). Neither field is read directly outside this file — every use
+   * goes through `resolveStagedStart` so the staleness rule cannot be
+   * bypassed by a caller that forgot to check it.
+   */
+  const [stagedStartAt, setStagedStartAt] = useState<number | null>(null)
+  const [stagedStartSetAt, setStagedStartSetAt] = useState<number | null>(null)
+
+  const clearStagedStart = () => {
+    setStagedStartAt(null)
+    setStagedStartSetAt(null)
+  }
+
+  const stageStart = (instantMs: number | null) => {
+    if (instantMs === null) {
+      clearStagedStart()
+      return
+    }
+    setStagedStartAt(instantMs)
+    setStagedStartSetAt(Date.now())
+  }
+
+  const effectiveStagedStartAt = resolveStagedStart(stagedStartAt, stagedStartSetAt, timeZone)
 
   const [projectOpen, setProjectOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
@@ -373,14 +437,27 @@ export function TimerBar({
       } else {
         await start({
           title: draft.text.trim(),
+          // Only the staged START is ever honoured here. Play means "begin
+          // running", and a running entry has no end, so a STOP also typed
+          // into the same idle popover is deliberately ignored — it is the
+          // "Create entry" gesture's input, one button away, and reading
+          // both would make one press of Play silently pick between two
+          // conflicting intents (start a timer vs. log a finished block).
+          // Whatever was in the Stop field is visibly dropped as a side
+          // effect of this branch: once `start` resolves, `running` becomes
+          // non-null and `TimerDurationPopover` swaps to `RunningDurationPopover`,
+          // which has no Stop field at all — so there is nothing left on
+          // screen claiming a stop was ever typed.
+          ...(effectiveStagedStartAt !== null ? { startedAt: effectiveStagedStartAt } : {}),
           projectId: staged.projectId ?? undefined,
           tagIds: staged.tagIds,
           billable: staged.billable,
         })
         // Cleared only after the mutation resolves. Clearing optimistically
-        // would lose the classification if the start failed and the user
-        // pressed the button again.
+        // would lose the classification (or silently re-arm a backdate) if
+        // the start failed and the user pressed the button again.
         setStaged({ projectId: null, tagIds: [], billable: false })
+        clearStagedStart()
         setSuggestOpen(false)
         announce(
           draft.text.trim() === ""
@@ -574,6 +651,7 @@ export function TimerBar({
           weekStartDay={weekStartDay}
           onEditTime={actions.editTime}
           onCreateCompleted={actions.createCompleted}
+          onStageStart={stageStart}
         />
 
         <button
@@ -694,6 +772,39 @@ export function TimerBar({
           >
             <Trash2 className="size-3.5" />
             Discard
+          </button>
+        </div>
+      ) : effectiveStagedStartAt !== null ? (
+        /*
+         * The armed indicator. Staging a start has no affordance of its own
+         * inside the popover once closed, and an armed backdate you cannot
+         * see is worse than no feature at all — see the doc comment on
+         * `resolveStagedStart` above.
+         *
+         * Deliberately NOT `text-enlarger`/`bg-enlarger`: The Cold Light Rule
+         * reserves that colour for a timer that IS running, and nothing is
+         * running yet — this is only a promise about what Play will do next.
+         * Using it here would make "is something running?" require reading
+         * text instead of a half-second glance, exactly the failure mode the
+         * rule exists to prevent. So this row carries its meaning the way
+         * DESIGN.md asks anything that is not running or money to: a neutral
+         * tone, plus an icon, plus words — never colour alone.
+         */
+        <div className="flex items-center justify-between gap-3 border-t border-edge-soft px-4 py-1.5">
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Clock aria-hidden="true" className="size-3.5" />
+            Starts {describeStagedStart(effectiveStagedStartAt, timeZone, use12Hour)}
+          </span>
+          <button
+            type="button"
+            onClick={() => clearStagedStart()}
+            className={cn(
+              "touch-target flex items-center rounded-md px-2 py-1 text-xs text-muted-foreground",
+              "transition-colors hover:text-foreground",
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            )}
+          >
+            Use now
           </button>
         </div>
       ) : null}

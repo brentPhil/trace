@@ -47,6 +47,7 @@ export function TimerDurationPopover({
   weekStartDay,
   onEditTime,
   onCreateCompleted,
+  onStageStart,
 }: {
   running: Doc<"timeEntries"> | null
   timeZone: string
@@ -65,6 +66,14 @@ export function TimerDurationPopover({
     startedAt: number
     endedAt: number
   }) => Promise<unknown>
+  /**
+   * Fired whenever the idle popover's Start field or day resolves to a valid
+   * instant — stages it on the bar so Play can pick it up. There is no
+   * running entry here to write into yet, the same reasoning `staged`
+   * classification already rests on; see the comment above `staged` in
+   * `timer-bar.tsx`.
+   */
+  onStageStart: (instantMs: number) => void
 }) {
   if (running !== null) {
     return (
@@ -84,6 +93,7 @@ export function TimerDurationPopover({
       use12Hour={use12Hour}
       weekStartDay={weekStartDay}
       onCreateCompleted={onCreateCompleted}
+      onStageStart={onStageStart}
     />
   )
 }
@@ -161,6 +171,7 @@ function IdleDurationPopover({
   use12Hour,
   weekStartDay,
   onCreateCompleted,
+  onStageStart,
 }: {
   timeZone: string
   use12Hour: boolean
@@ -169,6 +180,7 @@ function IdleDurationPopover({
     startedAt: number
     endedAt: number
   }) => Promise<unknown>
+  onStageStart: (instantMs: number) => void
 }) {
   const [open, setOpen] = useState(false)
   const [day, setDay] = useState<DayString>(() => dayOf(Date.now(), timeZone))
@@ -178,6 +190,25 @@ function IdleDurationPopover({
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const actionsRef = usePopoverActionsRef()
+
+  /**
+   * Stages Play's start instant from whatever START and day are on screen
+   * right now — called after every keystroke in the Start field and every
+   * calendar pick, so the bar's armed indicator (and Play itself) always
+   * reflect exactly what is currently typed, not what was last confirmed.
+   *
+   * Silently does nothing on a Start that does not yet parse (mid-keystroke,
+   * e.g. "4:0") rather than clearing the stage — half-typed input is not the
+   * same thing as "I changed my mind", and the last value that DID parse is
+   * still the correct thing for Play to use if pressed right now.
+   */
+  const stageFromFields = (dayValue: DayString, startText: string) => {
+    const parsed = parseTimeOfDay(startText, 0)
+    if (!parsed.ok) return
+    onStageStart(
+      instantOfDayTime(dayValue, { minutes: parsed.time.minutes, dayOffset: 0 }, timeZone)
+    )
+  }
 
   // Re-seed every time it opens, to "now" — the Toggl gesture this is. A tab
   // left open since yesterday must not offer yesterday's moment today.
@@ -280,7 +311,10 @@ function IdleDurationPopover({
         <TimePopoverFields
           running={false}
           startValue={start}
-          onStartChange={setStart}
+          onStartChange={(value) => {
+            setStart(value)
+            stageFromFields(day, value)
+          }}
           // Deliberately inert: committing on blur (as the edit path does)
           // would fire a create the instant focus left the Start field, with
           // Stop still at its default — before the user has finished. Only
@@ -294,7 +328,10 @@ function IdleDurationPopover({
           onMonthChange={setMonth}
           selectedDay={day}
           weekStartDay={weekStartDay}
-          onPickDay={setDay}
+          onPickDay={(pickedDay) => {
+            setDay(pickedDay)
+            stageFromFields(pickedDay, start)
+          }}
           footer={
             <div className="mt-3 flex justify-end">
               <Button size="sm" disabled={saving} onClick={() => void confirm()}>

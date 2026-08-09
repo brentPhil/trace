@@ -639,3 +639,118 @@ describe("the duration's popover", () => {
     ).toBeTruthy()
   })
 })
+
+/*
+ * Staging a start instant, the same pattern `staged` classification already
+ * uses: while idle there is no row for the popover to write into, so a START
+ * (and/or a day) typed there is held in the bar until Play resolves it.
+ */
+describe("staging a start from the idle popover", () => {
+  // 7 August 2026, 9:00 PM London (BST, so 20:00Z).
+  const fixedNow = Date.parse("2026-08-07T20:00:00Z")
+
+  const openPopoverAndSetStart = (value: string) => {
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("Start time"), { target: { value } })
+  }
+
+  it("carries a staged start into Play, rather than Date.now()", async () => {
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    openPopoverAndSetStart("4:06 AM")
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ startedAt: Date.parse("2026-08-07T03:06:00Z") })
+    )
+  })
+
+  it("still starts at now when nothing was staged", async () => {
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = actions.start as ReturnType<typeof vi.fn>
+    expect(call.mock.calls[0][0].startedAt).toBeUndefined()
+  })
+
+  it("shows the staged start on the bar, and clearing it returns to now", async () => {
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    openPopoverAndSetStart("4:06 AM")
+    expect(screen.getByText(/4:06 AM/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: /use now/i }))
+    expect(screen.queryByText(/4:06 AM/)).toBeNull()
+
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = actions.start as ReturnType<typeof vi.fn>
+    expect(call.mock.calls[0][0].startedAt).toBeUndefined()
+  })
+
+  it("clears the staged start once a timer actually starts", async () => {
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    openPopoverAndSetStart("4:06 AM")
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(screen.queryByText(/4:06 AM/)).toBeNull()
+  })
+
+  it("uses only the staged START when a STOP is also set, and never creates a completed entry", async () => {
+    // Play means "begin running". A stop typed in the same popover is the
+    // completed-entry intent one button away ("Create entry"); honouring
+    // both would silently pick one of two conflicting readings of one click.
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    openPopoverAndSetStart("4:06 AM")
+    fireEvent.change(screen.getByLabelText("End time"), { target: { value: "4:30 AM" } })
+
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ startedAt: Date.parse("2026-08-07T03:06:00Z") })
+    )
+    expect(actions.createCompleted).not.toHaveBeenCalled()
+  })
+
+  it("drops a staged start once the day it was set on has passed", async () => {
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    openPopoverAndSetStart("4:06 AM")
+    expect(screen.getByText(/4:06 AM/)).toBeTruthy()
+
+    // Past midnight London: still the 7th's 4:06 AM target, but a new day has
+    // begun since it was SET — a tab left open overnight.
+    vi.setSystemTime(Date.parse("2026-08-08T04:00:00Z")) // 5:00 AM BST, Aug 8
+    // Force a re-render so the staleness check re-evaluates without another
+    // interaction with the popover itself.
+    fireEvent.change(input(), { target: { value: "x" } })
+
+    expect(screen.queryByText(/4:06 AM/)).toBeNull()
+
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = actions.start as ReturnType<typeof vi.fn>
+    expect(call.mock.calls[0][0].startedAt).toBeUndefined()
+  })
+})
