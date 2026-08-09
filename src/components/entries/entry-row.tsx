@@ -85,12 +85,17 @@ export function EntryRow({
       )}
     >
       {/*
-        The row's CONTENT is capped at 1100px and centred; the outer element
-        above keeps the full-bleed border and hover fill, so the log still
-        reads as edge-to-edge bands. Uncapped, the title/note column that
+        The row's CONTENT is capped at `max-w-log` and left-flush; the outer
+        element above keeps the full-bleed border and hover fill, so the log
+        still reads as edge-to-edge bands. Uncapped, the title/note column that
         grows to fill whatever room it is given spent the extra width on gap
         rather than on either — measured at 1600px as ~1000px of nothing
         between a four-word title and the classifier cluster.
+
+        `max-w-log` + `px-4` is the exact pair the day header above and the
+        timer bar in the shell both use, and that is the whole point of it
+        being a token: three files have to put the left edge in the same place
+        and none of them can see the other two.
 
         4 + 20 + 2 + 20 + 4 = the 50px the row is specified at, so `min-h` is a
         floor the content sits exactly on rather than a number it fights. The
@@ -98,7 +103,7 @@ export function EntryRow({
         written note does not — left to size themselves, a day of mixed rows
         would ripple by two pixels down the whole column.
       */}
-      <div className="mx-auto flex min-h-[50px] max-w-[1100px] items-center gap-2 px-3">
+      <div className="flex min-h-[50px] w-full max-w-log items-center gap-2 px-4">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
           <div className="flex min-w-0 items-center gap-1.5">
             <EditableTitle

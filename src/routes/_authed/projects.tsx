@@ -32,13 +32,13 @@ export function Projects() {
   return (
     <div className="flex flex-col">
       {/*
-        `max-w-[46rem]`: this is a settings-shaped list of forms, not a table
+        `max-w-form`: this is a settings-shaped list of forms, not a table
         wanting the log's full-bleed row treatment — every row here is a name,
         a checkbox, and two icons, and at 1600px an unconstrained row measured
         a 1196px gap between the project-colour swatch and its own actions. A
         project name never needs more than a normal reading measure.
       */}
-      <div className="flex max-w-[46rem] flex-1 flex-col gap-10 px-4 py-6">
+      <div className="flex max-w-form flex-1 flex-col gap-10 px-4 py-6">
         <section className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-3">
             <h1 className="text-sm font-semibold">Projects</h1>

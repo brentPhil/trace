@@ -63,11 +63,19 @@ export function AppShell({
             {/* The hamburger. Hidden on desktop, where the rail is always
                 there and ⌘B toggles it. */}
             <SidebarTrigger className="shrink-0 md:hidden" />
-            <div className="min-w-0 flex-1">{timer}</div>
+            {/*
+              `max-w-log`: the bar takes the same measure as the log below it
+              (src/styles.css). It is the one control on screen that belongs to
+              no page, so nothing else can cap it — and left uncapped its title
+              input began at x≈16 while every entry title beneath it began at
+              x≈262 on a 1600px viewport. The title you type into and the title
+              you read back are the same field; they line up.
+            */}
+            <div className="min-w-0 max-w-log flex-1">{timer}</div>
           </div>
 
           {/*
-            Full width, not a centred measure.
+            Full-bleed and unpadded, deliberately.
 
             This carried `mx-auto max-w-4xl` from before the sidebar existed,
             when the page was a centred column under a top nav and a reading
@@ -75,14 +83,20 @@ export function AppShell({
             constraint puts the log in a narrow band with dead space to its
             right — and the log is a TABLE, not prose: the width goes to the
             title and the note, which are the two things a row has too little
-            room for. The reading-measure argument still holds for actual
-            paragraphs, so anything prose-shaped constrains itself locally
-            rather than making every page pay for it.
+            room for.
 
-            Padding is left as it was so the rows stay aligned with the timer
-            bar above them: DayList already applies its own `px-4` internally.
+            THE ALIGNMENT CONTRACT, and where it lives. The shell caps and pads
+            nothing here. Every page instead caps its own content at one of the
+            two measures in src/styles.css (`max-w-log` for the log surfaces,
+            `max-w-form` for /projects and /settings) and applies its own
+            `px-4`, left-flush. The timer bar above does the same. That is what
+            keeps the bar's title input, the totals, the filter band, the day
+            labels and the entry titles on one left edge — an inset here would
+            offset the pages by 8px against the bar, which is not in this
+            container. Backgrounds, borders and hover fills stay on the
+            uncapped parents, so the log still reads as edge-to-edge bands.
           */}
-          <div className="flex w-full flex-1 flex-col px-0 md:px-2">{children}</div>
+          <div className="flex w-full flex-1 flex-col">{children}</div>
 
           {/*
             Reserves the fixed bar's height so the last row of a log can

@@ -72,6 +72,26 @@
 
   --radius: 0.45rem;
 
+  /* THE MEASURE. Two of them, defined once, because three pages have to agree
+   * on where a line of content starts and ends and a repeated `max-w-[1100px]`
+   * literal is three chances for them to drift. Exposed as `max-w-log` and
+   * `max-w-form` below.
+   *
+   * Every capped block is LEFT-FLUSH, never `mx-auto`. Centring makes the left
+   * edge a function of the page's own cap — 1100px on the log, 46rem on the
+   * forms — so /timer's rows and /settings' fields would start in two
+   * different places, and neither would line up with the timer bar, which sits
+   * in the shell and belongs to no page. Left-flush gives one edge from the
+   * sidebar rail down through every page.
+   *
+   * --log-measure: the log is a TABLE. It wants width for the title and the
+   *   note, and stops before a four-word title and the classifier cluster are
+   *   a thousand pixels apart at 1600.
+   * --form-measure: a column of labelled controls (/projects, /settings). A
+   *   reading measure, not a table. */
+  --log-measure: 1100px;
+  --form-measure: 46rem;
+
   --sidebar: var(--surface);
   --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--ink);
@@ -97,6 +117,12 @@
   --color-enlarger: var(--enlarger);
   --color-brass: var(--brass);
   --color-alarm: var(--alarm);
+
+  /* `max-w-log` / `max-w-form`. Tailwind builds its width utilities from the
+   * `--container-*` namespace, so naming them here is what turns the two
+   * measures above into classes. */
+  --container-log: var(--log-measure);
+  --container-form: var(--form-measure);
 
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);

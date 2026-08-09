@@ -62,16 +62,19 @@ export function DayList({
           <header
             className={cn(
               "sticky top-0 z-10 border-b border-edge-soft bg-ground/95",
-              "px-4 py-2 backdrop-blur-sm"
+              "py-2 backdrop-blur-sm"
             )}
           >
             {/*
-              Capped and centred like the rows below it, so the label and the
-              total stay a bound pair instead of the most-glanced-at line on
-              the page stretching to the full log width — the header's own
-              background and border stay on the element above, uncapped.
+              `max-w-log px-4`, exactly as `EntryRow` does it, so the day label
+              starts on the same pixel as the entry titles underneath it. The
+              padding lives HERE and not on the header, because the header's
+              background and border are meant to stay full-bleed — and because
+              a cap measured inside a padded parent lands somewhere different
+              from the same cap measured inside an unpadded one, which is how
+              the label ended up twelve pixels left of its own rows.
             */}
-            <div className="mx-auto flex max-w-[1100px] items-baseline justify-between gap-3">
+            <div className="flex w-full max-w-log items-baseline justify-between gap-3 px-4">
               <div className="flex items-baseline gap-3">
                 <h2 className="text-sm font-semibold">{group.label}</h2>
                 {/*
@@ -184,23 +187,21 @@ export function LogSkeleton() {
     <div aria-hidden="true" className="flex flex-col">
       {[0, 1].map((group) => (
         <div key={group} className="flex flex-col">
-          <div
-            className={cn(
-              "flex items-baseline justify-between gap-3",
-              "border-b border-edge-soft px-4 py-2"
-            )}
-          >
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-4 w-14" />
+          <div className="border-b border-edge-soft py-2">
+            {/* Same `max-w-log px-4` as the header it stands in for, so the
+                page does not shift sideways when the real rows arrive. */}
+            <div className="flex w-full max-w-log items-baseline justify-between gap-3 px-4">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-14" />
+            </div>
           </div>
           <div className="flex flex-col">
             {[0, 1, 2].map((row) => (
-              <div
-                key={row}
-                className="flex h-[50px] items-center gap-3 border-b border-edge-soft px-4"
-              >
-                <Skeleton className="h-4 flex-1 max-w-64" />
-                <Skeleton className="h-4 w-16 shrink-0" />
+              <div key={row} className="border-b border-edge-soft">
+                <div className="flex h-[50px] w-full max-w-log items-center gap-3 px-4">
+                  <Skeleton className="h-4 flex-1 max-w-64" />
+                  <Skeleton className="h-4 w-16 shrink-0" />
+                </div>
               </div>
             ))}
           </div>

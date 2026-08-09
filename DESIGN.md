@@ -167,6 +167,25 @@ history columns must align on the decimal without effort.
 eyebrows — that is the scaffold this system is avoiding, and it makes an
 instrument look like a landing page.
 
+**The One Measure Rule.** There are exactly two content widths in the product,
+both defined once in `src/styles.css` and used only as `max-w-log` /
+`max-w-form`. A bare `max-w-[…]` literal in a component is a defect.
+
+- `--log-measure` (1100px) — the log surfaces: the timer bar, /timer's totals
+  and filter band, /reports' header and summary, day headers, entry rows. The
+  log is a TABLE; the width goes to the title and the note.
+- `--form-measure` (46rem) — /projects and /settings. A column of labelled
+  controls, at a reading measure.
+
+**Every capped block is left-flush.** Never `mx-auto`. Centring makes a page's
+left edge a function of its own cap, so a 1100px log and a 46rem settings
+column start in two different places — and neither lines up with the timer
+bar, which lives in the shell and belongs to no page. Padding is `px-4` on the
+capped element itself, never on its parent: a cap measured inside a padded
+parent lands somewhere different from the same cap measured inside an unpadded
+one. Backgrounds, borders, hover fills and sticky headers stay on the uncapped
+parent, so the log still reads as edge-to-edge bands.
+
 ## 4. Elevation
 
 Flat. Depth is tonal, not cast.
