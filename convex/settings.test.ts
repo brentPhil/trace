@@ -294,4 +294,48 @@ describe("update", () => {
     const settings = await t.query(internal.settings.getAs, { userId: ALICE })
     expect(settings.currency).toBe("SGD")
   })
+
+  /*
+   * The three-letter cases are the ones the old guard let through. It built an
+   * `Intl.NumberFormat` in a try/catch, which tests whether a code is
+   * WELL-FORMED rather than whether it exists — so "ABC" stored fine and every
+   * amount in the product then rendered as "ABC 10.50", under an error message
+   * that claimed to know currencies.
+   */
+  it("refuses a well-formed three-letter code that is not a real currency", async () => {
+    const t = setup()
+    for (const currency of ["ABC", "XYZ", "QQQ"]) {
+      await expectCode(
+        t.mutation(internal.settings.updateAs, { userId: ALICE, currency }),
+        "INVALID_CURRENCY"
+      )
+    }
+    // Nothing was written by any of them.
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.currency).toBe(SETTINGS_DEFAULTS.currency)
+  })
+
+  it("refuses a currency the /settings picker does not offer", async () => {
+    // The guard and the dropdown read the same list (money.SUPPORTED_
+    // CURRENCIES), so a code the picker will not show is one the server will
+    // not store. JPY and KWD are excluded because their minor unit is not a
+    // hundredth and `hourlyRateCents` is.
+    const t = setup()
+    await expectCode(
+      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "JPY" }),
+      "INVALID_CURRENCY"
+    )
+    await expectCode(
+      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "KWD" }),
+      "INVALID_CURRENCY"
+    )
+  })
+
+  it("refuses a real code in the wrong case", async () => {
+    const t = setup()
+    await expectCode(
+      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "usd" }),
+      "INVALID_CURRENCY"
+    )
+  })
 })

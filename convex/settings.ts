@@ -175,7 +175,16 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
     traceError("INVALID_WEEK_START", "Week start day must be 0-6.")
   }
   if (args.currency !== undefined && !isValidCurrency(args.currency)) {
-    traceError("INVALID_CURRENCY", `"${args.currency}" is not a currency I know.`)
+    // `isValidCurrency` is now membership in `money.SUPPORTED_CURRENCIES` —
+    // the same list the /settings dropdown is built from — rather than the
+    // shape check it used to be, so this message is finally true. The wording
+    // covers both refusals it can produce: a code that does not exist, and a
+    // real one this product does not offer because its minor unit is not a
+    // hundredth (JPY, KWD, and 37 others).
+    traceError(
+      "INVALID_CURRENCY",
+      `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`
+    )
   }
 
   const row = await readSettings(ctx, userId)
