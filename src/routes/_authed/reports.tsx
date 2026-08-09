@@ -100,12 +100,40 @@ export function Reports() {
    * range's first page actually lands — at which point they swap atomically,
    * never through an empty/skeleton state in between.
    */
-  const settledPageRef = useRef({ rangeKey, results: rawPage.results })
+  /*
+   * SEEDED WITH A SENTINEL, not with the current range.
+   *
+   * `useRef({ rangeKey, results })` on mount claimed the first range had
+   * already settled while `status` was `LoadingFirstPage` and `results` was
+   * `[]`. Change the range inside that window — the loader prefetches
+   * `rangeSummary` but NOT `listPage`, so it is a real window — and the ref
+   * then disagreed with `rangeKey`: `logIsStale` true, `logLoading` false,
+   * `EntryLog` rendered with zero groups, and "Nothing here. Try a wider date
+   * range" appeared over a range that was still loading. `null` can never
+   * equal a rangeKey, so nothing is stale until a page has genuinely landed.
+   *
+   * ON WRITING TO A REF DURING RENDER, which is normally unsafe under
+   * concurrent React: what is written here is derived entirely from this
+   * render's own inputs and is idempotent, and the `status` guard means a
+   * range is only ever marked settled once its page HAS settled — so a
+   * discarded render can only write a value a committed render would write
+   * too. The alternative, a render-phase `setState`, would have to compare
+   * `results` by identity to converge, and `usePaginatedQuery` does not
+   * promise a stable one.
+   */
+  const settledPageRef = useRef<{ rangeKey: string | null; results: typeof rawPage.results }>(
+    { rangeKey: null, results: [] }
+  )
   if (rawPage.status !== "LoadingFirstPage") {
     settledPageRef.current = { rangeKey, results: rawPage.results }
   }
-  const logIsStale = settledPageRef.current.rangeKey !== rangeKey
-  const results = logIsStale ? settledPageRef.current.results : rawPage.results
+  // "Stale" means "these are a DIFFERENT range's settled rows", which needs
+  // a settled range to be true of. Before the first page of the visit lands
+  // there is nothing to carry over and nothing to dim: that is loading, and
+  // `logLoading` below is what has to be true then, not this.
+  const settledPage = settledPageRef.current
+  const logIsStale = settledPage.rangeKey !== null && settledPage.rangeKey !== rangeKey
+  const results = logIsStale ? settledPage.results : rawPage.results
   const { status, loadMore } = rawPage
 
   /*
@@ -387,7 +415,15 @@ export function Reports() {
         </p>
       </div>
 
+      {/*
+        `aria-busy` as well as the dimming. The summary sentence above already
+        carries both an `aria-busy` and a literal "Updating…"; the log had only
+        `STALE_CLASSES`, so the staleness of the ROWS — the larger, more
+        consequential half of the page — was signalled by opacity alone, which
+        is nothing at all to a screen-reader user changing the range.
+      */}
       <div
+        aria-busy={logIsStale}
         className={cn("flex-1 border-t border-edge-soft", logIsStale && STALE_CLASSES)}
       >
         {/*

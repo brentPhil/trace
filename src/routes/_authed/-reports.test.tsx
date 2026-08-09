@@ -426,6 +426,89 @@ describe("Reports — changing the range", () => {
   })
 })
 
+describe("Reports — the log's own staleness", () => {
+  /*
+   * `settledPageRef` used to seed with the CURRENT rangeKey on mount, as if
+   * that range's first page had already settled — while `status` was
+   * `LoadingFirstPage` and `results` was `[]`. Change the range before that
+   * page lands (the loader prefetches `rangeSummary`, not `listPage`, so the
+   * window is real) and the ref then disagreed with `rangeKey`: `logIsStale`
+   * true, `logLoading` false, `EntryLog` rendered with zero groups, and the
+   * empty sentence appeared over a range that was still loading. Exactly the
+   * flash the ref exists to prevent.
+   */
+  it("does not flash the empty sentence when the range changes before the first page lands", () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const initialFilters = defaultFilters(today, SETTINGS.weekStartDay)
+    const initialRange = rangeOf(initialFilters, SETTINGS.timezone)
+
+    // Neither range's page is resolved: this is the cold-load window.
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, initialRange), {
+        totalMs: 0,
+        billableMs: 0,
+        count: 0,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 0,
+        unratedBillableMs: 0,
+      })
+    })
+
+    expect(screen.queryByText(/Nothing here/)).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: /next period/i }))
+
+    expect(screen.queryByText(/Nothing here/)).toBeNull()
+    expect(screen.getByRole("status").textContent).toBe("Loading entries…")
+
+    dateSpy.mockRestore()
+  })
+
+  it("marks the log busy, not just dimmed, while it shows the previous range's rows", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const initialFilters = defaultFilters(today, SETTINGS.weekStartDay)
+    const initialRange = rangeOf(initialFilters, SETTINGS.timezone)
+
+    const alpha = makeEntry({
+      _id: "alpha" as unknown as Id<"timeEntries">,
+      title: "Alpha entry",
+      startedAt: initialRange.fromMs + 3_600_000,
+      endedAt: initialRange.fromMs + 7_200_000,
+    })
+    resolvePage(paginatedKey(api.entries.listPage, initialRange), {
+      page: [alpha],
+      isDone: true,
+    })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, initialRange), {
+        totalMs: 3_600_000,
+        billableMs: 0,
+        count: 1,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 0,
+        unratedBillableMs: 0,
+      })
+    })
+
+    await waitFor(() => expect(screen.getByTestId("entry-alpha")).toBeTruthy())
+    expect(screen.getByTestId("entry-alpha").closest('[aria-busy="true"]')).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: /next period/i }))
+
+    // The summary next to it already said "Updating…" out loud. The log said
+    // it with opacity alone, so a screen-reader user changing the range had no
+    // way to know the rows below belonged to the range they just left.
+    expect(screen.getByTestId("entry-alpha").closest('[aria-busy="true"]')).not.toBeNull()
+
+    dateSpy.mockRestore()
+  })
+})
+
 describe("Reports — the billable amount", () => {
   it("shows an amount for billable time, formatted in the user's currency", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
