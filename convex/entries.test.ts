@@ -819,3 +819,159 @@ describe("rangeSummary truncation", () => {
     expect(summary.totalMs).toBe(12 * 60_000)
   })
 })
+
+// ---------------------------------------------------------------------------
+// rangeSummary — billable money
+// ---------------------------------------------------------------------------
+
+/**
+ * `billableCents` is the one figure on /reports that puts a currency amount
+ * next to invoiced work, so the rule that produces it needs the same kind of
+ * proof `rangeSummary truncation` above gives the time totals.
+ */
+describe("rangeSummary — billable money", () => {
+  const T0 = 1_700_000_000_000
+
+  async function billableEntryOn(
+    t: ReturnType<typeof setup>,
+    userId: string,
+    projectId: Id<"projects"> | undefined,
+    startedAt: number,
+    durationMs: number,
+    billable = true
+  ) {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("timeEntries", {
+        userId,
+        clientKey: `money-${startedAt}-${Math.random()}`,
+        title: "Work",
+        startedAt,
+        endedAt: startedAt + durationMs,
+        durationMs,
+        projectId,
+        tagIds: [],
+        billable,
+        source: "web",
+        updatedAt: T0,
+        deletedAt: null,
+      })
+    })
+  }
+
+  const range = { fromMs: T0 - 1, toMs: T0 + 10_000 * 60_000 }
+
+  it("contributes nothing for a project with no rate", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated Co",
+    })
+    await billableEntryOn(t, ALICE, projectId, T0, 3_600_000)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.billableMs).toBe(3_600_000) // the TIME still counts...
+    expect(summary.billableCents).toBe(0) // ...but no rate means no money.
+  })
+
+  it("contributes nothing for a billable entry with no project at all", async () => {
+    const t = setup()
+    await billableEntryOn(t, ALICE, undefined, T0, 3_600_000)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.billableCents).toBe(0)
+  })
+
+  it("ignores a project's rate for a non-billable entry", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+      hourlyRateCents: 6_100, // $61/hr
+    })
+    await billableEntryOn(t, ALICE, projectId, T0, 3_600_000, false)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.billableCents).toBe(0)
+  })
+
+  it("values a billable hour at the project's hourly rate exactly", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+      hourlyRateCents: 6_100, // $61/hr
+    })
+    await billableEntryOn(t, ALICE, projectId, T0, 3_600_000)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.billableCents).toBe(6_100)
+  })
+
+  /**
+   * THE rounding-rule test. $61/hr means one minute is worth 101.6666… cents
+   * — not a whole cent. Summed first and rounded once, three of them are
+   * 305.0 exactly (rounds to 305). Rounded per entry FIRST (102 each, since
+   * 101.67 rounds up) and then summed, they would total 306 — a different
+   * number from identical underlying work, purely from where the rounding
+   * happens. This test pins the documented rule: sum first, round once.
+   */
+  it("sums each entry's exact fractional-cent value before rounding once, rather than rounding per entry", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+      hourlyRateCents: 6_100, // $61/hr -> 101.6666...cents/minute
+    })
+    await billableEntryOn(t, ALICE, projectId, T0, 60_000)
+    await billableEntryOn(t, ALICE, projectId, T0 + 60_000, 60_000)
+    await billableEntryOn(t, ALICE, projectId, T0 + 120_000, 60_000)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    // Sum-then-round: 3 * 101.6666... = 305.0 exactly -> 305.
+    // (Round-then-sum would instead give 3 * 102 = 306.)
+    expect(summary.billableCents).toBe(305)
+  })
+
+  it("mixes rated and unrated projects correctly within the same range", async () => {
+    const t = setup()
+    const { projectId: rated } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Rated Co",
+      hourlyRateCents: 5_000, // $50/hr
+    })
+    const { projectId: unrated } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated Co",
+    })
+    await billableEntryOn(t, ALICE, rated, T0, 3_600_000)
+    await billableEntryOn(t, ALICE, unrated, T0 + 3_600_000, 3_600_000)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.billableMs).toBe(7_200_000)
+    expect(summary.billableCents).toBe(5_000)
+  })
+})

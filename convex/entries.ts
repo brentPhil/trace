@@ -308,6 +308,20 @@ const summaryReturns = v.object({
   runningCount: v.number(),
   /** True when the range holds more entries than this scan looked at. */
   truncated: v.boolean(),
+  /**
+   * What the billable time above is worth, in cents, using the CALLER's
+   * currency (see convex/lib/money.ts and userSettings.currency).
+   *
+   * Zero for a billable entry whose project has no `hourlyRateCents`, or no
+   * project at all — a rate nothing set is not a rate of zero, but it is also
+   * not money this total can claim to know. See `rangeSummaryImpl` for the
+   * exact rounding rule this figure follows: it must be reproducible by hand.
+   *
+   * Shares `truncated` with the time above rather than its own flag: both
+   * numbers come from the same scanned window of rows, so a truncated time
+   * total implies an equally partial money total.
+   */
+  billableCents: v.number(),
 })
 
 /**
@@ -355,6 +369,35 @@ async function rangeSummaryImpl(
   let count = 0
   let runningCount = 0
 
+  /*
+   * THE ROUNDING RULE for `billableCents`, stated once, here, because this is
+   * the only place it is applied.
+   *
+   * Each billable entry's EXACT worth — `durationMs ÷ 3,600,000 × hourlyRateCents`
+   * — is a real number, not a whole cent (a 7-minute block at $61/hr is
+   * 711.1666… cents). Those exact values are SUMMED FIRST, unrounded, and the
+   * grand total is rounded to the nearest cent exactly ONCE, at the very end.
+   *
+   * Rounding each entry first and then summing the roundings is a different,
+   * and for many small entries LARGER, total from identical data — three
+   * one-minute blocks at $61/hr are 101.6666… cents each, which rounds to 102
+   * apiece and sums to 306; summed first and rounded once they are exactly
+   * 305. `convex/entries.test.ts` pins 305, not 306. This is exactly the
+   * per-entry-vs-per-subtotal divergence the Tier 2 plan notes for duration
+   * rounding ("twelve 4-minute entries rounded to 15 each is 3h; the 48-minute
+   * total rounded is 48m") — it applies identically to money, and sum-then-
+   * round is the rule a person doing this by hand on a calculator would also
+   * land on: add up the exact amounts, then round the total once.
+   *
+   * A project with no `hourlyRateCents` — including no project at all —
+   * contributes nothing: a rate nobody set is not a rate of zero.
+   */
+  let billableCentsExact = 0
+  // Cached per project rather than looked up per entry: a range commonly
+  // holds many entries against the same handful of clients, and `null` is
+  // cached too, distinct from "not yet looked up" (map miss).
+  const rateCentsByProject = new Map<Id<"projects">, number | null>()
+
   for (const row of live) {
     if (row.durationMs === null) {
       runningCount += 1
@@ -362,10 +405,25 @@ async function rangeSummaryImpl(
     }
     count += 1
     totalMs += row.durationMs
-    if (row.billable) billableMs += row.durationMs
+    if (row.billable) {
+      billableMs += row.durationMs
+      if (row.projectId !== undefined) {
+        let rateCents = rateCentsByProject.get(row.projectId)
+        if (rateCents === undefined) {
+          const project = await ctx.db.get(row.projectId)
+          rateCents = project?.hourlyRateCents ?? null
+          rateCentsByProject.set(row.projectId, rateCents)
+        }
+        if (rateCents !== null) {
+          billableCentsExact += (row.durationMs / 3_600_000) * rateCents
+        }
+      }
+    }
   }
 
-  return { totalMs, billableMs, count, runningCount, truncated }
+  const billableCents = Math.round(billableCentsExact)
+
+  return { totalMs, billableMs, count, runningCount, truncated, billableCents }
 }
 
 const rangeSummaryArgs = { fromMs: v.number(), toMs: v.number() }
