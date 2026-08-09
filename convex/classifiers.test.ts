@@ -305,6 +305,102 @@ describe("projects", () => {
     expect(cleared[0].hourlyRateCents).toBeUndefined()
   })
 
+  /*
+   * The rate had NO server-side validation: `v.number()` accepts every IEEE-754
+   * double Convex can carry, including NaN and Infinity, and `parseMoney` runs
+   * only in the browser. A single direct mutation call storing NaN poisoned
+   * `rangeSummary.billableCents` for the WHOLE range — `billableCentsExact`
+   * becomes NaN, `Math.round(NaN)` is NaN, the `v.number()` return validator
+   * accepts it, and /reports renders "$NaN" over every other project's
+   * perfectly correct money until someone thinks to clear that one rate.
+   * Infinity gave the same in a different glyph; a negative quietly subtracted.
+   */
+  describe("rate validation", () => {
+    const REJECTED: Array<[string, number]> = [
+      ["NaN", Number.NaN],
+      ["Infinity", Number.POSITIVE_INFINITY],
+      ["-Infinity", Number.NEGATIVE_INFINITY],
+      ["a negative rate", -5_000],
+      ["a fractional cent", 1_000.5],
+      ["a rate past the ceiling", 100_000_001],
+    ]
+
+    for (const [label, cents] of REJECTED) {
+      it(`refuses ${label} on create`, async () => {
+        const t = setup()
+        await expectCode(
+          t.mutation(internal.projects.createAs, {
+            userId: ALICE,
+            name: "Acme",
+            hourlyRateCents: cents,
+          }),
+          "INVALID_RATE"
+        )
+        // And nothing was inserted, so a refused create leaves no half-project.
+        expect(await t.query(internal.projects.listAs, { userId: ALICE })).toEqual([])
+      })
+
+      it(`refuses ${label} on update, leaving the stored rate untouched`, async () => {
+        const t = setup()
+        const projectId = await project(t, ALICE, "Acme", { hourlyRateCents: 6_100 })
+        await expectCode(
+          t.mutation(internal.projects.updateAs, {
+            userId: ALICE,
+            projectId,
+            hourlyRateCents: cents,
+          }),
+          "INVALID_RATE"
+        )
+
+        const rows = await t.query(internal.projects.listAs, { userId: ALICE })
+        expect(rows[0].hourlyRateCents).toBe(6_100)
+      })
+    }
+
+    it("still accepts the rates a real user can produce", async () => {
+      const t = setup()
+      // Zero is an explicit pro-bono price, not "unset" — see money.parseMoney.
+      const projectId = await project(t, ALICE, "Acme", { hourlyRateCents: 0 })
+      expect((await t.query(internal.projects.listAs, { userId: ALICE }))[0].hourlyRateCents)
+        .toBe(0)
+
+      for (const cents of [1, 6_100, 100_000_000]) {
+        await t.mutation(internal.projects.updateAs, {
+          userId: ALICE,
+          projectId,
+          hourlyRateCents: cents,
+        })
+        const rows = await t.query(internal.projects.listAs, { userId: ALICE })
+        expect(rows[0].hourlyRateCents).toBe(cents)
+      }
+    })
+
+    it("still treats null as clearing the rate rather than an invalid one", async () => {
+      const t = setup()
+      const projectId = await project(t, ALICE, "Acme", { hourlyRateCents: 6_100 })
+      await t.mutation(internal.projects.updateAs, {
+        userId: ALICE,
+        projectId,
+        hourlyRateCents: null,
+      })
+      const rows = await t.query(internal.projects.listAs, { userId: ALICE })
+      expect(rows[0].hourlyRateCents).toBeUndefined()
+    })
+
+    it("names the number it refused, so the message is actionable", async () => {
+      const t = setup()
+      const failure = await expectFailure(
+        t.mutation(internal.projects.createAs, {
+          userId: ALICE,
+          name: "Acme",
+          hourlyRateCents: -5_000,
+        })
+      )
+      expect(failure.code).toBe("INVALID_RATE")
+      expect(failure.message).toMatch(/negative/i)
+    })
+  })
+
   it("lets update change the rate without touching anything else", async () => {
     const t = setup()
     const projectId = await project(t, ALICE, "Acme", { hourlyRateCents: 5_000 })

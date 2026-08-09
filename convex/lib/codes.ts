@@ -42,6 +42,14 @@ export type TraceErrorCode =
   | "INVALID_WEEK_START"
   /** A currency code the runtime's formatter cannot resolve. */
   | "INVALID_CURRENCY"
+  /** An hourly rate that is not a whole, non-negative, plausible number of
+   *  minor units. Its own code rather than INVALID_CURRENCY: both come from
+   *  money handling, but one is about which currency and the other is about
+   *  the amount, and a caller branching on the code would otherwise send
+   *  someone to /settings to fix a currency that is perfectly fine. NaN is the
+   *  case that earns this: `v.number()` round-trips non-finite doubles, and one
+   *  stored NaN rate renders every OTHER project's money as "$NaN" too. */
+  | "INVALID_RATE"
   /** More than one running entry existed. Should be impossible; reported rather
    *  than swallowed, because the recovery path stops all of them and the user
    *  deserves to know their data was repaired. */

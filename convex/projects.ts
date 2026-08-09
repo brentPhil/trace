@@ -11,6 +11,56 @@ import type { MutationCtx, QueryCtx } from "./_generated/server"
 
 const MAX_NAME_LENGTH = 120
 
+/**
+ * The most a project can be worth per hour: 1,000,000.00 of whatever currency
+ * the user has set.
+ *
+ * A ceiling rather than no ceiling, for the same reason MAX_NAME_LENGTH exists
+ * — past some point the input is a typo, and a typo that lands is permanent.
+ * This particular value also keeps the money arithmetic EXACT: a single entry
+ * is capped at 24h (DURATION_TOO_LONG), so `durationMs * hourlyRateCents` tops
+ * out at 86,400,000 * 100,000,000 = 8.64e15, inside JavaScript's 9.007e15
+ * exact-integer range. See `rangeSummaryImpl` in convex/entries.ts.
+ */
+const MAX_RATE_CENTS = 100_000_000
+
+/**
+ * Validates an hourly rate server-side.
+ *
+ * Mirrors the `weekStartDay` range check in convex/settings.ts, and exists for
+ * the same reason: `v.number()` is not a validator of MEANING. Convex carries
+ * every IEEE-754 double, non-finite ones included, and `parseMoney` runs only
+ * in the browser — so a direct mutation call could store NaN. That one value
+ * then poisoned an entire range on /reports: `billableCentsExact` goes NaN,
+ * `Math.round(NaN)` is NaN, the `v.number()` RETURN validator accepts it, and
+ * every other project's correctly-computed money renders as "$NaN" until
+ * somebody works out which project to clear. `Infinity` did the same in a
+ * different glyph, and a negative silently subtracted from the total.
+ *
+ * `undefined` and `null` are not rates and are not checked here: they mean
+ * "not supplied" and "clear it" respectively, which the callers handle.
+ */
+function checkRate(cents: number | null | undefined): void {
+  if (cents === undefined || cents === null) return
+  if (!Number.isInteger(cents)) {
+    // Catches NaN and both infinities as well as 10.5 — `Number.isInteger` is
+    // false for all of them, which is exactly the set that must not be stored.
+    traceError(
+      "INVALID_RATE",
+      "A rate has to be a whole number of cents. Type it as an amount, like 10.50."
+    )
+  }
+  if (cents < 0) {
+    traceError("INVALID_RATE", "A rate cannot be negative.")
+  }
+  if (cents > MAX_RATE_CENTS) {
+    traceError(
+      "INVALID_RATE",
+      `That rate looks like a typo — the most a project can be worth is ${MAX_RATE_CENTS / 100} an hour.`
+    )
+  }
+}
+
 /*
  * Projects.
  *
@@ -106,6 +156,7 @@ type CreateArgs = {
  */
 async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
   const name = checkName(args.name)
+  checkRate(args.hourlyRateCents)
   const existing = await allProjects(ctx, userId)
   const color = checkColor(
     args.color,
@@ -167,9 +218,35 @@ type UpdateArgs = {
  * happens once, at the moment an entry is created; re-applying it here would
  * silently rewrite the billable flag on work that has already been invoiced.
  * The same rule as `entries.update` not re-inheriting on a project change.
+ *
+ * `hourlyRateCents` DELIBERATELY GOES THE OTHER WAY, and this paragraph exists
+ * because the opposite choice is documented one paragraph above and the
+ * difference was never stated anywhere.
+ *
+ * The rate is not copied onto entries. `entries.rangeSummary` reads whatever
+ * this field holds AT QUERY TIME, so raising a rate today changes what March
+ * was worth, on every report, retroactively and with nothing on screen to say
+ * so. That is what Toggl does and it is the behaviour most people expect from
+ * a rate that lives on a project rather than on an entry: "my rate is X" is a
+ * statement about the client, and a user correcting a typo in it wants the
+ * correction to apply, not to have to re-file three months of work.
+ *
+ * The reason it is safe to differ from `billableByDefault` is that a rate is a
+ * PRICE and the billable flag is a FACT. Re-pricing history is arithmetic the
+ * user can see and reverse by typing the old number back; rewriting the
+ * billable flag destroys the record of a decision, and no old number restores
+ * which entries had been marked by hand.
+ *
+ * The cost is real and accepted: an invoice sent in March is not reproducible
+ * from /reports after an April rate change. If that ever needs to stop being
+ * true, the fix is to snapshot the rate onto each entry at creation (as
+ * `billable` already is) — NOT to add a second, quieter rule here. See the
+ * `billableCents` doc in convex/entries.ts, which says the same thing from the
+ * reading end.
  */
 async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   const project = await getOwned(ctx, userId, "projects", args.projectId)
+  checkRate(args.hourlyRateCents)
 
   const patch: Partial<Doc<"projects">> = { updatedAt: Date.now() }
   if (args.name !== undefined) patch.name = checkName(args.name)
