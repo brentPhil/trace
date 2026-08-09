@@ -68,15 +68,18 @@ function Calendar({
           "absolute inset-x-0 top-0 flex w-full items-center justify-between",
           defaultClassNames.nav
         ),
+        // `border-edge-raised` on both steppers: no fill of their own, sitting
+        // on the `bg-surface-raised` above, where `--edge` measures 2.60:1 and
+        // misses SC 1.4.11's 3:1. See src/styles.css.
         button_previous: cn(
-          "touch-target rounded-md border border-edge p-1 text-muted-foreground",
+          "touch-target rounded-md border border-edge-raised p-1 text-muted-foreground",
           "transition-colors hover:text-foreground motion-reduce:transition-none",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "aria-disabled:pointer-events-none aria-disabled:opacity-50",
           defaultClassNames.button_previous
         ),
         button_next: cn(
-          "touch-target rounded-md border border-edge p-1 text-muted-foreground",
+          "touch-target rounded-md border border-edge-raised p-1 text-muted-foreground",
           "transition-colors hover:text-foreground motion-reduce:transition-none",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "aria-disabled:pointer-events-none aria-disabled:opacity-50",

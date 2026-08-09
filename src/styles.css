@@ -26,14 +26,34 @@
   --surface: oklch(0.22 0.008 75);
   --surface-raised: oklch(0.26 0.008 75);
 
-  /* Two edge tones, because they have different jobs and different rules.
+  /* Three edge tones, because they have different jobs and different rules.
+   * Every ratio below is computed from these values by
+   * `src/styles.contrast.test.ts`, which fails if one is darkened.
+   *
    * --edge-soft is decoration: dividers and separators between passive
-   * content, where WCAG imposes no minimum.
-   * --edge is the boundary of an interactive control (inputs, outline
-   * buttons) and must clear 3:1 against the ground per WCAG 2.2 SC 1.4.11.
-   * Measured at 3.2:1. Do not darken it for aesthetic reasons. */
+   *   content, where WCAG imposes no minimum.
+   * --edge is the boundary of an interactive control that sits on the GROUND
+   *   and must clear 3:1 there per WCAG 2.2 SC 1.4.11. 3.15:1 — and only
+   *   there: 2.90:1 on --surface and 2.60:1 on --surface-raised. It is a
+   *   ground token, not a universal one, and that was never written down.
+   * --edge-raised is the same boundary for a control that sits on a PANEL, a
+   *   BAND or a POPOVER: a chip in /timer's filter strip, a month stepper
+   *   inside a calendar. 4.05:1 on ground, 3.73:1 on surface, 3.34:1 on
+   *   surface-raised, so it clears wherever it lands. A control with its own
+   *   `bg-ground` fill can keep --edge instead — the border is then adjacent
+   *   to ground on its inner side and clears there. */
   --edge: oklch(0.5 0.01 75);
+  --edge-raised: oklch(0.56 0.01 75);
   --edge-soft: oklch(0.3 0.008 75);
+
+  /* Loading placeholders, and nothing else.
+   *
+   * Not --muted (which is --surface): that measured 1.09:1 against the log's
+   * ground, halved again at the trough of `animate-pulse`, so the loading
+   * state was a blank page with an invisible pulse on it. 1.59:1 here — no
+   * WCAG floor applies to a decorative placeholder, but it has to be a shape
+   * the eye registers as "content, arriving". */
+  --skeleton: oklch(0.34 0.008 75);
 
   /* Ink */
   --ink: oklch(0.93 0.008 80);
@@ -111,7 +131,9 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-edge: var(--edge);
+  --color-edge-raised: var(--edge-raised);
   --color-edge-soft: var(--edge-soft);
+  --color-skeleton: var(--skeleton);
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
   --color-enlarger: var(--enlarger);

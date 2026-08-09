@@ -200,7 +200,11 @@ function MonthButton({
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "rounded-md border border-edge p-1 text-muted-foreground",
+        // `border-edge-raised`: no fill of its own, inside a `surface-raised`
+        // popover, where `--edge` is 2.60:1 — under SC 1.4.11. The inputs
+        // above keep `--edge` because their `bg-ground` fill puts the border
+        // next to ground on its inner side, where it clears at 3.15:1.
+        "rounded-md border border-edge-raised p-1 text-muted-foreground",
         "transition-colors hover:text-foreground",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       )}

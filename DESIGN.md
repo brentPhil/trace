@@ -101,11 +101,25 @@ A warm graphite room with two signal colours and nothing else.
   so it reads as a lit space rather than a void.
 - **Surface** (`oklch(0.22 0.008 75)`): Panels, list rows, the timer bar.
 - **Surface Raised** (`oklch(0.26 0.008 75)`): Popovers, dialogs, menus.
-- **Edge** (`oklch(0.5 0.01 75)`): The boundary of an interactive control —
-  input borders, outline buttons. Measured at 3.15:1 against ground. This value
-  is set by WCAG 2.2 SC 1.4.11, not by taste. Do not darken it.
+- **Edge** (`oklch(0.5 0.01 75)`): The boundary of an interactive control that
+  sits **on the ground** — input borders, outline buttons on the page itself.
+  **3.15:1 against ground, and only against ground: 2.90:1 on Surface and
+  2.60:1 on Surface Raised.** That distinction was missing for a long time and
+  is how several controls shipped under the floor. This value is set by WCAG
+  2.2 SC 1.4.11, not by taste. Do not darken it.
+- **Edge Raised** (`oklch(0.56 0.01 75)`): The same boundary for a control that
+  sits on a panel, a band, or a popover — a filter chip in /timer's
+  `bg-surface` strip, a month stepper inside a calendar. 4.05:1 on ground,
+  3.73:1 on Surface, 3.34:1 on Surface Raised, so it clears wherever it lands.
+  A control that carries its own `bg-ground` fill may keep Edge instead: the
+  border is then adjacent to ground on its inner side and clears there.
 - **Edge Soft** (`oklch(0.3 0.008 75)`): Dividers and separators between
   passive content, where no contrast minimum applies.
+- **Skeleton** (`oklch(0.34 0.008 75)`): Loading placeholders, and nothing
+  else. 1.59:1 against ground. It is decorative, so no WCAG floor applies —
+  but `--muted` (which resolves to Surface) measured **1.09:1** and halved
+  again at the trough of `animate-pulse`, which is a blank page with an
+  invisible pulse on it, not a loading state.
 - **Ink** (`oklch(0.93 0.008 80)`): Primary text — entry titles, notes,
   durations. Warm ivory, ~12:1 on ground.
 - **Ink Muted** (`oklch(0.68 0.010 75)`): Secondary text, timestamps, labels.
@@ -125,6 +139,16 @@ category, client — is encoded with text, shape, or position.
 border at Edge or brighter, never by a fill tint alone. A dark surface makes
 tinted fills tempting and they do not survive the 3:1 floor — the shadcn default
 input measured 1.69:1 before this rule was applied.
+
+**The Adjacent Colour Rule.** A border has **two** adjacent colours — the fill
+inside it and the layer outside it — and SC 1.4.11 is measured against each. So
+"3:1 against ground" is not a property of a token, it is a property of a token
+*on a particular layer*. Before using a border colour, ask what is on both
+sides of it: a fill-less control inherits whatever it is sitting on, which is
+how a chip that passed on /reports failed on /timer without either file
+changing. Every ratio quoted in this document is computed from the tokens by
+`src/styles.contrast.test.ts`; add the measurement there rather than to a
+commit message.
 
 **The Hatch Rule.** Gaps, untracked time, and entries missing a note are marked
 with a hatch or dashed treatment, never a colour. Absence is a texture, not a
@@ -222,8 +246,28 @@ documented, because documenting a placeholder would enshrine it as a decision.
 - **Primary:** Ink on ground. Deliberately *not* the cold light — see The Cold
   Light Rule. On a page where nothing is running, the affirmative action is a
   high-contrast neutral.
-- **Focus:** Neutral ring (`oklch(0.72 0.012 75)`), 3px at 30% plus a border
-  shift. Measured at 7.6:1 against ground.
+- **Focus:** Neutral ring (`oklch(0.72 0.012 75)`) — a **border shift** to that
+  colour, plus a 3px halo of it at 30% opacity. The two carry very different
+  weight and the numbers must stay attached to the right one:
+  - The **border shift** is what satisfies SC 2.4.11/1.4.11: **7.59:1** against
+    ground, 6.99:1 against surface.
+  - The **30% halo** is decoration: **1.75:1** over ground, **1.77:1** over
+    surface. It is nowhere near an indicator on its own.
+
+  A single "measured at 7.6:1" attached to the halo is how a focus style
+  shipped with the border shift dropped and the number still "checking out".
+
+- **Focus, when the border already carries state.** Some controls cannot spend
+  their border on focus because it is already saying something else — the timer
+  bar's border is Edge when idle and `enlarger/50` while running. Those use an
+  **outline** instead of a border shift:
+  `has-[input:focus-visible]:outline-2 outline-offset-2 outline-ring`. The
+  `outline-offset-2` is load-bearing: it puts ground on *both* sides of the
+  outline, so the figure is **~7.58:1 whatever the control's own fill and
+  border are doing** — idle or running, the same number. It also leaves the
+  border underneath untouched, so a cold boundary keeps saying "recording"
+  while focus gets its own indicator. This is the answer for any future
+  control in the same position.
 
 ### Inputs / Fields
 - **Style:** Outlined — 1px Edge border on Surface fill, `rounded-md`. base-luma

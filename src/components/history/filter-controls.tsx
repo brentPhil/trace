@@ -82,6 +82,13 @@ export function FilterControls<T extends QuickFilters>({
 /**
  * State carried by weight and a border, never hue alone — and `aria-pressed`
  * is what actually says "on" to anyone reading neither.
+ *
+ * `border-edge-raised`, not `border-edge`, in BOTH states. A chip carries no
+ * fill of its own when inactive, and on /timer it sits inside a `bg-surface`
+ * band where `--edge` measures 2.90:1 — under SC 1.4.11's 3:1. The active
+ * state is worse, not better: a `bg-surface-raised` fill puts `--edge` at
+ * 2.60:1 on the inside and 2.90:1 on the outside, failing on both. See
+ * styles.css for the token and styles.contrast.test.ts for the numbers.
  */
 export function Chip({
   active,
@@ -102,8 +109,8 @@ export function Chip({
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         "motion-reduce:transition-none",
         active
-          ? "border-edge bg-surface-raised font-medium text-foreground"
-          : "border-edge text-muted-foreground hover:text-foreground"
+          ? "border-edge-raised bg-surface-raised font-medium text-foreground"
+          : "border-edge-raised text-muted-foreground hover:text-foreground"
       )}
     >
       {children}
@@ -129,8 +136,13 @@ function BillableChip({ active, onClick }: { active: boolean; onClick: () => voi
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         "motion-reduce:transition-none",
         active
-          ? "border-brass/60 font-medium text-brass"
-          : "border-edge text-muted-foreground hover:text-foreground"
+          ? // 3.84:1 on ground, 3.73:1 on surface — measured composited the
+            // way a browser does it, in gamma-encoded sRGB. Clears 3:1 in
+            // both bands this bar appears in, so it keeps brass.
+            "border-brass/60 font-medium text-brass"
+          : // Fill-less, and on /timer this bar sits on `bg-surface`. See
+            // `Chip` above.
+            "border-edge-raised text-muted-foreground hover:text-foreground"
       )}
     >
       Billable
