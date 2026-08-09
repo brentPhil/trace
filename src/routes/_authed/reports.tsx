@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
@@ -53,6 +53,7 @@ const EMPTY_SUMMARY = {
   runningCount: 0,
   truncated: false,
   billableCents: 0,
+  unratedBillableMs: 0,
 }
 
 // A dimmed-but-still-legible affordance for "this is the last thing we knew,
@@ -134,6 +135,22 @@ export function Reports() {
   // is still an honest "we don't know yet", not a green light to show zero.
   const summaryIsStale = summary === undefined || isPlaceholderData
   const shownSummary = summary ?? EMPTY_SUMMARY
+
+  /*
+   * How much of the billable time `billableCents` could not put a price on —
+   * a subset of `billableMs`, over the same rows, from `entries.rangeSummary`.
+   *
+   * Two flags rather than one because the sentence genuinely branches. With
+   * SOME of it unpriced the amount is still right for the part it covers and
+   * only needs qualifying; with ALL of it unpriced there is no amount worth
+   * printing at all, and "$0.00" would be a confident answer to a question
+   * nobody has answered. A rate of zero is priced — pro bono contributes zero
+   * cents and zero unrated milliseconds — so this correctly stays false there
+   * and `$0.00` still renders, which is the honest figure in that case.
+   */
+  const unpricedSome = shownSummary.unratedBillableMs > 0
+  const unpricedAll =
+    unpricedSome && shownSummary.unratedBillableMs >= shownSummary.billableMs
 
   /*
    * With a client-side filter active, pull the whole range before drawing any
@@ -269,24 +286,71 @@ export function Reports() {
                   <strong className="font-medium tabular text-foreground">
                     {formatTotal(shownSummary.billableMs, settings.durationDisplay)}
                   </strong>{" "}
-                  billable (
+                  billable
                   {/*
-                    THE one brass use in the product: money, and nothing else.
-                    Rounding rule is stated once, in `entries.rangeSummary` —
-                    every rated, billable entry's exact fractional-cent value
-                    is summed first and the total rounded to the nearest cent
-                    exactly once, so this figure is reproducible by hand from
-                    the entries below. A project with no rate contributes $0,
-                    silently — there is no per-project breakdown here to say
-                    which project that was; /projects is where a rate gets set.
+                    NO AMOUNT AT ALL when nothing here could be priced.
+
+                    `billableCents: 0` has two opposite meanings and only
+                    `unratedBillableMs` separates them: work done for free
+                    (a rate of zero somebody chose) and work nobody has put a
+                    price on yet. Rendering "$0.00" for the second reads as
+                    "these eight hours earned nothing" — a confident, wrong
+                    figure in the one place a freelancer copies numbers onto an
+                    invoice. The qualifying sentence below carries the real
+                    answer instead.
                   */}
-                  <strong className="font-medium tabular text-brass">
-                    {formatMoney(shownSummary.billableCents, settings.currency)}
-                  </strong>
-                  )
+                  {unpricedAll ? null : (
+                    <>
+                      {" "}
+                      (
+                      {/*
+                        THE one brass use in the product: money, and nothing
+                        else. Rounding rule is stated once, in
+                        `entries.rangeSummary` — every rated, billable entry's
+                        exact fractional-cent value is summed first and the
+                        total rounded to the nearest cent exactly once, so this
+                        figure is reproducible by hand from the entries below.
+                      */}
+                      <strong className="font-medium tabular text-brass">
+                        {formatMoney(shownSummary.billableCents, settings.currency)}
+                      </strong>
+                      )
+                    </>
+                  )}
                 </>
               ) : null}
               .
+              {/*
+                Said in words, immediately after the amount it qualifies, and
+                never folded into it. "$499.20" beside eight billable hours is
+                a complete claim as far as the reader is concerned, so the only
+                way to stop it being read as one is another sentence — and the
+                fix has to be reachable, not just stated, hence the link to the
+                one screen where a rate gets set.
+              */}
+              {unpricedSome ? (
+                <>
+                  {" "}
+                  {unpricedAll ? (
+                    "None of it is priced: no hourly rate is set for that work."
+                  ) : (
+                    <>
+                      <strong className="font-medium tabular text-foreground">
+                        {formatTotal(
+                          shownSummary.unratedBillableMs,
+                          settings.durationDisplay
+                        )}
+                      </strong>{" "}
+                      of that is unpriced and is not in the amount above: no
+                      hourly rate is set for it.
+                    </>
+                  )}{" "}
+                  <Link to="/projects" className="underline underline-offset-2">
+                    Set rates on Projects
+                  </Link>
+                  .
+                </>
+              ) : null}
               {/*
                 A running entry has no duration to add, so it is excluded and
                 said out loud. Folding it in as zero made this figure contradict

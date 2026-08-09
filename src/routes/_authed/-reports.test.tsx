@@ -29,6 +29,33 @@ type ConvexReactModule = typeof ConvexReactModuleType
  * have nothing to do with this bug.
  */
 
+/*
+ * `Link` reads router context via `useRouter`, and this file deliberately
+ * renders `Reports` on its own — the route's COMPONENT is what is under test,
+ * not the router. `createFileRoute` and everything else stay real:
+ * reports.tsx calls `createFileRoute` at module scope, and stubbing the whole
+ * module would hide a genuine route-definition error behind a test double.
+ */
+vi.mock("@tanstack/react-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-router")>()
+  return {
+    ...actual,
+    Link: ({
+      to,
+      children,
+      ...rest
+    }: {
+      to: string
+      children: React.ReactNode
+      className?: string
+    }) => (
+      <a href={to} {...rest}>
+        {children}
+      </a>
+    ),
+  }
+})
+
 vi.mock("@/components/entries/entry-log", () => ({
   EntryLog: ({
     groups,
@@ -180,6 +207,21 @@ function isHidden(el: Element): boolean {
   return false
 }
 
+/**
+ * The whole totals sentence, as one string.
+ *
+ * `getByText` matches an element's DIRECT text nodes only, so any claim that
+ * spans a `<strong>` — which is every figure in this sentence — is
+ * unassertable with it: "8:00:00 billable ($499.20)" is four elements deep and
+ * no single one of them holds that text. Reading the paragraph's
+ * `textContent` asserts what a person actually reads off the screen.
+ */
+function summaryText(): string {
+  const paragraph = document.querySelector("p[aria-live]")
+  if (paragraph === null) throw new Error("no summary paragraph rendered")
+  return paragraph.textContent ?? ""
+}
+
 type Summary = {
   totalMs: number
   billableMs: number
@@ -187,6 +229,7 @@ type Summary = {
   runningCount: number
   truncated: boolean
   billableCents: number
+  unratedBillableMs: number
 }
 
 /**
@@ -292,6 +335,7 @@ describe("Reports — changing the range", () => {
         runningCount: 0,
         truncated: false,
         billableCents: 0,
+        unratedBillableMs: 0,
       })
     })
 
@@ -317,6 +361,7 @@ describe("Reports — changing the range", () => {
       runningCount: 0,
       truncated: false,
       billableCents: 0,
+      unratedBillableMs: 0,
     })
 
     await waitFor(() => expect(screen.getByTestId("entry-beta")).toBeTruthy())
@@ -344,6 +389,7 @@ describe("Reports — changing the range", () => {
         runningCount: 0,
         truncated: false,
         billableCents: 0,
+        unratedBillableMs: 0,
       })
     })
 
@@ -367,6 +413,7 @@ describe("Reports — changing the range", () => {
       runningCount: 0,
       truncated: false,
       billableCents: 0,
+      unratedBillableMs: 0,
     })
 
     await waitFor(() => expect(screen.getByText(/across 5 entries/)).toBeTruthy())
@@ -417,11 +464,109 @@ describe("Reports — the billable amount", () => {
         runningCount: 0,
         truncated: false,
         billableCents: 0,
+        unratedBillableMs: 0,
       })
     })
 
     await waitFor(() => expect(screen.getByText(/across 1 entry\b/)).toBeTruthy())
     expect(screen.queryByText(/\$/)).toBeNull()
+
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * `billableCents: 0` has two completely different meanings and only
+   * `unratedBillableMs` tells them apart. Rendering `$0.00` for the unpriced
+   * one is the defect: eight billable hours on a project nobody has given a
+   * rate reads as eight hours that earned nothing, and the PARTIAL case is
+   * worse still — a plausible, understated figure someone puts on an invoice.
+   */
+  it("shows no amount at all when none of the billable time could be priced", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, range), {
+        totalMs: 28_800_000,
+        billableMs: 28_800_000,
+        count: 1,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 0,
+        unratedBillableMs: 28_800_000, // all of it: the project has no rate
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText(/across 1 entry\b/)).toBeTruthy())
+    // A currency amount here would be a lie of confidence. Not "$0.00", not
+    // any amount.
+    expect(summaryText()).not.toContain("$")
+    expect(summaryText()).toContain("None of it is priced")
+
+    dateSpy.mockRestore()
+  })
+
+  it("says how much is unpriced when only some of the billable time could be valued", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, range), {
+        totalMs: 28_800_000,
+        billableMs: 28_800_000, // 8h billable…
+        count: 4,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 49_920, // …of which only 6h is priced, at $83.20/hr
+        unratedBillableMs: 7_200_000, // 2h on an unrated project
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText(/across 4 entries/)).toBeTruthy())
+    // The amount is still shown — it is right for the part it covers — but it
+    // can no longer be read as covering all eight hours.
+    expect(screen.getByText(/\$499\.20/)).toBeTruthy()
+    expect(summaryText()).toContain("2:00:00 of that is unpriced")
+
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * The other reading of `billableCents: 0`, and the reason the fix cannot
+   * simply key off the cents. A project with `hourlyRateCents: 0` is priced —
+   * pro bono is a decision somebody made — so `$0.00` is the honest answer and
+   * there is nothing to qualify. `rangeSummary` encodes exactly this by
+   * leaving `unratedBillableMs` at zero for a zero rate.
+   */
+  it("still shows $0.00 for pro bono work, where a rate of zero really was set", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, range), {
+        totalMs: 3_600_000,
+        billableMs: 3_600_000,
+        count: 1,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 0,
+        unratedBillableMs: 0,
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText(/across 1 entry\b/)).toBeTruthy())
+    expect(screen.getByText(/\$0\.00/)).toBeTruthy()
+    expect(summaryText()).not.toContain("unpriced")
+    expect(summaryText()).not.toContain("None of it is priced")
 
     dateSpy.mockRestore()
   })
@@ -441,6 +586,7 @@ describe("Reports — the billable amount", () => {
         runningCount: 0,
         truncated: true,
         billableCents: 6_100,
+        unratedBillableMs: 0,
       })
     })
 
