@@ -8,15 +8,12 @@ import { Button } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { errorMessage } from "@/lib/error-message"
-import { formatRate } from "@/lib/format-money"
+import { formatRate, rateHelp } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
 import { PROJECT_COLORS } from "@shared/palette"
 import { parseMoney } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 import type { Doc } from "../../../convex/_generated/dataModel"
-
-/** Shown under the rate field so a rejection names the input that would work. */
-const RATE_HELP = "Try 10, 10.50, or $10 — or leave it blank to clear the rate."
 
 export const Route = createFileRoute("/_authed/projects")({
   head: () => ({ meta: [{ title: "Projects — Trace" }] }),
@@ -201,10 +198,13 @@ function ProjectRow({
         className="shrink-0 px-1 py-0.5 text-xs text-muted-foreground"
         inputClassName="w-20 text-xs tabular"
         parse={(raw) => {
-          const parsed = parseMoney(raw)
+          // `currency` is passed so the user's OWN sign and ISO code are
+          // strippable noise rather than a parse failure — an SGD user pasting
+          // "S$10" or "SGD 10.00" straight back out of the display above.
+          const parsed = parseMoney(raw, currency)
           return parsed.ok
             ? { ok: true, value: parsed.cents }
-            : { ok: false, message: RATE_HELP }
+            : { ok: false, message: rateHelp(currency) }
         }}
         onCommit={async (cents) => {
           await updateProject({ projectId: project._id, hourlyRateCents: cents })
@@ -362,9 +362,9 @@ function NewProject({ currency }: { currency: string }) {
     // A rejected rate keeps the form OPEN with what was typed still in it —
     // same rule InlineEdit follows elsewhere: a parse failure never silently
     // discards input or falls back to a guess.
-    const parsedRate = parseMoney(rate)
+    const parsedRate = parseMoney(rate, currency)
     if (!parsedRate.ok) {
-      setError(RATE_HELP)
+      setError(rateHelp(currency))
       return
     }
     void createProject({
