@@ -3,26 +3,35 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { DateRangePicker } from "@/components/history/date-range-picker"
 import { monthLabel } from "@/lib/month-grid"
 import type * as ForceCloseModuleType from "@/lib/popover-force-close"
+import type { PopoverActionsRef } from "@/lib/popover-force-close"
 
 type ForceCloseModule = typeof ForceCloseModuleType
 
 /*
- * The deprecated fire-and-forget helper, spied on so the assertion below can
- * be about it being GONE.
+ * `useForceCloseWhenClosed` wrapped so the assertion below can be about WHAT
+ * IT IS PASSED, while the real hook still runs.
  *
- * Its replacement's own behaviour is fully covered in
- * popover-force-close.test.tsx and cannot be re-proved from here: jsdom has no
- * `Element.prototype.getAnimations`, so Base UI's animated close takes its
- * synchronous fallback and every popover unmounts immediately in tests,
- * fixed or not. What IS observable at this level is which of the two this
- * component reaches for — and that is exactly what the migration changes.
+ * Its own behaviour is fully covered in popover-force-close.test.tsx and
+ * cannot be re-proved from here: jsdom has no `Element.prototype.getAnimations`,
+ * so Base UI's animated close takes its synchronous fallback and every popover
+ * unmounts immediately in tests, fixed or not. What IS observable at this
+ * level is whether this component drives the force-close off its `open` state
+ * — which is the whole difference between the hook and the fire-and-forget
+ * helper it replaced.
  */
-const { forceClosePopover } = vi.hoisted(() => ({ forceClosePopover: vi.fn() }))
+const { forceCloseCalls } = vi.hoisted(() => ({ forceCloseCalls: vi.fn() }))
 
-vi.mock("@/lib/popover-force-close", async (importOriginal) => ({
-  ...(await importOriginal<ForceCloseModule>()),
-  forceClosePopover,
-}))
+vi.mock("@/lib/popover-force-close", async (importOriginal) => {
+  const actual = await importOriginal<ForceCloseModule>()
+  return {
+    ...actual,
+    // `isOpen`, not `open`: this file already has an `open()` render helper.
+    useForceCloseWhenClosed: (isOpen: boolean, actionsRef: PopoverActionsRef) => {
+      forceCloseCalls(isOpen)
+      return actual.useForceCloseWhenClosed(isOpen, actionsRef)
+    },
+  }
+})
 
 /*
  * The range picker replacing the hand-built calendar, now `Popover` +
@@ -196,25 +205,31 @@ describe("DateRangePicker today", () => {
 
 describe("DateRangePicker popover close", () => {
   /*
-   * `forceClosePopover` is uncancellable: re-open inside its 200ms window and
-   * it fires Base UI's `forceUnmount` against a LIVE popup, nulling the
-   * trigger and focus-return refs underneath a replayed entrance transition.
-   * It also only ever covered the one close path its caller remembered to call
-   * it from — never Escape, an outside click, or the Close button.
-   * `useForceCloseWhenClosed` is driven off `open`, so it covers all of them
-   * and cancels itself on re-open.
+   * The helper this replaced was uncancellable: re-open inside its 200ms
+   * window and it fired Base UI's `forceUnmount` against a LIVE popup, nulling
+   * the trigger and focus-return refs underneath a replayed entrance
+   * transition. It also only ever covered the one close path its caller
+   * remembered to call it from — never Escape, an outside click, or the Close
+   * button. `useForceCloseWhenClosed` is driven off `open`, so it covers all
+   * of them and cancels itself on re-open.
    *
-   * This is also what makes the deprecated shim deletable: it is the last
-   * caller.
+   * Asserting on the ARGUMENT is what makes this test able to fail. A version
+   * that merely called the hook — with a constant, or with a value unrelated
+   * to the popover's state — would still be broken, and would still render
+   * identically in jsdom.
    */
-  it("does not use the deprecated fire-and-forget force-close", () => {
+  it("drives the force-close off the popover's own open state", () => {
     const { onChange } = open({ from: "2026-08-01", to: "2026-08-01" })
 
     fireEvent.click(dayButton(3))
     fireEvent.click(dayButton(9))
     expect(onChange).toHaveBeenCalledWith({ from: "2026-08-03", to: "2026-08-09" })
 
-    expect(forceClosePopover).not.toHaveBeenCalled()
+    // Closed on first render, open once the trigger is clicked. Both readings
+    // must reach the hook, or a stuck popup never gets forced out.
+    const seen = forceCloseCalls.mock.calls.map(([isOpen]) => isOpen)
+    expect(seen).toContain(false)
+    expect(seen).toContain(true)
   })
 })
 

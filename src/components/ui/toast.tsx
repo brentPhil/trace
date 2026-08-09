@@ -66,7 +66,12 @@ function ToastList() {
         <Toast.Action
           className={cn(
             "shrink-0 rounded-md px-2.5 py-1 text-sm font-medium",
-            "border border-edge text-foreground",
+            // `border-edge-raised`, not `border-edge`: this button carries no
+            // fill and sits on a `surface-raised` toast, where `--edge`
+            // measures 2.60:1 and misses the 3:1 floor for a control boundary.
+            // It matters more here than most — this is the Undo on the
+            // note-save toast, i.e. the recovery control for a lost note.
+            "border border-edge-raised text-foreground",
             "transition-colors hover:bg-surface",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           )}

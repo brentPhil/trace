@@ -65,22 +65,6 @@ export function useForceCloseWhenClosed(
   }, [open, actionsRef])
 }
 
-/**
- * @deprecated Use `useForceCloseWhenClosed` instead.
- *
- * The original fire-and-forget form, kept only because
- * `components/history/date-range-picker.tsx` still calls it and belongs to
- * someone else's change. It is uncancellable — re-open the popover inside the
- * 200ms window and this fires `forceUnmount` against a live, OPEN popup — it
- * leaks its timer, and it only ever covered the one close path its caller
- * remembered to call it from. Migrating that caller is a two-line change:
- * `useForceCloseWhenClosed(open, actionsRef)` beside the `open` state, and
- * delete the call.
- */
-export function forceClosePopover(actionsRef: PopoverActionsRef): void {
-  setTimeout(() => actionsRef.current?.unmount(), SAFETY_MS)
-}
-
 /** A ref shaped for `Popover.Root`'s `actionsRef` prop. */
 export function usePopoverActionsRef(): PopoverActionsRef {
   return useRef<BasePopover.Root.Actions | null>(null)
