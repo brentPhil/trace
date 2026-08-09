@@ -5,7 +5,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Popover } from "@/components/ui/popover"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { dateToDay, dayToDate, formatDayRange, rangeTriggerLabel } from "@/lib/date-range-picker"
-import { forceClosePopover, usePopoverActionsRef } from "@/lib/popover-force-close"
+import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { cn } from "@/lib/utils"
 import type { DateRange } from "react-day-picker"
 import type { Period } from "@/lib/history-filters"
@@ -48,6 +48,14 @@ export function DateRangePicker({
   const actionsRef = usePopoverActionsRef()
 
   const [open, setOpen] = useState(false)
+  // Driven off `open`, so it covers EVERY way this popover can close — Escape,
+  // an outside click, the Close button, and the range-picked path below —
+  // rather than only the one a caller remembers to call a helper from. It also
+  // cancels itself if the popover re-opens inside its window, which the
+  // fire-and-forget version it replaces could not: that one fired Base UI's
+  // `forceUnmount` against a live, open popup. See src/lib/popover-force-close.ts.
+  useForceCloseWhenClosed(open, actionsRef)
+
   const [draft, setDraft] = useState<DateRange | undefined>(() => ({
     from: dayToDate(from),
     to: dayToDate(to),
@@ -93,7 +101,6 @@ export function DateRangePicker({
     announce(`Range set to ${formatDayRange(committed.from, committed.to)}.`)
     onChange(committed)
     setOpen(false)
-    forceClosePopover(actionsRef)
   }
 
   // FilterBar listens for arrow keys at the document level to step
