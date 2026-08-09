@@ -121,6 +121,10 @@ function AuthedLayout() {
       editTime: async (entryId, field, instantMs) => {
         await editMutations.editTime(entryId, field, instantMs)
       },
+      // Spread straight through. `editMutations.create` already accepts the
+      // title and the classification, and the bar is holding both by the time
+      // it calls this — narrowing the parameter to the two instants here is
+      // what silently dropped them.
       createCompleted: async (input) => await editMutations.create(input),
     }),
     [entryMutations, editMutations, createProject, ensureTag]

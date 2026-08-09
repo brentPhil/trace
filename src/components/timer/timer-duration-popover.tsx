@@ -1,20 +1,28 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Popover } from "@/components/ui/popover"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
 import { TimePopoverFields } from "@/components/entries/time-popover-fields"
 import { EntryDuration } from "@/components/timer/entry-duration"
+import { useElapsedMs } from "@/hooks/use-clock"
 import {
   formatTimeOfInstant,
   instantMovedToDay,
   instantOfDayTime,
+  localMinutesOf,
 } from "@/lib/format-time"
 import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
-import { forceClosePopover, usePopoverActionsRef } from "@/lib/popover-force-close"
+import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { dayOf } from "@shared/day"
-import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
+import { spokenDuration } from "@shared/duration"
+import {
+  formatTimeOfDay,
+  parseTimeOfDay,
+  resolveEndAfterStart,
+} from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
+import type { TimeOfDay } from "@shared/timeOfDay"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 const TIME_HELP = "Try 9:15, 0915, or 2pm."
@@ -45,15 +53,24 @@ export function TimerDurationPopover({
   timeZone,
   use12Hour,
   weekStartDay,
+  stagedStartAt,
   onEditTime,
   onCreateCompleted,
   onStageStart,
+  onError,
 }: {
   running: Doc<"timeEntries"> | null
   timeZone: string
   use12Hour: boolean
   /** 0 = Sunday, from userSettings. The grid and the week totals must agree. */
   weekStartDay: number
+  /**
+   * The instant Play would currently use, or null for "now" — already put
+   * through the bar's staleness rules. The idle popover seeds ITSELF from
+   * this, so opening it to check what Play will do cannot show one time while
+   * the armed row below shows another.
+   */
+  stagedStartAt: number | null
   /** Mirrors `EntryRowActions.onTimeChange`/`onDayChange` — a `"day"` edit
    *  carries the resolved START instant, exactly as `editTime` already
    *  expects everywhere else it is called. */
@@ -72,8 +89,20 @@ export function TimerDurationPopover({
    * running entry here to write into yet, the same reasoning `staged`
    * classification already rests on; see the comment above `staged` in
    * `timer-bar.tsx`.
+   *
+   * `null` disarms it. "Create entry" consumes the fields it was staged from,
+   * so leaving the stage armed after one would silently backdate the NEXT
+   * press of Play by however far the created entry reached back.
    */
-  onStageStart: (instantMs: number) => void
+  onStageStart: (instantMs: number | null) => void
+  /**
+   * Reports a write that rejected AFTER the popover has closed — a day pick,
+   * which commits on click and takes the popup with it. There is nowhere left
+   * on screen for an inline error by then, so it has to go to whatever the
+   * page uses for out-of-band failures. Same prop, same reason, as
+   * `TimerBar`'s own `onError`.
+   */
+  onError?: (thrown: unknown) => void
 }) {
   if (running !== null) {
     return (
@@ -83,6 +112,7 @@ export function TimerDurationPopover({
         use12Hour={use12Hour}
         weekStartDay={weekStartDay}
         onEditTime={onEditTime}
+        onError={onError}
       />
     )
   }
@@ -92,6 +122,7 @@ export function TimerDurationPopover({
       timeZone={timeZone}
       use12Hour={use12Hour}
       weekStartDay={weekStartDay}
+      stagedStartAt={stagedStartAt}
       onCreateCompleted={onCreateCompleted}
       onStageStart={onStageStart}
     />
@@ -115,12 +146,45 @@ const triggerClass = cn(
 
 const durationClass = "text-base font-medium sm:text-lg"
 
+/** Ties the trigger to the elapsed time it can no longer expose itself. */
+const ELAPSED_DESCRIPTION_ID = "timer-elapsed-description"
+
+/**
+ * The running elapsed time, for a screen reader only.
+ *
+ * `EntryDuration` renders `<time role="timer" aria-label="Running, 1 hour 5
+ * minutes">`, and that used to be the whole control. Wrapping it in a button
+ * to make the duration clickable took the label away: `button` has Children
+ * Presentational: True in WAI-ARIA, so every descendant role and name is
+ * pruned from the accessibility tree. The digits were then readable by nobody
+ * — not on focus (the button's own `aria-label` wins), and not by browsing
+ * either (the subtree is gone, not merely deprioritised).
+ *
+ * So it is re-exposed OUTSIDE the button, as the trigger's description. Not
+ * folded into the button's name, which would re-announce the whole control
+ * every time the clock ticked; and deliberately not an `<output>`, whose
+ * implicit `role="status"` is a live region and would narrate every tick on
+ * its own. A description is read once, when focus lands.
+ *
+ * Its own component so the per-second subscription re-renders one `<span>`,
+ * not the popover and its 42-button calendar.
+ */
+function SpokenElapsed({ startedAt }: { startedAt: number }) {
+  const ms = useElapsedMs(startedAt, null)
+  return (
+    <span id={ELAPSED_DESCRIPTION_ID} className="sr-only">
+      {spokenDuration(ms)}
+    </span>
+  )
+}
+
 function RunningDurationPopover({
   entry,
   timeZone,
   use12Hour,
   weekStartDay,
   onEditTime,
+  onError,
 }: {
   entry: Doc<"timeEntries">
   timeZone: string
@@ -131,38 +195,51 @@ function RunningDurationPopover({
     field: "start" | "end" | "day",
     instantMs: number
   ) => Promise<void>
+  onError?: (thrown: unknown) => void
 }) {
   return (
-    <EntryTimePopover
-      entry={entry}
-      timeZone={timeZone}
-      use12Hour={use12Hour}
-      weekStartDay={weekStartDay}
-      onCommitTime={(field, instantMs) => onEditTime(entry._id, field, instantMs)}
-      onCommitDay={(day) =>
-        onEditTime(entry._id, "day", instantMovedToDay(entry.startedAt, day, timeZone))
-      }
-      trigger={
-        <button
-          type="button"
-          // Says what it does, not the digits it wraps — a screen reader
-          // hears "Edit start time — running", never "9:12:04, button".
-          aria-label="Edit start time — running"
-          className={triggerClass}
-        >
-          {/* `role="timer"` lives inside a `role="button"` ancestor here. That
-           *  is a live-region role, not a widget one, so it is not
-           *  interactive content and the nesting is valid — but the button's
-           *  own `aria-label` is what a screen reader announces on focus, so
-           *  the timer role only narrates for anyone browsing by content. */}
-          <EntryDuration
-            startedAt={entry.startedAt}
-            endedAt={null}
-            className={cn(durationClass, "text-enlarger")}
-          />
-        </button>
-      }
-    />
+    <>
+      <EntryTimePopover
+        entry={entry}
+        timeZone={timeZone}
+        use12Hour={use12Hour}
+        weekStartDay={weekStartDay}
+        onCommitTime={(field, instantMs) => onEditTime(entry._id, field, instantMs)}
+        onCommitDay={async (day) => {
+          // Reported rather than thrown: this settles after the popup has gone,
+          // so an uncaught rejection was a console warning and a row that
+          // silently jumped back where it started.
+          try {
+            await onEditTime(
+              entry._id,
+              "day",
+              instantMovedToDay(entry.startedAt, day, timeZone)
+            )
+          } catch (thrown) {
+            onError?.(thrown)
+          }
+        }}
+        trigger={
+          <button
+            type="button"
+            // Says what it does, not the digits it wraps — a screen reader
+            // hears "Edit start time — running", never "9:12:04, button".
+            aria-label="Edit start time — running"
+            // The digits themselves, which the button role prunes. See
+            // `SpokenElapsed`.
+            aria-describedby={ELAPSED_DESCRIPTION_ID}
+            className={triggerClass}
+          >
+            <EntryDuration
+              startedAt={entry.startedAt}
+              endedAt={null}
+              className={cn(durationClass, "text-enlarger")}
+            />
+          </button>
+        }
+      />
+      <SpokenElapsed startedAt={entry.startedAt} />
+    </>
   )
 }
 
@@ -170,17 +247,19 @@ function IdleDurationPopover({
   timeZone,
   use12Hour,
   weekStartDay,
+  stagedStartAt,
   onCreateCompleted,
   onStageStart,
 }: {
   timeZone: string
   use12Hour: boolean
   weekStartDay: number
+  stagedStartAt: number | null
   onCreateCompleted: (input: {
     startedAt: number
     endedAt: number
   }) => Promise<unknown>
-  onStageStart: (instantMs: number) => void
+  onStageStart: (instantMs: number | null) => void
 }) {
   const [open, setOpen] = useState(false)
   const [day, setDay] = useState<DayString>(() => dayOf(Date.now(), timeZone))
@@ -190,6 +269,32 @@ function IdleDurationPopover({
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const actionsRef = usePopoverActionsRef()
+  useForceCloseWhenClosed(open, actionsRef)
+
+  /*
+   * The staged instant is read on the OPEN transition only, so it is held in a
+   * ref rather than listed as a dependency of the reseed effect below. Typing
+   * into Start stages what was typed, which would otherwise re-run the effect
+   * and overwrite the field from the value it had just produced — the user
+   * would be fighting their own keystrokes.
+   */
+  const stagedRef = useRef(stagedStartAt)
+  useEffect(() => {
+    stagedRef.current = stagedStartAt
+  }, [stagedStartAt])
+
+  /**
+   * The reference `parseTimeOfDay` disambiguates a bare hour against.
+   *
+   * Passing a literal `0` here pinned that reference to midnight, so every
+   * bare `1`-`11` resolved to AM and a bare `12` to `00:00`. Typing `3` over
+   * Start at three in the afternoon recorded a 3 AM entry — twelve hours out,
+   * from the exact terse input the parser exists to support, and with a
+   * project rate set that is wrong billable data. `EntryTimePopover` gets this
+   * right by anchoring to the entry's own start; the idle path has no entry,
+   * so it anchors to the wall clock, which is what the parser documents.
+   */
+  const nowMinutes = () => localMinutesOf(Date.now(), timeZone)
 
   /**
    * Stages Play's start instant from whatever START and day are on screen
@@ -203,24 +308,38 @@ function IdleDurationPopover({
    * still the correct thing for Play to use if pressed right now.
    */
   const stageFromFields = (dayValue: DayString, startText: string) => {
-    const parsed = parseTimeOfDay(startText, 0)
+    const parsed = parseTimeOfDay(startText, nowMinutes())
     if (!parsed.ok) return
     onStageStart(
       instantOfDayTime(dayValue, { minutes: parsed.time.minutes, dayOffset: 0 }, timeZone)
     )
   }
 
-  // Re-seed every time it opens, to "now" — the Toggl gesture this is. A tab
-  // left open since yesterday must not offer yesterday's moment today.
+  /*
+   * Re-seed every time it opens — from the STAGED start when one is armed, and
+   * from "now" otherwise. A tab left open since yesterday must not offer
+   * yesterday's moment today, which is what the "now" half is for; seeding
+   * from "now" unconditionally made the popover lie, showing 9:00 PM in Start
+   * while the armed row below it still said "Starts 4:06 AM" and Play still
+   * used 4:06 AM. This is the surface someone opens to CHECK the staged time.
+   *
+   * Seeding from the stage rather than re-staging from "now" is the deliberate
+   * direction: the other way round, merely looking at the popover would
+   * destroy a stage that had been set on purpose.
+   */
   useEffect(() => {
     if (!open) return
-    const now = Date.now()
-    const today = dayOf(now, timeZone)
-    setDay(today)
-    setMonth(today)
-    const nowLabel = formatTimeOfInstant(now, timeZone, use12Hour)
-    setStart(nowLabel)
-    setEnd(nowLabel)
+    const seedFrom = stagedRef.current ?? Date.now()
+    const seedDay = dayOf(seedFrom, timeZone)
+    setDay(seedDay)
+    setMonth(seedDay)
+    // Both fields to the same instant, as before: `confirm` refuses a stop
+    // equal to the start, so the default state asks for a real stop rather
+    // than guessing one. Seeding Stop from "now" against a backdated Start
+    // would instead offer a multi-hour entry a single click could commit.
+    const label = formatTimeOfInstant(seedFrom, timeZone, use12Hour)
+    setStart(label)
+    setEnd(label)
     setError(null)
   }, [open, timeZone, use12Hour])
 
@@ -228,7 +347,7 @@ function IdleDurationPopover({
     if (saving) return
     setError(null)
 
-    const startParsed = parseTimeOfDay(start, 0)
+    const startParsed = parseTimeOfDay(start, nowMinutes())
     if (!startParsed.ok) {
       setError(`Start time — ${TIME_HELP}`)
       return
@@ -269,8 +388,14 @@ function IdleDurationPopover({
     setSaving(true)
     try {
       await onCreateCompleted({ startedAt, endedAt })
+      // Disarm. Every keystroke in Start and every calendar pick above has
+      // already staged an instant for Play, and "Create entry" has just spent
+      // those same fields on a completed entry — leaving them armed meant the
+      // user's next press of Play, the most-used control in the product,
+      // silently began a running entry backdated to whatever this entry
+      // started at. Nothing about "Create entry" implies it should arm Play.
+      onStageStart(null)
       setOpen(false)
-      forceClosePopover(actionsRef)
     } catch (thrown) {
       setError(errorMessage(thrown))
     } finally {
@@ -313,6 +438,10 @@ function IdleDurationPopover({
           startValue={start}
           onStartChange={(value) => {
             setStart(value)
+            // A rejection reported against the PREVIOUS contents of this field
+            // must not outlive them; leaving it up put a red line under input
+            // it no longer described.
+            setError(null)
             stageFromFields(day, value)
           }}
           // Deliberately inert: committing on blur (as the edit path does)
@@ -321,7 +450,10 @@ function IdleDurationPopover({
           // the explicit button below commits.
           onStartCommit={() => {}}
           endValue={end}
-          onEndChange={setEnd}
+          onEndChange={(value) => {
+            setEnd(value)
+            setError(null)
+          }}
           onEndCommit={() => {}}
           error={error}
           month={month}
@@ -330,10 +462,17 @@ function IdleDurationPopover({
           weekStartDay={weekStartDay}
           onPickDay={(pickedDay) => {
             setDay(pickedDay)
+            setError(null)
             stageFromFields(pickedDay, start)
           }}
           footer={
-            <div className="mt-3 flex justify-end">
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <ParseEcho
+                start={start}
+                end={end}
+                use12Hour={use12Hour}
+                nowMinutes={nowMinutes}
+              />
               <Button size="sm" disabled={saving} onClick={() => void confirm()}>
                 Create entry
               </Button>
@@ -342,5 +481,49 @@ function IdleDurationPopover({
         />
       </Popover.Popup>
     </Popover.Root>
+  )
+}
+
+/**
+ * What the two fields currently MEAN, echoed before anything is written.
+ *
+ * `formatTimeOfDay`'s own docstring calls this echo "the product's stated
+ * defence against a mis-parse", and this popover had none: a two-keystroke
+ * overnight resolution producing a 23-hour entry was invisible until it landed
+ * in the log, and a bare hour resolving to the wrong half of the clock was
+ * invisible full stop. The `+1d` marker is the part that earns its place.
+ *
+ * Renders nothing while either field is unparseable — a half-typed time has no
+ * meaning to echo, and the error line above already speaks for a bad one.
+ *
+ * Deliberately NOT a live region. It changes on every keystroke, and a polite
+ * region that re-reads a time range per character is the same unusable chatter
+ * `useMinute` exists to avoid. It is ordinary content, read on the way to the
+ * Create button.
+ */
+function ParseEcho({
+  start,
+  end,
+  use12Hour,
+  nowMinutes,
+}: {
+  start: string
+  end: string
+  use12Hour: boolean
+  nowMinutes: () => number
+}) {
+  const startParsed = parseTimeOfDay(start, nowMinutes())
+  if (!startParsed.ok) return null
+  const endParsed = parseTimeOfDay(end, startParsed.time.minutes)
+  if (!endParsed.ok) return null
+
+  const startTime: TimeOfDay = { minutes: startParsed.time.minutes, dayOffset: 0 }
+  const endTime = resolveEndAfterStart(endParsed.time, startTime)
+
+  return (
+    // The Tabular Rule: every duration, timestamp and total, at any size.
+    <span className="tabular text-xs text-muted-foreground">
+      {formatTimeOfDay(startTime, use12Hour)} – {formatTimeOfDay(endTime, use12Hour)}
+    </span>
   )
 }

@@ -596,7 +596,161 @@ describe("the duration's popover", () => {
     expect(createCompleted).toHaveBeenCalledWith({
       startedAt: fixedNow,
       endedAt: fixedNow + 5 * 60_000,
+      tagIds: [],
+      billable: false,
     })
+  })
+
+  it("carries the title and classification the user already staged", async () => {
+    // The bug: `createCompleted` was typed `{ startedAt, endedAt }` only, so
+    // typing "Client call", marking it billable and then clicking the duration
+    // wrote an UNTITLED, unclassified entry — while the title sat in the input
+    // looking as though it had been used.
+    const fixedNow = Date.parse("2026-08-07T20:00:00Z")
+    vi.setSystemTime(fixedNow)
+    const { actions, createCompleted } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.change(input(), { target: { value: "  Client call  " } })
+    fireEvent.click(screen.getByLabelText("Not billable"))
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "9:05 PM" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /create entry/i }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(createCompleted).toHaveBeenCalledWith({
+      startedAt: fixedNow,
+      endedAt: fixedNow + 5 * 60_000,
+      title: "Client call",
+      tagIds: [],
+      billable: true,
+    })
+    // And they are spent, not left behind to be sent twice.
+    expect(input().value).toBe("")
+    expect(screen.getByLabelText("Not billable")).toBeTruthy()
+  })
+
+  it("resolves a bare hour against the wall clock, not against midnight", async () => {
+    // The parser's second argument disambiguates 1-11 by whichever reading is
+    // nearer on the clock face. A literal 0 pinned it to midnight, so at three
+    // in the afternoon typing `3` over Start and `4` over Stop recorded a
+    // 3-to-4 AM entry — twelve hours out, from the exact terse input the
+    // parser exists to support, with nothing on screen to catch it.
+    const threePm = Date.parse("2026-08-07T14:00:00Z") // 3:00 PM BST
+    vi.setSystemTime(threePm)
+    const { actions, createCompleted } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("Start time"), { target: { value: "3" } })
+    fireEvent.change(screen.getByLabelText("End time"), { target: { value: "4" } })
+    fireEvent.click(screen.getByRole("button", { name: /create entry/i }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(createCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startedAt: Date.parse("2026-08-07T14:00:00Z"), // 3 PM, not 3 AM
+        endedAt: Date.parse("2026-08-07T15:00:00Z"),
+      })
+    )
+  })
+
+  it("echoes what the two fields currently mean, before anything is written", async () => {
+    // `formatTimeOfDay`'s own docstring calls this the product's defence
+    // against a mis-parse, and this popover had none — a two-keystroke
+    // overnight resolution producing a 23-hour entry was invisible until it
+    // landed in the log.
+    vi.setSystemTime(Date.parse("2026-08-07T20:00:00Z")) // 9:00 PM BST
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "10:00 PM" },
+    })
+    expect(screen.getByText("9:00 PM – 10:00 PM")).toBeTruthy()
+
+    // An end EARLIER on the clock is the overnight case, and the marker is the
+    // whole point of the echo.
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "8:00 PM" },
+    })
+    expect(screen.getByText("9:00 PM – 8:00 PM +1d")).toBeTruthy()
+  })
+
+  it("stops showing an error once the field it described has changed", async () => {
+    vi.setSystemTime(Date.parse("2026-08-07T20:00:00Z"))
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    // Both fields default to the same instant, which `confirm` refuses.
+    fireEvent.click(screen.getByRole("button", { name: /create entry/i }))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByRole("alert")).toBeTruthy()
+
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "9:05 PM" },
+    })
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  it("exposes the running elapsed time outside the trigger button", async () => {
+    // `button` has Children Presentational: True in WAI-ARIA, so wrapping
+    // `EntryDuration` in one pruned its `role="timer"` and its
+    // "Running, 1 hour 5 minutes" label from the accessibility tree entirely.
+    // A screen-reader user could no longer read the elapsed time from the bar
+    // by ANY means — not on focus, not by browsing.
+    const now = Date.parse("2026-08-07T20:00:00Z")
+    vi.setSystemTime(now)
+    const { actions } = makeActions()
+    render(
+      <Bar
+        running={entry({
+          clientKey: "k1",
+          _id: REAL_ID,
+          startedAt: now - 65 * 60_000,
+        })}
+        actions={actions}
+      />
+    )
+
+    // One tick, so the shared clock store's module-level snapshot agrees with
+    // the fake system time rather than with whatever the previous test left.
+    await vi.advanceTimersByTimeAsync(1_100)
+
+    const trigger = screen.getByRole("button", { name: /edit start time/i })
+    const describedBy = trigger.getAttribute("aria-describedby")
+    expect(describedBy).toBeTruthy()
+    expect(document.getElementById(describedBy ?? "")?.textContent).toBe(
+      "1 hour 5 minutes"
+    )
+  })
+
+  it("reports a day change that rejected, rather than dropping it", async () => {
+    // The popover is already closed by the time this can fail, so there is no
+    // inline error to show: the optimistic update moved the row, Convex rolled
+    // it back, and the only trace was an unhandled rejection in the console.
+    const onError = vi.fn()
+    const { actions } = makeActions({
+      editTime: vi.fn(() => Promise.reject(new Error("network"))),
+    })
+    render(
+      <Bar
+        running={entry({ clientKey: "k1", _id: REAL_ID, startedAt })}
+        actions={actions}
+        onError={onError}
+      />
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /edit start time/i }))
+    fireEvent.click(screen.getByRole("button", { name: /12 August 2026/i }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(onError).toHaveBeenCalledTimes(1)
   })
 
   it("closes the popover after a successful create, so a second click cannot duplicate it", async () => {
@@ -680,16 +834,19 @@ describe("staging a start from the idle popover", () => {
     expect(call.mock.calls[0][0].startedAt).toBeUndefined()
   })
 
+  /** The bar's armed row — NOT the popover's own echo of the same time. */
+  const armedRow = () => screen.queryByText(/^Starts /)
+
   it("shows the staged start on the bar, and clearing it returns to now", async () => {
     vi.setSystemTime(fixedNow)
     const { actions } = makeActions()
     render(<Bar running={null} actions={actions} />)
 
     openPopoverAndSetStart("4:06 AM")
-    expect(screen.getByText(/4:06 AM/)).toBeTruthy()
+    expect(armedRow()?.textContent).toBe("Starts 4:06 AM")
 
     fireEvent.click(screen.getByRole("button", { name: /use now/i }))
-    expect(screen.queryByText(/4:06 AM/)).toBeNull()
+    expect(armedRow()).toBeNull()
 
     fireEvent.click(screen.getByLabelText("Start timer"))
     await vi.advanceTimersByTimeAsync(0)
@@ -707,7 +864,91 @@ describe("staging a start from the idle popover", () => {
     fireEvent.click(screen.getByLabelText("Start timer"))
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(screen.queryByText(/4:06 AM/)).toBeNull()
+    expect(armedRow()).toBeNull()
+  })
+
+  it("disarms Play once Create entry has spent the same fields", async () => {
+    // The trap: every keystroke in Start stages an instant for Play, and
+    // "Create entry" used to leave it armed. The completed entry was written
+    // correctly, the bar stayed armed with "Starts 9:00 AM on 8 Aug", and the
+    // user's next press of Play — the most-used control in the product —
+    // silently began a running entry backdated by a day and a half. Nothing
+    // about "Create entry" implies it should arm Play.
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    openPopoverAndSetStart("9:00 AM")
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "11:00 AM" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /create entry/i }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.createCompleted).toHaveBeenCalledTimes(1)
+    expect(armedRow()).toBeNull()
+
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = actions.start as ReturnType<typeof vi.fn>
+    expect(call.mock.calls[0][0].startedAt).toBeUndefined()
+  })
+
+  it("reopening the popover shows the staged start, not now", async () => {
+    // The popover is precisely the surface someone opens to CHECK what Play
+    // will do. Reseeding it from `Date.now()` made it show 9:00 PM in Start
+    // while the armed row underneath still said "Starts 4:06 AM" and Play
+    // still used 4:06 AM — the control disagreeing with itself.
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    openPopoverAndSetStart("4:06 AM")
+    const trigger = screen.getByRole("button", { name: /add a completed entry/i })
+    fireEvent.click(trigger) // close
+    fireEvent.click(trigger) // and open again
+
+    expect(screen.getByLabelText<HTMLInputElement>("Start time").value).toBe(
+      "4:06 AM"
+    )
+    expect(armedRow()?.textContent).toBe("Starts 4:06 AM")
+  })
+
+  it("refuses a staged start older than the longest entry the backend keeps", async () => {
+    // `resolveStagedStart` only ever checked the day the value was STAGED on,
+    // which is today by construction. The calendar can page to any month, so
+    // Play could begin a running entry backdated arbitrarily far — which trips
+    // the runaway banner at once and, once stopped, exceeds MAX_DURATION_MS,
+    // at which point `capEditedDuration` refuses every start/end edit that
+    // does not first bring it back under 24 hours.
+    vi.setSystemTime(fixedNow) // 7 August 2026, 9:00 PM
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    // Two days back, at the seeded 9:00 PM: 48 hours before now.
+    fireEvent.click(screen.getByRole("button", { name: / 5 August 2026$/ }))
+
+    expect(armedRow()).toBeNull()
+
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    const call = actions.start as ReturnType<typeof vi.fn>
+    expect(call.mock.calls[0][0].startedAt).toBeUndefined()
+  })
+
+  it("says how far back a staged start reaches when it is not today", async () => {
+    vi.setSystemTime(fixedNow)
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    // Yesterday at the seeded 9:00 PM — inside the 24-hour bound, so armed.
+    fireEvent.click(screen.getByRole("button", { name: / 6 August 2026$/ }))
+
+    expect(armedRow()?.textContent).toBe("Starts 9:00 PM on 6 Aug (yesterday)")
   })
 
   it("uses only the staged START when a STOP is also set, and never creates a completed entry", async () => {
@@ -731,21 +972,30 @@ describe("staging a start from the idle popover", () => {
   })
 
   it("drops a staged start once the day it was set on has passed", async () => {
+    /*
+     * The real path, with no re-render in it.
+     *
+     * `effectiveStagedStartAt` used to be computed during render and closed
+     * over by `onToggle`, and NOTHING subscribes to the clock while idle:
+     * `useElapsedMs` swaps in a subscribe function that never fires once
+     * `endedAt !== null`, and the idle `EntryDuration` and `RunawayBanner`
+     * both pass a non-null one. So a tab left open overnight never re-renders
+     * at midnight, and Play used the stale value. The previous version of this
+     * test typed a character into the title field first, with the comment
+     * "force a re-render so the staleness check re-evaluates" — which is
+     * precisely the step the real scenario does not have, so the guard it was
+     * meant to prove was the one thing it could not reach.
+     */
     vi.setSystemTime(fixedNow)
     const { actions } = makeActions()
     render(<Bar running={null} actions={actions} />)
 
     openPopoverAndSetStart("4:06 AM")
-    expect(screen.getByText(/4:06 AM/)).toBeTruthy()
+    expect(armedRow()?.textContent).toBe("Starts 4:06 AM")
 
     // Past midnight London: still the 7th's 4:06 AM target, but a new day has
-    // begun since it was SET — a tab left open overnight.
+    // begun since it was SET — a tab left open overnight, untouched.
     vi.setSystemTime(Date.parse("2026-08-08T04:00:00Z")) // 5:00 AM BST, Aug 8
-    // Force a re-render so the staleness check re-evaluates without another
-    // interaction with the popover itself.
-    fireEvent.change(input(), { target: { value: "x" } })
-
-    expect(screen.queryByText(/4:06 AM/)).toBeNull()
 
     fireEvent.click(screen.getByLabelText("Start timer"))
     await vi.advanceTimersByTimeAsync(0)

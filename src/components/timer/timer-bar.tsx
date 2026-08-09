@@ -9,10 +9,9 @@ import { ProjectDot } from "@/components/classifiers/project-dot"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { TimerDurationPopover } from "@/components/timer/timer-duration-popover"
 import { isOptimisticId } from "@/lib/optimistic-id"
-import { formatShortDate, formatTimeOfInstant } from "@/lib/format-time"
+import { describeStagedStart, resolveStagedStart } from "@/lib/staged-start"
 import { cn } from "@/lib/utils"
 import { spokenDuration } from "@shared/duration"
-import { dayOf } from "@shared/day"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 const TITLE_DEBOUNCE_MS = 400
@@ -89,10 +88,21 @@ export type TimerBarActions = {
   /**
    * Creates a completed entry from the duration's popover while idle —
    * mirrors `editMutations.create`, the same call `ManualEntryDialog` makes.
+   *
+   * Carries the title and the classification, not just the two instants. The
+   * bar is holding both by the time this fires (`draft.text` and `staged`),
+   * and dropping them wrote an untitled, unclassified entry while the title
+   * the user typed sat in the input looking as though it had been used —
+   * which reads as data loss, because it is. Same set `onToggle`'s start
+   * branch sends.
    */
   createCompleted: (input: {
     startedAt: number
     endedAt: number
+    title?: string
+    projectId?: Id<"projects">
+    tagIds?: Array<Id<"tags">>
+    billable?: boolean
   }) => Promise<unknown>
 }
 
@@ -102,35 +112,6 @@ export type TitleSuggestion = {
   projectId?: Id<"projects">
   tagIds: Array<Id<"tags">>
   billable: boolean
-}
-
-/**
- * Whether a staged start is still current enough to honour.
- *
- * Anchored to WHEN the value was staged, not to the instant it targets — a
- * deliberately-picked past or future time survives normally through the rest
- * of the session it was set in. Only a tab genuinely left open past local
- * midnight loses it, the same "a tab left open since yesterday must not
- * offer yesterday's moment today" reasoning `IdleDurationPopover` already
- * applies to its own reseed-on-open, applied here to the stage itself so
- * pressing Play the next morning cannot silently backdate an entry across a
- * day nobody meant to cross.
- */
-function resolveStagedStart(
-  stagedStartAt: number | null,
-  stagedStartSetAt: number | null,
-  timeZone: string
-): number | null {
-  if (stagedStartAt === null || stagedStartSetAt === null) return null
-  if (dayOf(stagedStartSetAt, timeZone) !== dayOf(Date.now(), timeZone)) return null
-  return stagedStartAt
-}
-
-/** "4:06 AM", or "4:06 AM on 6 Aug" when the staged day is not today. */
-function describeStagedStart(instantMs: number, timeZone: string, use12Hour: boolean): string {
-  const time = formatTimeOfInstant(instantMs, timeZone, use12Hour)
-  if (dayOf(instantMs, timeZone) === dayOf(Date.now(), timeZone)) return time
-  return `${time} on ${formatShortDate(instantMs, timeZone)}`
 }
 
 export function TimerBar({
@@ -223,7 +204,22 @@ export function TimerBar({
     setStagedStartSetAt(Date.now())
   }
 
-  const effectiveStagedStartAt = resolveStagedStart(stagedStartAt, stagedStartSetAt, timeZone)
+  /*
+   * The render-time reading, for the indicator ONLY.
+   *
+   * Nothing subscribes to the clock while idle — `useElapsedMs` swaps in a
+   * subscribe function that never fires once `endedAt !== null`, and both the
+   * idle `EntryDuration` and `RunawayBanner` pass a non-null one — so a tab
+   * left open overnight never re-renders at midnight and this value goes
+   * stale. `onToggle` therefore recomputes it against the clock at the moment
+   * Play is actually pressed, which is the only reading a write may use.
+   */
+  const effectiveStagedStartAt = resolveStagedStart(
+    stagedStartAt,
+    stagedStartSetAt,
+    timeZone,
+    Date.now()
+  )
 
   const [projectOpen, setProjectOpen] = useState(false)
   const [tagsOpen, setTagsOpen] = useState(false)
@@ -435,6 +431,16 @@ export function TimerBar({
           )
         }
       } else {
+        // Recomputed HERE, not read from the render that built this handler.
+        // See `effectiveStagedStartAt` above: while idle the bar can sit
+        // unrendered for hours, so the closed-over value is exactly the one
+        // the overnight staleness rule exists to reject.
+        const startedAt = resolveStagedStart(
+          stagedStartAt,
+          stagedStartSetAt,
+          timeZone,
+          Date.now()
+        )
         await start({
           title: draft.text.trim(),
           // Only the staged START is ever honoured here. Play means "begin
@@ -448,7 +454,7 @@ export function TimerBar({
           // non-null and `TimerDurationPopover` swaps to `RunningDurationPopover`,
           // which has no Stop field at all — so there is nothing left on
           // screen claiming a stop was ever typed.
-          ...(effectiveStagedStartAt !== null ? { startedAt: effectiveStagedStartAt } : {}),
+          ...(startedAt !== null ? { startedAt } : {}),
           projectId: staged.projectId ?? undefined,
           tagIds: staged.tagIds,
           billable: staged.billable,
@@ -490,26 +496,52 @@ export function TimerBar({
       aria-label="Timer"
       className={cn(
         "flex flex-col rounded-md border bg-surface",
-        // The visible focus indicator lives HERE, not on the input — see the
-        // input's own `outline-none` below for why. `focus-within:ring-3
-        // focus-within:ring-ring/30` is the exact vocabulary `button.tsx`
-        // uses (measured at 7.60:1), so the bar gains the same indicator
-        // every other control already had rather than a one-off invention.
-        //
-        // `focus-within:border-ring` is withheld while running: the cold
-        // border is the Cold Light Rule's signal that something IS
-        // recording, and swapping it for the neutral ring colour on focus
-        // would dim that signal at the exact moment someone is typing into
-        // the field a running entry's title lives in. The ring halo alone
-        // is still a real, visible indicator in that state — SC 2.4.11 asks
-        // for a visible focus appearance, not specifically a border change.
-        "focus-within:ring-3 focus-within:ring-ring/30",
+        /*
+         * The visible focus indicator lives HERE, not on the input — see the
+         * input's own `outline-none` below for why.
+         *
+         * An OUTLINE at full `--ring`, offset clear of the border, in BOTH
+         * states. Measured from the tokens in styles.css: `--ring`
+         * oklch(0.72 0.012 75) against `--ground` oklch(0.18 0.008 75) is
+         * 7.58:1, and the 2px offset means ground is what sits on either side
+         * of it, so that is the number on both edges. 2px thick clears SC
+         * 2.4.11's minimum area as well as SC 1.4.11's 3:1.
+         *
+         * WHAT THIS REPLACED, AND WHY. It was `focus-within:ring-3
+         * focus-within:ring-ring/30`, with a comment claiming that vocabulary
+         * measured 7.60:1 because `button.tsx` uses it. It does not: the
+         * button pairs that halo with `focus-visible:border-ring`, and the
+         * 7.58:1 figure is the BORDER at full `--ring`, never the 30% halo.
+         * The halo alone is 1.75:1 over ground and 1.77:1 over the bar's own
+         * `bg-surface` — no indicator at all. Idle got away with it because
+         * `focus-within:border-ring` was carrying the real 7.58:1; while
+         * running that border is deliberately withheld (below), so the most-
+         * used control in the app, in its most common state, had nothing.
+         *
+         * The Cold Light Rule and a visible indicator were never actually in
+         * tension — only the shared BORDER pixel was. An outline sits outside
+         * the border entirely, so the cold boundary keeps saying "recording"
+         * untouched, and focus gets its own, identical treatment either way.
+         *
+         * Scoped to the title INPUT rather than to the whole section. Plain
+         * `focus-within` also fired for the project picker, the tag picker,
+         * the billable toggle and the Start button, each of which has a
+         * `focus-visible` ring of its own — so tabbing lit up both the control
+         * and the entire bar around it, and the indicator stopped meaning
+         * anything in particular. The input is the one control in here with no
+         * indicator of its own, and it is the only `<input>`: the pickers'
+         * search fields are portalled out of this subtree, and the billable
+         * toggle is a button.
+         */
+        "has-[input:focus-visible]:outline-2",
+        "has-[input:focus-visible]:outline-offset-2",
+        "has-[input:focus-visible]:outline-ring",
         // `border-edge`, not `border-edge-soft`: the bar's own doc comment
         // above says the section IS the primary input's boundary, which
         // makes it an interactive control boundary under WCAG 2.2 SC
         // 1.4.11 (3:1), not a decorative divider (no minimum). Idle only —
         // while running the cold border already carries the signal.
-        isRunning ? "border-enlarger/50" : "border-edge focus-within:border-ring"
+        isRunning ? "border-enlarger/50" : "border-edge"
       )}
     >
       {/*
@@ -649,9 +681,28 @@ export function TimerBar({
           timeZone={timeZone}
           use12Hour={use12Hour}
           weekStartDay={weekStartDay}
+          stagedStartAt={effectiveStagedStartAt}
           onEditTime={actions.editTime}
-          onCreateCompleted={actions.createCompleted}
+          onCreateCompleted={async (input) => {
+            // The title and classification the user already staged travel with
+            // the entry, and are cleared only once the write lands — the same
+            // "clearing optimistically loses them if it failed" reasoning the
+            // start branch of `onToggle` applies. Without this the bar wrote an
+            // untitled, unclassified entry and left the title sitting in the
+            // input as though it had been used.
+            const title = draft.text.trim()
+            await actions.createCompleted({
+              ...input,
+              ...(title === "" ? {} : { title }),
+              ...(staged.projectId !== null ? { projectId: staged.projectId } : {}),
+              tagIds: staged.tagIds,
+              billable: staged.billable,
+            })
+            setDraft({ key: null, text: "", dirty: false })
+            setStaged({ projectId: null, tagIds: [], billable: false })
+          }}
           onStageStart={stageStart}
+          onError={onError}
         />
 
         <button
@@ -793,7 +844,18 @@ export function TimerBar({
         <div className="flex items-center justify-between gap-3 border-t border-edge-soft px-4 py-1.5">
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock aria-hidden="true" className="size-3.5" />
-            Starts {describeStagedStart(effectiveStagedStartAt, timeZone, use12Hour)}
+            {/* The Tabular Rule: every timestamp, at any size. The date and
+                the "(3 days ago)" are part of the same stamp, so the whole
+                phrase is set in it rather than only the digits. */}
+            <span className="tabular">
+              Starts{" "}
+              {describeStagedStart(
+                effectiveStagedStartAt,
+                timeZone,
+                use12Hour,
+                Date.now()
+              )}
+            </span>
           </span>
           <button
             type="button"
