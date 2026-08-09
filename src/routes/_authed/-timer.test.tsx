@@ -244,6 +244,8 @@ describe("Timer — filtering to nothing", () => {
 
     expect(screen.queryByTestId("entry-log")).toBeNull()
     expect(screen.queryByText("Nothing tracked yet.")).toBeNull()
+    // …and it is not silent: the skeleton is the only thing on screen here.
+    expect(screen.getByRole("status").textContent).toBe("Loading entries…")
   })
 
   it("distinguishes 'no matches yet' from 'no matches' by whether pages remain", () => {

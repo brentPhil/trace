@@ -111,17 +111,44 @@ describe("DayList empty state", () => {
 })
 
 describe("LogSkeleton", () => {
-  it("is distinct from the empty state — it never contains the onboarding sentence", () => {
-    // This is the property the fix actually depends on: whatever `status ===
-    // "LoadingFirstPage"` renders instead of the log must be textually
-    // impossible to mistake for "the account is empty".
+  /*
+   * The two tests that used to sit here could not fail. One asserted that
+   * `LogSkeleton` does not contain "Nothing tracked yet." — it renders only
+   * `<Skeleton>` divs, so that is true by construction and stays true if the
+   * component is deleted. The other asserted that SOME descendant carries
+   * `aria-hidden="true"`, which any descendant satisfies. These assert the
+   * three properties the component actually has to have.
+   */
+
+  it("says out loud that something is loading", () => {
+    // The whole thing used to be `aria-hidden`, and it is the ONLY content on
+    // screen during the first page load. A screen-reader user got silence
+    // where a sighted user gets shimmering bars.
     render(<LogSkeleton />)
-    expect(screen.queryByText("Nothing tracked yet.")).toBeNull()
-    expect(screen.queryByText(/Nothing here/)).toBeNull()
+    expect(screen.getByRole("status").textContent).toBe("Loading entries…")
   })
 
-  it("is presentational only, hidden from the accessibility tree", () => {
+  it("hides the decorative bars, and only the bars, from the accessibility tree", () => {
     const { container } = render(<LogSkeleton />)
-    expect(container.querySelector('[aria-hidden="true"]')).toBeTruthy()
+    const bars = container.querySelectorAll('[data-slot="skeleton"]')
+    expect(bars.length).toBeGreaterThan(0)
+    for (const bar of bars) expect(bar.closest('[aria-hidden="true"]')).not.toBeNull()
+    // …and the announcement is NOT inside that hidden subtree, or it would be
+    // just as silent as the bars.
+    expect(screen.getByRole("status").closest('[aria-hidden="true"]')).toBeNull()
+  })
+
+  it("draws bars that are visible on the ground, and not pill-shaped", () => {
+    // `bg-muted` resolves to `--surface`, which is 1.09:1 against the log's
+    // ground — invisible, and halved again at the trough of `animate-pulse`.
+    // `rounded-2xl` on an `h-4` bar is a full pill, the "rounded-everything"
+    // look DESIGN.md rejects by name. Both are properties of the shared
+    // primitive, so this is where they get pinned.
+    const { container } = render(<LogSkeleton />)
+    for (const bar of container.querySelectorAll('[data-slot="skeleton"]')) {
+      expect(bar.className).toContain("bg-skeleton")
+      expect(bar.className).not.toContain("bg-muted")
+      expect(bar.className).not.toContain("rounded-2xl")
+    }
   })
 })

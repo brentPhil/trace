@@ -181,33 +181,44 @@ function EmptyLog() {
  * empty state has to mean "empty"; while the answer isn't known yet, this is
  * what renders instead. Two day-shaped blocks, not one: a single skeleton
  * row reads as "there is one entry", which is its own false claim.
+ *
+ * The bars are `aria-hidden`: they are shapes standing in for content that
+ * does not exist yet, and reading them out is worse than silence. But this is
+ * the ONLY thing on screen for the whole first page load, so hiding all of it
+ * left a screen-reader user with nothing at all where a sighted user gets a
+ * shimmer. The live status beside them is the actual announcement.
  */
 export function LogSkeleton() {
   return (
-    <div aria-hidden="true" className="flex flex-col">
-      {[0, 1].map((group) => (
-        <div key={group} className="flex flex-col">
-          <div className="border-b border-edge-soft py-2">
-            {/* Same `max-w-log px-4` as the header it stands in for, so the
-                page does not shift sideways when the real rows arrive. */}
-            <div className="flex w-full max-w-log items-baseline justify-between gap-3 px-4">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-4 w-14" />
+    <>
+      <span role="status" className="sr-only">
+        Loading entries…
+      </span>
+      <div aria-hidden="true" className="flex flex-col">
+        {[0, 1].map((group) => (
+          <div key={group} className="flex flex-col">
+            <div className="border-b border-edge-soft py-2">
+              {/* Same `max-w-log px-4` as the header it stands in for, so the
+                  page does not shift sideways when the real rows arrive. */}
+              <div className="flex w-full max-w-log items-baseline justify-between gap-3 px-4">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-4 w-14" />
+              </div>
+            </div>
+            <div className="flex flex-col">
+              {[0, 1, 2].map((row) => (
+                <div key={row} className="border-b border-edge-soft">
+                  <div className="flex h-[50px] w-full max-w-log items-center gap-3 px-4">
+                    <Skeleton className="h-4 flex-1 max-w-64" />
+                    <Skeleton className="h-4 w-16 shrink-0" />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-          <div className="flex flex-col">
-            {[0, 1, 2].map((row) => (
-              <div key={row} className="border-b border-edge-soft">
-                <div className="flex h-[50px] w-full max-w-log items-center gap-3 px-4">
-                  <Skeleton className="h-4 flex-1 max-w-64" />
-                  <Skeleton className="h-4 w-16 shrink-0" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   )
 }
 
