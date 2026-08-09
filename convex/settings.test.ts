@@ -269,4 +269,29 @@ describe("update", () => {
       expect(settings.weekStartDay).toBe(day)
     }
   })
+
+  it("defaults currency to USD and lets it be changed", async () => {
+    const t = setup()
+    // A row that has never set a currency reads back the default rather than
+    // `undefined` — the additive-column fallback in `getImpl`.
+    const beforeAnyRow = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(beforeAnyRow.currency).toBe("USD")
+
+    await t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "SGD" })
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.currency).toBe("SGD")
+  })
+
+  it("refuses a currency the runtime does not recognise, leaving the stored one untouched", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "SGD" })
+
+    await expectCode(
+      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "NOTREAL" }),
+      "INVALID_CURRENCY"
+    )
+
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.currency).toBe("SGD")
+  })
 })

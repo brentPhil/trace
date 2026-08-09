@@ -171,6 +171,13 @@ export default defineSchema({
     runawayThresholdMs: v.number(),
     /** Opt-out for the tab-title clock, which a screen reader announces. */
     tabTitleClock: v.boolean(),
+    /** ISO 4217, e.g. "USD". Optional and additive, unlike the columns above:
+     *  a row written before this field existed has no opinion, and `get`
+     *  falls back to `SETTINGS_DEFAULTS.currency` rather than this needing a
+     *  backfill migration. Governs how `projects.hourlyRateCents` and the
+     *  billable amount on /reports are displayed — never assume `$`, a
+     *  freelancer's stored timezone says nothing about their currency. */
+    currency: v.optional(v.string()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 })

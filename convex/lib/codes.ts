@@ -40,6 +40,8 @@ export type TraceErrorCode =
    *  branching on the code would send someone to fix their timezone over a
    *  number that has nothing to do with one. */
   | "INVALID_WEEK_START"
+  /** A currency code the runtime's formatter cannot resolve. */
+  | "INVALID_CURRENCY"
   /** More than one running entry existed. Should be impossible; reported rather
    *  than swallowed, because the recovery path stops all of them and the user
    *  deserves to know their data was repaired. */

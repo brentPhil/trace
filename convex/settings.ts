@@ -3,6 +3,7 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { requireUserId } from "./auth"
 import { traceError } from "./errors"
 import { isValidTimeZone } from "./lib/day"
+import { isValidCurrency } from "./lib/money"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
 /**
@@ -22,6 +23,13 @@ export type Settings = {
   timeFormat: "12" | "24"
   runawayThresholdMs: number
   tabTitleClock: boolean
+  /** ISO 4217. Governs the symbol, placement and decimal count everywhere a
+   *  rate or a billable amount is shown — see convex/lib/money.ts. USD by
+   *  default because that is the actual default most users will want, not
+   *  because it is safe to assume: it is surfaced in /settings precisely so a
+   *  user whose currency is not USD (e.g. because their timezone is
+   *  `Asia/Singapore`) can say so. */
+  currency: string
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -31,6 +39,7 @@ export const SETTINGS_DEFAULTS: Settings = {
   timeFormat: "24",
   runawayThresholdMs: 8 * 60 * 60 * 1000,
   tabTitleClock: true,
+  currency: "USD",
 }
 
 async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
@@ -47,6 +56,7 @@ const settingsReturns = v.object({
   timeFormat: v.union(v.literal("12"), v.literal("24")),
   runawayThresholdMs: v.number(),
   tabTitleClock: v.boolean(),
+  currency: v.string(),
 })
 
 async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
@@ -59,6 +69,10 @@ async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
     timeFormat: row.timeFormat,
     runawayThresholdMs: row.runawayThresholdMs,
     tabTitleClock: row.tabTitleClock,
+    // `?? SETTINGS_DEFAULTS.currency`, not `row.currency`: a row written
+    // before this column existed has no opinion, and that is a valid, common
+    // state rather than one worth a backfill migration.
+    currency: row.currency ?? SETTINGS_DEFAULTS.currency,
   }
 }
 
@@ -135,6 +149,7 @@ const updateArgs = {
   timeFormat: v.optional(v.union(v.literal("12"), v.literal("24"))),
   runawayThresholdMs: v.optional(v.number()),
   tabTitleClock: v.optional(v.boolean()),
+  currency: v.optional(v.string()),
 }
 
 type UpdateArgs = {
@@ -144,6 +159,7 @@ type UpdateArgs = {
   timeFormat?: "12" | "24"
   runawayThresholdMs?: number
   tabTitleClock?: boolean
+  currency?: string
 }
 
 async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
@@ -157,6 +173,9 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
       args.weekStartDay > 6)
   ) {
     traceError("INVALID_WEEK_START", "Week start day must be 0-6.")
+  }
+  if (args.currency !== undefined && !isValidCurrency(args.currency)) {
+    traceError("INVALID_CURRENCY", `"${args.currency}" is not a currency I know.`)
   }
 
   const row = await readSettings(ctx, userId)
