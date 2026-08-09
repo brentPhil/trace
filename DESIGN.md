@@ -73,9 +73,23 @@ A warm graphite room with two signal colours and nothing else.
   Reserving it is what makes a running timer findable in half a second.
 
 ### Secondary
-- **Brass** (`oklch(0.76 0.10 85)`): Billable. Totals that will appear on an
-  invoice, billable-marked entries, currency. Warm and metallic — a ledger
-  tone, deliberately not the same family as anything that indicates activity.
+- **Brass** (`oklch(0.76 0.10 85)`): Money. A currency amount, and the mark
+  that says a piece of work is billable. Warm and metallic — a ledger tone,
+  deliberately not the same family as anything that indicates activity.
+
+  **A brass figure is a currency amount.** A billable DURATION is not money —
+  it is time that will become money — and it renders like every other duration,
+  in Ink. "8h 12m" in brass reads as an amount, which is the one thing it is
+  not, and the misreading is worst exactly where it matters: a range with
+  billable hours on an unpriced project. /reports says
+  `8h 12m billable ($499.20)` with the hours in Ink and only the parenthesised
+  figure in brass; `TotalsRow` on /timer follows it.
+
+  The billable MARK keeps brass, because a mark is not a figure and nobody
+  reads a glyph as an amount: the `$` on an entry row, the billable toggle in
+  the classifier pickers, the Billable filter chip, the billable-by-default
+  checkbox on /projects. Each of those is also labelled or shaped, so the
+  meaning still survives without colour.
 
 ### Tertiary
 - **Alarm** (`oklch(0.68 0.17 25)`): Destructive and error only. Deleting an

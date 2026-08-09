@@ -35,9 +35,19 @@ export function TotalsRow({
       <Total label="Today" value={todayMs} display={display} />
       <Total label="This week" value={weekMs} display={display} />
       {billableMs > 0 ? (
-        // Brass is money — The Two Temperatures Rule. The word "billable"
-        // carries it too, so the meaning survives without colour.
-        <Total label="Billable" value={billableMs} display={display} tone="brass" />
+        /*
+         * NOT brass. The Two Temperatures Rule reserves brass for MONEY, and
+         * this is a duration — time that will become money is not money, and
+         * "8h 0m" in brass reads as an amount. The word "Billable" carries the
+         * meaning on its own, which is what the rule asks colour never to do
+         * alone anyway.
+         *
+         * /reports renders this same figure in `text-foreground` and puts
+         * brass only on the currency amount beside it. Until this line changed,
+         * the product asserted both readings of its own rule on two screens a
+         * click apart.
+         */
+        <Total label="Billable" value={billableMs} display={display} />
       ) : null}
     </div>
   )
@@ -47,12 +57,10 @@ function Total({
   label,
   value,
   display,
-  tone,
 }: {
   label: string
   value: number
   display: DurationDisplay
-  tone?: "brass"
 }) {
   return (
     <span className="flex items-baseline gap-2">
@@ -65,10 +73,7 @@ function Total({
         // of the subtree, essentially every load. `EntryDuration` already
         // carries this for the same reason; the aggregate needs it too.
         suppressHydrationWarning
-        className={cn(
-          "font-medium tabular",
-          tone === "brass" ? "text-brass" : "text-foreground"
-        )}
+        className="font-medium tabular text-foreground"
       >
         {formatTotal(value, display)}
       </span>
