@@ -61,11 +61,13 @@ export function NoteSheet({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const toasts = Toast.useToastManager()
 
-  /** In-memory backstop, keyed by entry id. Never cleared on a failed or
-   * in-flight save — only ever overwritten by a newer draft or dropped once a
-   * dismissal had nothing to save. Lost on page reload, same as any other
-   * unsynced client state; the save kicked off by `handleDismiss` is what
-   * makes the note durable, this is what makes reopening feel instant. */
+  /** In-memory backstop, keyed by entry id. Held only while the user's text is
+   * the ONLY copy: it is written when a dismissal starts a save, and dropped
+   * the moment that save succeeds (or a dismissal had nothing to save). A
+   * failed or still-in-flight save keeps it, which is the whole point. Lost on
+   * page reload, same as any other unsynced client state; the save kicked off
+   * by `handleDismiss` is what makes the note durable, this is what makes
+   * reopening feel instant. */
   const draftsRef = useRef<Map<string, string>>(new Map())
 
   /*
@@ -148,6 +150,13 @@ export function NoteSheet({
         const label = title === "" ? "entry" : `“${title}”`
         void onSave(entry._id, draft)
           .then(() => {
+            // The server now holds this text, so the backstop has done its
+            // job. Kept, it would outrank `entry.note` in the seeding effect
+            // for the rest of this mount — and the NEXT change to that note
+            // from anywhere else would be invisible on reopen, then written
+            // back over by the next dismissal. The failed path below
+            // deliberately keeps it: there, the draft is the only copy.
+            draftsRef.current.delete(entry._id)
             toasts.add({
               title: `Saved note for ${label}`,
               timeout: UNDO_MS,

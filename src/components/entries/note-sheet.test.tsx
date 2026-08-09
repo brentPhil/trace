@@ -96,6 +96,36 @@ describe("dismissing a note with unsaved text", () => {
     expect(onSave).toHaveBeenCalledWith("e1", "wrote the release notes")
   })
 
+  /*
+   * The third dismissal path, and the only one that was untested — it rested
+   * entirely on the claim that Base UI funnels every reason through
+   * `Dialog.Root`'s `onOpenChange`. That claim is the most likely thing in this
+   * file to stop being true on an upgrade, so it is worth a real click rather
+   * than a comment.
+   */
+  it("saves the typed draft when the backdrop is clicked", async () => {
+    const onSave = vi.fn(async () => {})
+    render(<Harness entry={makeEntry()} onSave={onSave} />)
+
+    fireEvent.change(textarea(), { target: { value: "shipped the migration" } })
+
+    // Base UI's `Dialog.Backdrop`, rendered before the popup inside the same
+    // portal. Asserted to be a different element from the popup, so a future
+    // DOM change that made this select the popup itself would fail loudly
+    // rather than quietly turn this into a click on the dialog's own surface.
+    const backdrop = document.querySelector("[data-open]")
+    expect(backdrop).toBeTruthy()
+    expect(backdrop).not.toBe(screen.getByRole("dialog"))
+    await act(async () => {
+      fireEvent.pointerDown(backdrop!, { button: 0, pointerType: "mouse" })
+      fireEvent.mouseDown(backdrop!, { button: 0 })
+      fireEvent.mouseUp(backdrop!, { button: 0 })
+      fireEvent.click(backdrop!, { button: 0 })
+    })
+
+    expect(onSave).toHaveBeenCalledWith("e1", "shipped the migration")
+  })
+
   it("reports the save with an Undo, the same vocabulary entry-log.tsx uses", async () => {
     const onSave = vi.fn(async () => {})
     render(<Harness entry={makeEntry({ title: "Refactor" })} onSave={onSave} />)
@@ -135,6 +165,36 @@ describe("dismissing a note with unsaved text", () => {
 
     expect(onSave).not.toHaveBeenCalled()
     expect(screen.queryByRole("button", { name: "Undo" })).toBeNull()
+  })
+
+  /*
+   * The other half of that backstop, and the one that was missing: once the
+   * dismissal's own save has SUCCEEDED, the draft has done its job and must go.
+   *
+   * Left behind, it outranks `entry.note` for the rest of the sheet's mount
+   * (see the seeding effect), so the next change to that note from anywhere —
+   * a second tab, another device, the optimistic rollback this file's comments
+   * cite — is invisible on reopen, and the next Escape writes the stale text
+   * back over it. A silently reverted note, which is the outcome PRODUCT.md
+   * ranks worst.
+   */
+  it("drops the draft once its save lands, so a note changed elsewhere survives a reopen", async () => {
+    const onSave = vi.fn(async () => {})
+    const { rerender } = render(
+      <Harness entry={makeEntry({ note: "old note" })} onSave={onSave} />
+    )
+
+    fireEvent.change(textarea(), { target: { value: "abc" } })
+    await act(async () => {
+      fireEvent.keyDown(textarea(), { key: "Escape" })
+    })
+    expect(onSave).toHaveBeenLastCalledWith("e1", "abc")
+
+    // The note now changes from somewhere this sheet does not control.
+    rerender(<Harness entry={makeEntry({ note: "xyz" })} onSave={onSave} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "reopen" }))
+    expect(textarea().value).toBe("xyz")
   })
 
   it("restores the draft on reopen rather than the stale server note, while the save is still in flight", async () => {
