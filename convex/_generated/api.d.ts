@@ -20,6 +20,7 @@ import type * as lib_day from "../lib/day.js";
 import type * as lib_docs from "../lib/docs.js";
 import type * as lib_duration from "../lib/duration.js";
 import type * as lib_entryTimes from "../lib/entryTimes.js";
+import type * as lib_money from "../lib/money.js";
 import type * as lib_palette from "../lib/palette.js";
 import type * as lib_scan from "../lib/scan.js";
 import type * as lib_timeOfDay from "../lib/timeOfDay.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   "lib/docs": typeof lib_docs;
   "lib/duration": typeof lib_duration;
   "lib/entryTimes": typeof lib_entryTimes;
+  "lib/money": typeof lib_money;
   "lib/palette": typeof lib_palette;
   "lib/scan": typeof lib_scan;
   "lib/timeOfDay": typeof lib_timeOfDay;
