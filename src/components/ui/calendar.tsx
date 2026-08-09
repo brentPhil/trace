@@ -220,6 +220,11 @@ function CalendarDayButton({
       ref={ref}
       type="button"
       onKeyDown={handleKeyDown}
+      // Today is already conveyed by the dot below and by ", today" in the
+      // accessible name, which satisfies never-colour-alone on its own. This
+      // is the conventional programmatic hook for it, and what an assistive
+      // technology's own "today" affordance looks for.
+      aria-current={modifiers.today ? "date" : undefined}
       data-range={
         single
           ? "single"

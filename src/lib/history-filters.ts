@@ -97,6 +97,27 @@ export function periodFilters(
 }
 
 /**
+ * What `matches` and `hasClientSideFilter` accept: EITHER the full Reports
+ * filter set, which always carries its presets, OR Timer's three, which has no
+ * preset UI and therefore no preset field at all.
+ *
+ * A union, not `QuickFilters & { presets?: Array<Preset> }`. The optional form
+ * made "I have presets and forgot to pass them" and "I have no presets"
+ * indistinguishable — both compiled, and one of them silently skipped preset
+ * filtering. Here, a value typed `Filters` cannot arrive with its presets
+ * missing, and a value typed `QuickFilters` cannot have any to lose.
+ */
+export type FilterInput = Filters | QuickFilters
+
+/** Narrows the union above. `Filters` always has an array; `QuickFilters` has
+ * no such field, so there is nothing to default and nothing to forget. */
+function presetsOf(filters: FilterInput): ReadonlyArray<Preset> {
+  return "presets" in filters ? filters.presets : EMPTY_PRESETS
+}
+
+const EMPTY_PRESETS: ReadonlyArray<Preset> = []
+
+/**
  * Whether an entry survives the filters the SERVER could not apply.
  *
  * The date range is an index prefix and is already applied. Everything here is
@@ -106,7 +127,7 @@ export function periodFilters(
  */
 export function matches(
   entry: Doc<"timeEntries">,
-  filters: QuickFilters & { presets?: Array<Preset> },
+  filters: FilterInput,
   projectName: (id: string | undefined) => string
 ): boolean {
   if (filters.projectId !== null) {
@@ -117,7 +138,7 @@ export function matches(
 
   if (filters.billableOnly && !entry.billable) return false
 
-  for (const preset of filters.presets ?? []) {
+  for (const preset of presetsOf(filters)) {
     if (preset === "no-project" && entry.projectId !== undefined) return false
     if (preset === "no-note" && (entry.note ?? "").trim() !== "") return false
     if (preset === "under-a-minute") {
@@ -149,13 +170,11 @@ export function matches(
 }
 
 /** True when a filter is active that the server range query cannot express. */
-export function hasClientSideFilter(
-  filters: QuickFilters & { presets?: Array<Preset> }
-): boolean {
+export function hasClientSideFilter(filters: FilterInput): boolean {
   return (
     filters.projectId !== null ||
     filters.billableOnly ||
-    (filters.presets?.length ?? 0) > 0 ||
+    presetsOf(filters).length > 0 ||
     filters.text.trim() !== ""
   )
 }

@@ -184,6 +184,16 @@ describe("DateRangePicker calendar", () => {
   })
 })
 
+describe("DateRangePicker today", () => {
+  it("marks today with aria-current as well as the dot and the name", () => {
+    open({ from: "2026-08-01", to: "2026-08-01", today: "2026-08-06" })
+
+    expect(dayButton(6)).toHaveAttribute("aria-current", "date")
+    // …and nothing else claims to be today.
+    expect(document.querySelectorAll('[data-range][aria-current="date"]')).toHaveLength(1)
+  })
+})
+
 describe("DateRangePicker popover close", () => {
   /*
    * `forceClosePopover` is uncancellable: re-open inside its 200ms window and
