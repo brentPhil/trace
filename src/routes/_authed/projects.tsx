@@ -20,7 +20,8 @@ export const Route = createFileRoute("/_authed/projects")({
   component: Projects,
 })
 
-function Projects() {
+/** Exported for -projects.test.tsx, the same way reports.tsx exports `Reports`. */
+export function Projects() {
   const { data: projects } = useSuspenseQuery(convexQuery(api.projects.list, {}))
   const { data: tags } = useSuspenseQuery(convexQuery(api.tags.list, {}))
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
