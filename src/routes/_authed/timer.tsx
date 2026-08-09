@@ -126,6 +126,15 @@ export function Timer() {
     [filtered, settings.timezone, nowMs]
   )
 
+  /*
+   * Rows, not groups. `groupByDay` keeps a running entry out of `entries` but
+   * still opens a day for it (its elapsed time belongs in that day's total),
+   * so a group count answers "how many days are on screen", not "how many
+   * entries matched" — and those differ by exactly the entry the log
+   * deliberately never draws.
+   */
+  const rowCount = groups.reduce((n, group) => n + group.entries.length, 0)
+
   const totals = periodTotals(weekEntries, settings.timezone, today, nowMs)
 
   return (
@@ -207,7 +216,7 @@ export function Timer() {
         */}
         <FilteredLogStatus
           filtering={filtering}
-          hasResults={groups.length > 0}
+          matchCount={rowCount}
           status={status}
           onLoadMore={() => loadMore(PAGE_SIZE)}
         />

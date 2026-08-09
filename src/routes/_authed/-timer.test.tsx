@@ -260,4 +260,22 @@ describe("Timer — filtering to nothing", () => {
     expect(screen.getByText("No matches in the entries loaded so far.")).toBeTruthy()
     expect(screen.queryByText("No entries match these filters.")).toBeNull()
   })
+
+  it("announces the match count once the log is exhausted", () => {
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [
+        makeEntry({ _id: "a" as unknown as Id<"timeEntries">, title: "Client call" }),
+        makeEntry({ _id: "b" as unknown as Id<"timeEntries">, title: "Client email" }),
+        makeEntry({ _id: "c" as unknown as Id<"timeEntries">, title: "Invoicing" }),
+      ],
+      isDone: true,
+    })
+    renderTimer()
+
+    fireEvent.change(search(), { target: { value: "client" } })
+
+    // The live region is the same element it was before the keystroke — see
+    // filtered-log-status.test.tsx for why that is the whole point.
+    expect(screen.getByText("2 entries match these filters.")).toBeTruthy()
+  })
 })
