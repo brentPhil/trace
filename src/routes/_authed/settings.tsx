@@ -146,6 +146,16 @@ function Settings() {
         </Section>
 
         <Section
+          title="Currency"
+          hint="Formats every rate and billable amount — on /projects and /reports — with this currency's own symbol, placement and decimal count, rather than assuming a symbol that is wrong for you."
+        >
+          <CurrencyField
+            value={settings.currency}
+            onChange={(currency) => save({ currency })}
+          />
+        </Section>
+
+        <Section
           title="Tab title"
           hint="Announced by screen readers whenever it changes, which is why it can be switched off. It updates once a minute rather than once a second for the same reason."
         >
@@ -211,6 +221,44 @@ function TimezoneField({
       {options.map((zone) => (
         <option key={zone} value={zone}>
           {zone}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+/**
+ * Same idea as `TimezoneField`: the list comes from the runtime's own
+ * formatter rather than a bundled ISO 4217 table, so a code offered here can
+ * never be one `formatMoney` then fails to format.
+ */
+function CurrencyField({
+  value,
+  onChange,
+}: {
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [codes] = useState<Array<string>>(() => {
+    try {
+      return Intl.supportedValuesOf("currency")
+    } catch {
+      return [value, "USD"]
+    }
+  })
+
+  const options = codes.includes(value) ? codes : [value, ...codes]
+
+  return (
+    <select
+      aria-label="Currency"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className={cn(fieldClass, "max-w-full")}
+    >
+      {options.map((code) => (
+        <option key={code} value={code}>
+          {code}
         </option>
       ))}
     </select>

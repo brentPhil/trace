@@ -16,6 +16,7 @@ import {
   rangeOf,
 } from "@/lib/history-filters"
 import { dayOf } from "@shared/day"
+import { formatMoney } from "@shared/money"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
 import { api } from "../../../convex/_generated/api"
@@ -45,7 +46,14 @@ export const Route = createFileRoute("/_authed/reports")({
 })
 
 /** What the sentence below shows before any real summary has ever arrived. */
-const EMPTY_SUMMARY = { totalMs: 0, billableMs: 0, count: 0, runningCount: 0, truncated: false }
+const EMPTY_SUMMARY = {
+  totalMs: 0,
+  billableMs: 0,
+  count: 0,
+  runningCount: 0,
+  truncated: false,
+  billableCents: 0,
+}
 
 // A dimmed-but-still-legible affordance for "this is the last thing we knew,
 // not the answer to the question just asked" — never colour alone (DESIGN.md),
@@ -252,10 +260,30 @@ export function Reports() {
               {shownSummary.billableMs > 0 ? (
                 <>
                   , of which{" "}
-                  <strong className="font-medium tabular text-brass">
+                  {/*
+                    NOT `text-brass` — the Two Temperatures Rule reserves brass
+                    for money, and this is a duration. `text-foreground`
+                    matches the total above it; the strong/tabular weight is
+                    what marks it as a figure, not the colour.
+                  */}
+                  <strong className="font-medium tabular text-foreground">
                     {formatTotal(shownSummary.billableMs, settings.durationDisplay)}
                   </strong>{" "}
-                  billable
+                  billable (
+                  {/*
+                    THE one brass use in the product: money, and nothing else.
+                    Rounding rule is stated once, in `entries.rangeSummary` —
+                    every rated, billable entry's exact fractional-cent value
+                    is summed first and the total rounded to the nearest cent
+                    exactly once, so this figure is reproducible by hand from
+                    the entries below. A project with no rate contributes $0,
+                    silently — there is no per-project breakdown here to say
+                    which project that was; /projects is where a rate gets set.
+                  */}
+                  <strong className="font-medium tabular text-brass">
+                    {formatMoney(shownSummary.billableCents, settings.currency)}
+                  </strong>
+                  )
                 </>
               ) : null}
               .
@@ -274,7 +302,9 @@ export function Reports() {
               {shownSummary.truncated ? (
                 <span className="text-alarm">
                   {" "}
-                  This period is too large to total exactly — narrow the dates.
+                  This period is too large to total exactly — the time and the
+                  billable amount above are both a floor, not the real total.
+                  Narrow the dates.
                 </span>
               ) : null}
               {/*

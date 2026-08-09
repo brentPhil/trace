@@ -129,6 +129,7 @@ const SETTINGS = {
   timeFormat: "24" as const,
   runawayThresholdMs: 8 * 60 * 60 * 1000,
   tabTitleClock: false,
+  currency: "USD",
 }
 
 function makeEntry(overrides: Partial<Doc<"timeEntries">>): Doc<"timeEntries"> {
@@ -185,6 +186,7 @@ type Summary = {
   count: number
   runningCount: number
   truncated: boolean
+  billableCents: number
 }
 
 /**
@@ -289,6 +291,7 @@ describe("Reports — changing the range", () => {
         count: 1,
         runningCount: 0,
         truncated: false,
+        billableCents: 0,
       })
     })
 
@@ -313,6 +316,7 @@ describe("Reports — changing the range", () => {
       count: 1,
       runningCount: 0,
       truncated: false,
+      billableCents: 0,
     })
 
     await waitFor(() => expect(screen.getByTestId("entry-beta")).toBeTruthy())
@@ -339,6 +343,7 @@ describe("Reports — changing the range", () => {
         count: 2,
         runningCount: 0,
         truncated: false,
+        billableCents: 0,
       })
     })
 
@@ -361,11 +366,88 @@ describe("Reports — changing the range", () => {
       count: 5,
       runningCount: 0,
       truncated: false,
+      billableCents: 0,
     })
 
     await waitFor(() => expect(screen.getByText(/across 5 entries/)).toBeTruthy())
     expect(document.querySelector('[aria-busy="true"]')).toBeNull()
     expect(screen.queryByText(/Updating…/)).toBeNull()
+
+    dateSpy.mockRestore()
+  })
+})
+
+describe("Reports — the billable amount", () => {
+  it("shows an amount for billable time, formatted in the user's currency", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, range), {
+        totalMs: 7_200_000,
+        billableMs: 3_600_000,
+        count: 2,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 6_100, // $61.00 — the figure a rated project earned
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText(/across 2 entries/)).toBeTruthy())
+    expect(screen.getByText(/\$61\.00/)).toBeTruthy()
+
+    dateSpy.mockRestore()
+  })
+
+  it("does not show a billable amount when nothing is billable", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, range), {
+        totalMs: 3_600_000,
+        billableMs: 0,
+        count: 1,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 0,
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText(/across 1 entry\b/)).toBeTruthy())
+    expect(screen.queryByText(/\$/)).toBeNull()
+
+    dateSpy.mockRestore()
+  })
+
+  it("says the billable amount is also a floor when the range is truncated", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      queryClient.setQueryData(convexKey(api.entries.rangeSummary, range), {
+        totalMs: 7_200_000,
+        billableMs: 3_600_000,
+        count: 2,
+        runningCount: 0,
+        truncated: true,
+        billableCents: 6_100,
+      })
+    })
+
+    await waitFor(() => expect(screen.getByText(/\$61\.00/)).toBeTruthy())
+    // The understated-amount-presented-as-exact failure this exists to
+    // prevent: the warning has to name the amount, not just the time.
+    expect(screen.getByText(/billable amount above are both a floor/)).toBeTruthy()
 
     dateSpy.mockRestore()
   })

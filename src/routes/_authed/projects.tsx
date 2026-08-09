@@ -8,10 +8,15 @@ import { Button } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { errorMessage } from "@/lib/error-message"
+import { formatRate } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
 import { PROJECT_COLORS } from "@shared/palette"
+import { parseMoney } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 import type { Doc } from "../../../convex/_generated/dataModel"
+
+/** Shown under the rate field so a rejection names the input that would work. */
+const RATE_HELP = "Try 10, 10.50, or $10 — or leave it blank to clear the rate."
 
 export const Route = createFileRoute("/_authed/projects")({
   head: () => ({ meta: [{ title: "Projects — Trace" }] }),
@@ -21,6 +26,7 @@ export const Route = createFileRoute("/_authed/projects")({
 function Projects() {
   const { data: projects } = useSuspenseQuery(convexQuery(api.projects.list, {}))
   const { data: tags } = useSuspenseQuery(convexQuery(api.tags.list, {}))
+  const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
 
   const live = projects.filter((p) => !p.archived)
   const archived = projects.filter((p) => p.archived)
@@ -38,7 +44,7 @@ function Projects() {
         <section className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-3">
             <h1 className="text-sm font-semibold">Projects</h1>
-            <NewProject />
+            <NewProject currency={settings.currency} />
           </div>
           {live.length === 0 ? (
             <Empty>
@@ -48,7 +54,7 @@ function Projects() {
           ) : (
             <ul className="flex flex-col rounded-md border border-edge-soft">
               {live.map((project) => (
-                <ProjectRow key={project._id} project={project} />
+                <ProjectRow key={project._id} project={project} currency={settings.currency} />
               ))}
             </ul>
           )}
@@ -66,7 +72,7 @@ function Projects() {
             </div>
             <ul className="flex flex-col rounded-md border border-edge-soft">
               {archived.map((project) => (
-                <ProjectRow key={project._id} project={project} />
+                <ProjectRow key={project._id} project={project} currency={settings.currency} />
               ))}
             </ul>
           </section>
@@ -99,7 +105,13 @@ function Projects() {
 
 // ---------------------------------------------------------------------------
 
-function ProjectRow({ project }: { project: Doc<"projects"> }) {
+function ProjectRow({
+  project,
+  currency,
+}: {
+  project: Doc<"projects">
+  currency: string
+}) {
   const { updateProject, setArchived, removeProject } = useClassifierMutations()
   const toasts = Toast.useToastManager()
 
@@ -160,6 +172,44 @@ function ProjectRow({ project }: { project: Doc<"projects"> }) {
         <span className="hidden sm:inline">Billable by default</span>
         <span className="sm:hidden">$</span>
       </label>
+
+      {/*
+        Same InlineEdit affordance as the name above — click to edit, Enter or
+        blur to commit — not a separate modal or a different control for this
+        one field. Seeded with the bare number (no currency symbol) so the
+        input round-trips through `parseMoney` cleanly; the DISPLAY is where
+        the currency's own symbol and placement (via `formatMoney`) show up.
+      */}
+      <InlineEdit<number | null>
+        display={
+          <span
+            className={cn(
+              "tabular",
+              project.hourlyRateCents === undefined && "italic text-muted-foreground"
+            )}
+          >
+            {formatRate(project.hourlyRateCents, currency)}
+          </span>
+        }
+        initialInput={
+          project.hourlyRateCents === undefined
+            ? ""
+            : (project.hourlyRateCents / 100).toFixed(2)
+        }
+        ariaLabel={`Hourly rate for ${project.name}`}
+        placeholder="No rate"
+        className="shrink-0 px-1 py-0.5 text-xs text-muted-foreground"
+        inputClassName="w-20 text-xs tabular"
+        parse={(raw) => {
+          const parsed = parseMoney(raw)
+          return parsed.ok
+            ? { ok: true, value: parsed.cents }
+            : { ok: false, message: RATE_HELP }
+        }}
+        onCommit={async (cents) => {
+          await updateProject({ projectId: project._id, hourlyRateCents: cents })
+        }}
+      />
 
       <div className="flex shrink-0 items-center gap-0.5">
         <IconButton
@@ -281,10 +331,11 @@ function ColorPicker({
   )
 }
 
-function NewProject() {
+function NewProject({ currency }: { currency: string }) {
   const { createProject } = useClassifierMutations()
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState("")
+  const [rate, setRate] = useState("")
   const [error, setError] = useState<string | null>(null)
 
   if (!adding) {
@@ -296,17 +347,31 @@ function NewProject() {
     )
   }
 
+  const reset = () => {
+    setAdding(false)
+    setName("")
+    setRate("")
+    setError(null)
+  }
+
   const submit = () => {
     if (name.trim() === "") {
-      setAdding(false)
+      reset()
       return
     }
-    void createProject({ name: name.trim() })
-      .then(() => {
-        setName("")
-        setAdding(false)
-        setError(null)
-      })
+    // A rejected rate keeps the form OPEN with what was typed still in it —
+    // same rule InlineEdit follows elsewhere: a parse failure never silently
+    // discards input or falls back to a guess.
+    const parsedRate = parseMoney(rate)
+    if (!parsedRate.ok) {
+      setError(RATE_HELP)
+      return
+    }
+    void createProject({
+      name: name.trim(),
+      hourlyRateCents: parsedRate.cents ?? undefined,
+    })
+      .then(reset)
       .catch((thrown: unknown) => setError(errorMessage(thrown)))
   }
 
@@ -325,9 +390,7 @@ function NewProject() {
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault()
-            setAdding(false)
-            setName("")
-            setError(null)
+            reset()
           }
         }}
         placeholder="Client or product"
@@ -335,6 +398,24 @@ function NewProject() {
         aria-invalid={error !== null}
         className={cn(
           "w-48 rounded-md border bg-ground px-2 py-1 text-sm",
+          error === null ? "border-edge" : "border-alarm",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        )}
+      />
+      <input
+        value={rate}
+        onChange={(event) => setRate(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault()
+            reset()
+          }
+        }}
+        placeholder={`Rate (${currency}, optional)`}
+        aria-label={`Hourly rate in ${currency}, optional`}
+        aria-invalid={error !== null}
+        className={cn(
+          "w-32 rounded-md border bg-ground px-2 py-1 text-sm tabular",
           error === null ? "border-edge" : "border-alarm",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}

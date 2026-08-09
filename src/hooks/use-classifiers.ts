@@ -48,8 +48,12 @@ export function useClassifierMutations() {
   const removeTagMutation = useLatest(useConvexMutation(api.tags.remove))
 
   const createProject = useCallback(
-    async (input: { name: string; color?: string; billableByDefault?: boolean }) =>
-      await createProjectMutation(input),
+    async (input: {
+      name: string
+      color?: string
+      billableByDefault?: boolean
+      hourlyRateCents?: number
+    }) => await createProjectMutation(input),
     [createProjectMutation]
   )
 
@@ -59,6 +63,8 @@ export function useClassifierMutations() {
       name?: string
       color?: string
       billableByDefault?: boolean
+      // `null`, not just omission, means "clear it" — see projects.update.
+      hourlyRateCents?: number | null
     }) => await updateProjectMutation(input),
     [updateProjectMutation]
   )
