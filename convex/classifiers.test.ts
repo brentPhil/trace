@@ -285,6 +285,41 @@ describe("projects", () => {
     expect(row?.billable).toBe(false)
   })
 
+  it("sets an hourly rate on create and lets update clear it with null", async () => {
+    // The rate is what makes projects.hourlyRateCents mean something instead
+    // of sitting dormant — see entries.rangeSummary's billableCents. `update`
+    // treats `null` (not `undefined`, not omission) as "clear it".
+    const t = setup()
+    const projectId = await project(t, ALICE, "Acme", { hourlyRateCents: 6_100 })
+
+    const created = await t.query(internal.projects.listAs, { userId: ALICE })
+    expect(created[0].hourlyRateCents).toBe(6_100)
+
+    await t.mutation(internal.projects.updateAs, {
+      userId: ALICE,
+      projectId,
+      hourlyRateCents: null,
+    })
+
+    const cleared = await t.query(internal.projects.listAs, { userId: ALICE })
+    expect(cleared[0].hourlyRateCents).toBeUndefined()
+  })
+
+  it("lets update change the rate without touching anything else", async () => {
+    const t = setup()
+    const projectId = await project(t, ALICE, "Acme", { hourlyRateCents: 5_000 })
+
+    await t.mutation(internal.projects.updateAs, {
+      userId: ALICE,
+      projectId,
+      hourlyRateCents: 7_500,
+    })
+
+    const rows = await t.query(internal.projects.listAs, { userId: ALICE })
+    expect(rows[0].hourlyRateCents).toBe(7_500)
+    expect(rows[0].name).toBe("Acme")
+  })
+
   it("renames without touching entries, so history reads the new name", async () => {
     // The property the refusal above buys: entries hold an id, not a copy.
     const t = setup()
