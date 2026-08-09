@@ -975,3 +975,164 @@ describe("rangeSummary — billable money", () => {
     expect(summary.billableCents).toBe(5_000)
   })
 })
+
+/*
+ * `unratedBillableMs` is what stops /reports rendering a confident "$0.00".
+ *
+ * Without it the caller cannot tell "8h billable, worth nothing" from "8h
+ * billable, worth an amount nobody has priced yet" — the two produce identical
+ * `billableMs` and identical `billableCents`, and the second one is a figure
+ * someone puts on an invoice. The partial case is worse than the total one:
+ * three rated projects plus one unrated yields a plausible, understated number
+ * with nothing to mark it as incomplete.
+ */
+describe("rangeSummary — unrated billable time", () => {
+  const T0 = 1_700_000_000_000
+  const range = { fromMs: T0 - 1, toMs: T0 + 10_000 * 60_000 }
+
+  async function entry(
+    t: ReturnType<typeof setup>,
+    projectId: Id<"projects"> | undefined,
+    startedAt: number,
+    durationMs: number | null,
+    billable = true
+  ) {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("timeEntries", {
+        userId: ALICE,
+        clientKey: `unrated-${startedAt}-${Math.random()}`,
+        title: "Work",
+        startedAt,
+        endedAt: durationMs === null ? null : startedAt + durationMs,
+        durationMs,
+        projectId,
+        tagIds: [],
+        billable,
+        source: "web",
+        updatedAt: T0,
+        deletedAt: null,
+      })
+    })
+  }
+
+  const summarise = async (t: ReturnType<typeof setup>) =>
+    await t.query(internal.entries.rangeSummaryAs, { userId: ALICE, ...range })
+
+  it("reports the whole billable span as unrated when nothing is priced", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated Co",
+    })
+    await entry(t, projectId, T0, 8 * HOUR)
+
+    const summary = await summarise(t)
+    // The exact shape the "$0.00" bug wears: real billable time, zero money.
+    expect(summary.billableMs).toBe(8 * HOUR)
+    expect(summary.billableCents).toBe(0)
+    expect(summary.unratedBillableMs).toBe(8 * HOUR)
+  })
+
+  it("counts billable time with no project at all as unrated", async () => {
+    const t = setup()
+    await entry(t, undefined, T0, 3 * HOUR)
+
+    const summary = await summarise(t)
+    expect(summary.billableMs).toBe(3 * HOUR)
+    expect(summary.unratedBillableMs).toBe(3 * HOUR)
+  })
+
+  it("reports only the unpriced part when the range mixes rated and unrated work", async () => {
+    const t = setup()
+    const { projectId: rated } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Rated Co",
+      hourlyRateCents: 5_000,
+    })
+    const { projectId: alsoRated } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Also Rated",
+      hourlyRateCents: 10_000,
+    })
+    const { projectId: unrated } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated Co",
+    })
+    await entry(t, rated, T0, HOUR)
+    await entry(t, alsoRated, T0 + HOUR, HOUR)
+    await entry(t, unrated, T0 + 2 * HOUR, HOUR)
+    await entry(t, undefined, T0 + 3 * HOUR, HOUR)
+
+    const summary = await summarise(t)
+    expect(summary.billableMs).toBe(4 * HOUR)
+    // $50 + $100. Plausible, and two hours short of the truth.
+    expect(summary.billableCents).toBe(15_000)
+    expect(summary.unratedBillableMs).toBe(2 * HOUR)
+  })
+
+  it("is zero when every billable entry has a rate, including an explicit zero rate", async () => {
+    const t = setup()
+    const { projectId: paid } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Paid",
+      hourlyRateCents: 5_000,
+    })
+    // A rate of ZERO is a real, priced decision (pro bono) and is NOT unrated.
+    // This is the distinction `formatRate`'s "No rate set" exists for.
+    const { projectId: proBono } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Pro bono",
+      hourlyRateCents: 0,
+    })
+    await entry(t, paid, T0, HOUR)
+    await entry(t, proBono, T0 + HOUR, HOUR)
+
+    const summary = await summarise(t)
+    expect(summary.billableMs).toBe(2 * HOUR)
+    expect(summary.billableCents).toBe(5_000)
+    expect(summary.unratedBillableMs).toBe(0)
+  })
+
+  it("ignores non-billable time on an unrated project", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated Co",
+    })
+    await entry(t, projectId, T0, HOUR, false)
+
+    const summary = await summarise(t)
+    expect(summary.billableMs).toBe(0)
+    expect(summary.unratedBillableMs).toBe(0)
+  })
+
+  it("excludes a RUNNING billable entry, exactly as billableMs does", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated Co",
+    })
+    await entry(t, projectId, T0, null)
+
+    const summary = await summarise(t)
+    expect(summary.runningCount).toBe(1)
+    expect(summary.billableMs).toBe(0)
+    expect(summary.unratedBillableMs).toBe(0)
+  })
+
+  it("never exceeds billableMs, which is the invariant the caller subtracts on", async () => {
+    const t = setup()
+    const { projectId: rated } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Rated Co",
+      hourlyRateCents: 5_000,
+    })
+    await entry(t, rated, T0, HOUR)
+    await entry(t, undefined, T0 + HOUR, HOUR)
+    await entry(t, undefined, T0 + 2 * HOUR, HOUR, false)
+
+    const summary = await summarise(t)
+    expect(summary.unratedBillableMs).toBeLessThanOrEqual(summary.billableMs)
+    expect(summary.billableMs - summary.unratedBillableMs).toBe(HOUR)
+  })
+})

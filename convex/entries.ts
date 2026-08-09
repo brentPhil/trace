@@ -314,14 +314,46 @@ const summaryReturns = v.object({
    *
    * Zero for a billable entry whose project has no `hourlyRateCents`, or no
    * project at all — a rate nothing set is not a rate of zero, but it is also
-   * not money this total can claim to know. See `rangeSummaryImpl` for the
-   * exact rounding rule this figure follows: it must be reproducible by hand.
+   * not money this total can claim to know. `unratedBillableMs` below is how
+   * much time that was, so a caller can tell "worth nothing" from "worth an
+   * amount nobody has priced". See `rangeSummaryImpl` for the exact rounding
+   * rule this figure follows: it must be reproducible by hand.
+   *
+   * VALUED AT TODAY'S RATE, NOT THE RATE IN FORCE WHEN THE WORK WAS DONE.
+   * There is no per-entry rate snapshot; this reads `projects.hourlyRateCents`
+   * as it stands at query time, so raising a rate today changes what March was
+   * worth on every report that covers March. That is deliberate and is argued
+   * in full at `updateImpl` in convex/projects.ts — the short version is that a
+   * rate is a price the user can type back, so re-pricing is reversible in a
+   * way rewriting the billable flag would not be. The accepted cost is that an
+   * invoice sent before a rate change is no longer reproducible from here.
    *
    * Shares `truncated` with the time above rather than its own flag: both
    * numbers come from the same scanned window of rows, so a truncated time
    * total implies an equally partial money total.
    */
   billableCents: v.number(),
+  /**
+   * How much of `billableMs` the money figure above could not value, because
+   * the entry's project has no `hourlyRateCents` — or the entry has no project
+   * at all.
+   *
+   * A SUBSET of `billableMs`, in the same units, over exactly the same rows
+   * (completed and live; a running entry contributes to neither). So
+   * `billableMs - unratedBillableMs` is the span `billableCents` actually
+   * prices, and `unratedBillableMs === billableMs` with `billableMs > 0` is the
+   * total case: real billable work, no money known.
+   *
+   * A rate of ZERO is priced, not unrated. Pro bono work is an explicit
+   * decision and contributes 0 cents and 0 unrated milliseconds — the same
+   * distinction `formatRate` renders as "No rate set" versus "$0.00/hr".
+   *
+   * This exists because `billableCents: 0` alone is indistinguishable from
+   * "this work earned nothing", and the partial case — some projects rated,
+   * some not — produces a plausible understated figure with nothing to mark it.
+   * The caller is expected to qualify the money whenever this is above zero.
+   */
+  unratedBillableMs: v.number(),
 })
 
 /**
@@ -378,6 +410,18 @@ async function rangeSummaryImpl(
    * 711.1666… cents). Those exact values are SUMMED FIRST, unrounded, and the
    * grand total is rounded to the nearest cent exactly ONCE, at the very end.
    *
+   * The sum is kept in `cents × milliseconds` and divided by 3,600,000 once, at
+   * the end, rather than accumulating fractional cents as it goes. Same rule,
+   * strictly better arithmetic: every term is an integer, so the running total
+   * is EXACT rather than merely close while it stays inside JavaScript's
+   * 9.007e15 exact-integer range — which `MAX_RATE_CENTS` in convex/projects.ts
+   * is chosen to keep a 24h entry inside. There is no measured drift in the old
+   * float version (10,000 one-minute entries at $61/hr summed to
+   * 1016666.6666665188 against an exact 1016666.666…, the same cent); the
+   * residual this removes is an exact half-cent total flipping by one. The
+   * discriminating 305-not-306 test below is unchanged and still passes, which
+   * is the point: this changes the precision, not the rule.
+   *
    * Rounding each entry first and then summing the roundings is a different,
    * and for many small entries LARGER, total from identical data — three
    * one-minute blocks at $61/hr are 101.6666… cents each, which rounds to 102
@@ -392,7 +436,19 @@ async function rangeSummaryImpl(
    * A project with no `hourlyRateCents` — including no project at all —
    * contributes nothing: a rate nobody set is not a rate of zero.
    */
-  let billableCentsExact = 0
+  // In cents × milliseconds. Divided by an hour's worth of milliseconds once,
+  // at the end. See the rounding rule above.
+  let billableCentMs = 0
+  /*
+   * Billable time the loop could not price, because the project has no rate or
+   * there is no project. Tracked HERE rather than reconstructed by the caller,
+   * because the caller has no way to reconstruct it: it would need every
+   * entry's project and every project's rate, which is the whole scan again.
+   *
+   * Zero-rate projects are NOT counted. `hourlyRateCents: 0` is a price
+   * somebody set on purpose.
+   */
+  let unratedBillableMs = 0
   // Cached per project rather than looked up per entry: a range commonly
   // holds many entries against the same handful of clients, and `null` is
   // cached too, distinct from "not yet looked up" (map miss).
@@ -407,23 +463,36 @@ async function rangeSummaryImpl(
     totalMs += row.durationMs
     if (row.billable) {
       billableMs += row.durationMs
+      let rateCents: number | null = null
       if (row.projectId !== undefined) {
-        let rateCents = rateCentsByProject.get(row.projectId)
-        if (rateCents === undefined) {
+        const cached = rateCentsByProject.get(row.projectId)
+        if (cached === undefined) {
           const project = await ctx.db.get(row.projectId)
           rateCents = project?.hourlyRateCents ?? null
           rateCentsByProject.set(row.projectId, rateCents)
+        } else {
+          rateCents = cached
         }
-        if (rateCents !== null) {
-          billableCentsExact += (row.durationMs / 3_600_000) * rateCents
-        }
+      }
+      if (rateCents === null) {
+        unratedBillableMs += row.durationMs
+      } else {
+        billableCentMs += row.durationMs * rateCents
       }
     }
   }
 
-  const billableCents = Math.round(billableCentsExact)
+  const billableCents = Math.round(billableCentMs / 3_600_000)
 
-  return { totalMs, billableMs, count, runningCount, truncated, billableCents }
+  return {
+    totalMs,
+    billableMs,
+    count,
+    runningCount,
+    truncated,
+    billableCents,
+    unratedBillableMs,
+  }
 }
 
 const rangeSummaryArgs = { fromMs: v.number(), toMs: v.number() }
