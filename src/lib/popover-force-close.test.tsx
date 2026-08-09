@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { forceClosePopover } from "@/lib/popover-force-close"
+import { renderHook } from "@testing-library/react"
+import { useForceCloseWhenClosed } from "@/lib/popover-force-close"
 import type { PopoverActionsRef } from "@/lib/popover-force-close"
 
 /*
@@ -8,14 +9,15 @@ import type { PopoverActionsRef } from "@/lib/popover-force-close"
  * synchronous fallback branch and every popover closes immediately in tests,
  * fixed or not — confirmed by running `timer-bar.test.tsx`'s "closes the
  * popover" case against the ORIGINAL, unfixed component: it already passed.
- * The bug that prompted this file is real only in a browser, where Base UI's
- * shared `requestAnimationFrame` scheduler can permanently stall if the tab
- * ever loses paint for a single frame at the wrong moment (verified live via
- * `document.visibilityState`). What IS unit-testable is the guarantee this
- * helper adds on top: given enough time, the popup gets force-closed no
- * matter what Base UI's own animation watcher does.
+ * The bug that prompted this file is real only in a browser, where the popup's
+ * `transition-[opacity,transform] duration-100` never progresses in an
+ * unpainted tab, so the `animation.finished` promises Base UI awaits never
+ * settle. What IS unit-testable is the guarantee this hook adds on top: given
+ * enough time a closed popup gets force-unmounted no matter what Base UI's own
+ * watcher does, and — the half the previous fire-and-forget version got wrong
+ * — a LIVE, re-opened popup never does.
  */
-describe("forceClosePopover", () => {
+describe("useForceCloseWhenClosed", () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -24,15 +26,56 @@ describe("forceClosePopover", () => {
     vi.useRealTimers()
   })
 
-  it("force-unmounts the popover shortly after being called", () => {
+  const makeRef = () => {
     const unmount = vi.fn()
     const ref: PopoverActionsRef = { current: { unmount, close: vi.fn() } }
+    return { ref, unmount }
+  }
 
-    forceClosePopover(ref)
+  it("force-unmounts shortly after the popover closes", () => {
+    const { ref, unmount } = makeRef()
+    const view = renderHook(({ open }) => useForceCloseWhenClosed(open, ref), {
+      initialProps: { open: true },
+    })
+
+    vi.advanceTimersByTime(1_000)
+    expect(unmount).not.toHaveBeenCalled()
+
+    view.rerender({ open: false })
     expect(unmount).not.toHaveBeenCalled()
 
     vi.advanceTimersByTime(200)
     expect(unmount).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not force-unmount a popover that was re-opened inside the window", () => {
+    // The race the fire-and-forget version could not see. `unmount` resolves to
+    // Base UI's `forceUnmount`, which sets `mounted: false` and nulls the
+    // active trigger with NO check on `open` — so firing it against a live
+    // popup replays the entrance transition against nulled refs.
+    const { ref, unmount } = makeRef()
+    const view = renderHook(({ open }) => useForceCloseWhenClosed(open, ref), {
+      initialProps: { open: true },
+    })
+
+    view.rerender({ open: false })
+    vi.advanceTimersByTime(50)
+    view.rerender({ open: true })
+
+    vi.advanceTimersByTime(1_000)
+    expect(unmount).not.toHaveBeenCalled()
+  })
+
+  it("cancels the pending force-close when the component goes away", () => {
+    const { ref, unmount } = makeRef()
+    const view = renderHook(({ open }) => useForceCloseWhenClosed(open, ref), {
+      initialProps: { open: false },
+    })
+
+    view.unmount()
+    vi.advanceTimersByTime(1_000)
+
+    expect(unmount).not.toHaveBeenCalled()
   })
 
   it("does nothing if the popover has already unmounted on its own", () => {
@@ -42,7 +85,7 @@ describe("forceClosePopover", () => {
     const ref: PopoverActionsRef = { current: null }
 
     expect(() => {
-      forceClosePopover(ref)
+      renderHook(() => useForceCloseWhenClosed(false, ref))
       vi.advanceTimersByTime(200)
     }).not.toThrow()
   })
