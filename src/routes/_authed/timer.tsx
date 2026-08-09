@@ -45,7 +45,7 @@ export const Route = createFileRoute("/_authed/timer")({
   },
 })
 
-function Timer() {
+export function Timer() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
 
   // The range is pinned to the current second, not to Date.now() at render, so
@@ -158,28 +158,37 @@ function Timer() {
 
       <div className="flex-1">
         {/*
-          `status === "LoadingFirstPage"` is checked before either empty-state
-          branch below, because `groups` reads as `[]` for the entire first
-          round trip regardless of whether a filter is active — and an empty
-          array used to fall straight into "nothing tracked yet", flashing the
-          onboarding copy at a freelancer whose day is fully logged, for as
-          long as that fetch took.
+          `status === "LoadingFirstPage"` is checked first, because `groups`
+          reads as `[]` for the entire first round trip regardless of whether
+          a filter is active — and an empty array used to fall straight into
+          "nothing tracked yet", flashing the onboarding copy at a freelancer
+          whose day is fully logged, for as long as that fetch took.
 
-          Once loading has actually settled: a filter that matches nothing
-          here does not mean nothing is tracked — EntryLog's own empty state
-          says exactly that, onboarding copy included, and would be a flatly
-          false thing to show underneath an active search. Skip it in favour
-          of FilteredLogStatus's honest "no matches (yet)" below.
+          Everything after that is ONE branch, not two: `EntryLog` is always
+          rendered and only its `empty` slot changes. A filter that matches
+          nothing here does not mean nothing is tracked, so the onboarding
+          copy would be flatly false under an active search — but the answer
+          is to draw nothing inside the log, not to take the log away. See the
+          `empty` prop below for what removing it used to cost.
         */}
         {status === "LoadingFirstPage" ? (
           <LogSkeleton />
-        ) : filtering && groups.length === 0 ? null : (
+        ) : (
           <EntryLog
             groups={groups}
             timeZone={settings.timezone}
             use12Hour={settings.timeFormat === "12"}
             weekStartDay={settings.weekStartDay}
             display={settings.durationDisplay}
+            // `null`, not omitted: draw nothing for zero groups rather than
+            // DayList's onboarding copy. Passing nothing here is what forced
+            // the previous version to swap `EntryLog` for `null` outright
+            // whenever a filter matched nothing — which unmounted `NoteSheet`
+            // with it, and with that every note draft it was holding for a
+            // save still in flight or already failed. One keystroke in the
+            // search box, and the promise note-sheet.tsx makes about exactly
+            // that case was gone.
+            empty={filtering ? null : undefined}
           />
         )}
 

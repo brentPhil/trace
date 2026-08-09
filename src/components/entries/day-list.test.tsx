@@ -56,6 +56,30 @@ describe("DayList empty state", () => {
     expect(screen.queryByText("Nothing tracked yet.")).toBeNull()
   })
 
+  /*
+   * `empty ?? <EmptyLog/>` made "render nothing" inexpressible: `null` is the
+   * obvious way to ask for it and fell straight back to the onboarding copy.
+   * Timer's answer was to stop rendering `EntryLog` at all while a filter
+   * matched nothing — which took `NoteSheet` and every held note draft down
+   * with it on a keystroke. This is the API that lets it keep the log mounted.
+   */
+  it("renders nothing at all when the caller explicitly passes null", () => {
+    const { container } = render(
+      <DayList
+        groups={[]}
+        timeZone="UTC"
+        use12Hour
+        weekStartDay={0}
+        projects={[]}
+        tags={[]}
+        actions={noActions}
+        empty={null}
+      />
+    )
+    expect(screen.queryByText("Nothing tracked yet.")).toBeNull()
+    expect(container.textContent).toBe("")
+  })
+
   it("never shows any empty state — onboarding or custom — once groups arrive", () => {
     const groups = [
       {

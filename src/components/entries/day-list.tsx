@@ -42,10 +42,18 @@ export function DayList({
    * a filter matches nothing, or a date range holds no entries — neither of
    * which is onboarding, so it supplies its own message here instead of
    * inheriting Timer's.
+   *
+   * `null` means "render nothing", and is distinct from omitting the prop.
+   * `empty ?? <EmptyLog/>` made that inexpressible — `null` fell back to the
+   * onboarding copy, so the only way for a caller to draw nothing was to stop
+   * rendering the log entirely. Timer did exactly that, and unmounted
+   * `NoteSheet` and every held note draft along with it.
    */
   empty?: ReactNode
 }) {
-  if (groups.length === 0) return <>{empty ?? <EmptyLog />}</>
+  if (groups.length === 0) {
+    return <>{empty !== undefined ? empty : <EmptyLog />}</>
+  }
 
   return (
     <div className="flex flex-col">

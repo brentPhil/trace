@@ -9,8 +9,10 @@ import { dayOf } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as ConvexReactModuleType from "convex/react"
+import type * as RouterModuleType from "@tanstack/react-router"
 
 type ConvexReactModule = typeof ConvexReactModuleType
+type RouterModule = typeof RouterModuleType
 
 /*
  * The regression this file exists for: changing the date filter used to blank
@@ -37,7 +39,7 @@ type ConvexReactModule = typeof ConvexReactModuleType
  * module would hide a genuine route-definition error behind a test double.
  */
 vi.mock("@tanstack/react-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@tanstack/react-router")>()
+  const actual = await importOriginal<RouterModule>()
   return {
     ...actual,
     Link: ({
@@ -219,7 +221,7 @@ function isHidden(el: Element): boolean {
 function summaryText(): string {
   const paragraph = document.querySelector("p[aria-live]")
   if (paragraph === null) throw new Error("no summary paragraph rendered")
-  return paragraph.textContent ?? ""
+  return paragraph.textContent
 }
 
 type Summary = {
