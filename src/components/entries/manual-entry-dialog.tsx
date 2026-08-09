@@ -3,7 +3,7 @@ import { Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
 import { errorMessage } from "@/lib/error-message"
-import { instantOfDayTime } from "@/lib/format-time"
+import { instantOfDayTime, localMinutesOf } from "@/lib/format-time"
 import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
 import { cn } from "@/lib/utils"
 import type { DayString } from "@shared/day"
@@ -70,7 +70,22 @@ export function ManualEntryDialog({
     if (saving) return
     setError(null)
 
-    const start = parseTimeOfDay(from, 0)
+    /*
+     * The wall clock, not midnight.
+     *
+     * `parseTimeOfDay`'s second argument disambiguates a bare `1`-`11` by
+     * whichever reading is nearer on the clock face, and resolves a bare `12`.
+     * A literal `0` is not "no context" — it is the specific claim that it is
+     * currently midnight, so every bare hour resolved to AM and `12` to
+     * `00:00`. Logging this afternoon's 2-to-4 from the terse form the parser
+     * exists to support produced a 2 AM entry.
+     *
+     * The day this entry is filed under is deliberately NOT the reference. It
+     * carries no time of day, and the rule is about what a person typing right
+     * now most likely means — which is why the parser documents it as the
+     * user's current local time.
+     */
+    const start = parseTimeOfDay(from, localMinutesOf(Date.now(), timeZone))
     if (!start.ok) {
       setError("Start time — try 9:15, 0915, or 2pm.")
       return
