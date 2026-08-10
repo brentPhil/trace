@@ -8,6 +8,9 @@ import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
 import { timeEntryDoc } from "./lib/docs"
 import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
+import { dayOf, isValidTimeZone, localPartsOf } from "./lib/day"
+import { isFilterActive, matchesFilter } from "./lib/entryFilter"
+import type { EntryFilter, Preset } from "./lib/entryFilter"
 import type { EntryTimes, TimeEdit, TimesResult } from "./lib/entryTimes"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
@@ -299,7 +302,13 @@ export const listPageAs = internalQuery({
   handler: async (ctx, { userId, ...args }) => await listPageImpl(ctx, userId, args),
 })
 
-const summaryReturns = v.object({
+/*
+ * Named as a plain object of validators rather than inline in `v.object`, so
+ * `rangeBreakdown` below can declare that it returns THESE fields plus its
+ * groupings — rather than a second hand-copied list that drifts from this one
+ * the first time a field is added to either.
+ */
+const summaryFields = {
   totalMs: v.number(),
   billableMs: v.number(),
   /** COMPLETED entries only — see below. */
@@ -354,7 +363,181 @@ const summaryReturns = v.object({
    * The caller is expected to qualify the money whenever this is above zero.
    */
   unratedBillableMs: v.number(),
-})
+}
+
+const summaryReturns = v.object(summaryFields)
+
+/**
+ * The rows of a range, and whether there were more of them than we looked at.
+ *
+ * Shared by `rangeSummaryImpl` and `rangeBreakdownImpl` so the sentence at the
+ * top of Reports and the charts beside it are reading the same window of the
+ * same table. Two `.take()` calls with two limits is how a total comes to
+ * disagree with the chart drawn directly underneath it.
+ */
+async function scanRange(ctx: QueryCtx, userId: string, fromMs: number, toMs: number) {
+  const rows = await ctx.db
+    .query("timeEntries")
+    .withIndex("by_user_started", (q) =>
+      q.eq("userId", userId).gte("startedAt", fromMs).lt("startedAt", toMs)
+    )
+    .take(SUMMARY_SCAN_LIMIT + 1)
+
+  return {
+    truncated: rows.length > SUMMARY_SCAN_LIMIT,
+    live: rows.slice(0, SUMMARY_SCAN_LIMIT).filter((row) => row.deletedAt === null),
+  }
+}
+
+/**
+ * A running total of one set of entries.
+ *
+ * Exists because the Summary tab needs this same arithmetic once for the whole
+ * range, once per day, and once per project — and a per-bucket copy of the
+ * money rule is a per-bucket chance to get it wrong in a way that only shows up
+ * as a chart whose bars do not add up to the figure above them.
+ */
+type Ledger = {
+  totalMs: number
+  billableMs: number
+  count: number
+  runningCount: number
+  /**
+   * In cents × milliseconds. Divided by an hour's worth of milliseconds ONCE,
+   * by `centsOf`. See the rounding rule on `post` below.
+   */
+  billableCentMs: number
+  unratedBillableMs: number
+}
+
+function emptyLedger(): Ledger {
+  return {
+    totalMs: 0,
+    billableMs: 0,
+    count: 0,
+    runningCount: 0,
+    billableCentMs: 0,
+    unratedBillableMs: 0,
+  }
+}
+
+/*
+ * A RUNNING entry is counted separately and contributes nothing to the total.
+ *
+ * It has no duration yet, and a query cannot supply one: `Date.now()` inside a
+ * Convex query resolves to the transaction timestamp and creates no
+ * subscription to the passage of time, so any elapsed value computed here would
+ * freeze at its first evaluation.
+ *
+ * Silently treating it as 0 was worse than excluding it. The day header beneath
+ * this sentence derives its total on the CLIENT and does include the live
+ * elapsed time, so the two numbers described the same rows and disagreed — with
+ * the smaller one labelled as the exact figure. The caller now has what it needs
+ * to say so out loud.
+ */
+function post(
+  ledger: Ledger,
+  row: Pick<Doc<"timeEntries">, "durationMs" | "billable">,
+  rateCents: number | null
+): void {
+  if (row.durationMs === null) {
+    ledger.runningCount += 1
+    return
+  }
+  ledger.count += 1
+  ledger.totalMs += row.durationMs
+  if (!row.billable) return
+
+  ledger.billableMs += row.durationMs
+  if (rateCents === null) {
+    ledger.unratedBillableMs += row.durationMs
+  } else {
+    ledger.billableCentMs += row.durationMs * rateCents
+  }
+}
+
+/**
+ * What a ledger's billable time is worth, in whole cents.
+ *
+ * THE ROUNDING RULE for `billableCents`, stated once, here, because this is the
+ * only place it is applied.
+ *
+ * Each billable entry's EXACT worth — `durationMs ÷ 3,600,000 × hourlyRateCents`
+ * — is a real number, not a whole cent (a 7-minute block at $61/hr is
+ * 711.1666… cents). Those exact values are SUMMED FIRST, unrounded, and the
+ * grand total is rounded to the nearest cent exactly ONCE, at the very end.
+ *
+ * The sum is kept in `cents × milliseconds` and divided by 3,600,000 once, at
+ * the end, rather than accumulating fractional cents as it goes. Same rule,
+ * strictly better arithmetic: every term is an integer, so the running total
+ * is EXACT rather than merely close while it stays inside JavaScript's
+ * 9.007e15 exact-integer range — which `MAX_RATE_CENTS` in convex/projects.ts
+ * is chosen to keep a 24h entry inside. There is no measured drift in the old
+ * float version (10,000 one-minute entries at $61/hr summed to
+ * 1016666.6666665188 against an exact 1016666.666…, the same cent); the
+ * residual this removes is an exact half-cent total flipping by one. The
+ * discriminating 305-not-306 test below is unchanged and still passes, which
+ * is the point: this changes the precision, not the rule.
+ *
+ * Rounding each entry first and then summing the roundings is a different,
+ * and for many small entries LARGER, total from identical data — three
+ * one-minute blocks at $61/hr are 101.6666… cents each, which rounds to 102
+ * apiece and sums to 306; summed first and rounded once they are exactly
+ * 305. `convex/entries.test.ts` pins 305, not 306. This is exactly the
+ * per-entry-vs-per-subtotal divergence the Tier 2 plan notes for duration
+ * rounding ("twelve 4-minute entries rounded to 15 each is 3h; the 48-minute
+ * total rounded is 48m") — it applies identically to money, and sum-then-
+ * round is the rule a person doing this by hand on a calculator would also
+ * land on: add up the exact amounts, then round the total once.
+ *
+ * A project with no `hourlyRateCents` — including no project at all —
+ * contributes nothing: a rate nobody set is not a rate of zero.
+ */
+function centsOf(ledger: Ledger): number {
+  return Math.round(ledger.billableCentMs / 3_600_000)
+}
+
+/**
+ * Every project the given rows point at, resolved once each.
+ *
+ * Resolved UP FRONT rather than lazily inside the accumulation loop, so that
+ * loop is synchronous — which is what lets `matchesFilter` (a pure predicate,
+ * shared with the client) take a plain `projectName` function instead of
+ * something that has to be awaited.
+ *
+ * Soft-deleted and archived projects are returned like any other. Last year's
+ * entries must still render their project name, and pricing them by today's
+ * rate is the same policy `rangeSummary` documents.
+ */
+async function projectsOf(
+  ctx: QueryCtx,
+  rows: ReadonlyArray<Doc<"timeEntries">>
+): Promise<Map<Id<"projects">, Doc<"projects">>> {
+  const found = new Map<Id<"projects">, Doc<"projects">>()
+  // Distinct ids, not one lookup per row: a fortnight of one client's work is
+  // forty rows naming the same project.
+  for (const id of new Set(rows.map((row) => row.projectId))) {
+    if (id === undefined) continue
+    const project = await ctx.db.get(id)
+    if (project !== null) found.set(id, project)
+  }
+  return found
+}
+
+/**
+ * The rate to price a row at, or `null` when nobody has set one.
+ *
+ * Zero-rate projects are NOT null. `hourlyRateCents: 0` is a price somebody set
+ * on purpose (pro bono), and it is the distinction `unratedBillableMs` exists
+ * to carry.
+ */
+function rateOf(
+  row: Pick<Doc<"timeEntries">, "projectId">,
+  projects: Map<Id<"projects">, Doc<"projects">>
+): number | null {
+  if (row.projectId === undefined) return null
+  return projects.get(row.projectId)?.hourlyRateCents ?? null
+}
 
 /**
  * Exact totals for a whole range, independent of how much of it is paginated
@@ -372,126 +555,20 @@ async function rangeSummaryImpl(
   fromMs: number,
   toMs: number
 ) {
-  const rows = await ctx.db
-    .query("timeEntries")
-    .withIndex("by_user_started", (q) =>
-      q.eq("userId", userId).gte("startedAt", fromMs).lt("startedAt", toMs)
-    )
-    .take(SUMMARY_SCAN_LIMIT + 1)
+  const { truncated, live } = await scanRange(ctx, userId, fromMs, toMs)
+  const projects = await projectsOf(ctx, live)
 
-  const truncated = rows.length > SUMMARY_SCAN_LIMIT
-  const live = rows.slice(0, SUMMARY_SCAN_LIMIT).filter((row) => row.deletedAt === null)
-
-  /*
-   * A RUNNING entry is counted separately and contributes nothing to the total.
-   *
-   * It has no duration yet, and a query cannot supply one: `Date.now()` inside
-   * a Convex query resolves to the transaction timestamp and creates no
-   * subscription to the passage of time, so any elapsed value computed here
-   * would freeze at its first evaluation.
-   *
-   * Silently treating it as 0 was worse than excluding it. The day header
-   * beneath this sentence derives its total on the CLIENT and does include the
-   * live elapsed time, so the two numbers described the same rows and
-   * disagreed — with the smaller one labelled as the exact figure. The caller
-   * now has what it needs to say so out loud.
-   */
-  let totalMs = 0
-  let billableMs = 0
-  let count = 0
-  let runningCount = 0
-
-  /*
-   * THE ROUNDING RULE for `billableCents`, stated once, here, because this is
-   * the only place it is applied.
-   *
-   * Each billable entry's EXACT worth — `durationMs ÷ 3,600,000 × hourlyRateCents`
-   * — is a real number, not a whole cent (a 7-minute block at $61/hr is
-   * 711.1666… cents). Those exact values are SUMMED FIRST, unrounded, and the
-   * grand total is rounded to the nearest cent exactly ONCE, at the very end.
-   *
-   * The sum is kept in `cents × milliseconds` and divided by 3,600,000 once, at
-   * the end, rather than accumulating fractional cents as it goes. Same rule,
-   * strictly better arithmetic: every term is an integer, so the running total
-   * is EXACT rather than merely close while it stays inside JavaScript's
-   * 9.007e15 exact-integer range — which `MAX_RATE_CENTS` in convex/projects.ts
-   * is chosen to keep a 24h entry inside. There is no measured drift in the old
-   * float version (10,000 one-minute entries at $61/hr summed to
-   * 1016666.6666665188 against an exact 1016666.666…, the same cent); the
-   * residual this removes is an exact half-cent total flipping by one. The
-   * discriminating 305-not-306 test below is unchanged and still passes, which
-   * is the point: this changes the precision, not the rule.
-   *
-   * Rounding each entry first and then summing the roundings is a different,
-   * and for many small entries LARGER, total from identical data — three
-   * one-minute blocks at $61/hr are 101.6666… cents each, which rounds to 102
-   * apiece and sums to 306; summed first and rounded once they are exactly
-   * 305. `convex/entries.test.ts` pins 305, not 306. This is exactly the
-   * per-entry-vs-per-subtotal divergence the Tier 2 plan notes for duration
-   * rounding ("twelve 4-minute entries rounded to 15 each is 3h; the 48-minute
-   * total rounded is 48m") — it applies identically to money, and sum-then-
-   * round is the rule a person doing this by hand on a calculator would also
-   * land on: add up the exact amounts, then round the total once.
-   *
-   * A project with no `hourlyRateCents` — including no project at all —
-   * contributes nothing: a rate nobody set is not a rate of zero.
-   */
-  // In cents × milliseconds. Divided by an hour's worth of milliseconds once,
-  // at the end. See the rounding rule above.
-  let billableCentMs = 0
-  /*
-   * Billable time the loop could not price, because the project has no rate or
-   * there is no project. Tracked HERE rather than reconstructed by the caller,
-   * because the caller has no way to reconstruct it: it would need every
-   * entry's project and every project's rate, which is the whole scan again.
-   *
-   * Zero-rate projects are NOT counted. `hourlyRateCents: 0` is a price
-   * somebody set on purpose.
-   */
-  let unratedBillableMs = 0
-  // Cached per project rather than looked up per entry: a range commonly
-  // holds many entries against the same handful of clients, and `null` is
-  // cached too, distinct from "not yet looked up" (map miss).
-  const rateCentsByProject = new Map<Id<"projects">, number | null>()
-
-  for (const row of live) {
-    if (row.durationMs === null) {
-      runningCount += 1
-      continue
-    }
-    count += 1
-    totalMs += row.durationMs
-    if (row.billable) {
-      billableMs += row.durationMs
-      let rateCents: number | null = null
-      if (row.projectId !== undefined) {
-        const cached = rateCentsByProject.get(row.projectId)
-        if (cached === undefined) {
-          const project = await ctx.db.get(row.projectId)
-          rateCents = project?.hourlyRateCents ?? null
-          rateCentsByProject.set(row.projectId, rateCents)
-        } else {
-          rateCents = cached
-        }
-      }
-      if (rateCents === null) {
-        unratedBillableMs += row.durationMs
-      } else {
-        billableCentMs += row.durationMs * rateCents
-      }
-    }
-  }
-
-  const billableCents = Math.round(billableCentMs / 3_600_000)
+  const ledger = emptyLedger()
+  for (const row of live) post(ledger, row, rateOf(row, projects))
 
   return {
-    totalMs,
-    billableMs,
-    count,
-    runningCount,
+    totalMs: ledger.totalMs,
+    billableMs: ledger.billableMs,
+    count: ledger.count,
+    runningCount: ledger.runningCount,
     truncated,
-    billableCents,
-    unratedBillableMs,
+    billableCents: centsOf(ledger),
+    unratedBillableMs: ledger.unratedBillableMs,
   }
 }
 
@@ -509,6 +586,250 @@ export const rangeSummaryAs = internalQuery({
   returns: summaryReturns,
   handler: async (ctx, args) =>
     await rangeSummaryImpl(ctx, args.userId, args.fromMs, args.toMs),
+})
+
+// ---------------------------------------------------------------------------
+// rangeBreakdown — what Reports' Summary tab draws
+// ---------------------------------------------------------------------------
+
+const dayTotal = v.object({
+  day: v.string(),
+  totalMs: v.number(),
+  billableMs: v.number(),
+  billableCents: v.number(),
+  count: v.number(),
+})
+
+const projectTotal = v.object({
+  /** null is the unassigned bucket. What to CALL it is the UI's business. */
+  projectId: v.union(v.id("projects"), v.null()),
+  name: v.string(),
+  color: v.string(),
+  totalMs: v.number(),
+  billableMs: v.number(),
+  billableCents: v.number(),
+  unratedBillableMs: v.number(),
+  count: v.number(),
+})
+
+/*
+ * The summary's fields, spread rather than restated.
+ *
+ * The Summary tab shows the same sentence as the Detailed tab above its charts,
+ * and a hand-copied second list of these fields is how the sentence and the
+ * bars underneath it come to be computed from two different definitions.
+ */
+const breakdownReturns = v.object({
+  ...summaryFields,
+  /**
+   * SPARSE — only days that hold at least one entry, ascending.
+   *
+   * The caller knows the range it asked for and already has `addDays`, so it
+   * can fill the gaps itself; a year-long range would otherwise ship 365 rows
+   * of zeroes to draw the same picture. Filling them is also where the caller
+   * decides what an empty day looks like, which is a design question (see the
+   * Hatch Rule in DESIGN.md), not a storage one.
+   */
+  days: v.array(dayTotal),
+  /** Descending by time, so the caller can draw a ranked bar chart without
+   *  re-sorting and without inventing its own tie-break. */
+  projects: v.array(projectTotal),
+  /**
+   * Twenty-four buckets of tracked milliseconds, indexed by the LOCAL hour an
+   * entry started in.
+   *
+   * Attribution is by start, matching how an entry is attributed to a day (see
+   * `listRangeImpl`): a block from 23:00 to 01:30 lands wholly in hour 23. The
+   * alternative — dividing one piece of work across two buckets — is the same
+   * silent split that rule already rejects, and the question this answers is
+   * "when do I begin work", which the start is the honest answer to.
+   */
+  hours: v.array(v.number()),
+})
+
+const breakdownArgs = {
+  fromMs: v.number(),
+  toMs: v.number(),
+  /**
+   * The zone the days and hours are bucketed in.
+   *
+   * Passed by the caller rather than read from `userSettings` here, so this
+   * query is a pure function of its arguments and the client cannot end up
+   * drawing bars bucketed by one zone beside a log grouped by another — it
+   * sends the same `settings.timezone` that `groupByDay` uses.
+   */
+  timeZone: v.string(),
+  /**
+   * The FilterBar, applied server-side over the whole range.
+   *
+   * The Detailed tab applies these on the client over loaded pages, which is
+   * the right trade there — it is showing rows, and it says out loud when it is
+   * still loading them. A chart cannot say that usefully: half a period's bars
+   * look exactly like a period with less work in it. So the same predicate
+   * (`convex/lib/entryFilter.ts`, shared with the client) runs here, over the
+   * scan that is already happening.
+   */
+  projectId: v.optional(v.union(v.string(), v.null())),
+  billableOnly: v.optional(v.boolean()),
+  text: v.optional(v.string()),
+  presets: v.optional(
+    v.array(
+      v.union(
+        v.literal("no-project"),
+        v.literal("no-note"),
+        v.literal("under-a-minute")
+      )
+    )
+  ),
+}
+
+type BreakdownArgs = {
+  fromMs: number
+  toMs: number
+  timeZone: string
+  projectId?: string | null
+  billableOnly?: boolean
+  text?: string
+  presets?: Array<Preset>
+}
+
+/** Get-or-create, so the accumulation loop below reads as one line per bucket. */
+function bucket<K>(buckets: Map<K, Ledger>, key: K): Ledger {
+  let ledger = buckets.get(key)
+  if (ledger === undefined) {
+    ledger = emptyLedger()
+    buckets.set(key, ledger)
+  }
+  return ledger
+}
+
+/**
+ * The same range as `rangeSummary`, cut three ways: by day, by project, and by
+ * hour of the day.
+ *
+ * One scan, one ledger type, one rounding rule — so the headline figure and
+ * every bar drawn from these groupings are the same arithmetic over the same
+ * rows. The alternative (a second query per chart) is four independent chances
+ * to disagree with the sentence above them, at four times the read cost.
+ */
+async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: BreakdownArgs) {
+  if (!isValidTimeZone(args.timeZone)) {
+    traceError("INVALID_TIMEZONE", `"${args.timeZone}" is not a timezone I know.`)
+  }
+
+  const { truncated, live } = await scanRange(ctx, userId, args.fromMs, args.toMs)
+  const projectDocs = await projectsOf(ctx, live)
+
+  const filter: EntryFilter = {
+    projectId: args.projectId ?? null,
+    billableOnly: args.billableOnly ?? false,
+    text: args.text ?? "",
+    presets: args.presets ?? [],
+  }
+  const nameOf = (id: string | undefined) =>
+    id === undefined ? "" : (projectDocs.get(id as Id<"projects">)?.name ?? "")
+  const rows = isFilterActive(filter)
+    ? live.filter((row) => matchesFilter(row, filter, nameOf))
+    : live
+
+  const total = emptyLedger()
+  const byDay = new Map<string, Ledger>()
+  // Keyed by id, with "" for the unassigned bucket — a `Map` keyed by
+  // `Id | undefined` would work too, but `undefined` as a live map key is the
+  // kind of thing that survives a refactor as a silently-dropped bucket.
+  const byProject = new Map<string, Ledger>()
+  const hours = Array.from({ length: 24 }, () => 0)
+
+  for (const row of rows) {
+    const rateCents = rateOf(row, projectDocs)
+    post(total, row, rateCents)
+    post(bucket(byDay, dayOf(row.startedAt, args.timeZone)), row, rateCents)
+    post(bucket(byProject, row.projectId ?? ""), row, rateCents)
+    if (row.durationMs !== null) {
+      hours[localPartsOf(row.startedAt, args.timeZone).hour] += row.durationMs
+    }
+  }
+
+  /*
+   * Per-day amounts are the DELTAS OF A ROUNDED RUNNING TOTAL, not each day's
+   * own rounded amount.
+   *
+   * Rounding each day independently and summing gives a figure that can differ
+   * from `billableCents` by a cent per day — which the Summary tab would draw
+   * as a cumulative line ending somewhere other than the total printed directly
+   * above it. Taking deltas of the running total makes the last point EXACTLY
+   * `centsOf(total)` by construction, because the final running sum is the same
+   * `billableCentMs` the headline rounds, and every intermediate day is still
+   * the best whole-cent approximation of the period-to-date.
+   *
+   * Projects below are rounded independently instead, and that asymmetry is
+   * deliberate: a project's amount is what you would invoice that client, so it
+   * has to be right on its own rather than right in a sequence. Its parts may
+   * therefore differ from the whole by a few cents, which is a real property of
+   * money and not something to hide by making each client's figure depend on
+   * the sort order of the others.
+   */
+  const days = []
+  let runningCentMs = 0
+  let paidToDate = 0
+  for (const day of [...byDay.keys()].sort()) {
+    const ledger = byDay.get(day)!
+    runningCentMs += ledger.billableCentMs
+    const cumulative = Math.round(runningCentMs / 3_600_000)
+    days.push({
+      day,
+      totalMs: ledger.totalMs,
+      billableMs: ledger.billableMs,
+      billableCents: cumulative - paidToDate,
+      count: ledger.count,
+    })
+    paidToDate = cumulative
+  }
+
+  const projects = [...byProject.entries()]
+    .map(([key, ledger]) => {
+      const doc = key === "" ? undefined : projectDocs.get(key as Id<"projects">)
+      return {
+        projectId: doc?._id ?? null,
+        name: doc?.name ?? "",
+        color: doc?.color ?? "",
+        totalMs: ledger.totalMs,
+        billableMs: ledger.billableMs,
+        billableCents: centsOf(ledger),
+        unratedBillableMs: ledger.unratedBillableMs,
+        count: ledger.count,
+      }
+    })
+    // Longest first, ties broken by name so the order is stable across refetches
+    // — a bar chart that reshuffles itself on every reactive update is unusable.
+    .sort((a, b) => b.totalMs - a.totalMs || a.name.localeCompare(b.name))
+
+  return {
+    totalMs: total.totalMs,
+    billableMs: total.billableMs,
+    count: total.count,
+    runningCount: total.runningCount,
+    truncated,
+    billableCents: centsOf(total),
+    unratedBillableMs: total.unratedBillableMs,
+    days,
+    projects,
+    hours,
+  }
+}
+
+export const rangeBreakdown = query({
+  args: breakdownArgs,
+  returns: breakdownReturns,
+  handler: async (ctx, args) =>
+    await rangeBreakdownImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const rangeBreakdownAs = internalQuery({
+  args: { ...breakdownArgs, userId: v.string() },
+  returns: breakdownReturns,
+  handler: async (ctx, { userId, ...args }) =>
+    await rangeBreakdownImpl(ctx, userId, args),
 })
 
 // ---------------------------------------------------------------------------

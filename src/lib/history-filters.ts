@@ -1,5 +1,7 @@
 import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
+import { isFilterActive, matchesFilter } from "@shared/entryFilter"
 import type { DayString } from "@shared/day"
+import type { EntryFilter, Preset } from "@shared/entryFilter"
 import type { Doc } from "../../convex/_generated/dataModel"
 
 /**
@@ -8,11 +10,18 @@ import type { Doc } from "../../convex/_generated/dataModel"
  * Kept out of the component so the awkward parts — which filters the server can
  * apply, what "under a minute" means, how a period steps — are testable and
  * stated once.
+ *
+ * WHAT an entry has to look like to survive is NOT stated here: that is
+ * `convex/lib/entryFilter.ts`, which the server's `entries.rangeBreakdown` runs
+ * over the same rows. Reports' Summary tab and its Detailed tab share one
+ * FilterBar, so they have to share one definition of "matches" — this file is
+ * the client's half of the wiring (period stepping, the range, the
+ * presets-or-not union) and delegates the predicate itself.
  */
 
 export type Period = "day" | "week" | "month" | "custom"
 
-export type Preset = "no-project" | "no-note" | "under-a-minute"
+export type { Preset, EntryFilter }
 
 export type Filters = {
   period: Period
@@ -127,74 +136,48 @@ export function periodFilters(
  */
 export type FilterInput = Filters | QuickFilters
 
-/** Narrows the union above. `Filters` always has an array; `QuickFilters` has
- * no such field, so there is nothing to default and nothing to forget. */
-function presetsOf(filters: FilterInput): ReadonlyArray<Preset> {
-  return "presets" in filters ? filters.presets : EMPTY_PRESETS
-}
-
 const EMPTY_PRESETS: ReadonlyArray<Preset> = []
 
 /**
- * Whether an entry survives the filters the SERVER could not apply.
+ * The union above, flattened into the one shape the shared predicate takes.
+ *
+ * `Filters` always carries an array; `QuickFilters` has no such field, so there
+ * is nothing to default and nothing to forget. Exported because
+ * `entries.rangeBreakdown` takes exactly these four fields as arguments — the
+ * server applies them to the whole range, so this is also what a caller sends
+ * over the wire.
+ */
+export function entryFilterOf(filters: FilterInput): EntryFilter {
+  return {
+    projectId: filters.projectId,
+    billableOnly: filters.billableOnly,
+    text: filters.text,
+    presets: "presets" in filters ? filters.presets : EMPTY_PRESETS,
+  }
+}
+
+/**
+ * Whether an entry survives the filters the DETAILED tab could not push down.
  *
  * The date range is an index prefix and is already applied. Everything here is
  * a scan over what is loaded, which is exactly the trade the plan makes for
  * MVP text search: correct and cheap inside a bounded range, and — unlike a
  * search index — it composes with the date filter instead of fighting it.
+ *
+ * The rule itself lives in `convex/lib/entryFilter.ts`, so the Summary tab's
+ * server-side aggregate over the same range keeps the same rows this keeps.
  */
 export function matches(
   entry: Doc<"timeEntries">,
   filters: FilterInput,
   projectName: (id: string | undefined) => string
 ): boolean {
-  if (filters.projectId !== null) {
-    // "" is the sentinel for "no project", so the filter can express it.
-    const want = filters.projectId === "" ? undefined : filters.projectId
-    if (entry.projectId !== want) return false
-  }
-
-  if (filters.billableOnly && !entry.billable) return false
-
-  for (const preset of presetsOf(filters)) {
-    if (preset === "no-project" && entry.projectId !== undefined) return false
-    if (preset === "no-note" && (entry.note ?? "").trim() !== "") return false
-    if (preset === "under-a-minute") {
-      // A RUNNING entry has no duration yet, and `?? 0` made every one of them
-      // match — so the chip meant to surface accidental mis-starts surfaced the
-      // timer the user was actively running, however long it had been going.
-      if (entry.durationMs === null) return false
-      // Strictly under. The chip exists to find a timer begun and stopped by
-      // accident, and an exact 60s entry is not one.
-      if (entry.durationMs >= 60_000) return false
-    }
-  }
-
-  const needle = filters.text.trim().toLowerCase()
-  if (needle !== "") {
-    // Title, note AND project name. Searching only the title would miss the
-    // field this product exists to collect.
-    const haystack = [
-      entry.title,
-      entry.note ?? "",
-      projectName(entry.projectId),
-    ]
-      .join(" ")
-      .toLowerCase()
-    if (!haystack.includes(needle)) return false
-  }
-
-  return true
+  return matchesFilter(entry, entryFilterOf(filters), projectName)
 }
 
 /** True when a filter is active that the server range query cannot express. */
 export function hasClientSideFilter(filters: FilterInput): boolean {
-  return (
-    filters.projectId !== null ||
-    filters.billableOnly ||
-    presetsOf(filters).length > 0 ||
-    filters.text.trim() !== ""
-  )
+  return isFilterActive(entryFilterOf(filters))
 }
 
 // ---------------------------------------------------------------------------

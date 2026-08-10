@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { getFunctionName } from "convex/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { Reports } from "@/routes/_authed/reports"
+import { Reports, breakdownArgs } from "@/routes/_authed/reports"
 import { defaultFilters, rangeOf, stepPeriod } from "@/lib/history-filters"
 import {
   convexKey,
@@ -14,6 +14,7 @@ import {
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { dayOf } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
+import type { Breakdown } from "@/lib/report-series"
 import type { Id } from "../../../convex/_generated/dataModel"
 import type * as ConvexReactModuleType from "convex/react"
 import type * as RouterModuleType from "@tanstack/react-router"
@@ -192,10 +193,48 @@ function createQueryClient() {
   return { queryClient, resolveSummary }
 }
 
+/** An empty breakdown, so the Summary tab has something to mount against. */
+const NO_BREAKDOWN: Breakdown = {
+  totalMs: 0,
+  billableMs: 0,
+  count: 0,
+  runningCount: 0,
+  truncated: false,
+  billableCents: 0,
+  unratedBillableMs: 0,
+  days: [],
+  projects: [],
+  hours: Array.from({ length: 24 }, () => 0),
+}
+
 function seedStable(queryClient: QueryClient) {
   queryClient.setQueryData(convexKey(api.settings.get, {}), SETTINGS)
   queryClient.setQueryData(convexKey(api.projects.list, {}), [])
   queryClient.setQueryData(convexKey(api.tags.list, {}), [])
+}
+
+/**
+ * Seeds the SUMMARY tab's query for the default range.
+ *
+ * Summary is the tab Reports opens on, so its query runs on mount whichever
+ * tab a test is actually about — and `createQueryClient`'s `queryFn` throws on
+ * anything it was not told to expect, deliberately, so an unseeded query is a
+ * loud test-setup bug rather than a silent hang. `breakdownArgs` is imported
+ * from the route rather than spelled out here, so the key this seeds is the
+ * key the component asks for by construction.
+ */
+function seedBreakdown(
+  queryClient: QueryClient,
+  filters: ReturnType<typeof defaultFilters>,
+  value: Breakdown = NO_BREAKDOWN
+) {
+  queryClient.setQueryData(
+    convexKey(
+      api.entries.rangeBreakdown,
+      breakdownArgs(rangeOf(filters, SETTINGS.timezone), SETTINGS.timezone, filters)
+    ),
+    value
+  )
 }
 
 /**
@@ -205,10 +244,23 @@ function seedStable(queryClient: QueryClient) {
  * hide a real `useSuspenseQuery` regression behind a DIFFERENT one (an
  * unseeded query suspending on the very first paint) rather than isolating
  * the one this file is actually about: a RANGE CHANGE suspending.
+ *
+ * `view` selects the tab under test. It defaults to "detailed" because that is
+ * what almost everything in this file is about — the paginated log and the
+ * totals sentence — and clicking the tab is a truer setup than exporting a
+ * seam to bypass it: it proves the panel mounts, and Base UI unmounts the
+ * inactive one, so the Summary tab's query is genuinely gone by the time the
+ * assertions run.
  */
-function renderReports(seedInitialSummary: (queryClient: QueryClient) => void) {
+function renderReports(
+  seedInitialSummary: (queryClient: QueryClient) => void,
+  view: "summary" | "detailed" = "detailed"
+) {
   const { queryClient, resolveSummary } = createQueryClient()
   seedStable(queryClient)
+  // The default range's breakdown, always — Reports opens on Summary, so this
+  // query runs on mount before any test gets to say which tab it cares about.
+  seedBreakdown(queryClient, defaultFilters(dayOf(NOW, SETTINGS.timezone), SETTINGS.weekStartDay))
   seedInitialSummary(queryClient)
   render(
     <QueryClientProvider client={queryClient}>
@@ -224,6 +276,9 @@ function renderReports(seedInitialSummary: (queryClient: QueryClient) => void) {
       </Suspense>
     </QueryClientProvider>
   )
+  if (view === "detailed") {
+    fireEvent.click(screen.getByRole("tab", { name: "Detailed" }))
+  }
   return { queryClient, resolveSummary }
 }
 
@@ -604,6 +659,186 @@ describe("Reports — the billable amount", () => {
     // The understated-amount-presented-as-exact failure this exists to
     // prevent: the warning has to name the amount, not just the time.
     expect(screen.getByText(/billable amount above are both a floor/)).toBeTruthy()
+
+    dateSpy.mockRestore()
+  })
+})
+
+describe("Reports — the Detailed tab's first paint", () => {
+  /*
+   * The Detailed tab is not prefetched by the loader — its `rangeSummary` is a
+   * second scan of the same range for a tab the user may never open — so the
+   * first visit to it genuinely waits a round trip. `EMPTY_SUMMARY` would fill
+   * that window with "0:00:00 across 0 entries", dimmed and captioned
+   * "Updating…", and a dimmed wrong number is still a wrong number on the page
+   * a freelancer copies onto an invoice. Dimming makes a stale figure quieter;
+   * it does not make a fabricated one true.
+   */
+  it("says it is still totalling rather than showing a zero it does not believe", () => {
+    const filters = defaultFilters(dayOf(NOW, SETTINGS.timezone), SETTINGS.weekStartDay)
+    const range = rangeOf(filters, SETTINGS.timezone)
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
+
+    // No `rangeSummary` seeded: exactly the state a first visit to this tab is
+    // in, with the query still in flight.
+    renderReports(() => {})
+
+    expect(summaryText()).toBe("Totalling this period…")
+    expect(summaryText()).not.toContain("0 entries")
+
+    dateSpy.mockRestore()
+  })
+})
+
+describe("Reports — the Summary tab", () => {
+  /*
+   * Summary is the tab /reports opens on, and the one a freelancer looks at to
+   * answer "how did this period go". Everything below is about it stating the
+   * same facts the Detailed tab's sentence does — the two share one FilterBar
+   * and one range, so a figure that differs between them is a disagreement the
+   * user has no way to adjudicate.
+   */
+  const today = dayOf(NOW, SETTINGS.timezone)
+
+  it("reads its figures off the breakdown, not off whatever the log has loaded", () => {
+    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+
+    renderReports((queryClient) => {
+      seedBreakdown(queryClient, filters, {
+        ...NO_BREAKDOWN,
+        totalMs: 28_800_000, // 8:00:00
+        billableMs: 7_200_000, // 2:00:00
+        count: 4,
+        billableCents: 12_200, // $122.00
+        days: [
+          {
+            day: filters.from,
+            totalMs: 28_800_000,
+            billableMs: 7_200_000,
+            billableCents: 12_200,
+            count: 4,
+          },
+        ],
+      })
+    }, "summary")
+
+    expect(screen.getByText("8:00:00")).toBeTruthy()
+    expect(screen.getByText("2:00:00")).toBeTruthy()
+    expect(screen.getByText("$122.00")).toBeTruthy()
+    expect(screen.getByText("4")).toBeTruthy()
+
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * The same rule the totals sentence follows, and the same reason it exists:
+   * `billableCents: 0` means "worth nothing" for a project priced at zero and
+   * "nobody has priced this" for one with no rate. A confident $0.00 on the
+   * second is how eight hours of unbilled work reach an invoice as free.
+   */
+  it("shows no amount at all when none of the billable time could be priced", () => {
+    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+
+    renderReports((queryClient) => {
+      seedBreakdown(queryClient, filters, {
+        ...NO_BREAKDOWN,
+        totalMs: 28_800_000,
+        billableMs: 28_800_000,
+        count: 1,
+        billableCents: 0,
+        unratedBillableMs: 28_800_000, // all of it: no rate anywhere
+        days: [
+          {
+            day: filters.from,
+            totalMs: 28_800_000,
+            billableMs: 28_800_000,
+            billableCents: 0,
+            count: 1,
+          },
+        ],
+      })
+    }, "summary")
+
+    expect(screen.queryByText(/\$/)).toBeNull()
+    expect(screen.getByText("no rate set")).toBeTruthy()
+
+    dateSpy.mockRestore()
+  })
+
+  it("says the BARS are a floor too when the range was too large to total", () => {
+    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+
+    renderReports((queryClient) => {
+      seedBreakdown(queryClient, filters, {
+        ...NO_BREAKDOWN,
+        totalMs: 28_800_000,
+        count: 5_000,
+        truncated: true,
+        days: [
+          {
+            day: filters.from,
+            totalMs: 28_800_000,
+            billableMs: 0,
+            billableCents: 0,
+            count: 5_000,
+          },
+        ],
+      })
+    }, "summary")
+
+    // A chart cannot qualify itself the way a sentence can — a short bar for a
+    // truncated day looks exactly like a quiet day — so the warning has to name
+    // the bars as well as the figures.
+    expect(screen.getByRole("alert").textContent).toContain("every bar")
+
+    dateSpy.mockRestore()
+  })
+
+  it("keeps the range when the user moves between the two tabs", async () => {
+    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const next = stepPeriod(filters, 1)
+    const nextRange = rangeOf(next, SETTINGS.timezone)
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+
+    resolvePage(paginatedKey(api.entries.listPage, nextRange), {
+      page: [],
+      isDone: true,
+    })
+
+    // Starts on Detailed so the range can be stepped there and read back on
+    // Summary. That is the whole reason these are tabs rather than two routes:
+    // one FilterBar governs both, and a range set on one is the range the other
+    // answers for.
+    const { queryClient } = renderReports((client) => {
+      client.setQueryData(convexKey(api.entries.rangeSummary, nextRange), {
+        totalMs: 0,
+        billableMs: 0,
+        count: 0,
+        runningCount: 0,
+        truncated: false,
+        billableCents: 0,
+        unratedBillableMs: 0,
+      })
+    })
+
+    seedBreakdown(queryClient, next, {
+      ...NO_BREAKDOWN,
+      totalMs: 5_400_000, // 1:30:00
+      count: 2,
+      days: [
+        { day: next.from, totalMs: 5_400_000, billableMs: 0, billableCents: 0, count: 2 },
+      ],
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /next period/i }))
+    fireEvent.click(screen.getByRole("tab", { name: "Summary" }))
+
+    await waitFor(() => expect(screen.getByText("1:30:00")).toBeTruthy())
 
     dateSpy.mockRestore()
   })

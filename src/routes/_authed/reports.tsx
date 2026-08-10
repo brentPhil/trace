@@ -6,23 +6,79 @@ import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilterBar } from "@/components/history/filter-bar"
+import { SummaryPanel } from "@/components/reports/summary-panel"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { groupByDay } from "@/lib/group-entries"
 import {
   defaultFilters,
+  entryFilterOf,
   hasClientSideFilter,
   matches,
   rangeOf,
 } from "@/lib/history-filters"
+import { staleProps } from "@/lib/stale"
 import { dayOf } from "@shared/day"
 import { formatMoney } from "@shared/money"
 import { formatTotal } from "@/lib/format-total"
-import { cn } from "@/lib/utils"
 import { api } from "../../../convex/_generated/api"
+import type { Breakdown } from "@/lib/report-series"
 import type { Filters } from "@/lib/history-filters"
+import type { FunctionReturnType } from "convex/server"
+
+/*
+ * Read off the query rather than imported from convex/settings.ts, which is
+ * excluded from the root tsconfig (it targets the Convex runtime). Derived
+ * either way, so a field added there reaches these panels without an edit.
+ */
+type Settings = FunctionReturnType<typeof api.settings.get>
 
 const PAGE_SIZE = 100
+
+/**
+ * The two views, as data.
+ *
+ * TABS RATHER THAN TWO ROUTES, so the FilterBar above them is one control
+ * governing both. A freelancer narrows to a client and a fortnight once, then
+ * looks at the shape of it and at the rows behind the shape — making that a
+ * second page would mean setting the same filters twice and, worse, would let
+ * the two drift apart with nothing on screen to say they had.
+ *
+ * Summary is the default, matching what the page is opened for: "how did this
+ * period go" is answered by the charts, and the rows are what you drop into
+ * when one of them looks wrong.
+ */
+const VIEWS = [
+  { value: "summary", label: "Summary" },
+  { value: "detailed", label: "Detailed" },
+] as const
+
+type View = (typeof VIEWS)[number]["value"]
+
+/**
+ * The four filter fields `entries.rangeBreakdown` applies server-side.
+ *
+ * Exported so the loader, the panel and the tests all mint the SAME query key.
+ * A key assembled by hand in a second place is a cache miss that looks like a
+ * refetch, and in a test it is a seeded fixture the component never sees.
+ */
+export function breakdownArgs(
+  range: { fromMs: number; toMs: number },
+  timeZone: string,
+  filters: Filters
+) {
+  const filter = entryFilterOf(filters)
+  return {
+    fromMs: range.fromMs,
+    toMs: range.toMs,
+    timeZone,
+    projectId: filter.projectId,
+    billableOnly: filter.billableOnly,
+    text: filter.text,
+    presets: [...filter.presets],
+  }
+}
 
 export const Route = createFileRoute("/_authed/reports")({
   head: () => ({ meta: [{ title: "Reports — Trace" }] }),
@@ -32,18 +88,154 @@ export const Route = createFileRoute("/_authed/reports")({
       convexQuery(api.settings.get, {})
     )
 
-    // The component below reads this exact range with `useQuery` for the
-    // headline total. Without prefetching it here, the very first paint would
-    // sit in the "no data yet" branch of that hook for a round trip AFTER
-    // this loader has already resolved — the same reason `/timer`'s loader
-    // prefetches its own week range (see timer.tsx).
+    /*
+     * The DEFAULT TAB's data, and only it.
+     *
+     * Without this the first paint would sit in the "no data yet" branch for a
+     * round trip AFTER this loader has already resolved — the same reason
+     * /timer's loader prefetches its own week range. Detailed's `rangeSummary`
+     * is deliberately NOT prefetched: it is a second scan of the same range for
+     * a tab the user may never open, and opening that tab is a deliberate act
+     * with an honest "Updating…" already wired up for it.
+     */
     const today = dayOf(Date.now(), settings.timezone)
-    const range = rangeOf(defaultFilters(today, settings.weekStartDay), settings.timezone)
+    const filters = defaultFilters(today, settings.weekStartDay)
+    const range = rangeOf(filters, settings.timezone)
     await context.queryClient.ensureQueryData(
-      convexQuery(api.entries.rangeSummary, { fromMs: range.fromMs, toMs: range.toMs })
+      convexQuery(
+        api.entries.rangeBreakdown,
+        breakdownArgs(range, settings.timezone, filters)
+      )
     )
   },
 })
+
+/**
+ * The shell: one filter bar, one range, two views of it.
+ *
+ * The panels below own their own queries rather than being handed results,
+ * because Base UI unmounts an inactive `TabsContent` — so the tab you are not
+ * looking at holds no Convex subscription and costs no reads. Hoisting the
+ * fetching here to "share" it would give that back and buy nothing: the two
+ * tabs read different shapes.
+ */
+export function Reports() {
+  const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
+  const { projects } = useClassifiers()
+
+  const today = dayOf(Date.now(), settings.timezone)
+  const [filters, setFilters] = useState<Filters>(() =>
+    defaultFilters(today, settings.weekStartDay)
+  )
+  const [view, setView] = useState<View>("summary")
+
+  return (
+    <div className="flex flex-col">
+      {/* `w-full px-4`, the same pair the rows below it take, so the filter
+          row and everything under it share their left and right edges. */}
+      <div className="flex w-full flex-col gap-3 px-4 pt-3">
+        <FilterBar
+          filters={filters}
+          projects={projects}
+          today={today}
+          weekStartDay={settings.weekStartDay}
+          onChange={setFilters}
+        />
+      </div>
+
+      <Tabs
+        value={view}
+        onValueChange={(value) => setView(value as View)}
+        className="gap-0"
+      >
+        {/*
+          The `line` variant, and `rounded-md` over base-luma's `rounded-full`.
+          DESIGN.md: crisp, not pill — a pill on a 32px control is the
+          rounded-everything look this system rejects, and it is the focus ring
+          that makes it visible. The active tab is marked by an underline at
+          full-contrast ink, which is a boundary rather than a fill tint (The
+          Boundary Rule).
+        */}
+        <TabsList
+          variant="line"
+          className="mx-4 mt-3 h-auto border-b border-edge-soft pb-1.5"
+        >
+          {VIEWS.map((item) => (
+            <TabsTrigger key={item.value} value={item.value} className="rounded-md px-3">
+              {item.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="summary">
+          <SummaryTab filters={filters} settings={settings} />
+        </TabsContent>
+        <TabsContent value="detailed">
+          <DetailedTab filters={filters} settings={settings} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+/** What the charts show before any breakdown has ever arrived. */
+const EMPTY_BREAKDOWN: Breakdown = {
+  totalMs: 0,
+  billableMs: 0,
+  count: 0,
+  runningCount: 0,
+  truncated: false,
+  billableCents: 0,
+  unratedBillableMs: 0,
+  days: [],
+  projects: [],
+  hours: [],
+}
+
+/**
+ * The Summary tab's data, and nothing else — the drawing is `SummaryPanel`.
+ *
+ * EVERY filter is applied by the server here, including the text box and the
+ * preset chips, which the Detailed tab applies on the client. That difference
+ * is deliberate and is the reason `convex/lib/entryFilter.ts` exists: a list can
+ * say "still loading the rest of this period" and be believed, but a chart
+ * cannot — half a period's bars look exactly like a period with less work in
+ * it. So the charts are drawn from an exact answer over the whole range or not
+ * at all.
+ */
+function SummaryTab({ filters, settings }: { filters: Filters; settings: Settings }) {
+  const range = useMemo(
+    () => rangeOf(filters, settings.timezone),
+    [filters, settings.timezone]
+  )
+
+  /*
+   * `useQuery` with `placeholderData`, not `useSuspenseQuery` — the same
+   * reasoning as the Detailed tab's summary below. The range is part of the
+   * query key, so every date change mints a key with nothing cached for it, and
+   * suspending on that unmounts the tab strip and the filter bar along with the
+   * charts.
+   */
+  const { data, isPlaceholderData } = useQuery({
+    ...convexQuery(
+      api.entries.rangeBreakdown,
+      breakdownArgs(range, settings.timezone, filters)
+    ),
+    placeholderData: (previous) => previous,
+  })
+
+  return (
+    <SummaryPanel
+      breakdown={data ?? EMPTY_BREAKDOWN}
+      from={filters.from}
+      to={filters.to}
+      display={settings.durationDisplay}
+      currency={settings.currency}
+      use12Hour={settings.timeFormat === "12"}
+      isStale={data === undefined || isPlaceholderData}
+    />
+  )
+}
 
 /** What the sentence below shows before any real summary has ever arrived. */
 const EMPTY_SUMMARY = {
@@ -56,40 +248,8 @@ const EMPTY_SUMMARY = {
   unratedBillableMs: 0,
 }
 
-// A dimmed-but-still-legible affordance for "this is the last thing we knew,
-// not the answer to the question just asked" — never colour alone (DESIGN.md).
-// The transition is real motion, so it gets the reduced-motion opt-out every
-// animation in this app carries.
-const STALE_CLASSES = "opacity-60 transition-opacity duration-150 motion-reduce:transition-none"
-
-/**
- * The dimming AND its `aria-busy`, as one thing that cannot be half-applied.
- *
- * The rule was previously stated in prose above `STALE_CLASSES` and then
- * applied by hand at three sites — and one of the three forgot the ARIA half,
- * which is part of why this branch exists: the log was dimmed by opacity
- * alone, signalling nothing whatsoever to a screen-reader user changing the
- * date range. Spreading this makes the dimming unreachable without the half
- * that carries it to everybody else.
- *
- * `className` is the site's OWN classes; the stale ones are composed on top,
- * because every one of the three has layout classes of its own.
- */
-function staleProps(isStale: boolean, className?: string) {
-  return {
-    "aria-busy": isStale,
-    className: cn(className, isStale && STALE_CLASSES),
-  }
-}
-
-export function Reports() {
-  const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
-  const { projects, projectsById } = useClassifiers()
-
-  const today = dayOf(Date.now(), settings.timezone)
-  const [filters, setFilters] = useState<Filters>(() =>
-    defaultFilters(today, settings.weekStartDay)
-  )
+function DetailedTab({ filters, settings }: { filters: Filters; settings: Settings }) {
+  const { projectsById } = useClassifiers()
 
   const range = useMemo(
     () => rangeOf(filters, settings.timezone),
@@ -124,11 +284,11 @@ export function Reports() {
    *
    * `useRef({ rangeKey, results })` on mount claimed the first range had
    * already settled while `status` was `LoadingFirstPage` and `results` was
-   * `[]`. Change the range inside that window — the loader prefetches
-   * `rangeSummary` but NOT `listPage`, so it is a real window — and the ref
-   * then disagreed with `rangeKey`: `logIsStale` true, `logLoading` false,
-   * `EntryLog` rendered with zero groups, and "Nothing here. Try a wider date
-   * range" appeared over a range that was still loading. `null` can never
+   * `[]`. Change the range inside that window — the loader prefetches the
+   * Summary tab's breakdown but NOT `listPage`, so it is a real window — and
+   * the ref then disagreed with `rangeKey`: `logIsStale` true, `logLoading`
+   * false, `EntryLog` rendered with zero groups, and "Nothing here. Try a wider
+   * date range" appeared over a range that was still loading. `null` can never
    * equal a rangeKey, so nothing is stale until a page has genuinely landed.
    *
    * ON WRITING TO A REF DURING RENDER, which is normally unsafe under
@@ -176,11 +336,18 @@ export function Reports() {
     ...convexQuery(api.entries.rangeSummary, { fromMs: range.fromMs, toMs: range.toMs }),
     placeholderData: (previous) => previous,
   })
-  // `summary === undefined` only on a render before ANY summary has ever
-  // arrived — the loader above prefetches the default range so this should
-  // not happen in practice, but a filter changed before that prefetch landed
-  // is still an honest "we don't know yet", not a green light to show zero.
-  const summaryIsStale = summary === undefined || isPlaceholderData
+  /*
+   * Before ANY summary has arrived, the sentence says so instead of totalling.
+   *
+   * That window is real on this tab: the loader prefetches the Summary tab's
+   * breakdown and not this, deliberately, so the first visit to Detailed waits
+   * a round trip. `EMPTY_SUMMARY` renders "0:00:00 across 0 entries" — dimmed
+   * and captioned "Updating…", but still a figure, and a figure of zero is the
+   * one wrong answer this page must never give while it has entries. Dimming
+   * makes a stale number quieter; it does not make a fabricated one true.
+   */
+  const summaryUnknown = summary === undefined
+  const summaryIsStale = summaryUnknown || isPlaceholderData
   const shownSummary = summary ?? EMPTY_SUMMARY
 
   /*
@@ -280,17 +447,7 @@ export function Reports() {
 
   return (
     <div className="flex flex-col">
-      {/* `w-full px-4`, the same pair the rows below it take, so the filter
-          row and the totals sentence share their left and right edges. */}
-      <div className="flex w-full flex-col gap-3 px-4 py-3">
-        <FilterBar
-          filters={filters}
-          projects={projects}
-          today={today}
-          weekStartDay={settings.weekStartDay}
-          onChange={setFilters}
-        />
-
+      <div className="w-full px-4 py-3">
         {/*
           Totals as a sentence, not a dashboard — and two different sentences,
           because the honest claim genuinely changes. Unfiltered, the server has
@@ -300,6 +457,8 @@ export function Reports() {
         <p aria-live="polite" className="text-sm text-muted-foreground">
           {stillLoading ? (
             "Loading the rest of this period…"
+          ) : summaryUnknown && !filtering ? (
+            "Totalling this period…"
           ) : filtering ? (
             <span {...staleProps(logIsStale, "inline")}>
               <strong className="font-medium tabular text-foreground">
@@ -401,10 +560,7 @@ export function Reports() {
                 time on the client.
               */}
               {shownSummary.runningCount > 0 ? (
-                <>
-                  {" "}
-                  One entry is still running and is not counted.
-                </>
+                <> One entry is still running and is not counted.</>
               ) : null}
               {shownSummary.truncated ? (
                 <span className="text-alarm">

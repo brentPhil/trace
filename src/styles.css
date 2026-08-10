@@ -242,6 +242,30 @@
  * Colour is never the only carrier: every swatch appears beside the project's
  * name, and `--project-color` is also used for a text variant where a dot alone
  * would be ambiguous. */
+/* The hues themselves, each named ONCE.
+ *
+ * Declared as their own variables rather than inline in the attribute rules
+ * below, because a swatch is not the only thing that has to be able to paint a
+ * project. A chart draws into SVG, where `fill` cannot resolve a variable that
+ * is scoped to an attribute the SVG element does not carry — so /reports reads
+ * `var(--project-teal)` directly (see `projectColorVar` in
+ * src/lib/project-color.ts). Two copies of a hue is how a project comes to be
+ * one colour in the log and a different one in the chart above it. */
+:root {
+  --project-slate: oklch(0.72 0.02 250);
+  --project-rose: oklch(0.72 0.13 10);
+  --project-coral: oklch(0.72 0.13 35);
+  --project-amber: oklch(0.72 0.13 60);
+  --project-olive: oklch(0.72 0.11 110);
+  --project-moss: oklch(0.72 0.13 140);
+  --project-sage: oklch(0.72 0.09 160);
+  --project-teal: oklch(0.72 0.11 180);
+  --project-cyan: oklch(0.72 0.1 200);
+  --project-indigo: oklch(0.72 0.13 275);
+  --project-violet: oklch(0.72 0.13 300);
+  --project-plum: oklch(0.72 0.13 330);
+}
+
 /* Fallback FIRST, deliberately. `[data-project-color]` and
  * `[data-project-color="slate"]` have identical specificity, so ordering is the
  * only thing deciding the winner — declared after the named hues, this would
@@ -251,40 +275,40 @@
 }
 
 [data-project-color="slate"] {
-  --project-color: oklch(0.72 0.02 250);
+  --project-color: var(--project-slate);
 }
 [data-project-color="rose"] {
-  --project-color: oklch(0.72 0.13 10);
+  --project-color: var(--project-rose);
 }
 [data-project-color="coral"] {
-  --project-color: oklch(0.72 0.13 35);
+  --project-color: var(--project-coral);
 }
 [data-project-color="amber"] {
-  --project-color: oklch(0.72 0.13 60);
+  --project-color: var(--project-amber);
 }
 [data-project-color="olive"] {
-  --project-color: oklch(0.72 0.11 110);
+  --project-color: var(--project-olive);
 }
 [data-project-color="moss"] {
-  --project-color: oklch(0.72 0.13 140);
+  --project-color: var(--project-moss);
 }
 [data-project-color="sage"] {
-  --project-color: oklch(0.72 0.09 160);
+  --project-color: var(--project-sage);
 }
 [data-project-color="teal"] {
-  --project-color: oklch(0.72 0.11 180);
+  --project-color: var(--project-teal);
 }
 [data-project-color="cyan"] {
-  --project-color: oklch(0.72 0.1 200);
+  --project-color: var(--project-cyan);
 }
 [data-project-color="indigo"] {
-  --project-color: oklch(0.72 0.13 275);
+  --project-color: var(--project-indigo);
 }
 [data-project-color="violet"] {
-  --project-color: oklch(0.72 0.13 300);
+  --project-color: var(--project-violet);
 }
 [data-project-color="plum"] {
-  --project-color: oklch(0.72 0.13 330);
+  --project-color: var(--project-plum);
 }
 
 @media (forced-colors: active) {

@@ -283,6 +283,55 @@ documented, because documenting a placeholder would enshrine it as a decision.
   `aria-invalid` on the control and `role="alert"` on the message — the colour
   is never the only carrier.
 
+### Charts
+
+Built on shadcn's chart block (recharts). They live on **/reports → Summary**,
+which is a tab beside Detailed rather than a page of its own, so one FilterBar
+governs both and the two can never describe different rows.
+
+- **Frame:** `bg-surface`, one `edge-soft` border, `rounded-lg`, no shadow —
+  The Tonal Depth Rule. shadcn's own `Card` was removed rather than overridden:
+  it ships `rounded-4xl`, `shadow-md` and a `ring-foreground/5`, which is three
+  rules broken at once, and a component you have to correct at every call site
+  is worse than a fifteen-line panel that is right by construction.
+- **The Monochrome Rule.** A chart of past work carries **no hue**. Cold means
+  running and warm means money (The Two Temperatures Rule), and a bar of last
+  Tuesday is neither. Series are separated on the neutral ramp — Ink against Ink
+  Muted — which is the same tonal layering the surfaces use.
+  - **The project chart is the one exception**, and it is the exception the
+    palette already exists for: twelve capped, legible hues, with the two
+    reserved ones absent by construction, and every bar sitting beside its own
+    name. Colour is a recognition aid there, never the information.
+  - **Money may be brass, when the axis is money.** /reports' Earned chart plots
+    currency amounts and is brass throughout. The daily chart plots the same
+    billable hours in Ink, because those are a duration.
+- **The Hatch Rule applies to plots.** A span with nothing tracked is drawn as a
+  short hatched stub, not as bare axis — a missing bar and a zero bar look
+  identical, and the eye closes the gap. "No project" is hatched for the same
+  reason: an absence is a texture, never a thirteenth colour. The SVG pattern
+  and `.hatch-empty` must stay the same angle, spacing and token.
+- **Axes are styled by prop, not by stylesheet.** Recharts writes `fill="#666"`
+  onto every tick as a presentation attribute (~2.4:1 on Surface). shadcn's
+  wrapper tries to undo that with a descendant selector and it did not take
+  here. Ticks are Ink Muted, set through `AXIS` in
+  `src/components/reports/chart-frame.tsx` — a selector aimed at a vendored
+  library's internal class names fails silently, and dimmer-than-the-floor is
+  exactly the failure nobody notices.
+- **Gridlines are round numbers.** Recharts divides the observed maximum by five
+  and rounds, which over a 9.9-hour day gives 0h/3h/5h/8h/10h — unevenly spaced
+  AND unevenly valued. `hourTicks` picks a step people think in. The scale is
+  the one part of a chart that must be beyond question.
+- **Nothing animates.** Every series sets `isAnimationActive={false}`. Recharts
+  grows bars from zero via `requestAnimationFrame`, which never fires in an
+  unpainted tab — the charts rendered as empty plots with axes the first time
+  they were checked. Convex queries are live besides, so every push and every
+  range change would replay the entrance, and a vendored entrance animation has
+  no `prefers-reduced-motion` alternative. An instrument does not need its
+  numbers to fly in.
+- **Figures are a readout, not tiles.** The four numbers above the charts are
+  label-figure-hairline on the page's own ground. A card per metric, with its
+  own border and icon, is the hero-metric template §6 rejects.
+
 Re-run `/impeccable document` in scan mode once the timer and history surfaces
 exist; that pass generates the full section and the `.impeccable/design.json`
 sidecar.
@@ -322,9 +371,14 @@ sidecar.
   illustration, emoji-forward copy, or cheerful anthropomorphism.
 - **Don't** let the recap render as an **analytics dashboard**. It is written
   prose the user can paste into Slack, not a chart grid. **REMOVED 2026-08-08**
-  along with the recap — Reports is the surface that took its place, and it
-  is deliberately a table: the rule this line stated no longer has anything
-  to guard.
+  along with the recap.
+  - **Reports now has charts** (/reports → Summary, added 2026-08-10), so the
+    concern this line raised is live again in a new place — and the answer is
+    not "no charts", it is the Charts section in §5. Four panels, all four cuts
+    of the ONE question the page exists to answer, monochrome unless the axis
+    earns a hue. The thing to keep refusing is a *grid of unrelated metrics*:
+    if a panel does not help answer "where did this period go", it is a tile,
+    and tiles are the template this system rejects.
 - **Don't** use uppercase tracked-out eyebrow labels above sections.
 - **Don't** use `border-left` or `border-right` above 1px as a coloured accent
   stripe on rows, cards, or callouts.
