@@ -2,7 +2,15 @@ import { formatClock, formatDecimalHours } from "@shared/duration"
 import { formatMoney } from "@shared/money"
 import { parseDayString } from "@shared/day"
 import { TITLE_CAP_NOTE, UNPRICED_NOTE } from "../report-rows"
-import { axisTickIndices, barColumns, donutSlices, rect, text, truncateToWidth } from "./ops"
+import {
+  axisTickIndices,
+  barColumns,
+  donutSlices,
+  helveticaWidth,
+  rect,
+  text,
+  truncateToWidth,
+} from "./ops"
 import { PAGE, PAPER, paperColorFor } from "./paper"
 import type { PdfOp, PdfPage } from "./ops"
 import type { ReportRows } from "../report-rows"
@@ -27,9 +35,18 @@ const BOTTOM = PAGE.margin
 
 /** Where the breakdown table's columns sit. Right-aligned columns give their
  *  right edge, which is what `align: "right"` measures from. */
-const COL = {
+// Exported so tests can assert the no-overlap geometry directly against the
+// same anchors this file draws with, instead of duplicating the numbers.
+//
+// `description` sits at LEFT + 90, not the wider LEFT + 120 this used to be.
+// This app's own project names are short ("Sealogs", "No project" — see
+// NO_PROJECT in report-rows.ts) while descriptions are imported ticket
+// titles that run long; a project column sized for names nobody has just
+// starves the column that actually needs the room. 90pt still comfortably
+// fits a name like "Vessel Vanguard" (~61pt at size 8) with room to spare.
+export const COL = {
   project: LEFT,
-  description: LEFT + 120,
+  description: LEFT + 90,
   duration: RIGHT - 190,
   hours: RIGHT - 130,
   percent: RIGHT - 70,
@@ -294,18 +311,35 @@ function breakdownHeader(): Array<PdfOp> {
  * P0-1: a long description ran straight through the DURATION column — text
  * was drawn at a column x with no width limit, so `[B-CB-326] Building Crew
  * Training CSV and PDF download` overprinted `7:51:34` on a document a
- * client reconciles against an invoice. `CELL_GAP` is the visual breathing
- * room reserved before the next column starts, subtracted from the raw
- * distance between two column x's so a truncated cell never touches its
- * neighbour even at the widest string that still fits.
+ * client reconciles against an invoice.
+ *
+ * A first truncation pass measured the description's budget as the raw
+ * distance up to `COL.duration` minus a gap. That still collided, because
+ * DURATION is right-aligned: `COL.duration` is where its glyphs END, and
+ * they extend LEFTWARD from there by the string's own width. Measuring "up
+ * to COL.duration" measures up to a line the duration text has already
+ * crossed — the two cells' claimed regions overlap by exactly the width of
+ * whatever duration is on that row.
+ *
+ * PROJECT has no equivalent bug: it is left-aligned, so its own anchor
+ * (`COL.project`) is already where its text BEGINS, and its budget already
+ * correctly stops at the next column's start.
+ *
+ * `GUTTER` is real, deliberate whitespace between columns (not a rounding
+ * fudge) — enough that adjacent cells read as two columns rather than one
+ * run-on line even when both are truncated to their limit.
  */
-const CELL_GAP = 8
-const PROJECT_CELL_WIDTH = COL.description - COL.project - CELL_GAP
-const DESCRIPTION_CELL_WIDTH = COL.duration - COL.description - CELL_GAP
+const GUTTER = 10
+const PROJECT_CELL_WIDTH = COL.description - COL.project - GUTTER
 
-function breakdownRow(row: ReportRows["titles"][number], y: number, currency: string): Array<PdfOp> {
+function breakdownRow(
+  row: ReportRows["titles"][number],
+  y: number,
+  currency: string,
+  descriptionMaxWidth: number
+): Array<PdfOp> {
   const project = truncateToWidth(row.project, PROJECT_CELL_WIDTH, 8, false)
-  const description = truncateToWidth(row.description, DESCRIPTION_CELL_WIDTH, 8, false)
+  const description = truncateToWidth(row.description, descriptionMaxWidth, 8, false)
   return [
     text({ x: COL.project, y, text: project, size: 8, color: PAPER.inkMuted }),
     text({ x: COL.description, y, text: description, size: 8 }),
@@ -328,6 +362,22 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
   const { currency } = rows.meta
 
   /*
+   * The description's budget must reserve room for the widest DURATION that
+   * will actually be drawn at this fixed column position — not a guessed
+   * constant. A hardcoded reservation sized for `7:51:34` silently reopens
+   * this exact overprint the moment a range is long enough to produce
+   * `123:45:07` (unpadded hours, so the string only grows), which is exactly
+   * the heavy month a freelancer most wants to export. Measured over every
+   * body row AND the TOTAL row — TOTAL is bold, so it is measured bold — since
+   * the column position is one constant for the whole document, not per-row.
+   */
+  const maxDurationTextWidth = Math.max(
+    ...rows.titles.map((row) => helveticaWidth(formatClock(row.totalMs), 8, false)),
+    helveticaWidth(formatClock(rows.totals.totalMs), 9, true)
+  )
+  const descriptionMaxWidth = COL.duration - maxDurationTextWidth - GUTTER - COL.description
+
+  /*
    * The TOTAL row is reserved a slot on the last page from the start.
    *
    * Paginating the rows first and appending the total afterwards puts it alone
@@ -341,7 +391,9 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
     const slice = rows.titles.slice(index, index + perPage)
     const ops = breakdownHeader()
     slice.forEach((row, n) => {
-      ops.push(...breakdownRow(row, TOP - HEADER_GAP - (n + 1) * ROW_HEIGHT, currency))
+      ops.push(
+        ...breakdownRow(row, TOP - HEADER_GAP - (n + 1) * ROW_HEIGHT, currency, descriptionMaxWidth)
+      )
     })
     index += perPage
 
