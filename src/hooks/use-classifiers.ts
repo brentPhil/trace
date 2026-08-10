@@ -1,4 +1,4 @@
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { useLatest } from "@/hooks/use-latest"
@@ -17,8 +17,22 @@ export function useClassifiers() {
   const { data: projects } = useSuspenseQuery(convexQuery(api.projects.list, {}))
   const { data: tags } = useSuspenseQuery(convexQuery(api.tags.list, {}))
 
-  const projectsById = new Map(projects.map((p) => [p._id as string, p]))
-  const tagsById = new Map(tags.map((t) => [t._id as string, t]))
+  /*
+   * Memoised for REFERENTIAL stability, not for the build cost — both lists
+   * are bounded by how many clients a freelancer has, so rebuilding a Map of
+   * them is genuinely nothing.
+   *
+   * A fresh `Map` on every render is what made every downstream `useMemo`
+   * keyed on one of these miss on every render. /timer re-renders once a
+   * second, so its filter pass over the whole paginated log was rebuilt per
+   * tick; /reports rebuilds the same pass on every render of a page whose
+   * result set is a hundred rows at a time.
+   */
+  const projectsById = useMemo(
+    () => new Map(projects.map((p) => [p._id as string, p])),
+    [projects]
+  )
+  const tagsById = useMemo(() => new Map(tags.map((t) => [t._id as string, t])), [tags])
 
   return { projects, tags, projectsById, tagsById }
 }

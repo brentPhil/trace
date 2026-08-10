@@ -116,9 +116,25 @@ export function Timer() {
     [projectsById]
   )
 
+  /*
+   * The pass is SKIPPED, not merely memoised, when nothing is filtering.
+   *
+   * With no filter set — every state until somebody types in the search box —
+   * `matches` returns true for every row, so the whole scan can only ever
+   * rebuild an array equal to the one it started from. This page re-renders
+   * once a second (`useSecond` above), and `nameOf`'s dependency was a `Map`
+   * that `useClassifiers` rebuilt every render, so the memo below missed on
+   * every tick and ran that guaranteed-identity scan over the entire
+   * paginated log once a second, forever.
+   *
+   * The memo is kept for the case that does do work: `projectsById` is stable
+   * now, so a real filter is re-evaluated when the rows or the filters change
+   * rather than when the clock does.
+   */
   const filtered = useMemo(
-    () => results.filter((entry) => matches(entry, filters, nameOf)),
-    [results, filters, nameOf]
+    () =>
+      filtering ? results.filter((entry) => matches(entry, filters, nameOf)) : results,
+    [filtering, results, filters, nameOf]
   )
 
   const groups = useMemo(
