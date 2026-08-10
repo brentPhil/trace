@@ -3,6 +3,7 @@ import { internalMutation, internalQuery } from "./_generated/server"
 import { createImpl } from "./entries"
 import { traceError } from "./errors"
 import type { MutationCtx } from "./_generated/server"
+import type { Id } from "./_generated/dataModel"
 
 /**
  * Bulk import of tracked time from another tracker.
@@ -66,6 +67,14 @@ const importedEntry = v.object({
   title: v.string(),
   startedAt: v.number(),
   endedAt: v.number(),
+  /** Per ENTRY, not per batch. A real export carries a billable flag on each
+   *  row, and forcing the batch to agree would either invent revenue on
+   *  unbilled work or discard it on billed work. */
+  billable: v.optional(v.boolean()),
+  /** Also per entry, and optional: "no project" is a normal, common state in
+   *  every tracker, and collapsing it onto the batch's project would file
+   *  standups and admin under a client. */
+  projectName: v.optional(v.string()),
 })
 
 /**
@@ -79,42 +88,60 @@ const importedEntry = v.object({
 export const importEntries = internalMutation({
   args: {
     userId: v.string(),
-    projectName: v.optional(v.string()),
-    billable: v.optional(v.boolean()),
     entries: v.array(importedEntry),
   },
   returns: v.object({
     inserted: v.number(),
     replayed: v.number(),
-    projectId: v.union(v.id("projects"), v.null()),
+    projects: v.array(v.string()),
   }),
   handler: async (ctx, args) => {
     if (args.entries.length === 0) {
       traceError("EMPTY_IMPORT", "Nothing to import.")
     }
 
-    const projectId =
-      args.projectName === undefined
-        ? null
-        : await ensureProject(ctx, args.userId, args.projectName, args.billable ?? false)
+    /*
+     * Resolved once per distinct name, not once per row. The lookup is a full
+     * scan of the user's projects, and a fortnight of one client's work is
+     * forty rows naming the same project — forty scans to learn one id.
+     */
+    const byName = new Map<string, Id<"projects">>()
+    for (const entry of args.entries) {
+      if (entry.projectName === undefined) continue
+      const key = entry.projectName.trim().toLowerCase()
+      if (byName.has(key)) continue
+      byName.set(
+        key,
+        await ensureProject(ctx, args.userId, entry.projectName, entry.billable ?? false)
+      )
+    }
 
     let inserted = 0
     let replayed = 0
     for (const entry of args.entries) {
+      const projectId =
+        entry.projectName === undefined
+          ? undefined
+          : byName.get(entry.projectName.trim().toLowerCase())
+
       const result = await createImpl(ctx, args.userId, {
         clientKey: entry.clientKey,
         title: entry.title,
         startedAt: entry.startedAt,
         endedAt: entry.endedAt,
-        projectId: projectId ?? undefined,
-        billable: args.billable,
+        projectId,
+        // Explicit, never `?? project.billableByDefault`. The export knows
+        // whether this row was billed; the project default is a guess about
+        // rows nobody has decided about yet, and letting it win here would
+        // silently re-price imported history.
+        billable: entry.billable ?? false,
         source: "import",
       })
       if (result.replayed) replayed++
       else inserted++
     }
 
-    return { inserted, replayed, projectId }
+    return { inserted, replayed, projects: [...byName.keys()] }
   },
 })
 

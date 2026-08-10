@@ -43,13 +43,12 @@ describe("importEntries", () => {
     const t = setup()
     const result = await t.mutation(internal.import.importEntries, {
       userId: ALICE,
-      projectName: "Sealogs",
-      entries: [entry(0), entry(1), entry(2)],
+      entries: [entry(0), entry(1), entry(2)].map((x) => ({ ...x, projectName: "Sealogs" })),
     })
 
     expect(result.inserted).toBe(3)
     expect(result.replayed).toBe(0)
-    expect(result.projectId).not.toBeNull()
+    expect(result.projects).toEqual(["sealogs"])
   })
 
   /**
@@ -61,8 +60,7 @@ describe("importEntries", () => {
     const t = setup()
     const batch = {
       userId: ALICE,
-      projectName: "Sealogs",
-      entries: [entry(0), entry(1), entry(2)],
+      entries: [entry(0), entry(1), entry(2)].map((x) => ({ ...x, projectName: "Sealogs" })),
     }
 
     await t.mutation(internal.import.importEntries, batch)
@@ -109,13 +107,13 @@ describe("importEntries", () => {
       name: "Sealogs",
     })
 
-    const result = await t.mutation(internal.import.importEntries, {
+    await t.mutation(internal.import.importEntries, {
       userId: ALICE,
-      projectName: "SeaLogs", // as spelled in the export
-      entries: [entry(0)],
+      entries: [entry(0)].map((x) => ({ ...x, projectName: "SeaLogs" })), // as spelled in the export
     })
 
-    expect(result.projectId).toBe(existing.projectId)
+    const row = await t.run(async (ctx) => await ctx.db.query("timeEntries").first())
+    expect(row?.projectId).toBe(existing.projectId)
     const projects = await t.run(async (ctx) => await ctx.db.query("projects").collect())
     expect(projects).toHaveLength(1)
   })
@@ -124,8 +122,7 @@ describe("importEntries", () => {
     const t = setup()
     await t.mutation(internal.import.importEntries, {
       userId: ALICE,
-      projectName: "Sealogs",
-      entries: [entry(0)],
+      entries: [entry(0)].map((x) => ({ ...x, projectName: "Sealogs" })),
     })
 
     const projects = await t.run(async (ctx) => await ctx.db.query("projects").collect())
@@ -133,7 +130,14 @@ describe("importEntries", () => {
     expect(projects[0]?.name).toBe("Sealogs")
   })
 
-  it("takes billable from the project's own default", async () => {
+  /**
+   * The export knows which rows were billed. The project default is a guess
+   * about rows nobody has decided about yet, so it must NOT win here — letting
+   * it through re-priced imported history: a first import of this data marked
+   * all 41 entries billable against a project defaulting to billable, when
+   * Toggl said only 10 of them were.
+   */
+  it("takes billable from the entry, not the project default", async () => {
     const t = setup()
     await t.mutation(internal.projects.createAs, {
       userId: ALICE,
@@ -143,12 +147,34 @@ describe("importEntries", () => {
 
     await t.mutation(internal.import.importEntries, {
       userId: ALICE,
-      projectName: "Sealogs",
-      entries: [entry(0)],
+      entries: [
+        { ...entry(0), projectName: "Sealogs", billable: false },
+        { ...entry(1), projectName: "Sealogs", billable: true },
+      ],
     })
 
-    const row = await t.run(async (ctx) => await ctx.db.query("timeEntries").first())
-    expect(row?.billable).toBe(true)
+    const rows = await t.run(async (ctx) =>
+      (await ctx.db.query("timeEntries").collect()).sort((a, b) => a.startedAt - b.startedAt)
+    )
+    expect(rows.map((r) => r.billable)).toEqual([false, true])
+  })
+
+  /** "No project" is normal — standups and admin belong to no client. */
+  it("leaves an entry with no project unattached", async () => {
+    const t = setup()
+    await t.mutation(internal.import.importEntries, {
+      userId: ALICE,
+      entries: [
+        { ...entry(0), projectName: "Sealogs" },
+        { ...entry(1) }, // a standup
+      ],
+    })
+
+    const rows = await t.run(async (ctx) =>
+      (await ctx.db.query("timeEntries").collect()).sort((a, b) => a.startedAt - b.startedAt)
+    )
+    expect(rows[0]?.projectId).not.toBeUndefined()
+    expect(rows[1]?.projectId).toBeUndefined()
   })
 
   /** Reporting "imported 0" as success is how a broken parser ships. */
@@ -165,8 +191,7 @@ describe("importEntries", () => {
     await expectCode(
       t.mutation(internal.import.importEntries, {
         userId: ALICE,
-        projectName: "   ",
-        entries: [entry(0)],
+        entries: [{ ...entry(0), projectName: "   " }],
       }),
       "INVALID_PROJECT_NAME"
     )
@@ -294,8 +319,7 @@ describe("undoImport", () => {
     })
     await t.mutation(internal.import.importEntries, {
       userId: ALICE,
-      projectName: "Sealogs",
-      entries: [entry(0)],
+      entries: [entry(0)].map((x) => ({ ...x, projectName: "Sealogs" })),
     })
 
     await t.mutation(internal.import.undoImport, { userId: ALICE })

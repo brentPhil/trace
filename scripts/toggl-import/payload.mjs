@@ -1,52 +1,40 @@
 /**
- * Emits the `import:importEntries` argument batches.
+ * Emits the `import:importEntries` argument batches from the extracted rows.
  *
- * `clientKey` is DETERMINISTIC — `toggl:<range>:<n>` — not a fresh UUID per
- * run. `createImpl` dedupes on it, so re-running this import is a no-op rather
- * than a second fortnight of duplicates. That property is the difference
- * between an importer you can retry after a half-failed batch and one you
- * cannot.
+ * The `clientKey` is Toggl's own entry id, so a re-import is a no-op whatever
+ * order the rows arrive in — the property that makes a half-failed batch safe
+ * to re-send, and that let the previous reconstruction be replaced without
+ * anyone reconciling by hand.
  *
  * Batched because the whole payload is one command-line argument and a
- * mutation has a write ceiling. Each batch is independently retryable, again
- * because of the keys.
+ * mutation has a write ceiling.
  */
 import { writeFileSync, mkdirSync } from "node:fs"
-import { entries } from "./reconstruct.mjs"
+import { entries } from "./extracted.mjs"
 
 const USER_ID = process.argv[2]
-const TZ = process.argv[3] ?? "Asia/Singapore"
-const PROJECT = process.argv[4] ?? "Sealogs"
-const OUT = process.argv[5] ?? "scripts/toggl-import/batches"
-const BATCH = 13
-const RANGE = "2026-07-27..2026-08-09"
+const OUT = process.argv[3] ?? "scripts/toggl-import/batches"
+const BATCH = 15
 
 if (USER_ID === undefined) {
-  console.error("usage: node payload.mjs <userId> [timeZone] [projectName] [outDir]")
+  console.error("usage: node payload.mjs <userId> [outDir]")
   process.exit(1)
 }
 
-const rows = entries(TZ).map((e, i) => ({
-  clientKey: `toggl:${RANGE}:${String(i).padStart(3, "0")}`,
-  title: e.title,
-  startedAt: e.startedAt,
-  endedAt: e.endedAt,
-}))
-
+const rows = entries()
 mkdirSync(OUT, { recursive: true })
+
 let n = 0
 for (let i = 0; i < rows.length; i += BATCH) {
-  const args = {
-    userId: USER_ID,
-    projectName: PROJECT,
-    entries: rows.slice(i, i + BATCH),
-  }
-  writeFileSync(`${OUT}/${String(n).padStart(2, "0")}.json`, JSON.stringify(args))
+  writeFileSync(
+    `${OUT}/${String(n).padStart(2, "0")}.json`,
+    JSON.stringify({ userId: USER_ID, entries: rows.slice(i, i + BATCH) })
+  )
   n++
 }
 
+const secs = rows.reduce((a, r) => a + (r.endedAt - r.startedAt) / 1000, 0)
 console.log(`${rows.length} entries -> ${n} batches in ${OUT}`)
-console.log(`project: ${PROJECT}  timezone: ${TZ}`)
-console.log(`billable: left to the project's own default (Sealogs is billable at $10/hr)`)
-console.log(`first: ${new Date(rows[0].startedAt).toLocaleString("en-GB", { timeZone: TZ })}`)
-console.log(`last:  ${new Date(rows.at(-1).endedAt).toLocaleString("en-GB", { timeZone: TZ })}`)
+console.log(`total    ${Math.floor(secs / 3600)}:${String(Math.floor((secs % 3600) / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`)
+console.log(`billable ${rows.filter((r) => r.billable).length} of ${rows.length}`)
+console.log(`project  ${rows.filter((r) => r.projectName).length} Sealogs, ${rows.filter((r) => !r.projectName).length} unassigned`)
