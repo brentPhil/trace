@@ -9,7 +9,7 @@ import {
   helveticaWidth,
   rect,
   text,
-  truncateToWidth,
+  wrapToWidth,
 } from "./ops"
 import { PAGE, PAPER, paperColorFor } from "./paper"
 import type { PdfOp, PdfPage } from "./ops"
@@ -53,7 +53,27 @@ export const COL = {
   amount: RIGHT,
 } as const
 
-const ROW_HEIGHT = 16
+/**
+ * A row's height is no longer one fixed constant — it is `lines * LINE_HEIGHT
+ * + ROW_PADDING`, driven by how many lines the DESCRIPTION (and, when it's
+ * the wider cell, PROJECT) wrapped to. `LINE_HEIGHT` is the gap between two
+ * wrapped lines within one cell; `ROW_PADDING` is the gap after a row's last
+ * line before the next row starts. The two sum to 16 — the row height every
+ * single-line row (still the common case) occupied before wrapping existed —
+ * so a page of short rows paginates exactly as it did before this change.
+ */
+const LINE_HEIGHT = 10
+const ROW_PADDING = 6
+
+/** The vertical space a row of `lineCount` wrapped lines actually occupies,
+ *  including the gap before the next row. The one formula both the packer
+ *  (`reportPages`) and the TOTAL-row reservation below must agree on — two
+ *  independent height calculations are two things that can silently drift
+ *  apart the next time either changes. */
+function rowSlotHeight(lineCount: number): number {
+  return lineCount * LINE_HEIGHT + ROW_PADDING
+}
+
 const HEADER_GAP = 26
 
 /** `2026-07-13` as `07/13/2026`, the reference report's own format. */
@@ -332,29 +352,103 @@ function breakdownHeader(): Array<PdfOp> {
 const GUTTER = 10
 const PROJECT_CELL_WIDTH = COL.description - COL.project - GUTTER
 
+/** A row's DESCRIPTION and PROJECT cells, pre-wrapped, plus the line-count
+ *  that determines how tall the row's slot is. Computed once per row up
+ *  front — the packer (deciding what fits on a page) and the drawer (turning
+ *  a placed row into ops) both need the SAME wrapped lines, and recomputing
+ *  `wrapToWidth` a second time at draw time risks the two disagreeing about
+ *  a row's height versus what actually gets drawn into it. */
+type SizedRow = {
+  row: ReportRows["titles"][number]
+  descriptionLines: Array<string>
+  projectLines: Array<string>
+  height: number
+}
+
+function sizeRow(row: ReportRows["titles"][number], descriptionMaxWidth: number): SizedRow {
+  const descriptionLines = wrapToWidth(row.description, descriptionMaxWidth, 8, false)
+  const projectLines = wrapToWidth(row.project, PROJECT_CELL_WIDTH, 8, false)
+  const lineCount = Math.max(descriptionLines.length, projectLines.length)
+  return { row, descriptionLines, projectLines, height: rowSlotHeight(lineCount) }
+}
+
+/*
+ * P0-1 (original defect, now generalised to N lines): a long description ran
+ * straight through the DURATION column — text was drawn at a column x with
+ * no width limit, so `[B-CB-326] Building Crew Training CSV and PDF
+ * download` overprinted `7:51:34` on a document a client reconciles against
+ * an invoice. Wrapping instead of truncating keeps the text but reopens the
+ * same risk per LINE, not just once per row, if a line's own width is ever
+ * measured wrong — `wrapToWidth` is what now guarantees each returned line's
+ * width already fits `descriptionMaxWidth`, so this function only has to
+ * draw what it's given.
+ *
+ * DURATION is right-aligned: `COL.duration` is where its glyphs END, and
+ * they extend LEFTWARD from there. `descriptionMaxWidth` (computed once for
+ * the whole document below) already reserves room up to where the widest
+ * duration on the page BEGINS, not merely up to the column's anchor.
+ *
+ * `firstLineY` is where the FIRST line of the description/project block
+ * sits; the numeric columns are vertically centred against that whole block
+ * rather than pinned to the first line, matching the reference report — a
+ * two-line description with its duration glued to the top line reads as
+ * though the second line belongs to the row below.
+ */
 function breakdownRow(
-  row: ReportRows["titles"][number],
-  y: number,
-  currency: string,
-  descriptionMaxWidth: number
+  sized: SizedRow,
+  firstLineY: number,
+  currency: string
 ): Array<PdfOp> {
-  const project = truncateToWidth(row.project, PROJECT_CELL_WIDTH, 8, false)
-  const description = truncateToWidth(row.description, descriptionMaxWidth, 8, false)
-  return [
-    text({ x: COL.project, y, text: project, size: 8, color: PAPER.inkMuted }),
-    text({ x: COL.description, y, text: description, size: 8 }),
-    text({ x: COL.duration, y, text: formatClock(row.totalMs), size: 8, align: "right" }),
-    text({ x: COL.hours, y, text: formatDecimalHours(row.totalMs), size: 8, align: "right" }),
-    text({ x: COL.percent, y, text: `${row.percent}%`, size: 8, align: "right", color: PAPER.inkMuted }),
+  const { row, descriptionLines, projectLines } = sized
+  const lineCount = Math.max(descriptionLines.length, projectLines.length)
+  // Centring an ODD line count lands exactly on the middle line's own
+  // baseline; an EVEN count lands the numbers in the gap between the two
+  // middle lines, which is what "centred against the block" means when
+  // there is no single middle line to pin to.
+  const centerY = firstLineY - ((lineCount - 1) * LINE_HEIGHT) / 2
+
+  const ops: Array<PdfOp> = []
+  descriptionLines.forEach((line, n) => {
+    ops.push(text({ x: COL.description, y: firstLineY - n * LINE_HEIGHT, text: line, size: 8 }))
+  })
+  projectLines.forEach((line, n) => {
+    ops.push(
+      text({
+        x: COL.project,
+        y: firstLineY - n * LINE_HEIGHT,
+        text: line,
+        size: 8,
+        color: PAPER.inkMuted,
+      })
+    )
+  })
+  ops.push(
+    text({ x: COL.duration, y: centerY, text: formatClock(row.totalMs), size: 8, align: "right" }),
+    text({
+      x: COL.hours,
+      y: centerY,
+      text: formatDecimalHours(row.totalMs),
+      size: 8,
+      align: "right",
+    }),
+    text({
+      x: COL.percent,
+      y: centerY,
+      text: `${row.percent}%`,
+      size: 8,
+      align: "right",
+      color: PAPER.inkMuted,
+    }),
     text({
       x: COL.amount,
-      y,
+      y: centerY,
       text: moneyOr(row.billableCents, currency, row.unpriced),
       size: 8,
       align: "right",
       color: row.unpriced ? PAPER.inkMuted : PAPER.brass,
-    }),
-  ]
+    })
+  )
+  return ops
 }
 
 export function reportPages(rows: ReportRows): Array<PdfPage> {
@@ -377,31 +471,78 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
   )
   const descriptionMaxWidth = COL.duration - maxDurationTextWidth - GUTTER - COL.description
 
+  // Wrapped and measured ONCE, up front, for every row — pagination below
+  // needs each row's real height before it can decide what fits on a page,
+  // and drawing later reuses these same wrapped lines (see `SizedRow`).
+  const sizedRows = rows.titles.map((row) => sizeRow(row, descriptionMaxWidth))
+
   /*
-   * The TOTAL row is reserved a slot on the last page from the start.
+   * The TOTAL row is reserved a slot on the last page from the start, sized
+   * against its OWN actual height (via `rowSlotHeight`) rather than a
+   * hardcoded number — TOTAL's cells never wrap (its PROJECT cell is the
+   * literal string "TOTAL" and its DESCRIPTION cell is empty), so this is
+   * always one line, but it goes through the same formula the body rows do
+   * so the two can never silently drift apart.
    *
-   * Paginating the rows first and appending the total afterwards puts it alone
-   * on a fifth page whenever the rows happen to fill the fourth — a document
-   * whose final page is one number with no table above it.
+   * `TOTAL_GAP` is a full blank row's worth of space between the last body
+   * row and the rule above TOTAL — without it, TOTAL reads as though it
+   * belongs to whichever row above it happens to wrap onto the fewest lines,
+   * exactly the visual bug variable row heights would otherwise introduce.
+   *
+   * This reserve is subtracted from EVERY page's budget below, not only the
+   * final one — pagination is a single forward pass that doesn't know which
+   * page will turn out to be last until it's built it, so every page must
+   * leave enough room in case IT turns out to be the one holding TOTAL. Pages
+   * that aren't last simply carry unused trailing whitespace instead.
    */
-  const perPage = Math.floor((TOP - HEADER_GAP - BOTTOM - ROW_HEIGHT * 2) / ROW_HEIGHT)
+  const TOTAL_GAP = rowSlotHeight(1)
+  const totalRowHeight = rowSlotHeight(1)
+  const totalReserve = TOTAL_GAP + totalRowHeight
 
-  let index = 0
-  do {
-    const slice = rows.titles.slice(index, index + perPage)
+  const pageBodyHeight = TOP - HEADER_GAP - BOTTOM
+  const perPageBudget = pageBodyHeight - totalReserve
+
+  /*
+   * Height-accumulating pagination: fill a page until the NEXT row would
+   * cross the reserved budget, then start a new one — a fixed rows-per-page
+   * count (the previous approach) assumed every row the same height, which
+   * wrapping makes false. `current.length > 0` is what stops a single row
+   * taller than a whole page's budget from being dropped: it still gets its
+   * own (overflowing) page rather than vanishing from the document.
+   */
+  const rowPages: Array<Array<SizedRow>> = []
+  let current: Array<SizedRow> = []
+  let used = 0
+  for (const sized of sizedRows) {
+    if (current.length > 0 && used + sized.height > perPageBudget) {
+      rowPages.push(current)
+      current = []
+      used = 0
+    }
+    current.push(sized)
+    used += sized.height
+  }
+  rowPages.push(current)
+
+  rowPages.forEach((pageRows, pageIndex) => {
+    const isLastPage = pageIndex === rowPages.length - 1
     const ops = breakdownHeader()
-    slice.forEach((row, n) => {
-      ops.push(
-        ...breakdownRow(row, TOP - HEADER_GAP - (n + 1) * ROW_HEIGHT, currency, descriptionMaxWidth)
-      )
-    })
-    index += perPage
 
-    const last = index >= rows.titles.length
-    if (last) {
-      const y = TOP - HEADER_GAP - (slice.length + 2) * ROW_HEIGHT
+    // `cursor` is the y just below whatever was drawn last — the top
+    // boundary the next row (or TOTAL) starts filling from.
+    let cursor = TOP - HEADER_GAP
+    for (const sized of pageRows) {
+      const firstLineY = cursor - LINE_HEIGHT
+      ops.push(...breakdownRow(sized, firstLineY, currency))
+      cursor -= sized.height
+    }
+
+    if (isLastPage) {
+      const ruleY = cursor
+      cursor -= TOTAL_GAP
+      const y = cursor - LINE_HEIGHT
       ops.push(
-        rect({ x: LEFT, y: y + ROW_HEIGHT - 4, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
+        rect({ x: LEFT, y: ruleY - 2, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
         text({ x: COL.project, y, text: "TOTAL", size: 9, bold: true }),
         text({ x: COL.duration, y, text: formatClock(rows.totals.totalMs), size: 9, bold: true, align: "right" }),
         text({ x: COL.hours, y, text: formatDecimalHours(rows.totals.totalMs), size: 9, bold: true, align: "right" }),
@@ -420,6 +561,7 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
           color: PAPER.brass,
         })
       )
+      cursor -= totalRowHeight
       if (rows.titlesTruncated) {
         ops.push(
           text({ x: LEFT, y: y - 20, text: TITLE_CAP_NOTE, size: 8, color: PAPER.inkMuted })
@@ -433,7 +575,7 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
     }
 
     pages.push({ ops })
-  } while (index < rows.titles.length)
+  })
 
   /*
    * An empty range gets the summary page and nothing else. A breakdown page

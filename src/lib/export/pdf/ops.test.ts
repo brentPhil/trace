@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import { PROJECT_COLORS } from "@shared/palette"
 import { PAPER, paperColorFor } from "./paper"
-import { axisTickIndices, barColumns, donutSlices, helveticaWidth, truncateToWidth } from "./ops"
+import {
+  axisTickIndices,
+  barColumns,
+  donutSlices,
+  helveticaWidth,
+  truncateToWidth,
+  wrapToWidth,
+} from "./ops"
 
 describe("donutSlices", () => {
   it("returns one path per non-zero value", () => {
@@ -153,6 +160,68 @@ describe("helveticaWidth / truncateToWidth", () => {
   it("falls back to a default advance instead of throwing on a character outside the table", () => {
     expect(() => helveticaWidth("café — a title", 8, false)).not.toThrow()
     expect(helveticaWidth("café — a title", 8, false)).toBeGreaterThan(0)
+  })
+})
+
+describe("wrapToWidth", () => {
+  // The report's own reference case (P0-1), reused: long enough that a single
+  // line at a realistic description-column width must break somewhere.
+  const LONG = "[B-CB-326] Building Crew Training CSV and PDF download"
+
+  it("splits a long description into more than one line, every line within the width", () => {
+    const maxWidth = 80
+    const lines = wrapToWidth(LONG, maxWidth, 8, false)
+    expect(lines.length).toBeGreaterThan(1)
+    for (const line of lines) {
+      expect(helveticaWidth(line, 8, false)).toBeLessThanOrEqual(maxWidth)
+    }
+  })
+
+  it("reassembles to the original words in order, so wrapping never drops text", () => {
+    const lines = wrapToWidth(LONG, 80, 8, false)
+    expect(lines.join(" ")).toBe(LONG)
+  })
+
+  /*
+   * Imported ticket titles carry unbroken tokens like `[B-CB-326]` — an ID
+   * with no space for greedy word-wrap to land on. Without a hard break, a
+   * token wider than the column just overflows it exactly like the ellipsis
+   * bug this feature replaces; WITH one, no returned line may exceed maxWidth
+   * even when the token itself is the entire input.
+   */
+  it("hard-breaks a single token longer than the width, never exceeding it", () => {
+    const token = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-supercalifragilisticexpialidocious"
+    const maxWidth = 40
+    expect(helveticaWidth(token, 8, false)).toBeGreaterThan(maxWidth)
+
+    const lines = wrapToWidth(token, maxWidth, 8, false)
+    expect(lines.length).toBeGreaterThan(1)
+    for (const line of lines) {
+      expect(helveticaWidth(line, 8, false)).toBeLessThanOrEqual(maxWidth)
+    }
+    expect(lines.join("")).toBe(token)
+  })
+
+  it("returns at least one entry for an empty string, so a row still occupies a line", () => {
+    expect(wrapToWidth("", 100, 8, false)).toEqual([""])
+  })
+
+  /*
+   * A description budget can legitimately reach zero (an extreme duration
+   * string can consume the whole reserved gap — see `descriptionMaxWidth` in
+   * report-doc.ts). Every character's advance is positive, so a naive
+   * "consume while it still fits" loop never terminates at width <= 0. This
+   * must return, not hang the test runner.
+   */
+  it("terminates rather than looping forever at a zero or negative width", () => {
+    expect(() => wrapToWidth("some real text", 0, 8, false)).not.toThrow()
+    expect(wrapToWidth("some real text", 0, 8, false).length).toBeGreaterThan(0)
+    expect(() => wrapToWidth("some real text", -10, 8, false)).not.toThrow()
+    expect(wrapToWidth("some real text", -10, 8, false).length).toBeGreaterThan(0)
+  })
+
+  it("keeps a short string on one line, unchanged", () => {
+    expect(wrapToWidth("Short", 200, 8, false)).toEqual(["Short"])
   })
 })
 

@@ -5,6 +5,8 @@ import { helveticaWidth } from "./ops"
 import type { PdfOp } from "./ops"
 import type { ReportRows } from "../report-rows"
 
+const BOTTOM = PAGE.margin
+
 const HOUR = 3_600_000
 
 function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRows {
@@ -216,7 +218,7 @@ describe("reportPages", () => {
    * `[B-CB-326] Building Crew Training...` / `7:51:34` collision that was
    * observed in a rendered export.
    */
-  it("keeps the rendered description clear of where the duration text actually begins", () => {
+  it("keeps every wrapped description line clear of where the duration text actually begins", () => {
     const rows = rowsWith(1, {
       titles: [
         {
@@ -233,11 +235,14 @@ describe("reportPages", () => {
     })
     const [, breakdown] = reportPages(rows)
 
-    // `size === 8` (the row's own font size) is what actually picks out the
-    // data row: filtering on text content alone also catches the page's bold,
+    // `size === 8` (the row's own font size) is what actually picks out data
+    // rows: filtering on text content alone also catches the page's bold,
     // 11pt block heading, which happens to share `COL.description`'s left
-    // margin coincidentally (both trace back to `LEFT`).
-    const descriptionOp = breakdown.ops.find(
+    // margin coincidentally (both trace back to `LEFT`). This description is
+    // long enough at the row's own column width to wrap onto several lines
+    // now that it is no longer truncated, so EVERY one of those lines — not
+    // just the first found — must clear where DURATION's glyphs begin.
+    const descriptionOps = breakdown.ops.filter(
       (op): op is Extract<PdfOp, { kind: "text" }> =>
         op.kind === "text" && op.x === COL.description && op.size === 8
     )
@@ -245,24 +250,62 @@ describe("reportPages", () => {
       (op): op is Extract<PdfOp, { kind: "text" }> =>
         op.kind === "text" && op.x === COL.duration && op.align === "right" && op.size === 8
     )
-    expect(descriptionOp).toBeDefined()
+    expect(descriptionOps.length).toBeGreaterThan(1)
     expect(durationOp).toBeDefined()
-    if (!descriptionOp || !durationOp) return
+    if (!durationOp) return
 
-    const descriptionEndX =
-      COL.description + helveticaWidth(descriptionOp.text, descriptionOp.size, descriptionOp.bold ?? false)
     const durationStartX =
       COL.duration - helveticaWidth(durationOp.text, durationOp.size, durationOp.bold ?? false)
 
-    expect(descriptionEndX).toBeLessThan(durationStartX)
+    for (const descriptionOp of descriptionOps) {
+      const descriptionEndX =
+        COL.description +
+        helveticaWidth(descriptionOp.text, descriptionOp.size, descriptionOp.bold ?? false)
+      expect(descriptionEndX).toBeLessThan(durationStartX)
+    }
+  })
+
+  /*
+   * The table stops truncating descriptions with an ellipsis and wraps them
+   * instead — the whole point of this change is that the text a billed line
+   * is justified by must still be readable, not cut off with `…`.
+   */
+  it("renders a long description as multiple text ops rather than one ending in an ellipsis", () => {
+    const rows = rowsWith(1, {
+      titles: [
+        {
+          project: "Sealogs",
+          description:
+            "[B-CB-326] Building Crew Training CSV and PDF download for the offshore vessel maintenance logs",
+          totalMs: HOUR,
+          centiHours: 100,
+          percent: 42,
+          billableCents: 123_456,
+          unpriced: false,
+        },
+      ],
+    })
+    const [, breakdown] = reportPages(rows)
+    const descriptionOps = breakdown.ops.filter(
+      (op): op is Extract<PdfOp, { kind: "text" }> =>
+        op.kind === "text" && op.x === COL.description && op.size === 8
+    )
+    expect(descriptionOps.length).toBeGreaterThan(1)
+    for (const op of descriptionOps) {
+      expect(op.text.endsWith("…")).toBe(false)
+    }
+    // Every line reassembles the original words, in order — wrapping must not
+    // silently drop any of the text a client reconciles against an invoice.
+    expect(descriptionOps.map((op) => op.text).join(" ")).toBe(rows.titles[0].description)
   })
 
   /*
    * Same reasoning, one column over. PROJECT is left-aligned so its own start
    * is not the failure mode DURATION has, but its budget must still stop
-   * before DESCRIPTION's start (minus a real gutter), not run into it.
+   * before DESCRIPTION's start (minus a real gutter), not run into it — for
+   * every wrapped line, not just whichever one `.find` happened to return.
    */
-  it("keeps the rendered project cell clear of where the description column starts", () => {
+  it("keeps every wrapped project line clear of where the description column starts", () => {
     const rows = rowsWith(1, {
       titles: [
         {
@@ -278,19 +321,59 @@ describe("reportPages", () => {
     })
     const [, breakdown] = reportPages(rows)
 
-    // Same reason as above: `size === 8` isolates the data row from both the
-    // header label and the page's bold block heading, which shares `COL.project`
-    // (== `LEFT`) purely by coincidence.
-    const projectOp = breakdown.ops.find(
+    // Same reason as above: `size === 8` isolates data rows from both the
+    // header label and the page's bold block heading, which shares
+    // `COL.project` (== `LEFT`) purely by coincidence.
+    const projectOps = breakdown.ops.filter(
       (op): op is Extract<PdfOp, { kind: "text" }> =>
         op.kind === "text" && op.x === COL.project && op.size === 8
     )
-    expect(projectOp).toBeDefined()
-    if (!projectOp) return
+    expect(projectOps.length).toBeGreaterThan(1)
 
-    const projectEndX =
-      COL.project + helveticaWidth(projectOp.text, projectOp.size, projectOp.bold ?? false)
+    for (const projectOp of projectOps) {
+      const projectEndX =
+        COL.project + helveticaWidth(projectOp.text, projectOp.size, projectOp.bold ?? false)
+      expect(projectEndX).toBeLessThan(COL.description)
+    }
+  })
 
-    expect(projectEndX).toBeLessThan(COL.description)
+  /*
+   * The pagination invariant that variable row heights put directly at risk:
+   * a fixed rows-per-page count can no longer guarantee this, since a page's
+   * actual content height now depends on how many lines each row wrapped to.
+   * A fixture where every description wraps to three lines is the case most
+   * likely to push a row's bottom line past the margin if the accumulator is
+   * wrong.
+   */
+  it("keeps every row's text within the page's bottom margin, with a wrapping-heavy fixture", () => {
+    const LONG_DESCRIPTION =
+      "Reconciling offshore vessel maintenance logs against the client's own crew training CSV export for the quarter"
+    const rows = rowsWith(40, {
+      titles: Array.from({ length: 40 }, (_, n) => ({
+        project: "Vessel Vanguard",
+        description: `[B-CB-${300 + n}] ${LONG_DESCRIPTION}`,
+        totalMs: HOUR,
+        centiHours: 100,
+        percent: 1,
+        billableCents: 1_000,
+        unpriced: false,
+      })),
+    })
+    const pages = reportPages(rows)
+    const breakdownPages = pages.filter((page) =>
+      textOf(page).includes("Project and description breakdown")
+    )
+    expect(breakdownPages.length).toBeGreaterThan(1) // confirms the fixture actually spans pages
+
+    for (const page of breakdownPages) {
+      for (const op of page.ops) {
+        if (op.kind !== "text") continue
+        // The footer is deliberately drawn IN the bottom margin, at
+        // `BOTTOM - 18` — it is not a table row and must not be held to the
+        // row invariant it is exempt from by design.
+        if (/^Page \d+ \/ \d+$/.test(op.text)) continue
+        expect(op.y).toBeGreaterThanOrEqual(BOTTOM)
+      }
+    }
   })
 })

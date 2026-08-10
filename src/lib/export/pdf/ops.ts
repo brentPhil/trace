@@ -139,6 +139,98 @@ export function truncateToWidth(
 }
 
 /**
+ * Splits `word` into chunks that each measure `<= maxWidth`, for a single
+ * token with no space for greedy wrapping to land on (an imported ticket ID
+ * like `[B-CB-326]`, or a long unbroken identifier).
+ *
+ * Always advances by at least one character per chunk, even when a single
+ * character's own advance exceeds `maxWidth` (a non-positive or vanishingly
+ * small width) — the alternative, waiting for a character to "fit" a budget
+ * that no character can, is what turns a bad column width into a hang
+ * instead of a merely ugly page.
+ */
+function hardBreak(word: string, maxWidth: number, size: number, bold: boolean): Array<string> {
+  const chunks: Array<string> = []
+  let current = ""
+  for (const ch of word) {
+    const candidate = current + ch
+    if (current !== "" && helveticaWidth(candidate, size, bold) > maxWidth) {
+      chunks.push(current)
+      current = ch
+    } else {
+      current = candidate
+    }
+  }
+  if (current !== "") chunks.push(current)
+  return chunks
+}
+
+/**
+ * Greedy word-wrap, measured with `helveticaWidth` so a line this returns is
+ * exactly what `render.ts`'s embedded Helvetica will draw at that width.
+ *
+ * Replaces `truncateToWidth` for the breakdown table's DESCRIPTION cell:
+ * truncation hides the text that justifies a billed line, which a client
+ * reconciling the report against an invoice cannot accept. Wrapping keeps
+ * every character, at the cost of the row needing more vertical space —
+ * `report-doc.ts` is what makes row height follow this function's output
+ * rather than a fixed constant.
+ *
+ * A word wider than `maxWidth` on its own (see `hardBreak`) is broken across
+ * lines rather than left to overflow the column, which is the same overprint
+ * `truncateToWidth` exists to prevent, just for a word instead of a sentence.
+ */
+export function wrapToWidth(
+  str: string,
+  maxWidth: number,
+  size: number,
+  bold: boolean
+): Array<string> {
+  if (str === "") return [""]
+
+  const lines: Array<string> = []
+  let current = ""
+
+  for (const word of str.split(" ")) {
+    const pieces =
+      helveticaWidth(word, size, bold) > maxWidth
+        ? hardBreak(word, maxWidth, size, bold)
+        : [word]
+
+    pieces.forEach((piece, pieceIndex) => {
+      // A piece past the first is a continuation of a hard-broken word, not a
+      // new word — it must start its own line unconditionally (no leading
+      // space to test a fit against), because `hardBreak` already sized it
+      // assuming a fresh line's full budget, not whatever room `current` has
+      // left over from the word's previous piece.
+      if (pieceIndex > 0) {
+        lines.push(current)
+        current = piece
+        return
+      }
+      if (current === "") {
+        current = piece
+        return
+      }
+      const candidate = `${current} ${piece}`
+      if (helveticaWidth(candidate, size, bold) <= maxWidth) {
+        current = candidate
+      } else {
+        lines.push(current)
+        current = piece
+      }
+    })
+  }
+  if (current !== "") lines.push(current)
+
+  // `str.split(" ")` on text with a doubled space (or a leading/trailing one)
+  // yields empty-string words, which the loop above folds in harmlessly but
+  // can leave `lines` itself empty for an all-space input — still one row,
+  // same as the empty-string case above.
+  return lines.length > 0 ? lines : [""]
+}
+
+/**
  * Which bucket indices get an x-axis label, thinned so they stop colliding.
  *
  * A 31-day range at 6pt draws 31 labels across ~465pt of chart width; at that
