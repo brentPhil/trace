@@ -34,6 +34,18 @@ export type ProjectTotal = {
   count: number
 }
 
+/** One (project, description) pair's totals. `project` is "" when unassigned. */
+export type TitleTotal = {
+  projectId: string | null
+  project: string
+  title: string
+  totalMs: number
+  billableMs: number
+  billableCents: number
+  unratedBillableMs: number
+  count: number
+}
+
 /**
  * Everything the Summary tab draws, as `entries.rangeBreakdown` returns it.
  *
@@ -54,6 +66,8 @@ export type Breakdown = {
   days: Array<DayTotal>
   projects: Array<ProjectTotal>
   hours: Array<number>
+  titles: Array<TitleTotal>
+  titlesTruncated: boolean
 }
 
 /**
@@ -82,6 +96,8 @@ export const EMPTY_BREAKDOWN: Breakdown = {
   days: [],
   projects: [],
   hours: Array.from({ length: 24 }, () => 0),
+  titles: [],
+  titlesTruncated: false,
 }
 
 export type Granularity = "day" | "week" | "month"

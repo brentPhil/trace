@@ -641,6 +641,32 @@ const projectTotal = v.object({
   count: v.number(),
 })
 
+/**
+ * How many distinct descriptions a breakdown will name.
+ *
+ * Past this the block is not a table anyone reads, and shipping every row of a
+ * pathological range costs the client more than the answer is worth.
+ * `titlesTruncated` is what stops the list from merely ending: a document that
+ * silently stops naming work reads as a complete account of the period.
+ */
+const TITLE_LIMIT = 500
+
+const titleTotal = v.object({
+  /** null is the unassigned bucket, same convention as `projectTotal`. */
+  projectId: v.union(v.id("projects"), v.null()),
+  /** Resolved here rather than by the caller: the export writers are pure and
+   *  hold no project map. "" for the unassigned bucket — what to CALL it is
+   *  the UI's business, exactly as `projectTotal` decides. */
+  project: v.string(),
+  /** "" is a real, valid title and gets its own row. */
+  title: v.string(),
+  totalMs: v.number(),
+  billableMs: v.number(),
+  billableCents: v.number(),
+  unratedBillableMs: v.number(),
+  count: v.number(),
+})
+
 /*
  * The summary's fields, spread rather than restated.
  *
@@ -674,6 +700,18 @@ const breakdownReturns = v.object({
    * "when do I begin work", which the start is the honest answer to.
    */
   hours: v.array(v.number()),
+  /**
+   * One row per (project, description), descending by time — the largest block
+   * of the exported report.
+   *
+   * Cut from the SAME scan as `days`, `projects` and `hours` rather than by a
+   * second query. One scan, one ledger type, one rounding rule, so the table a
+   * client reconciles cannot disagree with the chart printed above it.
+   */
+  titles: v.array(titleTotal),
+  /** The list was cut at `TITLE_LIMIT`. Surfaced on the page and in the
+   *  document, because a truncated list of work reads as a complete one. */
+  titlesTruncated: v.boolean(),
 })
 
 const breakdownArgs = {
@@ -768,12 +806,22 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
   // kind of thing that survives a refactor as a silently-dropped bucket.
   const byProject = new Map<string, Ledger>()
   const hours = Array.from({ length: 24 }, () => 0)
+  /*
+   * Keyed by `projectId\u0000title`, with "" for the unassigned project.
+   *
+   * A NUL separator rather than a `:` or a `|`, because the second half is a
+   * user-supplied title that may contain any printable character — a project id
+   * plus "a:b" and a project id ending ":a" plus "b" must not collide into one
+   * row. NUL is the one byte a title cannot hold.
+   */
+  const byTitle = new Map<string, Ledger>()
 
   for (const row of rows) {
     const rateCents = rateOf(row, projectDocs, accountRate)
     post(total, row, rateCents)
     post(bucket(byDay, dayOf(row.startedAt, args.timeZone)), row, rateCents)
     post(bucket(byProject, row.projectId ?? ""), row, rateCents)
+    post(bucket(byTitle, `${row.projectId ?? ""}\u0000${row.title}`), row, rateCents)
     if (row.durationMs !== null) {
       hours[localPartsOf(row.startedAt, args.timeZone).hour] += row.durationMs
     }
@@ -833,6 +881,34 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
     // — a bar chart that reshuffles itself on every reactive update is unusable.
     .sort((a, b) => b.totalMs - a.totalMs || a.name.localeCompare(b.name))
 
+  /*
+   * Rounded independently per row, like `projects` and unlike `days` — the same
+   * asymmetry, for the same reason. A description's amount is a line somebody
+   * may put on an invoice, so it has to be right on its own rather than right
+   * in a sequence. Its parts may therefore differ from the whole by a few cents,
+   * which is a real property of money.
+   */
+  const allTitles = [...byTitle.entries()]
+    .map(([key, ledger]) => {
+      const split = key.indexOf("\u0000")
+      const projectKey = key.slice(0, split)
+      const doc =
+        projectKey === "" ? undefined : projectDocs.get(projectKey as Id<"projects">)
+      return {
+        projectId: doc?._id ?? null,
+        project: doc?.name ?? "",
+        title: key.slice(split + 1),
+        totalMs: ledger.totalMs,
+        billableMs: ledger.billableMs,
+        billableCents: centsOf(ledger),
+        unratedBillableMs: ledger.unratedBillableMs,
+        count: ledger.count,
+      }
+    })
+    // Ties broken by title so the order is stable across refetches — a table
+    // that reshuffles itself on every reactive update cannot be read.
+    .sort((a, b) => b.totalMs - a.totalMs || a.title.localeCompare(b.title))
+
   return {
     totalMs: total.totalMs,
     billableMs: total.billableMs,
@@ -844,6 +920,8 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
     days,
     projects,
     hours,
+    titles: allTitles.slice(0, TITLE_LIMIT),
+    titlesTruncated: allTitles.length > TITLE_LIMIT,
   }
 }
 

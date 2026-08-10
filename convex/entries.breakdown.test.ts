@@ -535,3 +535,118 @@ describe("the account's default hourly rate", () => {
     expect(summary.billableCents).toBe(1_000)
   })
 })
+
+describe("rangeBreakdown — by description", () => {
+  it("groups by project AND title, so one title on two projects stays two rows", async () => {
+    const t = setup()
+    const { projectId: acme } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+      hourlyRateCents: 6_100,
+    })
+    const { projectId: beta } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Beta",
+      hourlyRateCents: 6_100,
+    })
+    await entry(t, { startedAt: MON + HOUR, title: "Standup", projectId: acme })
+    await entry(t, { startedAt: TUE + HOUR, title: "Standup", projectId: beta })
+
+    const { titles } = await breakdown(t)
+    expect(titles.map((row) => [row.project, row.title])).toEqual([
+      ["Acme", "Standup"],
+      ["Beta", "Standup"],
+    ])
+  })
+
+  it("sums repeats of the same title on the same project into one row", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "Standup" })
+    await entry(t, { startedAt: TUE + HOUR, title: "Standup" })
+
+    const { titles } = await breakdown(t)
+    expect(titles).toHaveLength(1)
+    expect(titles[0]).toMatchObject({ title: "Standup", totalMs: 2 * HOUR, count: 2 })
+  })
+
+  it("orders by time descending, breaking ties by title so refetches do not reshuffle", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "Zebra", durationMs: HOUR })
+    await entry(t, { startedAt: TUE + HOUR, title: "Alpha", durationMs: HOUR })
+    await entry(t, { startedAt: WED + HOUR, title: "Long one", durationMs: 3 * HOUR })
+
+    expect((await breakdown(t)).titles.map((row) => row.title)).toEqual([
+      "Long one",
+      "Alpha",
+      "Zebra",
+    ])
+  })
+
+  /*
+   * An empty title is normal and must not be dropped — `timeEntries.title`
+   * documents that "" is allowed, because blocking a start on a missing title
+   * would destroy the reason the product exists. A row for it still has to
+   * reach the document, or its time vanishes from a total that claims to be
+   * complete.
+   */
+  it("keeps untitled work as its own row rather than dropping it", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "" })
+
+    const { titles } = await breakdown(t)
+    expect(titles).toHaveLength(1)
+    expect(titles[0]).toMatchObject({ title: "", project: "", totalMs: HOUR })
+  })
+
+  /*
+   * No project rate AND no account default rate. Since ad5b1a8, `rateOf` falls
+   * back to `settings.defaultHourlyRateCents`, so "unrated" now means both are
+   * unset — and a test that only omitted the project rate would start passing
+   * or failing depending on a setting it never mentions.
+   */
+  it("marks unpriced billable time per row rather than pricing it at zero", async () => {
+    const t = setup()
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated",
+    })
+    await entry(t, { startedAt: MON + HOUR, title: "Work", projectId, billable: true })
+
+    const { titles } = await breakdown(t)
+    expect(titles[0]).toMatchObject({ billableCents: 0, unratedBillableMs: HOUR })
+  })
+
+  it("caps the list and says so, rather than quietly ending it", async () => {
+    const t = setup()
+    for (let n = 0; n < 505; n++) {
+      // Descending durations, so the cap keeps the heaviest 500 and the assertion
+      // below can name exactly which ones were dropped.
+      await entry(t, {
+        startedAt: MON + n * 60_000,
+        title: `T${n}`,
+        durationMs: (600 - n) * 1_000,
+      })
+    }
+
+    const { titles, titlesTruncated } = await breakdown(t)
+    expect(titles).toHaveLength(500)
+    expect(titlesTruncated).toBe(true)
+    expect(titles.at(-1)?.title).toBe("T499")
+  })
+
+  it("does not claim truncation when the list fits", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "Work" })
+    expect((await breakdown(t)).titlesTruncated).toBe(false)
+  })
+
+  it("sums to the same total as the headline", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "A", durationMs: 90 * 60_000 })
+    await entry(t, { startedAt: TUE + HOUR, title: "B", durationMs: 45 * 60_000 })
+
+    const result = await breakdown(t)
+    const summed = result.titles.reduce((n, row) => n + row.totalMs, 0)
+    expect(summed).toBe(result.totalMs)
+  })
+})
