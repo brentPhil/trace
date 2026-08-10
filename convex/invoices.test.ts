@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest"
 import schema from "./schema"
 import { internal } from "./_generated/api"
 import { traceErrorCode } from "./lib/codes"
-import { lineAmountCents } from "./lib/invoiceMath"
-import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
+import { parseInvoiceSequence } from "./lib/invoiceNumber"
+import { INVOICE_SCAN_LIMIT } from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
 
 const modules = import.meta.glob("./**/*.*s")
@@ -129,8 +129,36 @@ describe("invoices.createFromRange", () => {
     expect(invoice.lines).toHaveLength(1)
     expect(invoice.lines[0]?.quantityCentis).toBe(9880)
     expect(invoice.lines[0]?.unitCents).toBe(1000)
-    expect(invoice.lines[0]?.amountCents).toBe(lineAmountCents(9880, 1000))
+    // The literal, not `lineAmountCents(9880, 1000)` — asserting against the
+    // function under test proves nothing about it.
+    expect(invoice.lines[0]?.amountCents).toBe(98_800)
     expect(invoice.clientId).toBe(clientId)
+  })
+
+  /*
+   * 98:48:00 is EXACTLY 98.80 hours, so `centiHours` has no remainder to lose
+   * and `lineAmountCents(9880, 1000)` equals the breakdown's own
+   * `billableCents` — the test above passes identically whether the amount is
+   * computed from the rounded quantity or taken straight from the breakdown.
+   * This fixture has a real remainder, so the two arithmetics genuinely
+   * differ and this test can actually fail against the wrong one.
+   */
+  it("prices a line from the rounded quantity, not the breakdown's exact billableCents", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 6100 })
+    // 1h 0m 20s = 3,620,000ms. centiHours floors 100.5(5)... down to 100
+    // centihours, so lineAmountCents(100, 6100) = 6_100 exactly. The exact
+    // value — (3,620,000 / 3,600,000) x 6100 = 6133.8(8)... -> 6_134 rounded —
+    // is what `billableCents` would price this same time at.
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR + 20_000, projectId })
+
+    const { invoiceId } = await create(t)
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.quantityCentis).toBe(100)
+    expect(invoice.lines[0]?.unitCents).toBe(6100)
+    expect(invoice.lines[0]?.amountCents).toBe(6_100)
   })
 
   /*
@@ -153,6 +181,11 @@ describe("invoices.createFromRange", () => {
       value: 2 * HOUR,
     })
 
+    // Prove the edit itself landed — otherwise a no-op edit path would pass
+    // this test's real assertion below while proving nothing about it.
+    const editedEntry = await t.run(async (ctx) => await ctx.db.get(entryId))
+    expect(editedEntry?.durationMs).toBe(2 * HOUR)
+
     const after = await get(t, invoiceId)
     expect(after.lines).toEqual(before.lines)
     expect(after).toEqual(before)
@@ -163,7 +196,10 @@ describe("invoices.createFromRange", () => {
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
 
     const BATCH = 500
-    const n = SUMMARY_SCAN_LIMIT + 1
+    // INVOICE_SCAN_LIMIT, not SUMMARY_SCAN_LIMIT — createFromRange scans
+    // inside a mutation and refuses at the lower of the two (see the
+    // constant's comment in convex/lib/scan.ts).
+    const n = INVOICE_SCAN_LIMIT + 1
     for (let offset = 0; offset < n; offset += BATCH) {
       const upper = Math.min(offset + BATCH, n)
       await t.run(async (ctx) => {
@@ -229,6 +265,26 @@ describe("invoices.createFromRange", () => {
     expect(unratedMs).toBe(2 * HOUR)
   })
 
+  /*
+   * A rate of ZERO is a price somebody chose (pro bono), not the absence of
+   * one — see `rateOf` in entries.ts. Conflating the two would silently
+   * under-bill: a $0.00 line that should print on the document instead
+   * vanishes into `unratedMs` beside genuinely-unpriced work.
+   */
+  it("prices a zero-rate project as a real $0.00 line, not as unrated", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Pro bono", hourlyRateCents: 0 })
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId })
+
+    const { invoiceId, unratedMs } = await create(t)
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.unitCents).toBe(0)
+    expect(invoice.lines[0]?.amountCents).toBe(0)
+    expect(unratedMs).toBe(0)
+  })
+
   it("excludes non-billable time entirely", async () => {
     const t = setup()
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
@@ -273,5 +329,84 @@ describe("invoices.createFromRange", () => {
 
     expect(second.invoiceId).toBe(first.invoiceId)
     expect(await countInvoices(t)).toBe(1)
+  })
+
+  /*
+   * `unratedMs` is how the editor (Task 6) names excluded time — "3h 12m of
+   * billable time has no rate and is not on this invoice". Before this was
+   * persisted, a retry (a lost response, a re-sent form) hit the replay
+   * branch and got back `0`, as though nothing had ever been excluded: a
+   * client asking "why does this add up short" after a reload would be told
+   * nothing was hidden, when 2h genuinely was.
+   */
+  it("returns the stored unratedMs on a replay, not zero", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Unrated" })
+    await entry(t, { startedAt: MON + HOUR, durationMs: 2 * HOUR, projectId })
+
+    const first = await create(t, { clientKey: "replay-unrated" })
+    expect(first.unratedMs).toBe(2 * HOUR)
+
+    const second = await create(t, { clientKey: "replay-unrated" })
+    expect(second.replayed).toBe(true)
+    expect(second.invoiceId).toBe(first.invoiceId)
+    expect(second.unratedMs).toBe(2 * HOUR)
+  })
+
+  it("stamps number, currency, dueAt and status on creation", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "EUR" })
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const { invoiceId } = await create(t)
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.status).toBe("draft")
+    // settings.currencyOf is otherwise unexercised anywhere in this suite —
+    // without this, a currency snapshot that silently fell back to "USD"
+    // regardless of the account's own setting would pass every other test.
+    expect(invoice.currency).toBe("EUR")
+    expect(invoice.number).toMatch(/^\d{6}-\d{4,}$/)
+    // Net 30, in milliseconds, computed from the SAME issuedAt this invoice
+    // stamped rather than from a second clock read.
+    expect(invoice.dueAt - invoice.issuedAt).toBe(30 * 24 * 60 * 60 * 1000)
+  })
+
+  it("gives two invoices created in sequence different, advancing numbers", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const first = await create(t, { clientKey: "seq-1" })
+    const second = await create(t, { clientKey: "seq-2" })
+
+    const firstInvoice = await get(t, first.invoiceId)
+    const secondInvoice = await get(t, second.invoiceId)
+
+    expect(secondInvoice.number).not.toBe(firstInvoice.number)
+    const firstSeq = parseInvoiceSequence(firstInvoice.number)
+    const secondSeq = parseInvoiceSequence(secondInvoice.number)
+    expect(firstSeq).not.toBeNull()
+    expect(secondSeq).not.toBeNull()
+    expect(secondSeq as number).toBeGreaterThan(firstSeq as number)
+  })
+
+  it("lines carry a stable sortKey, matching print order", async () => {
+    const t = setup()
+    const { projectId: alpha } = await project(t, { name: "Alpha", hourlyRateCents: 1000 })
+    const { projectId: bravo } = await project(t, { name: "Bravo", hourlyRateCents: 1000 })
+    const { projectId: charlie } = await project(t, { name: "Charlie", hourlyRateCents: 1000 })
+    // Distinct totals so `breakdown.projects`'s descending-by-time order is
+    // unambiguous: Charlie (3h) > Bravo (2h) > Alpha (1h).
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: alpha })
+    await entry(t, { startedAt: MON + 2 * HOUR, durationMs: 2 * HOUR, projectId: bravo })
+    await entry(t, { startedAt: MON + 5 * HOUR, durationMs: 3 * HOUR, projectId: charlie })
+
+    const { invoiceId } = await create(t)
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.lines.map((l) => l.description)).toEqual(["Charlie", "Bravo", "Alpha"])
+    expect(invoice.lines.map((l) => l.sortKey)).toEqual([0, 1, 2])
   })
 })

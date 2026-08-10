@@ -17,12 +17,12 @@ import type { DayString } from "@shared/day"
  * What an entry or project with no project is called, on screen and in every
  * exported document.
  *
- * Lives here — not in `src/lib/export/report-rows.ts` — because this module
- * (the breakdown/bucket shapes both the on-screen charts and the export
- * pipeline are built from) is the one thing `project-chart.tsx` and
- * `report-rows.ts` already both import; a label the live chart needs has no
- * business living in an export-only module the chart would otherwise have no
- * reason to reach into.
+ * Re-exported from `@shared/labels` (convex/lib/labels.ts), not defined here
+ * — `invoices.createFromRangeImpl` needs this same text on the convex side for
+ * its unassigned-project invoice line, and `convex/` may never import `src/`.
+ * The name stays `NO_PROJECT_LABEL` here so `project-chart.tsx` and
+ * `filter-controls.tsx`, which already import it from this module, do not
+ * have to change.
  *
  * Named `NO_PROJECT_LABEL`, not `NO_PROJECT`, so it can never collide with
  * `convex/lib/entryFilter.ts`'s `NO_PROJECT_FILTER` — that one is the empty
@@ -34,7 +34,7 @@ import type { DayString } from "@shared/day"
  * because they shared a name, while the label itself still lived in two
  * uncoupled places.
  */
-export const NO_PROJECT_LABEL = "No project"
+export { NO_PROJECT_LABEL } from "@shared/labels"
 
 /** One day's totals, as `entries.rangeBreakdown` returns them. */
 export type DayTotal = {

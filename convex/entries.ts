@@ -376,18 +376,28 @@ const summaryReturns = v.object(summaryFields)
  * top of Reports and the charts beside it are reading the same window of the
  * same table. Two `.take()` calls with two limits is how a total comes to
  * disagree with the chart drawn directly underneath it.
+ *
+ * `limit` defaults to `SUMMARY_SCAN_LIMIT` but is overridable — see
+ * `rangeBreakdownImpl`'s `scanLimit` parameter, which `invoices.createFromRange`
+ * uses to refuse before the mutation's byte ceiling, not after it.
  */
-async function scanRange(ctx: QueryCtx, userId: string, fromMs: number, toMs: number) {
+async function scanRange(
+  ctx: QueryCtx,
+  userId: string,
+  fromMs: number,
+  toMs: number,
+  limit: number = SUMMARY_SCAN_LIMIT
+) {
   const rows = await ctx.db
     .query("timeEntries")
     .withIndex("by_user_started", (q) =>
       q.eq("userId", userId).gte("startedAt", fromMs).lt("startedAt", toMs)
     )
-    .take(SUMMARY_SCAN_LIMIT + 1)
+    .take(limit + 1)
 
   return {
-    truncated: rows.length > SUMMARY_SCAN_LIMIT,
-    live: rows.slice(0, SUMMARY_SCAN_LIMIT).filter((row) => row.deletedAt === null),
+    truncated: rows.length > limit,
+    live: rows.slice(0, limit).filter((row) => row.deletedAt === null),
   }
 }
 
@@ -809,13 +819,26 @@ function bucket<K>(buckets: Map<K, Ledger>, key: K): Ledger {
  * `DatabaseWriter`, which structurally satisfies the `DatabaseReader` this
  * function's `ctx: QueryCtx` parameter declares, so a mutation can pass its own
  * ctx straight through with no cast.
+ *
+ * `scanLimit` defaults to `SUMMARY_SCAN_LIMIT`, the query's own budget.
+ * `invoices.createFromRangeImpl` passes `INVOICE_SCAN_LIMIT` instead — lower,
+ * because it runs inside a mutation and has to refuse before the transaction's
+ * byte ceiling, not after it (see that constant's comment in
+ * convex/lib/scan.ts). This changes only WHEN `truncated` trips, never the
+ * arithmetic applied to whatever was scanned, so a non-truncated invoice still
+ * agrees with the /reports page bit for bit.
  */
-export async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: BreakdownArgs) {
+export async function rangeBreakdownImpl(
+  ctx: QueryCtx,
+  userId: string,
+  args: BreakdownArgs,
+  scanLimit: number = SUMMARY_SCAN_LIMIT
+) {
   if (!isValidTimeZone(args.timeZone)) {
     traceError("INVALID_TIMEZONE", `"${args.timeZone}" is not a timezone I know.`)
   }
 
-  const { truncated, live } = await scanRange(ctx, userId, args.fromMs, args.toMs)
+  const { truncated, live } = await scanRange(ctx, userId, args.fromMs, args.toMs, scanLimit)
   const projectDocs = await projectsOf(ctx, live)
   const accountRate = await defaultRateCents(ctx, userId)
 

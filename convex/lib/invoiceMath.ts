@@ -16,7 +16,16 @@
  * accepted is it being silent.
  */
 export function lineAmountCents(quantityCentis: number, unitCents: number): number {
-  return Math.round((quantityCentis * unitCents) / 100)
+  // Integer arithmetic throughout, not `Math.round((quantityCentis * unitCents)
+  // / 100)` — that divides before rounding, and while the division is exact at
+  // every realistic invoice magnitude, this codebase does not accept "exact at
+  // realistic magnitudes" as a rule for money (see `centiHours` in
+  // convex/lib/duration.ts, which exists for exactly that reason). Both
+  // operands are integers, so the product is exact; floor-and-compare-the-
+  // remainder gets the same half-cent-up rounding the tests below pin,
+  // without ever routing it through a division that could round the wrong way.
+  const product = quantityCentis * unitCents
+  return Math.floor(product / 100) + (product % 100 >= 50 ? 1 : 0)
 }
 
 /** The fields `invoiceTotals` reads. A whole `invoiceLines` doc satisfies this

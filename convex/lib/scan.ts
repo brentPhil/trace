@@ -45,6 +45,28 @@ export const ENTRY_SCAN_LIMIT = 2_000
 export const SUMMARY_SCAN_LIMIT = 5_000
 
 /**
+ * How many `timeEntries` rows `invoices.createFromRange` may scan before
+ * refusing — LOWER than `SUMMARY_SCAN_LIMIT`, because that number is sized for
+ * a QUERY and this scan runs inside a MUTATION.
+ *
+ * `rangeBreakdownImpl` (convex/entries.ts) is shared between `rangeBreakdown`,
+ * a query, and `invoices.createFromRangeImpl`, a mutation — and a mutation's
+ * transaction shares the SAME ~3,100-row byte ceiling documented on
+ * `ENTRY_SCAN_LIMIT` above with every write it goes on to perform, on top of
+ * it. `SUMMARY_SCAN_LIMIT` sits past where that ceiling arrives on this table,
+ * so a large-but-real range would blow the transaction on bytes before
+ * `truncated` was ever computed — and `RANGE_TOO_LARGE`, the refusal that
+ * exists so a truncated range is never silently invoiced, would never fire.
+ * The user would see the platform's own opaque internal error instead of the
+ * one this product wrote for them.
+ *
+ * Set equal to `ENTRY_SCAN_LIMIT` rather than a second hand-picked number: the
+ * same per-row byte accounting justifies both, over the same table, inside the
+ * same kind of transaction.
+ */
+export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
+
+/**
  * How many `(week, project, description)` ROWS a breakdown will keep — NOT
  * how many distinct descriptions.
  *

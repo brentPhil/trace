@@ -8,6 +8,8 @@ import { centiHours } from "./lib/duration"
 import { lineAmountCents } from "./lib/invoiceMath"
 import { nextInvoiceNumber } from "./lib/invoiceNumber"
 import { invoiceDoc, invoiceLineDoc } from "./lib/docs"
+import { NO_PROJECT_LABEL } from "./lib/labels"
+import { INVOICE_SCAN_LIMIT } from "./lib/scan"
 import { currencyOf, defaultRateCents } from "./settings"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
@@ -95,7 +97,9 @@ const createFromRangeReturns = v.object({
   /** How much billable time in the range had no rate at all and so is on
    *  NEITHER this invoice nor any line of it — see `unratedBillableMs` on
    *  `entries.rangeBreakdownImpl`. The editor (Task 6) names this so the
-   *  figure is never silently short. Not recomputed on a replay. */
+   *  figure is never silently short. Read from the invoice's own
+   *  `unratedMsAtCreation` on a replay — NEVER recomputed by re-scanning — so
+   *  a retry reports the same figure the original response did. */
   unratedMs: v.number(),
   replayed: v.boolean(),
 })
@@ -126,7 +130,7 @@ async function createFromRangeImpl(
     )
     .first()
   if (replay !== null) {
-    return { invoiceId: replay._id, unratedMs: 0, replayed: true }
+    return { invoiceId: replay._id, unratedMs: replay.unratedMsAtCreation, replayed: true }
   }
 
   /*
@@ -135,14 +139,24 @@ async function createFromRangeImpl(
    * A second scan written here would be a second rounding rule, and the
    * invoice would disagree with the page the user raised it from — which is
    * the one disagreement this product cannot afford.
+   *
+   * `INVOICE_SCAN_LIMIT`, not the default `SUMMARY_SCAN_LIMIT` — this runs
+   * inside a mutation, and has to refuse before the transaction's own byte
+   * ceiling arrives, not after it. See that constant's comment in
+   * convex/lib/scan.ts.
    */
-  const breakdown = await rangeBreakdownImpl(ctx, userId, {
-    fromMs: args.fromMs,
-    toMs: args.toMs,
-    timeZone: args.timeZone,
-    weekStartDay: args.weekStartDay,
-    billableOnly: true,
-  })
+  const breakdown = await rangeBreakdownImpl(
+    ctx,
+    userId,
+    {
+      fromMs: args.fromMs,
+      toMs: args.toMs,
+      timeZone: args.timeZone,
+      weekStartDay: args.weekStartDay,
+      billableOnly: true,
+    },
+    INVOICE_SCAN_LIMIT
+  )
 
   if (breakdown.truncated) {
     // Every figure on a truncated /reports is a floor. A floor on an invoice
@@ -231,7 +245,11 @@ async function createFromRangeImpl(
 
     const quantityCentis = centiHours(p.billableMs)
     lines.push({
-      description: project?.name ?? "",
+      // A stated label, not "" — a blank cell beside a real amount on a
+      // printed invoice reads as a rendering fault, not as "work with no
+      // project". Shared with the client's own charts via convex/lib/labels.ts
+      // so the two never print two different names for the same bucket.
+      description: project?.name ?? NO_PROJECT_LABEL,
       quantityCentis,
       unitCents,
       amountCents: lineAmountCents(quantityCentis, unitCents),
@@ -269,6 +287,9 @@ async function createFromRangeImpl(
     // schema comment on `sourceFromMs`/`sourceToMs`.
     sourceFromMs: args.fromMs,
     sourceToMs: args.toMs,
+    // SNAPSHOT — see the schema comment. Read back verbatim on the replay
+    // branch above, never recomputed.
+    unratedMsAtCreation: breakdown.unratedBillableMs,
     updatedAt: now,
     deletedAt: null,
   })

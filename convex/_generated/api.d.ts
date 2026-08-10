@@ -26,6 +26,7 @@ import type * as lib_entryFilter from "../lib/entryFilter.js";
 import type * as lib_entryTimes from "../lib/entryTimes.js";
 import type * as lib_invoiceMath from "../lib/invoiceMath.js";
 import type * as lib_invoiceNumber from "../lib/invoiceNumber.js";
+import type * as lib_labels from "../lib/labels.js";
 import type * as lib_money from "../lib/money.js";
 import type * as lib_palette from "../lib/palette.js";
 import type * as lib_scan from "../lib/scan.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   "lib/entryTimes": typeof lib_entryTimes;
   "lib/invoiceMath": typeof lib_invoiceMath;
   "lib/invoiceNumber": typeof lib_invoiceNumber;
+  "lib/labels": typeof lib_labels;
   "lib/money": typeof lib_money;
   "lib/palette": typeof lib_palette;
   "lib/scan": typeof lib_scan;

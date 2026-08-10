@@ -133,6 +133,14 @@ export const invoiceFields = {
    *  exists so a human can ask where the figures came from. */
   sourceFromMs: v.union(v.number(), v.null()),
   sourceToMs: v.union(v.number(), v.null()),
+  /** SNAPSHOT of `entries.rangeBreakdownImpl`'s `unratedBillableMs` for the
+   *  source range, AT CREATION — how much billable time had no rate and so
+   *  landed on neither this invoice nor any line of it. Like every other
+   *  figure here, it must NEVER be recomputed: a rate set after the fact must
+   *  not rewrite what a past invoice excluded. Exists so `createFromRange`'s
+   *  replay path can return the real figure instead of a bare `0` — see
+   *  `unratedMs` on that mutation's return type. */
+  unratedMsAtCreation: v.number(),
   updatedAt: v.number(),
   deletedAt: v.union(v.number(), v.null()),
 }
