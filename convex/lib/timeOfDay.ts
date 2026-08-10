@@ -26,6 +26,33 @@ export type TimeParseResult =
 
 export const MINUTES_PER_DAY = 1440
 
+/**
+ * The forms this module accepts, for a field that has just refused one.
+ *
+ * Here because it is a description OF the parser below: teaching that parser a
+ * new spelling has to be one edit, not a hunt through every field that reports
+ * a rejection. It was declared byte-identically in `entry-time-popover.tsx`
+ * and `timer-duration-popover.tsx`, and a third copy had already drifted
+ * inside `manual-entry-dialog.tsx` — lower-case "try", a different example.
+ */
+export const TIME_HELP = "Try 9:15, 0915, or 2pm."
+
+/**
+ * `"End time — Try 9:15, 0915, or 2pm."` — the whole message for a field whose
+ * contents could not be read.
+ *
+ * THE END FIELD IS CALLED "End time", NOT "Stop time". Three call sites
+ * disagreed and this is the deliberate resolution rather than whichever
+ * spelling a dedup happened to keep. `TimePopoverFields` gives the input
+ * `aria-label="End time"`, so that is the name a screen reader announces for
+ * the very field the error is about, and an error naming a "Stop time" field
+ * would name one that, to that user, does not exist. The visible column
+ * heading stays the terser "Stop": that is a heading, this is a sentence.
+ */
+export function timeFieldHelp(field: "start" | "end"): string {
+  return `${field === "start" ? "Start time" : "End time"} — ${TIME_HELP}`
+}
+
 // "9", "09", "1430", "930"
 const BARE = /^(\d{1,4})$/
 // "9:30", "14:45", "9.30"
@@ -171,6 +198,27 @@ function fail(): TimeParseResult {
 }
 
 /**
+ * Parses the START of an interval. Prefer this over `parseTimeOfDay` for any
+ * field that begins something filed under a day the user has chosen.
+ *
+ * `parseTimeOfDay` plus one clamp: the reading is pinned to `dayOffset: 0`,
+ * because a start belongs to the day it is filed under and the CALENDAR is
+ * what moves an entry — a typed time silently doing it is exactly the guess
+ * this product does not make. Only a bare `12` late in the evening can produce
+ * a non-zero offset from `parseTimeOfDay` at all, and "12" typed at 9pm over a
+ * start field means midnight of the day on screen.
+ *
+ * The clamp was open-coded at every call site. It is the half of the
+ * `parseEndTime` rule that did not make the trip when that function was
+ * created, and the two belong together.
+ */
+export function parseStartTime(input: string, nowMinutes: number): TimeParseResult {
+  const parsed = parseTimeOfDay(input, nowMinutes)
+  if (!parsed.ok) return parsed
+  return { ok: true, time: { minutes: parsed.time.minutes, dayOffset: 0 } }
+}
+
+/**
  * Parses the END of an interval. Prefer this over `parseTimeOfDay` for any
  * field that ends something.
  *
@@ -244,6 +292,44 @@ export function resolveEndAfterStart(end: TimeOfDay, start: TimeOfDay): TimeOfDa
     minutes: endAbs % MINUTES_PER_DAY,
     dayOffset: Math.floor(endAbs / MINUTES_PER_DAY),
   }
+}
+
+export type IntervalResult =
+  | { ok: true; start: TimeOfDay; end: TimeOfDay }
+  | { ok: false; field: "start" | "end" }
+
+/**
+ * BOTH ends of an interval, from two typed fields, as a caller will commit
+ * them.
+ *
+ * The sequence — parse the start against the wall clock, pin it to
+ * `dayOffset: 0` because the calendar is what moves an entry, then read the
+ * end against THAT start — was written longhand in three components, each
+ * carrying its own multi-line comment re-deriving the same reasoning.
+ * `parseEndTime` exists to make the bad composition unexpressible; expressing
+ * the good one once, here, next to it, is the other half of that.
+ *
+ * It is also what keeps a popover's confirm path and its parse echo from
+ * disagreeing. Showing one interval while writing another is worse than
+ * showing nothing, because it turns a visible mistake into a confident wrong
+ * answer — deriving both from here makes that unexpressible rather than merely
+ * unlikely.
+ *
+ * `field` names which of the two was refused, so the caller can put the
+ * message on the right one; `timeFieldHelp` above turns it into that message.
+ */
+export function resolveInterval(
+  start: string,
+  end: string,
+  nowMinutes: number
+): IntervalResult {
+  const startParsed = parseStartTime(start, nowMinutes)
+  if (!startParsed.ok) return { ok: false, field: "start" }
+
+  const endParsed = parseEndTime(end, startParsed.time)
+  if (!endParsed.ok) return { ok: false, field: "end" }
+
+  return { ok: true, start: startParsed.time, end: endParsed.time }
 }
 
 /**

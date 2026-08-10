@@ -10,11 +10,9 @@ import {
 import { cn } from "@/lib/utils"
 import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { dayOf } from "@shared/day"
-import { parseEndTime, parseTimeOfDay } from "@shared/timeOfDay"
+import { parseEndTime, parseStartTime, timeFieldHelp } from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
 import type { Entry } from "@/lib/group-entries"
-
-const TIME_HELP = "Try 9:15, 0915, or 2pm."
 
 /**
  * Start, stop and the date, in one control.
@@ -111,33 +109,32 @@ export function EntryTimePopover({
   }, [open, entry.startedAt, entry.endedAt, entryDay, timeZone, use12Hour])
 
   const commitTime = (field: "start" | "end", raw: string) => {
-    // A start belongs to the day it is filed under; the calendar is what moves
-    // an entry, not a typed time. An END is bounded below by that start, so it
-    // goes through `parseEndTime` — which both reads a bare hour as the first
-    // one after the start ("9" then "5" is eight hours, not twenty) and
-    // anchors a genuinely earlier end to the next day, the ordinary overnight
-    // case.
-    const startAnchor = { minutes: startMinutes, dayOffset: 0 }
+    /*
+     * `parseStartTime` and `parseEndTime`, the same two `resolveInterval` is
+     * built from — but reached separately, because this popover commits ONE
+     * FIELD AT A TIME as it is typed, and `resolveInterval` needs both texts
+     * to answer. The start's reference is also the entry's own start rather
+     * than the wall clock: this is an edit of something already filed.
+     *
+     * `parseStartTime` carries the "the calendar is what moves an entry"
+     * clamp, and `parseEndTime` the "an end is bounded below by its start"
+     * rule — which reads a bare hour as the first one after the start ("9"
+     * then "5" is eight hours, not twenty) and anchors a genuinely earlier end
+     * to the next day, the ordinary overnight case.
+     */
     const parsed =
       field === "start"
-        ? parseTimeOfDay(raw, startMinutes)
-        : parseEndTime(raw, startAnchor)
+        ? parseStartTime(raw, startMinutes)
+        : parseEndTime(raw, { minutes: startMinutes, dayOffset: 0 })
     if (!parsed.ok) {
-      setError(
-        field === "start"
-          ? `Start time — ${TIME_HELP}`
-          : `End time — ${TIME_HELP}`
-      )
+      setError(timeFieldHelp(field))
       return
     }
     setError(null)
 
-    const time =
-      field === "start" ? { minutes: parsed.time.minutes, dayOffset: 0 } : parsed.time
-
     void onCommitTime(
       field,
-      instantOfTypedTime(entry.startedAt, time, timeZone)
+      instantOfTypedTime(entry.startedAt, parsed.time, timeZone)
     ).catch((thrown: unknown) => {
       setError(thrown instanceof Error ? thrown.message : "That didn't save.")
     })

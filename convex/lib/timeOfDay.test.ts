@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest"
 import {
+  TIME_HELP,
   formatTimeOfDay,
   parseTimeOfDay,
   parseEndTime,
+  parseStartTime,
   resolveEndAfterStart,
+  resolveInterval,
+  timeFieldHelp,
 } from "./timeOfDay"
 
 const at = (h: number, m = 0) => h * 60 + m
@@ -214,6 +218,120 @@ describe("parseEndTime", () => {
     const start = { minutes: at(9), dayOffset: 0 }
     for (const junk of ["24", "9:60", "abc", "13pm", ""]) {
       expect(parseEndTime(junk, start).ok, junk).toBe(false)
+    }
+  })
+})
+
+describe("parseStartTime", () => {
+  it("reads exactly what parseTimeOfDay reads, for anything already on day 0", () => {
+    for (const input of ["9", "09", "930", "1430", "5pm", "0", "23"]) {
+      const clamped = parseStartTime(input, at(16))
+      const plain = parseTimeOfDay(input, at(16))
+      expect(clamped, input).toEqual(plain)
+    }
+  })
+
+  /*
+   * A start belongs to the day it is filed under; the calendar is what moves
+   * an entry. A bare `12` late in the evening is the one input `parseTimeOfDay`
+   * pushes to the following day, and over a START field that would silently
+   * file the entry a day later than the one on screen.
+   */
+  it("pins the reading to the chosen day, which parseTimeOfDay does not", () => {
+    expect(parseTimeOfDay("12", at(21))).toEqual({
+      ok: true,
+      time: { minutes: 0, dayOffset: 1 },
+    })
+    expect(parseStartTime("12", at(21))).toEqual({
+      ok: true,
+      time: { minutes: 0, dayOffset: 0 },
+    })
+  })
+
+  it("passes a refusal straight through", () => {
+    expect(parseStartTime("", at(9))).toEqual({ ok: false, reason: "empty" })
+    expect(parseStartTime("nope", at(9))).toEqual({ ok: false, reason: "unparseable" })
+  })
+})
+
+describe("resolveInterval", () => {
+  /*
+   * The composition three components used to write longhand: parse the start
+   * against the wall clock, pin it to the chosen day, read the end against
+   * THAT start. "9" then "5" is the case the whole `parseEndTime` rule exists
+   * for — it committed twenty hours once.
+   */
+  it("reads a terse 9-to-5 as eight hours", () => {
+    // `at(9)`: the wall clock is the start field's reference, so a bare "9"
+    // typed at nine in the morning is 09:00 rather than 21:00.
+    expect(resolveInterval("9", "5", at(9))).toEqual({
+      ok: true,
+      start: { minutes: at(9), dayOffset: 0 },
+      end: { minutes: at(17), dayOffset: 0 },
+    })
+  })
+
+  it("still reads a genuine overnight shift as overnight", () => {
+    expect(resolveInterval("23:40", "1:15", at(23, 40))).toEqual({
+      ok: true,
+      start: { minutes: at(23, 40), dayOffset: 0 },
+      end: { minutes: at(1, 15), dayOffset: 1 },
+    })
+  })
+
+  it("pins the start to the chosen day even when the hour is ambiguous", () => {
+    // `12` typed over Start at 9pm means midnight of the day on screen, not
+    // midnight of the next one — the calendar is what moves an entry.
+    const resolved = resolveInterval("12", "2", at(21))
+    expect(resolved.ok && resolved.start).toEqual({ minutes: 0, dayOffset: 0 })
+  })
+
+  it("names which field was refused, so the message lands on it", () => {
+    expect(resolveInterval("nope", "17:00", at(9))).toEqual({ ok: false, field: "start" })
+    expect(resolveInterval("9:00", "nope", at(9))).toEqual({ ok: false, field: "end" })
+    // An empty field is a refusal too — neither half may be guessed.
+    expect(resolveInterval("", "17:00", at(9))).toEqual({ ok: false, field: "start" })
+    expect(resolveInterval("9:00", "", at(9))).toEqual({ ok: false, field: "end" })
+  })
+
+  /*
+   * `resolveInterval` and `parseEndTime` must not be able to disagree — the
+   * whole reason the sequence lives in one place. The echo a popover shows and
+   * the interval it commits are both read from here.
+   */
+  it("agrees with parseStartTime and parseEndTime called by hand", () => {
+    for (const start of ["9", "09", "1430", "12", "5pm"]) {
+      for (const end of ["5", "17:30", "2", "0", "930"]) {
+        const combined = resolveInterval(start, end, at(16))
+        const startParsed = parseStartTime(start, at(16))
+        if (!startParsed.ok) throw new Error(start)
+        const endParsed = parseEndTime(end, startParsed.time)
+        if (!endParsed.ok) throw new Error(end)
+        expect(combined, `${start} -> ${end}`).toEqual({
+          ok: true,
+          start: startParsed.time,
+          end: endParsed.time,
+        })
+      }
+    }
+  })
+})
+
+describe("timeFieldHelp", () => {
+  /*
+   * The end field is "End time" everywhere, matching the `aria-label`
+   * `TimePopoverFields` puts on the input. One popover used to say "Stop
+   * time", naming a field that, to a screen-reader user, does not exist.
+   */
+  it("names the two fields the way the inputs are labelled", () => {
+    expect(timeFieldHelp("start")).toBe(`Start time — ${TIME_HELP}`)
+    expect(timeFieldHelp("end")).toBe(`End time — ${TIME_HELP}`)
+  })
+
+  it("enumerates the forms the parser actually accepts", () => {
+    for (const form of ["9:15", "0915", "2pm"]) {
+      expect(parseTimeOfDay(form, at(16)).ok, form).toBe(true)
+      expect(TIME_HELP).toContain(form)
     }
   })
 })

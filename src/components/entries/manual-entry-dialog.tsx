@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
 import { errorMessage } from "@/lib/error-message"
 import { instantOfDayTime, localMinutesOf } from "@/lib/format-time"
-import { parseEndTime, parseTimeOfDay } from "@shared/timeOfDay"
+import { resolveInterval, timeFieldHelp } from "@shared/timeOfDay"
 import { cn } from "@/lib/utils"
 import type { DayString } from "@shared/day"
 
@@ -84,27 +84,22 @@ export function ManualEntryDialog({
      * carries no time of day, and the rule is about what a person typing right
      * now most likely means — which is why the parser documents it as the
      * user's current local time.
+     *
+     * `resolveInterval` owns the rest: the start is pinned to the day the
+     * calendar says, and the end is read against that start rather than
+     * against the clock — which is what makes "9" then "5" an eight-hour day
+     * rather than a twenty-hour one, while still reading 23:40 to 01:15 as the
+     * one overnight shift it is. All three components that take a pair of
+     * typed times used to spell that out for themselves.
      */
-    const start = parseTimeOfDay(from, localMinutesOf(Date.now(), timeZone))
-    if (!start.ok) {
-      setError("Start time — try 9:15, 0915, or 2pm.")
-      return
-    }
-    const startTime = { minutes: start.time.minutes, dayOffset: 0 }
-    // `parseEndTime`, not `parseTimeOfDay`: an end is bounded below by its
-    // start, and reading it against that bound is what makes "9" then "5" an
-    // eight-hour day rather than a twenty-hour one. An end earlier in the
-    // clock than the start is still the overnight case, not a typo — 23:40 to
-    // 01:15 is one shift, and refusing it would make people record two
-    // entries for one piece of work.
-    const end = parseEndTime(to, startTime)
-    if (!end.ok) {
-      setError("End time — try 17:30, 1730, or 5:30pm.")
+    const interval = resolveInterval(from, to, localMinutesOf(Date.now(), timeZone))
+    if (!interval.ok) {
+      setError(timeFieldHelp(interval.field))
       return
     }
 
-    const startedAt = instantOfDayTime(day, startTime, timeZone)
-    const endedAt = instantOfDayTime(day, end.time, timeZone)
+    const startedAt = instantOfDayTime(day, interval.start, timeZone)
+    const endedAt = instantOfDayTime(day, interval.end, timeZone)
 
     setSaving(true)
     try {

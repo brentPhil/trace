@@ -20,14 +20,12 @@ import {
   MINUTES_PER_DAY,
   absoluteMinutes,
   formatTimeOfDay,
-  parseEndTime,
   parseTimeOfDay,
+  resolveInterval,
+  timeFieldHelp,
 } from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
-import type { TimeOfDay } from "@shared/timeOfDay"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
-
-const TIME_HELP = "Try 9:15, 0915, or 2pm."
 
 /**
  * Toggl's gesture, ported: clicking the timer bar's duration opens a popover
@@ -351,11 +349,7 @@ function IdleDurationPopover({
 
     const interval = resolveInterval(start, end, nowMinutes())
     if (!interval.ok) {
-      setError(
-        interval.field === "start"
-          ? `Start time — ${TIME_HELP}`
-          : `Stop time — ${TIME_HELP}`
-      )
+      setError(timeFieldHelp(interval.field))
       return
     }
     // Both fields default to the SAME instant on open, and confirming without
@@ -370,7 +364,8 @@ function IdleDurationPopover({
     // that "9:00 PM" against "9pm" — the same instant, spelled two ways — is
     // caught too.
     if (absoluteMinutes(interval.end) - absoluteMinutes(interval.start) === MINUTES_PER_DAY) {
-      setError("Stop time — must be after the start.")
+      // "End time", matching `timeFieldHelp` and the field's own aria-label.
+      setError("End time — must be after the start.")
       return
     }
 
@@ -516,29 +511,3 @@ function ParseEcho({
   )
 }
 
-/**
- * The two fields as this popover will COMMIT them.
- *
- * `confirm` and the echo above must never disagree. The echo is the product's
- * stated defence against a mis-parse — showing one interval while writing
- * another is worse than showing nothing, because it converts a visible mistake
- * into a confident wrong answer. Deriving both from here is what makes that
- * disagreement unexpressible rather than merely unlikely.
- */
-function resolveInterval(
-  start: string,
-  end: string,
-  nowMinutes: number
-):
-  | { ok: true; start: TimeOfDay; end: TimeOfDay }
-  | { ok: false; field: "start" | "end" } {
-  const startParsed = parseTimeOfDay(start, nowMinutes)
-  if (!startParsed.ok) return { ok: false, field: "start" }
-
-  // The start anchors the day; the calendar is what moves an entry.
-  const startTime: TimeOfDay = { minutes: startParsed.time.minutes, dayOffset: 0 }
-  const endParsed = parseEndTime(end, startTime)
-  if (!endParsed.ok) return { ok: false, field: "end" }
-
-  return { ok: true, start: startTime, end: endParsed.time }
-}
