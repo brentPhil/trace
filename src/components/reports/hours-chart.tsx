@@ -3,9 +3,8 @@ import { ChartContainer, ChartTooltip } from "@/components/ui/chart"
 import { AXIS, GRID_STROKE } from "@/components/reports/chart-frame"
 import { BAR_CURSOR, TooltipCard, hoveredRow } from "@/components/reports/chart-tooltip"
 import { formatTotal } from "@/lib/format-total"
-import { hourRows, hourTicks } from "@/lib/report-series"
+import { hourAxis, hourRows } from "@/lib/report-series"
 import type { DurationDisplay } from "@/lib/format-total"
-import type { ChartConfig } from "@/components/ui/chart"
 
 /**
  * When in the day the work starts.
@@ -22,8 +21,6 @@ import type { ChartConfig } from "@/components/ui/chart"
  * same reason) as the day attribution `entries.listRange` documents.
  */
 
-const config = { totalMs: { label: "Tracked" } } satisfies ChartConfig
-
 export function HoursChart({
   hours,
   display,
@@ -34,10 +31,10 @@ export function HoursChart({
   use12Hour: boolean
 }) {
   const rows = hourRows(hours, use12Hour)
-  const ticks = hourTicks(Math.max(...rows.map((row) => row.totalMs)))
+  const yAxis = hourAxis(Math.max(...rows.map((row) => row.totalMs)))
 
   return (
-    <ChartContainer config={config} className="aspect-auto h-56 w-full">
+    <ChartContainer className="aspect-auto h-56 w-full">
       <BarChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
         <CartesianGrid vertical={false} stroke={GRID_STROKE} />
         <XAxis
@@ -48,13 +45,7 @@ export function HoursChart({
           // stay readable in half a page's width.
           interval={3}
         />
-        <YAxis
-          {...AXIS}
-          width={44}
-          tickFormatter={hoursTick}
-          ticks={ticks}
-          domain={[0, ticks[ticks.length - 1]]}
-        />
+        <YAxis {...AXIS} {...yAxis} width={44} />
         <ChartTooltip cursor={BAR_CURSOR} content={<HourTooltip display={display} />} />
         {/* One tone. This chart says nothing about billability, and a second
             series here would be a distinction the reader has to hold for no
@@ -67,10 +58,6 @@ export function HoursChart({
   )
 }
 
-function hoursTick(ms: number): string {
-  return `${Math.round(ms / 3_600_000)}h`
-}
-
 function HourTooltip({
   display,
   active,
@@ -80,8 +67,8 @@ function HourTooltip({
   active?: boolean
   payload?: unknown
 }) {
-  const row = hoveredRow<{ label: string; totalMs: number }>(payload)
-  if (active !== true || row === null) return null
+  const row = hoveredRow<{ label: string; totalMs: number }>(active, payload)
+  if (row === null) return null
 
   return (
     <TooltipCard

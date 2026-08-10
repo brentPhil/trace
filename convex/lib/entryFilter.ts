@@ -18,12 +18,6 @@
 
 export type Preset = "no-project" | "no-note" | "under-a-minute"
 
-export const PRESETS: ReadonlyArray<Preset> = [
-  "no-project",
-  "no-note",
-  "under-a-minute",
-]
-
 /**
  * The filters that do not depend on a bounded range.
  *
@@ -32,6 +26,17 @@ export const PRESETS: ReadonlyArray<Preset> = [
  * and an id means that project. Reports offers "No project" as a real choice in
  * the picker, so the sentinel has to be expressible.
  */
+/**
+ * What `projectId` is set to when the filter means "entries with NO project".
+ *
+ * Its own constant because it is spelled in two places that cannot see each
+ * other: the predicate below, and the `<option value="">` in the picker
+ * (src/components/history/filter-controls.tsx) — a native select has to carry a
+ * literal string value. Two uncoupled spellings of a sentinel is how one of
+ * them becomes `"none"` and the filter silently matches nothing.
+ */
+export const NO_PROJECT = ""
+
 export type EntryFilter = {
   projectId: string | null
   billableOnly: boolean
@@ -81,8 +86,7 @@ export function matchesFilter(
   projectName: (id: string | undefined) => string
 ): boolean {
   if (filter.projectId !== null) {
-    // "" is the sentinel for "no project", so the filter can express it.
-    const want = filter.projectId === "" ? undefined : filter.projectId
+    const want = filter.projectId === NO_PROJECT ? undefined : filter.projectId
     if (entry.projectId !== want) return false
   }
 

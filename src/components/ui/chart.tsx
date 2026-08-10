@@ -6,65 +6,39 @@ import { cn } from "@/lib/utils"
 /**
  * shadcn's chart wrapper, trimmed to the parts this product can use.
  *
- * `ChartTooltipContent` and `ChartLegendContent` came with the block and are
- * gone, deliberately rather than by neglect. Both are unusable HERE, for
- * reasons specific to this design system rather than to their quality:
+ * What is gone, and why — deliberately, rather than by neglect:
  *
- *   The tooltip renders a value with `Number.toLocaleString()`. Every figure in
- *   this product is a duration in milliseconds or an amount in cents, and
- *   neither survives that — "28,800,000" where "8:00:00" belongs. It is also
+ *   `ChartTooltipContent` renders a value with `Number.toLocaleString()`. Every
+ *   figure in this product is a duration in milliseconds or an amount in cents,
+ *   and neither survives that: "28,800,000" where "8:00:00" belongs. It is also
  *   where the Tabular Rule and the money/duration distinction have to be
  *   applied. See `TooltipCard` in src/components/reports/chart-tooltip.tsx.
  *
- *   The legend renders a swatch and its label, with the swatch carrying the
- *   series identity. DESIGN.md never allows colour to be the sole carrier of a
- *   meaning. See `ChartKey` in src/components/reports/chart-frame.tsx.
+ *   `ChartLegendContent` renders a swatch carrying the series identity, and
+ *   DESIGN.md never allows colour to be the sole carrier of a meaning. See
+ *   `ChartKey` in src/components/reports/chart-frame.tsx.
  *
- * `npx shadcn add chart --overwrite` restores both if a future surface wants
- * them; this file is not attempting to be the upstream one.
+ *   `ChartConfig` and the `ChartStyle`/`ChartContext`/`useChart` machinery that
+ *   consumed it. Its whole job was to emit `--color-<key>` variables for series
+ *   that declare a `color` or `theme`, and to hand `label` to the two components
+ *   above. This product paints every series from a design token at the call site
+ *   — the Monochrome Rule means most of them are one of two greys — so no config
+ *   ever carried a colour, `ChartStyle` returned `null` on every render, and
+ *   `useChart` had no callers at all. Sixty lines and a required prop that did
+ *   nothing but had to be read to find that out.
+ *
+ * `npx shadcn add chart --overwrite` restores all of it if a future surface
+ * wants it; this file is not attempting to be the upstream one.
  */
-
-// Format: { THEME_NAME: CSS_SELECTOR }
-const THEMES = { light: "", dark: ".dark" } as const
 
 const INITIAL_DIMENSION = { width: 320, height: 200 } as const
 
-export type ChartConfig = Record<
-  string,
-  {
-    label?: React.ReactNode
-    icon?: React.ComponentType
-  } & (
-    | { color?: string; theme?: never }
-    | { color?: never; theme: Record<keyof typeof THEMES, string> }
-  )
->
-
-type ChartContextProps = {
-  config: ChartConfig
-}
-
-const ChartContext = React.createContext<ChartContextProps | null>(null)
-
-export function useChart() {
-  const context = React.useContext(ChartContext)
-
-  if (!context) {
-    throw new Error("useChart must be used within a <ChartContainer />")
-  }
-
-  return context
-}
-
 function ChartContainer({
-  id,
   className,
   children,
-  config,
   initialDimension = INITIAL_DIMENSION,
   ...props
 }: React.ComponentProps<"div"> & {
-  config: ChartConfig
   children: React.ComponentProps<
     typeof RechartsPrimitive.ResponsiveContainer
   >["children"]
@@ -73,61 +47,22 @@ function ChartContainer({
     height: number
   }
 }) {
-  const uniqueId = React.useId()
-  const chartId = `chart-${id ?? uniqueId.replace(/:/g, "")}`
-
   return (
-    <ChartContext.Provider value={{ config }}>
-      <div
-        data-slot="chart"
-        data-chart={chartId}
-        className={cn(
-          "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden",
-          className
-        )}
-        {...props}
-      >
-        <ChartStyle id={chartId} config={config} />
-        <RechartsPrimitive.ResponsiveContainer initialDimension={initialDimension}>
-          {children}
-        </RechartsPrimitive.ResponsiveContainer>
-      </div>
-    </ChartContext.Provider>
-  )
-}
-
-const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
-  const colorConfig = Object.entries(config).filter(
-    ([, item]) => item.theme ?? item.color
-  )
-
-  if (!colorConfig.length) {
-    return null
-  }
-
-  return (
-    <style
-      dangerouslySetInnerHTML={{
-        __html: Object.entries(THEMES)
-          .map(
-            ([theme, prefix]) => `
-${prefix} [data-chart=${id}] {
-${colorConfig
-  .map(([key, itemConfig]) => {
-    const color =
-      itemConfig.theme?.[theme as keyof typeof itemConfig.theme] ?? itemConfig.color
-    return color ? `  --color-${key}: ${color};` : null
-  })
-  .join("\n")}
-}
-`
-          )
-          .join("\n"),
-      }}
-    />
+    <div
+      data-slot="chart"
+      className={cn(
+        "flex aspect-video justify-center text-xs [&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground [&_.recharts-cartesian-grid_line[stroke='#ccc']]:stroke-border/50 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-border [&_.recharts-dot[stroke='#fff']]:stroke-transparent [&_.recharts-layer]:outline-hidden [&_.recharts-polar-grid_[stroke='#ccc']]:stroke-border [&_.recharts-radial-bar-background-sector]:fill-muted [&_.recharts-rectangle.recharts-tooltip-cursor]:fill-muted [&_.recharts-reference-line_[stroke='#ccc']]:stroke-border [&_.recharts-sector]:outline-hidden [&_.recharts-sector[stroke='#fff']]:stroke-transparent [&_.recharts-surface]:outline-hidden",
+        className
+      )}
+      {...props}
+    >
+      <RechartsPrimitive.ResponsiveContainer initialDimension={initialDimension}>
+        {children}
+      </RechartsPrimitive.ResponsiveContainer>
+    </div>
   )
 }
 
 const ChartTooltip = RechartsPrimitive.Tooltip
 
-export { ChartContainer, ChartTooltip, ChartStyle }
+export { ChartContainer, ChartTooltip }

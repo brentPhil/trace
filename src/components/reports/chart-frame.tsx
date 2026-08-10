@@ -95,6 +95,20 @@ export const AXIS = {
 export const GRID_STROKE = "var(--edge-soft)"
 
 /**
+ * The X axis for a chart plotting `Bucket[]`.
+ *
+ * The daily chart and the earnings chart sit one above the other and are read
+ * together, so their ticks have to behave identically — which nothing enforced
+ * while the same four props were copied between them.
+ */
+export const SPAN_AXIS = {
+  dataKey: "label",
+  tickMargin: 8,
+  minTickGap: 4,
+  interval: "preserveStartEnd",
+} as const
+
+/**
  * The id of the hatch pattern, and the `<defs>` that declares it.
  *
  * The Hatch Rule (DESIGN.md): gaps and untracked time are marked with a
@@ -155,12 +169,18 @@ export function ChartKey({
   )
 }
 
-/** A solid key swatch. `color` is a CSS colour, usually a token. */
-export function Swatch({ color }: { color: string }) {
+/**
+ * A solid key swatch. `color` is a CSS colour, usually a token.
+ *
+ * Shared with the tooltip, which wants the same mark one size smaller — the
+ * swatch under a chart and the swatch inside its tooltip are what tie a row to
+ * its series, and two definitions is how a radius change reaches only one.
+ */
+export function Swatch({ color, className }: { color: string; className?: string }) {
   return (
     <span
       aria-hidden
-      className="size-2.5 shrink-0 rounded-[2px]"
+      className={cn("size-2.5 shrink-0 rounded-[2px]", className)}
       style={{ backgroundColor: color }}
     />
   )

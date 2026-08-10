@@ -44,7 +44,15 @@ export function AppSidebar({
   onSignOut: () => void
 }) {
   return (
-    <Sidebar collapsible="icon">
+    /*
+      `border-edge-soft`, not the `--edge` the vendored sidebar defaults to.
+      The rail is already separated from the page by a step of the neutral ramp
+      (`--sidebar` is Surface, the page is Ground), and The Tonal Depth Rule
+      says to step the ramp OR add an edge — not both. An `--edge` line here is
+      heavier than every other divider in the product, so the one hairline the
+      eye reads first was the one that belonged to no content.
+    */
+    <Sidebar collapsible="icon" className="border-edge-soft">
       {/* The only way to re-expand a collapsed rail with a mouse on desktop —
           without it ⌘B/Ctrl+B is the sole path back, and that is a shortcut
           people hit by accident reaching for bold. */}

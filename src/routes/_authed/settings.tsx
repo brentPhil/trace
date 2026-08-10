@@ -47,13 +47,17 @@ function Settings() {
   return (
     <div className="flex flex-col">
       {/*
-        `max-w-form`: every `Section` below carries a full-width
-        `border-b`, and at 1600px unconstrained that was a 1329px hairline
-        running underneath a 272px `<select>`, six times down the page. This
-        is a column of settings controls, not content that wants the log's
-        full-bleed width.
+        FULL WIDTH, like every other page — but the fix for a wide settings
+        page is in `Section`, not here.
+
+        Capping the page was the old answer to a real problem: at 1600px each
+        Section's `border-b` was a 1329px hairline running under a 272px
+        `<select>`, six times down the page. That is a row with an empty
+        middle, and narrowing the page only hid it. `Section` now puts the
+        title and hint in a column beside the control, so the rule spans
+        something.
       */}
-      <div className="flex max-w-form flex-1 flex-col gap-8 px-4 py-6">
+      <div className="flex flex-1 flex-col gap-8 px-4 py-6">
         <h1 className="text-sm font-semibold">Settings</h1>
 
         <Section
@@ -305,14 +309,25 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-2 border-b border-edge-soft pb-6 last:border-b-0">
-      <h2 className="text-sm font-medium">{title}</h2>
-      {hint === undefined ? null : (
-        <p className="max-w-prose text-xs leading-relaxed text-muted-foreground">
-          {hint}
-        </p>
-      )}
-      <div className="pt-1">{children}</div>
+    /*
+      Label column beside control column, once there is room for two.
+
+      The page is full width like every other page, and this is what keeps that
+      from turning each Section into a long hairline under a short control.
+      The left column caps the prose at a reading measure — which is what
+      `max-w-prose` was doing by hand, and what capping the whole PAGE was
+      doing to the rule as well.
+
+      One column below `lg`, where a phone has no width to give a second one.
+    */
+    <section className="grid gap-2 border-b border-edge-soft pb-6 last:border-b-0 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:gap-x-12">
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium">{title}</h2>
+        {hint === undefined ? null : (
+          <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>
+        )}
+      </div>
+      <div className="pt-1 lg:pt-0">{children}</div>
     </section>
   )
 }

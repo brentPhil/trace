@@ -7,6 +7,7 @@ import { ProjectChart } from "@/components/reports/project-chart"
 import { formatTotal } from "@/lib/format-total"
 import { bucketDays, busiest } from "@/lib/report-series"
 import { staleProps } from "@/lib/stale"
+import { unpriced } from "@/lib/format-money"
 import { formatMoney } from "@shared/money"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { Breakdown } from "@/lib/report-series"
@@ -54,16 +55,9 @@ export function SummaryPanel({
   )
   const heaviest = useMemo(() => busiest(buckets), [buckets])
 
-  /*
-   * The same two flags the totals sentence branches on, for the same reason.
-   * With SOME billable time unpriced the amount is right for the part it
-   * covers and needs qualifying; with ALL of it unpriced there is no amount
-   * worth printing, and "$0.00" would be a confident answer to a question
-   * nobody has answered.
-   */
-  const unpricedSome = breakdown.unratedBillableMs > 0
-  const unpricedAll =
-    unpricedSome && breakdown.unratedBillableMs >= breakdown.billableMs
+  // The same predicate the totals sentence and the project tooltip use, so
+  // the three cannot disagree about whether an amount is printable.
+  const { some: unpricedSome, all: unpricedAll } = unpriced(breakdown)
 
   if (breakdown.count === 0) {
     return (
@@ -156,7 +150,7 @@ export function SummaryPanel({
         fortnight of unbilled work is a panel that says nothing, and reads as a
         product telling someone their work was worthless.
       */}
-      {breakdown.billableCents > 0 || (breakdown.billableMs > 0 && !unpricedAll) ? (
+      {breakdown.billableMs > 0 && !unpricedAll ? (
         <ChartFrame
           title="Earned"
           caption="Running total across the period"

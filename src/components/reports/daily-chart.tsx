@@ -1,13 +1,20 @@
 import { useId } from "react"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip } from "@/components/ui/chart"
-import { AXIS, ChartKey, GRID_STROKE, HatchDefs, HatchSwatch, Swatch } from "@/components/reports/chart-frame"
+import {
+  AXIS,
+  ChartKey,
+  GRID_STROKE,
+  HatchDefs,
+  HatchSwatch,
+  SPAN_AXIS,
+  Swatch,
+} from "@/components/reports/chart-frame"
 import { BAR_CURSOR, TooltipCard, hoveredRow } from "@/components/reports/chart-tooltip"
 import { formatTotal } from "@/lib/format-total"
 import type { DurationDisplay } from "@/lib/format-total"
-import { hourTicks } from "@/lib/report-series"
+import { hourAxis } from "@/lib/report-series"
 import type { Bucket, Granularity } from "@/lib/report-series"
-import type { ChartConfig } from "@/components/ui/chart"
 
 /**
  * Time tracked per day (or per week, or per month — see `bucketDays`).
@@ -23,11 +30,6 @@ import type { ChartConfig } from "@/components/ui/chart"
  * words by the key underneath, so it survives both colour blindness and a
  * greyscale print.
  */
-
-const config = {
-  billableMs: { label: "Billable" },
-  nonBillableMs: { label: "Non-billable" },
-} satisfies ChartConfig
 
 /**
  * How tall an empty span's hatch stub is drawn, as a fraction of the tallest
@@ -68,33 +70,21 @@ export function DailyChart({
 
   // Includes the stub, which is a fraction of `tallest` and so cannot push
   // the axis to a taller step than the real bars already need.
-  const ticks = hourTicks(tallest)
+  const yAxis = hourAxis(tallest)
   const unit = granularity === "day" ? "day" : granularity === "week" ? "week" : "month"
 
   return (
     <>
-      <ChartContainer config={config} className="aspect-auto h-64 w-full">
+      <ChartContainer className="aspect-auto h-64 w-full">
         <BarChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: -12 }}>
           <HatchDefs id={hatchId} />
           {/* Horizontal only. Vertical rules on a category axis add a grid
               nobody reads against and make the plot look like a timesheet. */}
           <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-          <XAxis
-            {...AXIS}
-            dataKey="label"
-            tickMargin={8}
-            minTickGap={4}
-            interval="preserveStartEnd"
-          />
-          {/* Ticks on round hours, and a domain pinned to them, so the
-              gridlines mean something a reader can name — see `hourTicks`. */}
-          <YAxis
-            {...AXIS}
-            width={48}
-            tickFormatter={hoursTick}
-            ticks={ticks}
-            domain={[0, ticks[ticks.length - 1]]}
-          />
+          <XAxis {...AXIS} {...SPAN_AXIS} />
+          {/* Ticks on round hours, with the domain pinned to them, so the
+              gridlines mean something a reader can name — see `hourAxis`. */}
+          <YAxis {...AXIS} {...yAxis} width={48} />
           <ChartTooltip
             cursor={BAR_CURSOR}
             content={<DailyTooltip display={display} unit={unit} />}
@@ -135,11 +125,6 @@ export function DailyChart({
   )
 }
 
-/** Whole hours. The axis is a scale to read bars against, not a figure. */
-function hoursTick(ms: number): string {
-  return `${Math.round(ms / 3_600_000)}h`
-}
-
 function DailyTooltip({
   display,
   unit,
@@ -151,8 +136,8 @@ function DailyTooltip({
   active?: boolean
   payload?: unknown
 }) {
-  const row = hoveredRow<Bucket>(payload)
-  if (active !== true || row === null) return null
+  const row = hoveredRow<Bucket>(active, payload)
+  if (row === null) return null
 
   if (row.empty) {
     return <TooltipCard heading={row.title} rows={[]} footnote={`Nothing tracked this ${unit}.`} />

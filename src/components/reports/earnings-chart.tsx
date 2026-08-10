@@ -1,10 +1,9 @@
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip } from "@/components/ui/chart"
-import { AXIS, GRID_STROKE } from "@/components/reports/chart-frame"
+import { AXIS, GRID_STROKE, SPAN_AXIS } from "@/components/reports/chart-frame"
 import { TooltipCard, hoveredRow } from "@/components/reports/chart-tooltip"
 import { formatMoney } from "@shared/money"
 import type { Bucket } from "@/lib/report-series"
-import type { ChartConfig } from "@/components/ui/chart"
 
 /**
  * What the period has earned, accumulating.
@@ -27,8 +26,6 @@ import type { ChartConfig } from "@/components/ui/chart"
  * it. That reasoning is written out at the `days` accumulation there.
  */
 
-const config = { earnedCents: { label: "Earned" } } satisfies ChartConfig
-
 export function EarningsChart({
   buckets,
   currency,
@@ -37,7 +34,7 @@ export function EarningsChart({
   currency: string
 }) {
   return (
-    <ChartContainer config={config} className="aspect-auto h-56 w-full">
+    <ChartContainer className="aspect-auto h-56 w-full">
       <AreaChart data={buckets} margin={{ top: 4, right: 4, bottom: 0, left: -4 }}>
         <defs>
           {/*
@@ -53,13 +50,7 @@ export function EarningsChart({
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-        <XAxis
-          {...AXIS}
-          dataKey="label"
-          tickMargin={8}
-          minTickGap={4}
-          interval="preserveStartEnd"
-        />
+        <XAxis {...AXIS} {...SPAN_AXIS} />
         <YAxis
           {...AXIS}
           width={64}
@@ -103,8 +94,8 @@ function EarningsTooltip({
   active?: boolean
   payload?: unknown
 }) {
-  const row = hoveredRow<Bucket>(payload)
-  if (active !== true || row === null) return null
+  const row = hoveredRow<Bucket>(active, payload)
+  if (row === null) return null
 
   return (
     <TooltipCard

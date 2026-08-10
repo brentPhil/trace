@@ -20,10 +20,11 @@ import {
 } from "@/lib/history-filters"
 import { staleProps } from "@/lib/stale"
 import { dayOf } from "@shared/day"
+import { unpriced } from "@/lib/format-money"
 import { formatMoney } from "@shared/money"
 import { formatTotal } from "@/lib/format-total"
 import { api } from "../../../convex/_generated/api"
-import type { Breakdown } from "@/lib/report-series"
+import { EMPTY_BREAKDOWN, EMPTY_TOTALS } from "@/lib/report-series"
 import type { Filters } from "@/lib/history-filters"
 import type { FunctionReturnType } from "convex/server"
 
@@ -178,20 +179,6 @@ export function Reports() {
   )
 }
 
-/** What the charts show before any breakdown has ever arrived. */
-const EMPTY_BREAKDOWN: Breakdown = {
-  totalMs: 0,
-  billableMs: 0,
-  count: 0,
-  runningCount: 0,
-  truncated: false,
-  billableCents: 0,
-  unratedBillableMs: 0,
-  days: [],
-  projects: [],
-  hours: [],
-}
-
 /**
  * The Summary tab's data, and nothing else — the drawing is `SummaryPanel`.
  *
@@ -235,17 +222,6 @@ function SummaryTab({ filters, settings }: { filters: Filters; settings: Setting
       isStale={data === undefined || isPlaceholderData}
     />
   )
-}
-
-/** What the sentence below shows before any real summary has ever arrived. */
-const EMPTY_SUMMARY = {
-  totalMs: 0,
-  billableMs: 0,
-  count: 0,
-  runningCount: 0,
-  truncated: false,
-  billableCents: 0,
-  unratedBillableMs: 0,
 }
 
 function DetailedTab({ filters, settings }: { filters: Filters; settings: Settings }) {
@@ -348,23 +324,21 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
    */
   const summaryUnknown = summary === undefined
   const summaryIsStale = summaryUnknown || isPlaceholderData
-  const shownSummary = summary ?? EMPTY_SUMMARY
+  // Never actually read while `summaryUnknown` — the sentence says so instead of
+  // totalling — but the JSX below still needs a value of the right shape.
+  const shownSummary = summary ?? EMPTY_TOTALS
 
   /*
    * How much of the billable time `billableCents` could not put a price on —
    * a subset of `billableMs`, over the same rows, from `entries.rangeSummary`.
    *
-   * Two flags rather than one because the sentence genuinely branches. With
-   * SOME of it unpriced the amount is still right for the part it covers and
-   * only needs qualifying; with ALL of it unpriced there is no amount worth
-   * printing at all, and "$0.00" would be a confident answer to a question
-   * nobody has answered. A rate of zero is priced — pro bono contributes zero
-   * cents and zero unrated milliseconds — so this correctly stays false there
-   * and `$0.00` still renders, which is the honest figure in that case.
+   * Two flags rather than one because the sentence genuinely branches; the rule
+   * itself lives in `unpriced`, which the Summary tab's readout and the project
+   * tooltip also call. A rate of zero is priced — pro bono contributes zero
+   * cents and zero unrated milliseconds — so both stay false there and `$0.00`
+   * still renders, which is the honest figure in that case.
    */
-  const unpricedSome = shownSummary.unratedBillableMs > 0
-  const unpricedAll =
-    unpricedSome && shownSummary.unratedBillableMs >= shownSummary.billableMs
+  const { some: unpricedSome, all: unpricedAll } = unpriced(shownSummary)
 
   /*
    * With a client-side filter active, pull the whole range before drawing any

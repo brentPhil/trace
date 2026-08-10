@@ -1,6 +1,31 @@
 import { formatMoney } from "@shared/money"
 
 /**
+ * How much of a billable total nobody has put a price on.
+ *
+ * THE RULE, in one place: `billableCents: 0` has two opposite meanings and only
+ * `unratedBillableMs` separates them — work done for free (a rate of zero
+ * somebody chose) and work nobody has priced yet. `all` is the gate on printing
+ * an amount at all, because "$0.00" against eight billable hours reads as "these
+ * earned nothing", which is a confident wrong figure in the one place a
+ * freelancer copies numbers onto an invoice. `some` only qualifies an amount
+ * that is still right for the part it covers.
+ *
+ * It lived at three call sites — the totals sentence, the Summary readout and
+ * the project tooltip — and the third had already been written as a DIFFERENT
+ * predicate, agreeing with the other two only because `unratedBillableMs` is a
+ * subset of `billableMs`. One copy, because the failure direction is unbilled
+ * work rendered as free.
+ */
+export function unpriced(totals: {
+  billableMs: number
+  unratedBillableMs: number
+}): { some: boolean; all: boolean } {
+  const some = totals.unratedBillableMs > 0
+  return { some, all: some && totals.unratedBillableMs >= totals.billableMs }
+}
+
+/**
  * A project's hourly rate, or the explicit statement that none is set.
  *
  * "No rate set" rather than "$0.00/hr" — those are different facts. A project

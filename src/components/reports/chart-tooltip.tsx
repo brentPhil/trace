@@ -1,3 +1,4 @@
+import { Swatch } from "@/components/reports/chart-frame"
 import { cn } from "@/lib/utils"
 
 /**
@@ -41,11 +42,7 @@ export function TooltipCard({
           <div key={row.label} className="flex items-center justify-between gap-4">
             <span className="flex items-center gap-1.5 text-muted-foreground">
               {row.swatch === undefined ? null : (
-                <span
-                  aria-hidden
-                  className="size-2 shrink-0 rounded-[2px]"
-                  style={{ backgroundColor: row.swatch }}
-                />
+                <Swatch color={row.swatch} className="size-2" />
               )}
               {row.label}
             </span>
@@ -72,8 +69,16 @@ export function TooltipCard({
  * the series — the tooltip states the day's whole story, not just the segment
  * the pointer happens to be over — so this unwraps it once instead of at four
  * call sites.
+ *
+ * It takes `active` as well, because recharts renders `content` with `active`
+ * undefined and the `active !== true` guard was otherwise restated at all four
+ * of those sites — a convention a fifth chart could only get right by copying.
  */
-export function hoveredRow<T>(payload: unknown): T | null {
+export function hoveredRow<T>(
+  active: boolean | undefined,
+  payload: unknown
+): T | null {
+  if (active !== true) return null
   if (!Array.isArray(payload) || payload.length === 0) return null
   const first: unknown = payload[0]
   if (typeof first !== "object" || first === null || !("payload" in first)) return null

@@ -191,18 +191,24 @@ history columns must align on the decimal without effort.
 eyebrows — that is the scaffold this system is avoiding, and it makes an
 instrument look like a landing page.
 
-**The One Measure Rule.** There is exactly one content width in the product,
-defined once in `src/styles.css` and used only as `max-w-form`. A bare
-`max-w-[…]` literal in a component is a defect.
+**The One Measure Rule.** There is **no page measure**. Every page takes the
+full width, and a bare `max-w-[…]` literal on a page container is a defect.
 
-- `--form-measure` (46rem) — /projects and /settings. A column of labelled
-  controls, at a reading measure, because a long line of prose is harder to
-  read than a short one.
-- Everything else takes the **full width**: the timer bar, /timer's totals and
-  filter band, /reports' header and summary, day headers, entry rows. The log
-  is a TABLE, not prose — the trailing cluster pins right and the title takes
-  what is left. A 1100px measure was tried here for one release and traded a
-  wide row for a dead band of page beside every row.
+- The log is a TABLE, not prose — the trailing cluster pins right and the title
+  takes what is left. This covers the timer bar, /timer's totals and filter
+  band, /reports' header, summary and charts, day headers, and entry rows. A
+  1100px measure was tried here for one release and traded a wide row for a
+  dead band of page beside every row.
+- /projects and /settings were capped at a 46rem `--form-measure` until
+  2026-08-10. Both were the same mistake, and the mistake is worth naming
+  because it will be tempting again: **a row with an empty middle looks broken
+  at 1600px, and narrowing the page only hides it.** /projects reads like an
+  entry row once its rate sits between the name and the actions; /settings puts
+  each section's label and hint in a column beside its control, so the section
+  rule spans something instead of running 1329px under a 272px `<select>`.
+- **Prose is capped where the prose is** — one column of one component — never
+  by shrinking a page around it. A settings hint has a reading measure; the
+  page it sits on does not.
 
 **Every block is left-flush.** Never `mx-auto`. Centring makes a page's left
 edge a function of its own width, so a full-width log and a 46rem settings

@@ -1,4 +1,5 @@
 import { v } from "convex/values"
+import type { ObjectType } from "convex/values"
 import { paginationOptsValidator, paginationResultValidator } from "convex/server"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
@@ -10,7 +11,7 @@ import { timeEntryDoc } from "./lib/docs"
 import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
 import { dayOf, isValidTimeZone, localPartsOf } from "./lib/day"
 import { isFilterActive, matchesFilter } from "./lib/entryFilter"
-import type { EntryFilter, Preset } from "./lib/entryFilter"
+import type { EntryFilter } from "./lib/entryFilter"
 import type { EntryTimes, TimeEdit, TimesResult } from "./lib/entryTimes"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
@@ -556,7 +557,18 @@ async function rangeSummaryImpl(
   toMs: number
 ) {
   const { truncated, live } = await scanRange(ctx, userId, fromMs, toMs)
-  const projects = await projectsOf(ctx, live)
+  /*
+   * BILLABLE ROWS ONLY, unlike `rangeBreakdownImpl`, which needs every
+   * project's name and colour to label a bar.
+   *
+   * The only thing this function wants from a project is its rate, and a rate
+   * is only ever consulted for a billable row. Resolving all of them would make
+   * a range of fifty projects with nothing billable in it do fifty document
+   * reads to answer a question none of them bear on — which is what the
+   * pre-`projectsOf` version avoided by looking a project up lazily, inside the
+   * `if (row.billable)` branch.
+   */
+  const projects = await projectsOf(ctx, live.filter((row) => row.billable))
 
   const ledger = emptyLedger()
   for (const row of live) post(ledger, row, rateOf(row, projects))
@@ -683,15 +695,14 @@ const breakdownArgs = {
   ),
 }
 
-type BreakdownArgs = {
-  fromMs: number
-  toMs: number
-  timeZone: string
-  projectId?: string | null
-  billableOnly?: boolean
-  text?: string
-  presets?: Array<Preset>
-}
+/*
+ * DERIVED from the validator above, never restated.
+ *
+ * A hand-written twin compiles perfectly while `breakdownArgs` grows a field
+ * the handler then silently ignores — the same drift `summaryFields` is spread
+ * to avoid a few lines up.
+ */
+type BreakdownArgs = ObjectType<typeof breakdownArgs>
 
 /** Get-or-create, so the accumulation loop below reads as one line per bucket. */
 function bucket<K>(buckets: Map<K, Ledger>, key: K): Ledger {

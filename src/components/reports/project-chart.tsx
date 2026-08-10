@@ -4,12 +4,12 @@ import { ChartContainer, ChartTooltip } from "@/components/ui/chart"
 import { AXIS, HatchDefs } from "@/components/reports/chart-frame"
 import { BAR_CURSOR, TooltipCard, hoveredRow } from "@/components/reports/chart-tooltip"
 import { formatTotal } from "@/lib/format-total"
+import { unpriced } from "@/lib/format-money"
 import { projectColorVar } from "@/lib/project-color"
 import { formatMoney } from "@shared/money"
 import type { TooltipRow } from "@/components/reports/chart-tooltip"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { ProjectTotal } from "@/lib/report-series"
-import type { ChartConfig } from "@/components/ui/chart"
 
 /**
  * Where the time went, by project.
@@ -26,8 +26,6 @@ import type { ChartConfig } from "@/components/ui/chart"
  * from that palette by construction, so no project can be mistaken for a
  * running timer or for money.
  */
-
-const config = { totalMs: { label: "Tracked" } } satisfies ChartConfig
 
 /**
  * How many projects get their own bar before the tail is rolled up.
@@ -54,7 +52,6 @@ export function ProjectChart({
 
   return (
     <ChartContainer
-      config={config}
       // Height per bar rather than an aspect ratio: three projects in a
       // 16:9 box are three stripes with a field of empty beneath them.
       className="aspect-auto w-full"
@@ -198,8 +195,8 @@ function ProjectTooltip({
   active?: boolean
   payload?: unknown
 }) {
-  const row = hoveredRow<Row>(payload)
-  if (active !== true || row === null) return null
+  const row = hoveredRow<Row>(active, payload)
+  if (row === null) return null
 
   const rows: Array<TooltipRow> = [
     { label: "Tracked", value: formatTotal(row.totalMs, display) },
@@ -207,17 +204,10 @@ function ProjectTooltip({
     { label: row.count === 1 ? "Entry" : "Entries", value: String(row.count) },
   ]
 
-  /*
-   * The amount is omitted entirely — never "$0.00" — when none of this
-   * project's billable time could be priced.
-   *
-   * The same rule the totals sentence follows, and for the same reason:
-   * `billableCents: 0` means "worth nothing" for a project priced at zero and
-   * "nobody has priced this" for a project with no rate, and only
-   * `unratedBillableMs` separates them. A confident zero on the second is how
-   * unbilled work reaches an invoice as free.
-   */
-  const unpricedAll = row.unratedBillableMs >= row.billableMs && row.billableMs > 0
+  // The amount is omitted entirely — never "$0.00" — when none of this
+  // project's billable time could be priced. Same predicate as the totals
+  // sentence and the Summary readout; see `unpriced`.
+  const unpricedAll = unpriced(row).all
   if (row.billableMs > 0 && !unpricedAll) {
     // The one brass figure here: money, and nothing else.
     rows.push({

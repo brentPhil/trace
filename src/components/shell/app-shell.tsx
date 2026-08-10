@@ -90,9 +90,9 @@ export function AppShell({
             keeps the bar's title input, the totals, the filter band, the day
             labels and the entry titles on one left edge. An inset here would
             offset the pages by 8px against the bar, which is not in this
-            container. The log surfaces take the full width; only /projects and
-            /settings cap themselves, at `max-w-form` (src/styles.css), because
-            a column of labelled controls is prose and the log is a table.
+            container. EVERY page takes the full width — there is no page
+            measure left (src/styles.css); prose is capped inside the one
+            component that holds prose, not by narrowing a page around it.
             Backgrounds, borders and hover fills stay on the padded content's
             parents, so the log still reads as edge-to-edge bands.
           */}

@@ -92,27 +92,27 @@
 
   --radius: 0.45rem;
 
-  /* THE MEASURE. One of them, and it is for FORMS only.
+  /* THERE IS NO PAGE MEASURE. Every page takes the full width.
    *
    * The log surfaces — the timer bar, /timer's totals and filter band, the day
-   * headers, the entry rows, /reports' summary — take the full width and are
-   * capped by nothing. They are a TABLE: the title takes what is left after
-   * the trailing cluster pins right, which is what a wide row is supposed to
-   * look like. A measure was tried here for one release and produced a dead
-   * band of page to the right of every row instead.
+   * headers, the entry rows, /reports' summary and its charts — are a TABLE:
+   * the title takes what is left after the trailing cluster pins right, which
+   * is what a wide row is supposed to look like.
    *
-   * `--form-measure` is a column of labelled controls (/projects, /settings) —
-   * a reading measure, where a long line really is harder to read. Defined
-   * once because two pages have to agree on it, and exposed as `max-w-form`
-   * below.
+   * /projects and /settings were the two exceptions, capped at a 46rem
+   * `--form-measure`. Both were the same mistake: a row with an EMPTY MIDDLE
+   * looks broken at 1600px, and narrowing the page only hides it. /projects
+   * has a rate in its middle and reads like an entry row; /settings puts the
+   * label and hint in a column beside the control, so its section rules span
+   * something. Prose is capped where prose actually is — one column of one
+   * component — rather than by shrinking a whole page around it.
    *
-   * Capped or not, every block is LEFT-FLUSH, never `mx-auto`. Centring makes
-   * the left edge a function of the page's own cap, so /settings' fields would
-   * start somewhere /timer's rows do not, and neither would line up with the
-   * timer bar, which sits in the shell and belongs to no page. Left-flush plus
-   * a shared `px-4` gives one edge from the sidebar rail down through every
+   * Every block is LEFT-FLUSH, never `mx-auto`. Centring makes the left edge a
+   * function of the page's own width, so /settings' fields would start
+   * somewhere /timer's rows do not, and neither would line up with the timer
+   * bar, which sits in the shell and belongs to no page. Left-flush plus a
+   * shared `px-4` gives one edge from the sidebar rail down through every
    * page. */
-  --form-measure: 46rem;
 
   --sidebar: var(--surface);
   --sidebar-foreground: var(--ink);
@@ -141,10 +141,6 @@
   --color-enlarger: var(--enlarger);
   --color-brass: var(--brass);
   --color-alarm: var(--alarm);
-
-  /* `max-w-form`. Tailwind builds its width utilities from the `--container-*`
-   * namespace, so naming it here is what turns the measure above into a class. */
-  --container-form: var(--form-measure);
 
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);

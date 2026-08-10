@@ -14,6 +14,7 @@ import {
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { dayOf } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
+import { EMPTY_BREAKDOWN } from "@/lib/report-series"
 import type { Breakdown } from "@/lib/report-series"
 import type { Id } from "../../../convex/_generated/dataModel"
 import type * as ConvexReactModuleType from "convex/react"
@@ -193,20 +194,6 @@ function createQueryClient() {
   return { queryClient, resolveSummary }
 }
 
-/** An empty breakdown, so the Summary tab has something to mount against. */
-const NO_BREAKDOWN: Breakdown = {
-  totalMs: 0,
-  billableMs: 0,
-  count: 0,
-  runningCount: 0,
-  truncated: false,
-  billableCents: 0,
-  unratedBillableMs: 0,
-  days: [],
-  projects: [],
-  hours: Array.from({ length: 24 }, () => 0),
-}
-
 function seedStable(queryClient: QueryClient) {
   queryClient.setQueryData(convexKey(api.settings.get, {}), SETTINGS)
   queryClient.setQueryData(convexKey(api.projects.list, {}), [])
@@ -226,7 +213,7 @@ function seedStable(queryClient: QueryClient) {
 function seedBreakdown(
   queryClient: QueryClient,
   filters: ReturnType<typeof defaultFilters>,
-  value: Breakdown = NO_BREAKDOWN
+  value: Breakdown = EMPTY_BREAKDOWN
 ) {
   queryClient.setQueryData(
     convexKey(
@@ -708,7 +695,7 @@ describe("Reports — the Summary tab", () => {
 
     renderReports((queryClient) => {
       seedBreakdown(queryClient, filters, {
-        ...NO_BREAKDOWN,
+        ...EMPTY_BREAKDOWN,
         totalMs: 28_800_000, // 8:00:00
         billableMs: 7_200_000, // 2:00:00
         count: 4,
@@ -745,7 +732,7 @@ describe("Reports — the Summary tab", () => {
 
     renderReports((queryClient) => {
       seedBreakdown(queryClient, filters, {
-        ...NO_BREAKDOWN,
+        ...EMPTY_BREAKDOWN,
         totalMs: 28_800_000,
         billableMs: 28_800_000,
         count: 1,
@@ -775,7 +762,7 @@ describe("Reports — the Summary tab", () => {
 
     renderReports((queryClient) => {
       seedBreakdown(queryClient, filters, {
-        ...NO_BREAKDOWN,
+        ...EMPTY_BREAKDOWN,
         totalMs: 28_800_000,
         count: 5_000,
         truncated: true,
@@ -827,7 +814,7 @@ describe("Reports — the Summary tab", () => {
     })
 
     seedBreakdown(queryClient, next, {
-      ...NO_BREAKDOWN,
+      ...EMPTY_BREAKDOWN,
       totalMs: 5_400_000, // 1:30:00
       count: 2,
       days: [

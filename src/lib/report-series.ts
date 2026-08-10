@@ -1,4 +1,5 @@
 import { addDays, parseDayString } from "@shared/day"
+import { addMonths } from "@/lib/month-grid"
 import { daysBetween } from "@/lib/history-filters"
 import type { DayString } from "@shared/day"
 
@@ -53,6 +54,34 @@ export type Breakdown = {
   days: Array<DayTotal>
   projects: Array<ProjectTotal>
   hours: Array<number>
+}
+
+/**
+ * What a chart shows before any breakdown has arrived.
+ *
+ * Exported so the route's placeholder and the tests' baseline are the same
+ * value. Two copies had already diverged on `hours` (`[]` against 24 zeroes),
+ * which meant the tests exercised a shape the component never renders.
+ *
+ * `EMPTY_TOTALS` is the seven figures `rangeSummary` and `rangeBreakdown`
+ * share, spread rather than restated — the same split, for the same reason, as
+ * `summaryFields` in convex/entries.ts.
+ */
+export const EMPTY_TOTALS = {
+  totalMs: 0,
+  billableMs: 0,
+  count: 0,
+  runningCount: 0,
+  truncated: false,
+  billableCents: 0,
+  unratedBillableMs: 0,
+}
+
+export const EMPTY_BREAKDOWN: Breakdown = {
+  ...EMPTY_TOTALS,
+  days: [],
+  projects: [],
+  hours: Array.from({ length: 24 }, () => 0),
 }
 
 export type Granularity = "day" | "week" | "month"
@@ -173,12 +202,14 @@ function keysBetween(
     return keys
   }
 
-  // Months, which are not a fixed number of days.
+  // Months, which are not a fixed number of days. `addMonths` clamps the day
+  // of the month, which an add-32-days-then-truncate version gets wrong at the
+  // end of January — and it is already covered by month-grid.test.ts.
   let month = monthKey(from)
   const last = monthKey(to)
   while (month <= last) {
     keys.push(month)
-    month = monthKey(addDays(month, 32))
+    month = addMonths(month, 1)
   }
   return keys
 }
@@ -210,10 +241,24 @@ function atNoon(day: DayString): Date {
   return new Date(Date.UTC(year, month - 1, date, 12))
 }
 
+/*
+ * Cached by option set, not rebuilt per call.
+ *
+ * `Intl.DateTimeFormat` construction is expensive relative to formatting, and
+ * this runs twice per bucket — up to ~200 constructions for a two-year range,
+ * on every render. convex/lib/day.ts and src/lib/format-time.ts both cache
+ * theirs for the same reason, and say so.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>()
+
 function format(day: DayString, options: Intl.DateTimeFormatOptions): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...options }).format(
-    atNoon(day)
-  )
+  const key = JSON.stringify(options)
+  let formatter = formatters.get(key)
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...options })
+    formatters.set(key, formatter)
+  }
+  return formatter.format(atNoon(day))
 }
 
 /**
@@ -241,7 +286,8 @@ function titleOf(key: DayString, granularity: Granularity, to: DayString): strin
   }
   if (granularity === "day") return format(key, full)
 
-  const end = granularity === "week" ? addDays(key, 6) : addDays(monthKey(addDays(key, 32)), -1)
+  const end =
+    granularity === "week" ? addDays(key, 6) : addDays(addMonths(key, 1), -1)
   // Never past the range the user asked for: a final partial week ending "9 Aug"
   // must not claim to cover the four days after it that nothing was queried for.
   const clamped = end > to ? to : end
@@ -297,6 +343,30 @@ export function hourRows(
  * touching the ceiling.
  */
 const NICE_HOURS = [1, 2, 3, 4, 6, 8, 12, 24, 48]
+
+/**
+ * Everything a duration Y-axis needs: its ticks, the domain pinned to them, and
+ * the formatter that labels them.
+ *
+ * Returned together because they are ONE decision. Split across call sites, the
+ * daily chart and the hours chart each restated the domain-pinning contract and
+ * each carried its own copy of the hour formatter — so the two charts could
+ * label the same gridline differently, on a page whose whole premise is that
+ * the scale is beyond question.
+ */
+export function hourAxis(maxMs: number): {
+  ticks: Array<number>
+  domain: [number, number]
+  tickFormatter: (ms: number) => string
+} {
+  const ticks = hourTicks(maxMs)
+  return {
+    ticks,
+    domain: [0, ticks[ticks.length - 1]],
+    // Whole hours. The axis is a scale to read bars against, not a figure.
+    tickFormatter: (ms: number) => `${Math.round(ms / 3_600_000)}h`,
+  }
+}
 
 export function hourTicks(maxMs: number): Array<number> {
   const hours = maxMs / 3_600_000

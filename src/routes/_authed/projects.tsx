@@ -32,13 +32,18 @@ export function Projects() {
   return (
     <div className="flex flex-col">
       {/*
-        `max-w-form`: this is a settings-shaped list of forms, not a table
-        wanting the log's full-bleed row treatment — every row here is a name,
-        a checkbox, and two icons, and at 1600px an unconstrained row measured
-        a 1196px gap between the project-colour swatch and its own actions. A
-        project name never needs more than a normal reading measure.
+        FULL WIDTH, like every other page.
+
+        This was capped at `max-w-form` on the argument that it is "a
+        settings-shaped list of forms, not a table" — and the argument was
+        wrong about its own rows. A `ProjectRow` is a swatch, a name, a
+        billable checkbox, a rate and two icons: the trailing cluster is all
+        `shrink-0` and the NAME is `flex-1`, which is exactly the entry row's
+        shape. So the width goes to the name, not to a gap — the 1196px hole
+        the old comment described is what happens to a row whose middle is
+        empty, and this row's middle is its rate.
       */}
-      <div className="flex max-w-form flex-1 flex-col gap-10 px-4 py-6">
+      <div className="flex flex-1 flex-col gap-10 px-4 py-6">
         <section className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between gap-3">
             <h1 className="text-sm font-semibold">Projects</h1>
