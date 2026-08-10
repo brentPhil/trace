@@ -50,7 +50,7 @@ const MERIDIEM = /^(\d{1,2})(?:[:.](\d{2}))?\s*(a|p)\.?m?\.?$/
  * type, so the same input always produces the same visible echo before commit.
  */
 export function parseTimeOfDay(input: string, nowMinutes: number): TimeParseResult {
-  const text = input.trim().toLowerCase().replace(/\s+/g, " ")
+  const text = normalise(input)
   if (text === "") return { ok: false, reason: "empty" }
 
   const meridiem = MERIDIEM.exec(text)
@@ -81,46 +81,79 @@ export function parseTimeOfDay(input: string, nowMinutes: number): TimeParseResu
   return fail()
 }
 
-function parseBare(digits: string, nowMinutes: number): TimeParseResult {
-  // Three and four digits are a compact h:mm — "930", "1430".
+/**
+ * EVERY reading a bare run of digits could mean, or `null` if it has none.
+ *
+ * ONE list, read by two selection policies — `parseTimeOfDay` below picks the
+ * reading nearest to now, `parseEndTime` picks the first one after the start.
+ * This function is the single statement of WHICH inputs are ambiguous at all,
+ * and it exists because that rule used to be written twice: once here and once
+ * in a mirror beside `parseEndTime` whose own docstring conceded it "must keep
+ * mirroring them". It did not. That is the exact shape that left `"09"` fixed
+ * and `"9"` broken for months.
+ *
+ * The four rules that make a bare reading SINGLE:
+ *
+ *   - Three and four digits are a compact h:mm — "930", "1430".
+ *   - A leading zero is an explicit 24-hour hour. Without this, "09" typed at
+ *     16:00 resolved to 21:00 — so backfilling a 9-to-5 day committed a
+ *     20-hour entry instead of eight, a twelve-hour over-bill from two
+ *     keystrokes, while "0900" at the same moment gave 09:00. Two spellings of
+ *     one intention must not disagree.
+ *   - `0` is midnight.
+ *   - 13-23 are already 24-hour.
+ *
+ * Everything left — 1 through 12 — has exactly two readings, always exactly 12
+ * hours apart. `% 12` so that 12 yields [00:00, 12:00] alongside 9's
+ * [09:00, 21:00]: the same shape, which is what lets one selection policy
+ * handle both. AM is always first.
+ */
+function bareReadings(digits: string): Array<number> | null {
   if (digits.length === 3 || digits.length === 4) {
     const hour = Number(digits.slice(0, digits.length - 2))
     const minute = Number(digits.slice(-2))
-    if (hour > 23 || minute > 59) return fail()
-    return ok(hour * 60 + minute)
+    if (hour > 23 || minute > 59) return null
+    return [hour * 60 + minute]
   }
 
   const value = Number(digits)
-  if (value > 23) return fail()
+  if (value > 23) return null
 
-  // A leading zero is an explicit 24-hour hour, never a candidate for the
-  // nearest-reading rule. Without this, "09" typed at 16:00 resolved to 21:00
-  // — so backfilling a 9-to-5 day committed a 20-hour entry instead of eight,
-  // a twelve-hour over-bill from two keystrokes, while "0900" at the same
-  // moment gave 09:00. Two spellings of one intention must not disagree.
-  if (digits.length === 2 && digits.startsWith("0")) return ok(value * 60)
+  if (digits.length === 2 && digits.startsWith("0")) return [value * 60]
+  if (value === 0 || value >= 13) return [value * 60]
 
-  if (value === 0) return ok(0)
+  const am = (value % 12) * 60
+  return [am, am + 12 * 60]
+}
 
-  if (value === 12) {
+function parseBare(digits: string, nowMinutes: number): TimeParseResult {
+  const readings = bareReadings(digits)
+  if (readings === null) return fail()
+  if (readings.length === 1) return ok(readings[0])
+
+  if (Number(digits) === 12) {
     // Ambiguous in a way "nearest" handles badly, because both candidates are
     // exactly 12 hours from each other. Resolve by what a working day looks
-    // like: noon is meant during it, midnight either side.
+    // like: noon is meant during it, midnight either side. `parseEndTime` does
+    // NOT need this — a start to measure from answers it outright — which is
+    // why the rule lives in this selection policy and not in the list above.
     if (nowMinutes < 8 * 60) return ok(0)
     if (nowMinutes <= 20 * 60) return ok(12 * 60)
     return { ok: true, time: { minutes: 0, dayOffset: 1 } }
   }
-
-  if (value >= 13) return ok(value * 60)
 
   // 1-11: pick whichever of the two readings is nearer on the clock face.
   // The two candidates are always exactly 12 hours apart, so a tie happens at
   // exactly one `now` per input. `<=` breaks it toward AM — deterministic, and
   // documented here because it is otherwise invisible. The caller echoes the
   // parse before committing, which is what makes the whole rule safe.
-  const am = value * 60
-  const pm = (value + 12) * 60
+  const [am, pm] = readings
   return ok(clockDistance(am, nowMinutes) <= clockDistance(pm, nowMinutes) ? am : pm)
+}
+
+/** Trim, lower-case, and collapse runs of whitespace. */
+function normalise(input: string): string {
+  return input.trim().toLowerCase().replace(/\s+/g, " ")
 }
 
 /** Shortest distance between two points on a 24-hour clock face, in minutes. */
@@ -157,40 +190,24 @@ function fail(): TimeParseResult {
  * explicit `5am` after a 09:00 start really is overnight.
  */
 export function parseEndTime(input: string, start: TimeOfDay): TimeParseResult {
-  const readings = ambiguousBareReadings(input)
-  if (readings !== null) return { ok: true, time: firstAfter(readings, start) }
+  // Bare digits go through `bareReadings` — the ONE statement of which inputs
+  // are ambiguous — and are selected from by "first after the start" rather
+  // than by "nearest to now". Everything else has a single reading already and
+  // is simply anchored forward.
+  const bare = BARE.exec(normalise(input))
+  if (bare !== null) {
+    const readings = bareReadings(bare[1])
+    if (readings === null) return fail()
+    return { ok: true, time: firstAfter(readings, start) }
+  }
 
   const parsed = parseTimeOfDay(input, start.minutes)
   if (!parsed.ok) return parsed
   return { ok: true, time: resolveEndAfterStart(parsed.time, start) }
 }
 
-/**
- * The two readings a bare hour could mean, or `null` if it means only one.
- *
- * Mirrors the cases `parseBare` treats as ambiguous, and must keep mirroring
- * them: a leading zero is an explicit 24-hour hour, three and four digits are
- * a compact h:mm, `0` is midnight, and 13-23 are already 24-hour.
- */
-function ambiguousBareReadings(input: string): [number, number] | null {
-  const text = input.trim().toLowerCase().replace(/\s+/g, " ")
-  const bare = /^(\d{1,2})$/.exec(text)
-  if (bare === null) return null
-
-  const digits = bare[1]
-  if (digits.length === 2 && digits.startsWith("0")) return null
-
-  const value = Number(digits)
-  if (value < 1 || value > 12) return null
-
-  // `% 12` so that 12 yields [00:00, 12:00] alongside 9's [09:00, 21:00] —
-  // the same shape, which is why 12 no longer needs a rule of its own here.
-  const am = (value % 12) * 60
-  return [am, am + 12 * 60]
-}
-
 /** Whichever reading lands soonest after the start, by the rule below. */
-function firstAfter(readings: [number, number], start: TimeOfDay): TimeOfDay {
+function firstAfter(readings: Array<number>, start: TimeOfDay): TimeOfDay {
   const resolved = readings.map((minutes) =>
     resolveEndAfterStart({ minutes, dayOffset: 0 }, start)
   )
@@ -215,13 +232,13 @@ export function absoluteMinutes(time: TimeOfDay): number {
  * entry described there.
  */
 export function resolveEndAfterStart(end: TimeOfDay, start: TimeOfDay): TimeOfDay {
-  const startAbs = start.dayOffset * MINUTES_PER_DAY + start.minutes
-  // Anchored to the start's own day rather than repeatedly adding a day to
-  // whatever the end already carried. The loop form could return dayOffset 2
-  // when the start was already offset, which is outside this type's documented
-  // 0 | 1 domain and produced an entry more than 24 hours long.
-  const endMinutes = end.minutes
-  const sameDay = start.dayOffset * MINUTES_PER_DAY + endMinutes
+  const startAbs = absoluteMinutes(start)
+  // Anchored to the START's own day, carrying the END's minutes — not to
+  // either one wholesale, and not by repeatedly adding a day to whatever the
+  // end already carried. The loop form could return dayOffset 2 when the start
+  // was already offset, which is outside this type's documented 0 | 1 domain
+  // and produced an entry more than 24 hours long.
+  const sameDay = start.dayOffset * MINUTES_PER_DAY + end.minutes
   const endAbs = sameDay > startAbs ? sameDay : sameDay + MINUTES_PER_DAY
   return {
     minutes: endAbs % MINUTES_PER_DAY,

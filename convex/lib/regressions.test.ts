@@ -115,6 +115,60 @@ describe("wrong money", () => {
   })
 
   /**
+   * The other half of that rule, and the half nothing was watching.
+   *
+   * Which bare inputs are AMBIGUOUS used to be stated twice — once in
+   * `parseBare` and once in a mirror beside `parseEndTime` whose own docstring
+   * conceded it "must keep mirroring them". The property loop above only ever
+   * covered hours 1-12, which is precisely the set both copies agreed on, so a
+   * divergence for "0", "09" or "930" passed the suite in silence. That is the
+   * same shape as the original defect: "09" was fixed and "9" left broken for
+   * months because the rule lived in one place and the fix in another.
+   *
+   * For every spelling with exactly ONE reading, the end parser must be
+   * indistinguishable from the time parser plus the forward anchor.
+   */
+  it("an unambiguous end spelling reads the same as the time parser plus the anchor", () => {
+    const single = [
+      "0",
+      "00",
+      "01",
+      "07",
+      "09",
+      "13",
+      "17",
+      "23",
+      "930",
+      "0900",
+      "1430",
+      "0000",
+      "2359",
+      "017",
+    ]
+    for (let s = 0; s < 1440; s += 23) {
+      const start = { minutes: s, dayOffset: 0 }
+      for (const input of single) {
+        const viaEnd = parseEndTime(input, start)
+        const direct = parseTimeOfDay(input, s)
+        if (!direct.ok) throw new Error(`"${input}" did not parse`)
+        expect(viaEnd, `"${input}" at ${s}`).toEqual({
+          ok: true,
+          time: resolveEndAfterStart(direct.time, start),
+        })
+      }
+    }
+  })
+
+  /** Both parsers must refuse the same bare junk, for the same reason. */
+  it("the end parser refuses exactly the bare digits the time parser refuses", () => {
+    const start = { minutes: 9 * 60, dayOffset: 0 }
+    for (const bad of ["24", "25", "99", "2400", "1260", "9999", "0099"]) {
+      expect(parseTimeOfDay(bad, 0).ok, bad).toBe(false)
+      expect(parseEndTime(bad, start).ok, bad).toBe(false)
+    }
+  })
+
+  /**
    * A mistyped year in the start field wrote a 584-day entry with no refusal.
    * The ceiling had been applied only to the field literally named "duration".
    */
