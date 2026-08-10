@@ -2,8 +2,11 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 /** The four states `usePaginatedQuery` can report, spelled out so this file
- * never has to import convex/react to know them. */
-export type LogStatus = "LoadingFirstPage" | "LoadingMore" | "CanLoadMore" | "Exhausted"
+ * never has to import convex/react to know them. Deliberately unexported:
+ * callers pass the status through structurally, straight from
+ * `usePaginatedQuery`, so an export would only be a second name for a shape
+ * nobody needs to spell. */
+type LogStatus = "LoadingFirstPage" | "LoadingMore" | "CanLoadMore" | "Exhausted"
 
 /**
  * What sits below Timer's log while a client-side filter is active.
@@ -34,7 +37,8 @@ export function FilteredLogStatus({
   filtering: boolean
   /**
    * How many entries the log is actually DRAWING, not how many groups it made.
-   * Only ever read when `status` is `"Exhausted"` — see above.
+   * Read in every state to tell "no matches" from "some matches", but only ever
+   * PRINTED when `status` is `"Exhausted"` — see above.
    */
   matchCount: number
   status: LogStatus
