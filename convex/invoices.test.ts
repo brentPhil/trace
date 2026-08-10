@@ -6,12 +6,13 @@
 // entries.breakdown.test.ts. What is proven HERE is specific to invoicing:
 // the snapshot rule, the two hard refusals, and the unrated-time exclusion.
 import { convexTest } from "convex-test"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import schema from "./schema"
 import { internal } from "./_generated/api"
 import { traceErrorCode } from "./lib/codes"
 import { parseInvoiceSequence } from "./lib/invoiceNumber"
-import { INVOICE_SCAN_LIMIT } from "./lib/scan"
+import { NO_PROJECT_LABEL } from "./lib/labels"
+import { INVOICE_NUMBER_SCAN_LIMIT, INVOICE_SCAN_LIMIT } from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
 
 const modules = import.meta.glob("./**/*.*s")
@@ -191,6 +192,20 @@ describe("invoices.createFromRange", () => {
     expect(after).toEqual(before)
   })
 
+  /*
+   * Pins the CONSTANT's value, not just the behaviour it drives. The test
+   * below seeds `INVOICE_SCAN_LIMIT + 1` rows and would pass identically if
+   * the constant were raised back to `SUMMARY_SCAN_LIMIT` (5,000) — it
+   * would just seed and refuse at a higher number, never noticing that 5,000
+   * sits ABOVE the ~3,100-row byte ceiling this limit exists to stay under
+   * (see convex/lib/scan.ts). Raising the constant past that ceiling brings
+   * back the opaque platform failure `RANGE_TOO_LARGE` was written to
+   * replace, and only an assertion on the literal value can catch that.
+   */
+  it("keeps INVOICE_SCAN_LIMIT below the documented byte ceiling", () => {
+    expect(INVOICE_SCAN_LIMIT).toBe(2_000)
+  })
+
   it("refuses a truncated range rather than invoicing a floor", async () => {
     const t = setup()
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
@@ -285,6 +300,30 @@ describe("invoices.createFromRange", () => {
     expect(unratedMs).toBe(0)
   })
 
+  /*
+   * No fixture elsewhere in this suite creates a billable entry with NO
+   * `projectId` while an account default rate is set, so the "No project"
+   * label on a line — the one path through `description: project?.name ??
+   * NO_PROJECT_LABEL` that actually reaches the fallback — was never
+   * asserted.
+   */
+  it("labels a line with no project 'No project', priced at the account default rate", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      defaultHourlyRateCents: 1500,
+    })
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR })
+
+    const { invoiceId } = await create(t)
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.description).toBe(NO_PROJECT_LABEL)
+    expect(invoice.lines[0]?.unitCents).toBe(1500)
+    expect(invoice.lines[0]?.projectId).toBeUndefined()
+  })
+
   it("excludes non-billable time entirely", async () => {
     const t = setup()
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
@@ -359,7 +398,28 @@ describe("invoices.createFromRange", () => {
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
-    const { invoiceId } = await create(t)
+    /*
+     * `Date.now()` is mocked to a COUNTER, not left real, for the assertion
+     * below. Two real `Date.now()` calls inside one synchronous mutation land
+     * on the same millisecond under convex-test, so a plain
+     * `dueAt - issuedAt === 30 days` check could not tell "one clock read,
+     * reused for both fields" from "two reads that happened to tie" — a
+     * second read would have silently passed the same assertion. A counter
+     * makes the two implementations diverge: `dueAt` computed from a SECOND
+     * `Date.now()` call would land 1ms past 30 days, and only reusing the
+     * FIRST read keeps the difference exact.
+     */
+    let tick = MON
+    const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      tick += 1
+      return tick
+    })
+    let invoiceId: Id<"invoices">
+    try {
+      ;({ invoiceId } = await create(t))
+    } finally {
+      dateNowSpy.mockRestore()
+    }
     const invoice = await get(t, invoiceId)
 
     expect(invoice.status).toBe("draft")
@@ -368,8 +428,9 @@ describe("invoices.createFromRange", () => {
     // regardless of the account's own setting would pass every other test.
     expect(invoice.currency).toBe("EUR")
     expect(invoice.number).toMatch(/^\d{6}-\d{4,}$/)
-    // Net 30, in milliseconds, computed from the SAME issuedAt this invoice
-    // stamped rather than from a second clock read.
+    // Net 30, in milliseconds, from the SAME issuedAt this invoice stamped —
+    // see the mock above for why this can now actually tell that apart from
+    // a second clock read.
     expect(invoice.dueAt - invoice.issuedAt).toBe(30 * 24 * 60 * 60 * 1000)
   })
 
@@ -391,6 +452,50 @@ describe("invoices.createFromRange", () => {
     expect(secondSeq).not.toBeNull()
     expect(secondSeq as number).toBeGreaterThan(firstSeq as number)
   })
+
+  /*
+   * `nextInvoiceNumber` needs the highest sequence ever used, and
+   * `by_user_number` sorts `number` as a STRING — so no bounded slice of that
+   * index provably contains the maximum (see INVOICE_NUMBER_SCAN_LIMIT's
+   * comment in convex/lib/scan.ts). This proves the mutation refuses once its
+   * bounded read of the WHOLE table can no longer prove correctness, rather
+   * than silently handing out a number some other invoice already holds.
+   */
+  it("refuses to mint a number once the invoice history is too large to scan safely", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const BATCH = 500
+    const n = INVOICE_NUMBER_SCAN_LIMIT + 1
+    for (let offset = 0; offset < n; offset += BATCH) {
+      const upper = Math.min(offset + BATCH, n)
+      await t.run(async (ctx) => {
+        for (let i = offset; i < upper; i += 1) {
+          await ctx.db.insert("invoices", {
+            userId: ALICE,
+            clientKey: `hist-${i}`,
+            number: `010100-${String(i).padStart(4, "0")}`,
+            status: "draft",
+            clientId: null,
+            billedTo: "",
+            payTo: "",
+            currency: "USD",
+            issuedAt: MON,
+            dueAt: MON + 30 * 24 * HOUR,
+            taxes: [],
+            sourceFromMs: null,
+            sourceToMs: null,
+            unratedMsAtCreation: 0,
+            updatedAt: MON,
+            deletedAt: null,
+          })
+        }
+      })
+    }
+
+    await expectCode(create(t), "INVOICE_HISTORY_TOO_LARGE")
+  }, 60_000)
 
   it("lines carry a stable sortKey, matching print order", async () => {
     const t = setup()

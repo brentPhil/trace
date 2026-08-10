@@ -67,6 +67,45 @@ export const SUMMARY_SCAN_LIMIT = 5_000
 export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
 
 /**
+ * How many `invoices` rows `createFromRange` may read while computing the
+ * next invoice number before it refuses, rather than risk handing out one
+ * already in use.
+ *
+ * `nextInvoiceNumber` needs the HIGHEST sequence ever used, not every number —
+ * so the obvious optimisation is reading a small tail of `by_user_number`
+ * instead of the whole table. That does not work here. The index sorts
+ * `number` — `MMDDYY-NNNN` — as a STRING, and string order diverges from
+ * sequence order in two ways that both matter: (1) the six-digit date stamp
+ * leads every comparison, so an old invoice whose sequence is high sorts
+ * BEFORE a recent invoice whose sequence is low, and the true maximum can sit
+ * anywhere in the table, not at either end; (2) even within one date, `NNNN`
+ * grows past four digits once the sequence does, and "10000" sorts BEFORE
+ * "9999" as a string though it is numerically larger. No slice of the index,
+ * front or back, provably contains the maximum. `number` is also
+ * user-editable (see convex/lib/invoiceNumber.ts), so a handwritten scheme
+ * can land anywhere in that order too. The only read that is provably
+ * correct is the whole table.
+ *
+ * So this bounds a full scan instead, and refusing past it is the same trade
+ * `RANGE_TOO_LARGE` makes: two invoices claiming the same number is a client's
+ * bookkeeper finding a duplicate id, which a refusal is cheaper than.
+ *
+ * This scan runs in the SAME mutation, and so the SAME transaction, as the
+ * `timeEntries` scan bounded by `INVOICE_SCAN_LIMIT` above — its budget is
+ * whatever the 8 MiB ceiling has left after that scan's own worst case
+ * (`INVOICE_SCAN_LIMIT` rows at up to ~2.7 KB each, or ~5.4 MB), not the full
+ * 8 MiB. An `invoices` row is far lighter: nothing this mutation writes onto
+ * one is free text yet, so the worst case is `billedTo` — bounded by
+ * `clients.ts`'s own `MAX_NAME_LENGTH` (100) plus `MAX_ADDRESS_LENGTH` (500)
+ * — beside a handful of ids and numbers, call it ~800 bytes. 2,000 such rows
+ * is ~1.6 MB, leaving real headroom inside the ~2.6 MB the entry scan's worst
+ * case leaves behind. If a future editor (Task 6) adds unbounded free text to
+ * an invoice — notes, purchase orders — this row-size estimate needs
+ * revisiting alongside it.
+ */
+export const INVOICE_NUMBER_SCAN_LIMIT = 2_000
+
+/**
  * How many `(week, project, description)` ROWS a breakdown will keep — NOT
  * how many distinct descriptions.
  *

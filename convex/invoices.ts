@@ -9,7 +9,7 @@ import { lineAmountCents } from "./lib/invoiceMath"
 import { nextInvoiceNumber } from "./lib/invoiceNumber"
 import { invoiceDoc, invoiceLineDoc } from "./lib/docs"
 import { NO_PROJECT_LABEL } from "./lib/labels"
-import { INVOICE_SCAN_LIMIT } from "./lib/scan"
+import { INVOICE_NUMBER_SCAN_LIMIT, INVOICE_SCAN_LIMIT } from "./lib/scan"
 import { currencyOf, defaultRateCents } from "./settings"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
@@ -162,9 +162,15 @@ async function createFromRangeImpl(
     // Every figure on a truncated /reports is a floor. A floor on an invoice
     // under-bills a client by an unknown amount with nothing on the document
     // to reveal it, so this is refused outright rather than invoiced.
+    //
+    // NOT "too large to total exactly" — between INVOICE_SCAN_LIMIT and
+    // SUMMARY_SCAN_LIMIT entries, /reports totals this same range exactly;
+    // only this mutation's smaller, byte-safe read (see INVOICE_SCAN_LIMIT in
+    // convex/lib/scan.ts) runs out first. The true claim is narrower: this
+    // path reads less than /reports does, and the range has to shrink to fit.
     traceError(
       "RANGE_TOO_LARGE",
-      "This period is too large to total exactly, so it cannot be invoiced. Narrow the dates."
+      "This period has more time entries than an invoice can total exactly — invoicing reads a smaller window than /reports does. Narrow the dates."
     )
   }
 
@@ -258,12 +264,24 @@ async function createFromRangeImpl(
   }
 
   const now = Date.now()
-  const usedNumbers = (
-    await ctx.db
-      .query("invoices")
-      .withIndex("by_user_number", (q) => q.eq("userId", userId))
-      .collect()
-  ).map((row) => row.number)
+  // Bounded, not `.collect()`: `nextInvoiceNumber` needs the HIGHEST sequence
+  // ever used, and `by_user_number` sorts `number` as a STRING — which does
+  // NOT put that maximum at either end of the index (see
+  // INVOICE_NUMBER_SCAN_LIMIT's comment in convex/lib/scan.ts for why). The
+  // only provably-correct read is the whole table, so this bounds that read
+  // and refuses outright once it doesn't fit, rather than risk a wrong
+  // number that lets two invoices claim the same id.
+  const invoiceRows = await ctx.db
+    .query("invoices")
+    .withIndex("by_user_number", (q) => q.eq("userId", userId))
+    .take(INVOICE_NUMBER_SCAN_LIMIT + 1)
+  if (invoiceRows.length > INVOICE_NUMBER_SCAN_LIMIT) {
+    traceError(
+      "INVOICE_HISTORY_TOO_LARGE",
+      "This account has too many invoices for the next number to be verified unique."
+    )
+  }
+  const usedNumbers = invoiceRows.map((row) => row.number)
   const number = nextInvoiceNumber(now, args.timeZone, usedNumbers)
 
   const invoiceId = await ctx.db.insert("invoices", {

@@ -72,6 +72,11 @@ export type TraceErrorCode =
    *  Refused rather than merged: silently combining them bills one company
    *  for another company's work, on one document, with one total. */
   | "MIXED_CLIENTS"
+  /** Too many invoices exist to prove what the next number's sequence should
+   *  be — see INVOICE_NUMBER_SCAN_LIMIT in convex/lib/scan.ts. Refused rather
+   *  than guessed: a wrong number here means two documents claiming the same
+   *  invoice id, which is worse than refusing to mint one. */
+  | "INVOICE_HISTORY_TOO_LARGE"
 
 export type TraceErrorData = {
   code: TraceErrorCode
