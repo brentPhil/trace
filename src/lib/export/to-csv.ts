@@ -73,7 +73,7 @@ export function toCsv(rows: ReportRows): string {
     "",
     formatClock(rows.totals.totalMs),
     formatDecimalHours(rows.totals.totalMs),
-    String(rows.totals.billablePercent === 0 ? 0 : 100),
+    String(rows.totals.totalMs === 0 ? 0 : 100),
     amount(rows.totals.billableCents, rows.totals.unratedBillableMs > 0),
     currency,
   ])

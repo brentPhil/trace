@@ -98,4 +98,23 @@ describe("toCsv", () => {
     // question nobody has answered, and the two must not share a cell value.
     expect(csv.split("\r\n")[1]).toBe("Acme,Standup,1:00:00,1.00,100,,USD")
   })
+
+  it("agrees with its own body rows even when the range is entirely non-billable", () => {
+    // billablePercent is the share that's billable, which is legitimately 0
+    // for a range that holds hours but no billable work. The Percent column
+    // measures share of *duration*, not billability, so gating TOTAL's
+    // Percent on billablePercent prints 0 beneath rows that sum to 100 — a
+    // CSV that visibly contradicts itself.
+    const rows = rowsOf(ONE)
+    const csv = toCsv({
+      ...rows,
+      totals: {
+        ...rows.totals,
+        billableMs: 0,
+        billablePercent: 0,
+        billableCents: 0,
+      },
+    })
+    expect(csv.split("\r\n").at(-1)).toBe("TOTAL,,1:00:00,1.00,100,0.00,USD")
+  })
 })
