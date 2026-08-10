@@ -5,7 +5,7 @@ import {
   axisTickIndices,
   barColumns,
   donutSlices,
-  helveticaWidth,
+  textWidth,
   truncateToWidth,
   wrapToWidth,
 } from "./ops"
@@ -131,7 +131,7 @@ describe("barColumns", () => {
   })
 })
 
-describe("helveticaWidth / truncateToWidth", () => {
+describe("textWidth / truncateToWidth", () => {
   // The report's own reference case (P0-1): a real description long enough to
   // run through the DURATION column when drawn at full width.
   const LONG = "[B-CB-326] Building Crew Training CSV and PDF download"
@@ -154,12 +154,12 @@ describe("helveticaWidth / truncateToWidth", () => {
   it("keeps the truncated result within the width it was given", () => {
     const maxWidth = 60
     const truncated = truncateToWidth(LONG, maxWidth, 8, false)
-    expect(helveticaWidth(truncated, 8, false)).toBeLessThanOrEqual(maxWidth)
+    expect(textWidth(truncated, 8, false)).toBeLessThanOrEqual(maxWidth)
   })
 
   it("falls back to a default advance instead of throwing on a character outside the table", () => {
-    expect(() => helveticaWidth("café — a title", 8, false)).not.toThrow()
-    expect(helveticaWidth("café — a title", 8, false)).toBeGreaterThan(0)
+    expect(() => textWidth("café — a title", 8, false)).not.toThrow()
+    expect(textWidth("café — a title", 8, false)).toBeGreaterThan(0)
   })
 })
 
@@ -173,7 +173,7 @@ describe("wrapToWidth", () => {
     const lines = wrapToWidth(LONG, maxWidth, 8, false)
     expect(lines.length).toBeGreaterThan(1)
     for (const line of lines) {
-      expect(helveticaWidth(line, 8, false)).toBeLessThanOrEqual(maxWidth)
+      expect(textWidth(line, 8, false)).toBeLessThanOrEqual(maxWidth)
     }
   })
 
@@ -192,12 +192,12 @@ describe("wrapToWidth", () => {
   it("hard-breaks a single token longer than the width, never exceeding it", () => {
     const token = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-supercalifragilisticexpialidocious"
     const maxWidth = 40
-    expect(helveticaWidth(token, 8, false)).toBeGreaterThan(maxWidth)
+    expect(textWidth(token, 8, false)).toBeGreaterThan(maxWidth)
 
     const lines = wrapToWidth(token, maxWidth, 8, false)
     expect(lines.length).toBeGreaterThan(1)
     for (const line of lines) {
-      expect(helveticaWidth(line, 8, false)).toBeLessThanOrEqual(maxWidth)
+      expect(textWidth(line, 8, false)).toBeLessThanOrEqual(maxWidth)
     }
     expect(lines.join("")).toBe(token)
   })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { reportPages, COL } from "./report-doc"
-import { PAGE } from "./paper"
-import { helveticaWidth } from "./ops"
+import { PAGE, TYPE } from "./paper"
+import { textWidth } from "./ops"
 import type { PdfOp } from "./ops"
 import type { ReportRows } from "../report-rows"
 
@@ -235,32 +235,32 @@ describe("reportPages", () => {
     })
     const [, breakdown] = reportPages(rows)
 
-    // `size === 8` (the row's own font size) is what actually picks out data
+    // `size === TYPE.body` (the row's own font size) is what actually picks out data
     // rows: filtering on text content alone also catches the page's bold,
-    // 11pt block heading, which happens to share `COL.description`'s left
+    // heading, which happens to share `COL.description`'s left
     // margin coincidentally (both trace back to `LEFT`). This description is
     // long enough at the row's own column width to wrap onto several lines
     // now that it is no longer truncated, so EVERY one of those lines — not
     // just the first found — must clear where DURATION's glyphs begin.
     const descriptionOps = breakdown.ops.filter(
       (op): op is Extract<PdfOp, { kind: "text" }> =>
-        op.kind === "text" && op.x === COL.description && op.size === 8
+        op.kind === "text" && op.x === COL.description && op.size === TYPE.body
     )
     const durationOp = breakdown.ops.find(
       (op): op is Extract<PdfOp, { kind: "text" }> =>
-        op.kind === "text" && op.x === COL.duration && op.align === "right" && op.size === 8
+        op.kind === "text" && op.x === COL.duration && op.align === "right" && op.size === TYPE.body
     )
     expect(descriptionOps.length).toBeGreaterThan(1)
     expect(durationOp).toBeDefined()
     if (!durationOp) return
 
     const durationStartX =
-      COL.duration - helveticaWidth(durationOp.text, durationOp.size, durationOp.bold ?? false)
+      COL.duration - textWidth(durationOp.text, durationOp.size, durationOp.bold ?? false)
 
     for (const descriptionOp of descriptionOps) {
       const descriptionEndX =
         COL.description +
-        helveticaWidth(descriptionOp.text, descriptionOp.size, descriptionOp.bold ?? false)
+        textWidth(descriptionOp.text, descriptionOp.size, descriptionOp.bold ?? false)
       expect(descriptionEndX).toBeLessThan(durationStartX)
     }
   })
@@ -288,7 +288,7 @@ describe("reportPages", () => {
     const [, breakdown] = reportPages(rows)
     const descriptionOps = breakdown.ops.filter(
       (op): op is Extract<PdfOp, { kind: "text" }> =>
-        op.kind === "text" && op.x === COL.description && op.size === 8
+        op.kind === "text" && op.x === COL.description && op.size === TYPE.body
     )
     expect(descriptionOps.length).toBeGreaterThan(1)
     for (const op of descriptionOps) {
@@ -321,18 +321,18 @@ describe("reportPages", () => {
     })
     const [, breakdown] = reportPages(rows)
 
-    // Same reason as above: `size === 8` isolates data rows from both the
+    // Same reason as above: `size === TYPE.body` isolates data rows from both the
     // header label and the page's bold block heading, which shares
     // `COL.project` (== `LEFT`) purely by coincidence.
     const projectOps = breakdown.ops.filter(
       (op): op is Extract<PdfOp, { kind: "text" }> =>
-        op.kind === "text" && op.x === COL.project && op.size === 8
+        op.kind === "text" && op.x === COL.project && op.size === TYPE.body
     )
     expect(projectOps.length).toBeGreaterThan(1)
 
     for (const projectOp of projectOps) {
       const projectEndX =
-        COL.project + helveticaWidth(projectOp.text, projectOp.size, projectOp.bold ?? false)
+        COL.project + textWidth(projectOp.text, projectOp.size, projectOp.bold ?? false)
       expect(projectEndX).toBeLessThan(COL.description)
     }
   })

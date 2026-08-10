@@ -19,13 +19,65 @@ export const PAGE = {
   margin: 48,
 } as const
 
+/**
+ * The document's type scale, in points.
+ *
+ * Every step below is chosen so an adjacent pair sits at roughly a 1.15–1.25
+ * ratio — a dense document (a table with six columns repeated over several
+ * pages) reads as noise if its sizes vary more than that between elements a
+ * reader compares directly, like a column header against the body text below
+ * it. `title` and `tileValue` are the two exceptions: both are meant to read
+ * as a page's headline figures, set apart from the working type beneath them,
+ * so their own ratio (1.11) is deliberately tighter than the working scale's.
+ *
+ * The previous scale — footer 7, ticks/labels 6–7, body 8, TOTAL 9, block
+ * headings 11, tile value and title both 16 — put six of those eight sizes
+ * at 6–9pt, near the floor of comfortable print legibility at A4, and gave
+ * the title no size of its own to read as primary with (it matched the tile
+ * value exactly). This scale is a full step up at every tier except the
+ * footer, which is deliberately exempt: `footer` is the one place genuinely
+ * tiny type is still acceptable, a page number nobody needs to read from
+ * across the room.
+ */
+export const TYPE = {
+  /** `Page N / M` — the one place tiny type is still acceptable. */
+  footer: 7,
+  /** Column headers, axis ticks, a tile's label and sub-line: captions that
+   *  sit beside something larger and must stay legible, not blend into it. */
+  tick: 8.5,
+  /** Table body text, the donut legend, and the qualifying notes below the
+   *  tiles and the TOTAL row — this document's main reading size. */
+  body: 10,
+  /** The TOTAL row: bold, and one step above the body it summarises. */
+  strong: 12,
+  /** A block's own heading ("Duration by day", "Project distribution",
+   *  "Project and description breakdown"). */
+  heading: 14,
+  /** A summary tile's value — the page's second-level figure, confidently
+   *  larger than the block headings around it. */
+  tileValue: 18,
+  /** The report title — the page's primary figure. Capped at 20: the title
+   *  string's format is fixed-width (`Summary report from MM/DD/YYYY to
+   *  MM/DD/YYYY`), and 20pt bold DM Sans is the largest size that still
+   *  clears the page's content width with real margin (474pt of 499pt
+   *  available); 22pt already overruns it. */
+  title: 20,
+} as const
+
 export type Rgb = readonly [number, number, number]
 
 export const PAPER = {
   /** Body text. Near-black, warm, never pure #000 — pure black on white is
    *  harsher in print than on a screen. */
   ink: [0.11, 0.10, 0.09],
-  /** Labels, axis ticks, the footer. */
+  /** Labels, axis ticks, the footer.
+   *
+   * Measured against white per WCAG 2.1's relative-luminance formula: this
+   * triple is 5.51:1, clearing the 4.5:1 floor for text carrying information
+   * with room to spare (the commonly-cited minimum-AA grey, #767676, is only
+   * 4.54:1) — so it is left as-is rather than darkened. What actually made
+   * this text hard to read was size (6–8pt) and typeface, not this colour;
+   * see `TYPE` above and `render.ts`'s embedded DM Sans. */
   inkMuted: [0.42, 0.41, 0.39],
   /** Table rules and separators. */
   rule: [0.82, 0.81, 0.79],

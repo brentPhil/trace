@@ -1,17 +1,41 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib"
+import { PDFDocument, rgb } from "pdf-lib"
+import fontkit from "@pdf-lib/fontkit"
 import { PAGE, PAPER } from "./paper"
 import type { PdfPage } from "./ops"
 import type { PDFFont, PDFPage } from "pdf-lib"
 
+// The two TTF weights this document embeds — regular body text and every
+// `bold: true` op (headings, TOTAL, tile values). `?url` keeps Vite from
+// inlining the bytes into this module: it resolves to an asset URL, fetched
+// below, so the font bytes live in the same lazily-loaded chunk as pdf-lib
+// itself rather than the app's main bundle (this file is only ever reached
+// through `to-pdf.ts`'s `await import()`, never a static import).
+//
+// `@expo-google-fonts/dm-sans` rather than the app's own
+// `@fontsource-variable/dm-sans`: the latter ships only `.woff2`, which
+// pdf-lib cannot decode, and is a variable font, which fontkit embeds far
+// less reliably than a static instance. This package is the same DM Sans as
+// static per-weight `.ttf` files with zero runtime dependencies of its own
+// (verified: its `package.json` has no `dependencies` field at all — it is
+// font assets, not Expo code) — a clean way to get a real TTF into pdf-lib.
+import dmSansRegularUrl from "@expo-google-fonts/dm-sans/400Regular/DMSans_400Regular.ttf?url"
+import dmSansBoldUrl from "@expo-google-fonts/dm-sans/700Bold/DMSans_700Bold.ttf?url"
+
 /**
  * Ops onto paper. The ONLY file in the project that imports pdf-lib.
  *
- * Helvetica rather than the app's DM Sans. Embedding a variable webfont means
- * `@pdf-lib/fontkit`, a TTF asset in the bundle, and a subsetting step — a real
- * amount of weight for a document nobody reads for its typeface. Worth
- * revisiting when the invoice PDF lands, since that one carries the user's
- * brand; a report handed over as evidence does not.
+ * Embeds the app's own DM Sans rather than `StandardFonts.Helvetica` — a
+ * report is the product's own document and should carry its identity, not
+ * whatever pdf-lib can draw without embedding anything. `ops.ts`'s width
+ * table was regenerated against these exact two TTFs (see its own comment);
+ * changing which weight is embedded here without updating that table is what
+ * would reopen the DURATION-column overprint P0-1 fixed, just measured
+ * against the wrong font.
  */
+async function fetchFontBytes(url: string): Promise<ArrayBuffer> {
+  const response = await fetch(url)
+  return await response.arrayBuffer()
+}
 
 // P1-5: on a range with many empty days and few real bars (26 empty against
 // 5 real, the observed case), a dense hatch reads louder than the data next
@@ -45,8 +69,22 @@ function drawHatch(
 
 export async function renderPages(pages: Array<PdfPage>): Promise<Blob> {
   const doc = await PDFDocument.create()
-  const regular = await doc.embedFont(StandardFonts.Helvetica)
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+  // Embedding a TTF (rather than one of pdf-lib's built-in `StandardFonts`)
+  // requires fontkit — pdf-lib parses and subsets arbitrary font files
+  // through it, not through code of its own.
+  doc.registerFontkit(fontkit)
+
+  const [regularBytes, boldBytes] = await Promise.all([
+    fetchFontBytes(dmSansRegularUrl),
+    fetchFontBytes(dmSansBoldUrl),
+  ])
+  // `subset: true` keeps the OUTPUT pdf small: without it, embedding ships
+  // the font's full glyph set (accents, non-Latin scripts, ligatures) inside
+  // every exported PDF for a document that only ever draws ASCII. pdf-lib
+  // collects which glyphs were actually used across every `drawText` call
+  // below and writes only those into the saved file.
+  const regular = await doc.embedFont(regularBytes, { subset: true })
+  const bold = await doc.embedFont(boldBytes, { subset: true })
 
   for (const model of pages) {
     const page = doc.addPage([PAGE.width, PAGE.height])

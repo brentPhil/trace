@@ -52,41 +52,54 @@ export function rect(op: Omit<RectOp, "kind">): RectOp {
 }
 
 /**
- * Adobe's standard Helvetica advance widths, 1/1000 em, for printable ASCII
- * 32-126 — every character an export string in this app actually draws.
- * `render.ts` embeds the same `StandardFonts.Helvetica`/`HelveticaBold`, and
- * these numbers were read back out of that exact embedded font
- * (`font.widthOfTextAtSize`), not retyped from a spec sheet, so a truncation
- * decision made here matches what pdf-lib will actually lay out a page with.
+ * DM Sans's real advance widths, 1/1000 em, for printable ASCII 32-126 —
+ * every character an export string in this app actually draws.
+ *
+ * These are NOT retyped from a spec sheet — `render.ts` embeds the exact same
+ * TTFs (`@expo-google-fonts/dm-sans`'s 400Regular and 700Bold), and these
+ * numbers were read back out of THOSE embedded fonts via pdf-lib's own
+ * `font.widthOfTextAtSize(char, 1000)`, the same method the previous
+ * Helvetica table used. That matters more here than it did for Helvetica:
+ * Helvetica's metrics are a fixed spec `pdf-lib` ships built in, but a TTF's
+ * metrics are whatever that specific font file contains, and DM Sans is
+ * measurably wider than Helvetica per character (mean advance ~532 here
+ * against Helvetica's ~530 for regular, but individual glyphs — digits
+ * especially — differ enough, e.g. "0" is 684 here against Helvetica's 556,
+ * that reusing the old table would silently mis-measure every wrap,
+ * truncation, and axis-tick collision this file computes.
+ *
+ * Regenerate by embedding the same two TTFs with `@pdf-lib/fontkit` and
+ * calling `widthOfTextAtSize` for codes 32–126, if the DM Sans dependency
+ * version ever changes its metrics.
  */
-const HELVETICA_WIDTHS: Record<string, number> = {
-  " ": 278, "!": 278, '"': 355, "#": 556, $: 556, "%": 889, "&": 667,
-  "'": 191, "(": 333, ")": 333, "*": 389, "+": 584, ",": 278, "-": 333,
-  ".": 278, "/": 278, "0": 556, "1": 556, "2": 556, "3": 556, "4": 556,
-  "5": 556, "6": 556, "7": 556, "8": 556, "9": 556, ":": 278, ";": 278,
-  "<": 584, "=": 584, ">": 584, "?": 556, "@": 1015, A: 667, B: 667,
-  C: 722, D: 722, E: 667, F: 611, G: 778, H: 722, I: 278, J: 500, K: 667,
-  L: 556, M: 833, N: 722, O: 778, P: 667, Q: 778, R: 722, S: 667, T: 611,
-  U: 722, V: 667, W: 944, X: 667, Y: 667, Z: 611, "[": 278, "\\": 278,
-  "]": 278, "^": 469, _: 556, "`": 333, a: 556, b: 556, c: 500, d: 556,
-  e: 556, f: 278, g: 556, h: 556, i: 222, j: 222, k: 500, l: 222, m: 833,
-  n: 556, o: 556, p: 556, q: 556, r: 333, s: 500, t: 278, u: 556, v: 500,
-  w: 722, x: 500, y: 500, z: 500, "{": 334, "|": 260, "}": 334, "~": 584,
+const DM_SANS_WIDTHS: Record<string, number> = {
+  " ": 266, "!": 250, '"': 291, "#": 804, $: 580, "%": 786, "&": 734,
+  "'": 159, "(": 373, ")": 373, "*": 480, "+": 550, ",": 182, "-": 541,
+  ".": 198, "/": 392, "0": 684, "1": 312, "2": 576, "3": 591, "4": 607,
+  "5": 610, "6": 628, "7": 534, "8": 608, "9": 628, ":": 202, ";": 227,
+  "<": 550, "=": 550, ">": 550, "?": 524, "@": 1005, A: 664, B: 603,
+  C: 717, D: 688, E: 565, F: 535, G: 758, H: 681, I: 234, J: 501, K: 584,
+  L: 527, M: 841, N: 691, O: 774, P: 580, Q: 774, R: 594, S: 580, T: 561,
+  U: 655, V: 669, W: 968, X: 603, Y: 580, Z: 541, "[": 314, "\\": 392,
+  "]": 314, "^": 622, _: 660, "`": 213, a: 544, b: 626, c: 572, d: 627,
+  e: 568, f: 340, g: 558, h: 575, i: 240, j: 243, k: 504, l: 223, m: 891,
+  n: 574, o: 593, p: 626, q: 627, r: 370, s: 502, t: 392, u: 573, v: 527,
+  w: 763, x: 496, y: 556, z: 458, "{": 427, "|": 234, "}": 427, "~": 550,
 }
 
-const HELVETICA_BOLD_WIDTHS: Record<string, number> = {
-  " ": 278, "!": 333, '"': 474, "#": 556, $: 556, "%": 889, "&": 722,
-  "'": 238, "(": 333, ")": 333, "*": 389, "+": 584, ",": 278, "-": 333,
-  ".": 278, "/": 278, "0": 556, "1": 556, "2": 556, "3": 556, "4": 556,
-  "5": 556, "6": 556, "7": 556, "8": 556, "9": 556, ":": 333, ";": 333,
-  "<": 584, "=": 584, ">": 584, "?": 611, "@": 975, A: 722, B: 722,
-  C: 722, D: 722, E: 667, F: 611, G: 778, H: 722, I: 278, J: 556, K: 722,
-  L: 611, M: 833, N: 722, O: 778, P: 667, Q: 778, R: 722, S: 667, T: 611,
-  U: 722, V: 667, W: 944, X: 667, Y: 667, Z: 611, "[": 333, "\\": 278,
-  "]": 333, "^": 584, _: 556, "`": 333, a: 556, b: 611, c: 556, d: 611,
-  e: 556, f: 333, g: 611, h: 611, i: 278, j: 278, k: 556, l: 278, m: 889,
-  n: 611, o: 611, p: 611, q: 611, r: 389, s: 556, t: 333, u: 611, v: 556,
-  w: 778, x: 556, y: 556, z: 500, "{": 389, "|": 280, "}": 389, "~": 584,
+const DM_SANS_BOLD_WIDTHS: Record<string, number> = {
+  " ": 235, "!": 309, '"': 367, "#": 857, $: 604, "%": 902, "&": 781,
+  "'": 197, "(": 405, ")": 405, "*": 513, "+": 579, ",": 246, "-": 576,
+  ".": 252, "/": 427, "0": 704, "1": 364, "2": 577, "3": 603, "4": 650,
+  "5": 622, "6": 634, "7": 537, "8": 633, "9": 635, ":": 254, ";": 278,
+  "<": 579, "=": 579, ">": 579, "?": 538, "@": 1046, A: 709, B: 638,
+  C: 738, D: 707, E: 583, F: 556, G: 778, H: 714, I: 272, J: 541, K: 653,
+  L: 558, M: 886, N: 729, O: 784, P: 614, Q: 784, R: 631, S: 604, T: 597,
+  U: 685, V: 706, W: 1018, X: 670, Y: 635, Z: 577, "[": 377, "\\": 427,
+  "]": 377, "^": 677, _: 725, "`": 235, a: 586, b: 655, c: 607, d: 655,
+  e: 602, f: 371, g: 596, h: 618, i: 274, j: 274, k: 578, l: 267, m: 941,
+  n: 617, o: 610, p: 655, q: 655, r: 409, s: 532, t: 433, u: 616, v: 565,
+  w: 820, x: 571, y: 604, z: 490, "{": 470, "|": 272, "}": 470, "~": 579,
 }
 
 /**
@@ -96,13 +109,14 @@ const HELVETICA_BOLD_WIDTHS: Record<string, number> = {
  * by a character rather than corrupting the measurement; the alternative,
  * throwing, would take down a document export over one character in one row.
  */
-const DEFAULT_ADVANCE = 556
+const DEFAULT_ADVANCE = 570
 
-/** A string's Helvetica width in points, matching what `render.ts`'s embedded
- *  `StandardFonts` will actually draw it at. Lets `report-doc.ts` measure
- *  text without importing pdf-lib and losing its purity. */
-export function helveticaWidth(str: string, size: number, bold: boolean): number {
-  const table = bold ? HELVETICA_BOLD_WIDTHS : HELVETICA_WIDTHS
+/** A string's width in points under the DM Sans this document actually
+ *  embeds, matching what `render.ts`'s embedded TTFs will draw it at. Lets
+ *  `report-doc.ts` measure text without importing pdf-lib and losing its
+ *  purity. */
+export function textWidth(str: string, size: number, bold: boolean): number {
+  const table = bold ? DM_SANS_BOLD_WIDTHS : DM_SANS_WIDTHS
   let units = 0
   for (const ch of str) {
     units += table[ch] ?? DEFAULT_ADVANCE
@@ -126,13 +140,13 @@ export function truncateToWidth(
   size: number,
   bold: boolean
 ): string {
-  if (helveticaWidth(str, size, bold) <= maxWidth) return str
+  if (textWidth(str, size, bold) <= maxWidth) return str
 
-  const budget = maxWidth - helveticaWidth(ELLIPSIS, size, bold)
+  const budget = maxWidth - textWidth(ELLIPSIS, size, bold)
   if (budget <= 0) return ELLIPSIS
 
   let cut = str.length
-  while (cut > 0 && helveticaWidth(str.slice(0, cut), size, bold) > budget) {
+  while (cut > 0 && textWidth(str.slice(0, cut), size, bold) > budget) {
     cut -= 1
   }
   return str.slice(0, cut) + ELLIPSIS
@@ -154,7 +168,7 @@ function hardBreak(word: string, maxWidth: number, size: number, bold: boolean):
   let current = ""
   for (const ch of word) {
     const candidate = current + ch
-    if (current !== "" && helveticaWidth(candidate, size, bold) > maxWidth) {
+    if (current !== "" && textWidth(candidate, size, bold) > maxWidth) {
       chunks.push(current)
       current = ch
     } else {
@@ -166,8 +180,8 @@ function hardBreak(word: string, maxWidth: number, size: number, bold: boolean):
 }
 
 /**
- * Greedy word-wrap, measured with `helveticaWidth` so a line this returns is
- * exactly what `render.ts`'s embedded Helvetica will draw at that width.
+ * Greedy word-wrap, measured with `textWidth` so a line this returns is
+ * exactly what `render.ts`'s embedded DM Sans will draw at that width.
  *
  * Replaces `truncateToWidth` for the breakdown table's DESCRIPTION cell:
  * truncation hides the text that justifies a billed line, which a client
@@ -193,7 +207,7 @@ export function wrapToWidth(
 
   for (const word of str.split(" ")) {
     const pieces =
-      helveticaWidth(word, size, bold) > maxWidth
+      textWidth(word, size, bold) > maxWidth
         ? hardBreak(word, maxWidth, size, bold)
         : [word]
 
@@ -213,7 +227,7 @@ export function wrapToWidth(
         return
       }
       const candidate = `${current} ${piece}`
-      if (helveticaWidth(candidate, size, bold) <= maxWidth) {
+      if (textWidth(candidate, size, bold) <= maxWidth) {
         current = candidate
       } else {
         lines.push(current)
@@ -252,7 +266,7 @@ export function axisTickIndices(
   if (labels.length === 1) return [0]
 
   const slot = totalWidth / labels.length
-  const widest = Math.max(...labels.map((label) => helveticaWidth(label, size, bold)))
+  const widest = Math.max(...labels.map((label) => textWidth(label, size, bold)))
   const step = Math.max(1, Math.ceil((widest + gutter) / slot))
 
   const indices: Array<number> = []

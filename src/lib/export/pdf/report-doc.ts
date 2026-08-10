@@ -6,12 +6,12 @@ import {
   axisTickIndices,
   barColumns,
   donutSlices,
-  helveticaWidth,
   rect,
   text,
+  textWidth,
   wrapToWidth,
 } from "./ops"
-import { PAGE, PAPER, paperColorFor } from "./paper"
+import { PAGE, PAPER, TYPE, paperColorFor } from "./paper"
 import type { PdfOp, PdfPage } from "./ops"
 import type { ReportRows } from "../report-rows"
 
@@ -38,18 +38,26 @@ const BOTTOM = PAGE.margin
 // Exported so tests can assert the no-overlap geometry directly against the
 // same anchors this file draws with, instead of duplicating the numbers.
 //
-// `description` sits at LEFT + 90, not the wider LEFT + 120 this used to be.
+// `description` sits at LEFT + 100, not the wider LEFT + 120 this used to be.
 // This app's own project names are short ("Sealogs", "No project" — see
 // NO_PROJECT in report-rows.ts) while descriptions are imported ticket
 // titles that run long; a project column sized for names nobody has just
-// starves the column that actually needs the room. 90pt still comfortably
-// fits a name like "Vessel Vanguard" (~61pt at size 8) with room to spare.
+// starves the column that actually needs the room. 100pt comfortably fits a
+// name like "Vessel Vanguard" (~78pt at the body size below) with room to
+// spare.
+//
+// The numeric columns' own gaps (60 / 60 / 80) are each sized to clear that
+// COLUMN's own worst-case string at the body/TOTAL sizes below, not the
+// column to its left — HOURS is right-aligned, so it is HOURS's width that
+// must fit inside the duration→hours gap, and so on rightward. AMOUNT gets
+// the widest gap (80, not 60) because a formatted currency string
+// (`$99,999.99`) is the widest thing any of these four columns ever draws.
 export const COL = {
   project: LEFT,
-  description: LEFT + 90,
-  duration: RIGHT - 190,
-  hours: RIGHT - 130,
-  percent: RIGHT - 70,
+  description: LEFT + 100,
+  duration: RIGHT - 200,
+  hours: RIGHT - 140,
+  percent: RIGHT - 80,
   amount: RIGHT,
 } as const
 
@@ -58,12 +66,13 @@ export const COL = {
  * + ROW_PADDING`, driven by how many lines the DESCRIPTION (and, when it's
  * the wider cell, PROJECT) wrapped to. `LINE_HEIGHT` is the gap between two
  * wrapped lines within one cell; `ROW_PADDING` is the gap after a row's last
- * line before the next row starts. The two sum to 16 — the row height every
- * single-line row (still the common case) occupied before wrapping existed —
- * so a page of short rows paginates exactly as it did before this change.
+ * line before the next row starts. The two sum to 20 — the row height every
+ * single-line row (still the common case) occupies at the body size below —
+ * scaled up from the 16 a single-line row occupied at the old 8pt body text,
+ * in the same proportion the body size itself grew (8pt → 10pt).
  */
-const LINE_HEIGHT = 10
-const ROW_PADDING = 6
+const LINE_HEIGHT = 12
+const ROW_PADDING = 8
 
 /** The vertical space a row of `lineCount` wrapped lines actually occupies,
  *  including the gap before the next row. The one formula both the packer
@@ -74,7 +83,7 @@ function rowSlotHeight(lineCount: number): number {
   return lineCount * LINE_HEIGHT + ROW_PADDING
 }
 
-const HEADER_GAP = 26
+const HEADER_GAP = 33
 
 /** `2026-07-13` as `07/13/2026`, the reference report's own format. */
 function us(day: string): string {
@@ -103,12 +112,12 @@ function tile(
   opts: { brass?: boolean; subLine?: string } = {}
 ): Array<PdfOp> {
   const ops: Array<PdfOp> = [
-    text({ x, y, text: label, size: 8, color: PAPER.inkMuted }),
+    text({ x, y, text: label, size: TYPE.tick, color: PAPER.inkMuted }),
     text({
       x,
-      y: y - 18,
+      y: y - 22,
       text: value,
-      size: 16,
+      size: TYPE.tileValue,
       bold: true,
       // Brass is a CURRENCY amount and nothing else. A billable duration is
       // time that will become money, not money, and renders as ordinary ink.
@@ -116,7 +125,7 @@ function tile(
     }),
   ]
   if (opts.subLine) {
-    ops.push(text({ x, y: y - 32, text: opts.subLine, size: 7, color: PAPER.inkMuted }))
+    ops.push(text({ x, y: y - 38, text: opts.subLine, size: TYPE.tick, color: PAPER.inkMuted }))
   }
   return ops
 }
@@ -130,13 +139,13 @@ function summaryPage(rows: ReportRows): PdfPage {
       x: LEFT,
       y: TOP,
       text: `Summary report from ${us(meta.from)} to ${us(meta.to)}`,
-      size: 16,
+      size: TYPE.title,
       bold: true,
     })
   )
 
   // ---- Block 1: the four tiles -------------------------------------------
-  const tileY = TOP - 52
+  const tileY = TOP - 65
   const tileWidth = (RIGHT - LEFT) / 4
   ops.push(
     ...tile(LEFT, tileY, "Total Hours", formatClock(totals.totalMs)),
@@ -167,7 +176,7 @@ function summaryPage(rows: ReportRows): PdfPage {
 
   if (totals.unratedBillableMs > 0) {
     ops.push(
-      text({ x: LEFT, y: tileY - 48, text: UNPRICED_NOTE, size: 8, color: PAPER.inkMuted })
+      text({ x: LEFT, y: tileY - 58, text: UNPRICED_NOTE, size: TYPE.body, color: PAPER.inkMuted })
     )
   }
 
@@ -180,28 +189,30 @@ function summaryPage(rows: ReportRows): PdfPage {
    * the gap ABOVE this heading (tileY - chartTop) left alone — that one is
    * already generous — and the block's own height taking the freed room.
    */
-  const chartTop = tileY - 78
+  const chartTop = tileY - 94
   const CHART_HEIGHT = 200
   const chartBox = { x: LEFT, y: chartTop - 10 - CHART_HEIGHT, width: RIGHT - LEFT, height: CHART_HEIGHT }
   ops.push(
-    text({ x: LEFT, y: chartTop, text: "Duration by day", size: 11, bold: true }),
+    text({ x: LEFT, y: chartTop, text: "Duration by day", size: TYPE.heading, bold: true }),
     ...barColumns(rows.buckets, chartBox)
   )
 
   // P0-2: thin the x-axis ticks so labels stop colliding. A 31-day range at
-  // 6pt across this box's width drew all 31 and `Mon 10` overlapped `Mon 1`;
-  // `axisTickIndices` measures the widest label actually present and steps
-  // by however many buckets that takes, always keeping the first and last so
-  // the axis still states its own range.
+  // `TYPE.tick` across this box's width drew all 31 and `Mon 10` overlapped
+  // `Mon 1`; `axisTickIndices` measures the widest label actually present and
+  // steps by however many buckets that takes, always keeping the first and
+  // last so the axis still states its own range. Raising the tick size (was
+  // 6pt) only shrinks the gap `axisTickIndices` has to work with, which is
+  // exactly what it is for — it thins further, it does not stop working.
   const slot = rows.buckets.length === 0 ? 0 : chartBox.width / rows.buckets.length
   const bucketLabels = rows.buckets.map((bucket) => bucket.label)
-  axisTickIndices(bucketLabels, chartBox.width, 6, false).forEach((index) => {
+  axisTickIndices(bucketLabels, chartBox.width, TYPE.tick, false).forEach((index) => {
     ops.push(
       text({
         x: chartBox.x + index * slot,
-        y: chartBox.y - 11,
+        y: chartBox.y - 16,
         text: bucketLabels[index],
-        size: 6,
+        size: TYPE.tick,
         color: PAPER.inkMuted,
       })
     )
@@ -210,20 +221,20 @@ function summaryPage(rows: ReportRows): PdfPage {
   // Both series named. DESIGN.md: meaning is never carried by colour alone,
   // and a legend is what discharges that for a stacked bar.
   ops.push(
-    rect({ x: LEFT, y: chartBox.y - 28, width: 8, height: 8, color: PAPER.bar }),
-    text({ x: LEFT + 12, y: chartBox.y - 27, text: "Billable", size: 8, color: PAPER.inkMuted }),
-    rect({ x: LEFT + 66, y: chartBox.y - 28, width: 8, height: 8, color: PAPER.barMuted }),
+    rect({ x: LEFT, y: chartBox.y - 33, width: 9, height: 9, color: PAPER.bar }),
+    text({ x: LEFT + 13, y: chartBox.y - 32, text: "Billable", size: TYPE.body, color: PAPER.inkMuted }),
+    rect({ x: LEFT + 80, y: chartBox.y - 33, width: 9, height: 9, color: PAPER.barMuted }),
     text({
-      x: LEFT + 78,
-      y: chartBox.y - 27,
+      x: LEFT + 93,
+      y: chartBox.y - 32,
       text: "Non-billable",
-      size: 8,
+      size: TYPE.body,
       color: PAPER.inkMuted,
     })
   )
 
   // ---- Block 3: project distribution -------------------------------------
-  const donutTop = chartBox.y - 58
+  const donutTop = chartBox.y - 70
   const DONUT_RADIUS = 95
   const DONUT_INNER = 55
   /*
@@ -244,12 +255,12 @@ function summaryPage(rows: ReportRows): PdfPage {
    * construction, for any radius — not by nudging either number until a
    * render happened to look right.
    */
-  const DONUT_HEADING_CLEARANCE = 20 // heading's own ~8pt cap height plus a visual gutter
+  const DONUT_HEADING_CLEARANCE = 25 // heading's own ~10pt cap height (TYPE.heading) plus a visual gutter
   const donutCenterY = donutTop - DONUT_HEADING_CLEARANCE - DONUT_RADIUS
   const cx = LEFT + DONUT_RADIUS + 12
   const cy = PAGE.height - donutCenterY
   ops.push(
-    text({ x: LEFT, y: donutTop, text: "Project distribution", size: 11, bold: true })
+    text({ x: LEFT, y: donutTop, text: "Project distribution", size: TYPE.heading, bold: true })
   )
 
   const slices = donutSlices(
@@ -275,23 +286,23 @@ function summaryPage(rows: ReportRows): PdfPage {
   // breakdown table's columns already are from LEFT) keeps the row reading
   // as one unit regardless of how wide the page's content area is.
   const legendX = cx + DONUT_RADIUS + 26
-  const LEGEND_COL = { name: 14, percent: 150, duration: 205 }
+  const LEGEND_COL = { name: 15, percent: 155, duration: 215 }
   rows.projects.forEach((project, index) => {
-    const y = donutTop - 24 - index * 15
+    const y = donutTop - 27 - index * 17
     ops.push(
       rect({
         x: legendX,
         y,
-        width: 8,
-        height: 8,
+        width: 9,
+        height: 9,
         color: paperColorFor(project.color),
       }),
-      text({ x: legendX + LEGEND_COL.name, y: y + 1, text: project.name, size: 9 }),
+      text({ x: legendX + LEGEND_COL.name, y: y + 1, text: project.name, size: TYPE.body }),
       text({
         x: legendX + LEGEND_COL.percent,
         y: y + 1,
         text: `${project.percent}%`,
-        size: 9,
+        size: TYPE.body,
         align: "right",
         color: PAPER.inkMuted,
       }),
@@ -299,7 +310,7 @@ function summaryPage(rows: ReportRows): PdfPage {
         x: legendX + LEGEND_COL.duration,
         y: y + 1,
         text: formatClock(project.totalMs),
-        size: 9,
+        size: TYPE.body,
         align: "right",
       })
     )
@@ -314,16 +325,30 @@ const BREAKDOWN_TITLE = "Project and description breakdown"
  *  of the table. Repeated rather than drawn once: a continuation page with
  *  unlabelled columns is a page of unattributed numbers. */
 function breakdownHeader(): Array<PdfOp> {
-  const y = TOP - 24
+  const y = TOP - 30
   return [
-    text({ x: LEFT, y: TOP, text: BREAKDOWN_TITLE, size: 11, bold: true }),
-    text({ x: COL.project, y, text: "PROJECT", size: 7, color: PAPER.inkMuted }),
-    text({ x: COL.description, y, text: "DESCRIPTION", size: 7, color: PAPER.inkMuted }),
-    text({ x: COL.duration, y, text: "DURATION", size: 7, align: "right", color: PAPER.inkMuted }),
-    text({ x: COL.hours, y, text: "HOURS", size: 7, align: "right", color: PAPER.inkMuted }),
-    text({ x: COL.percent, y, text: "%", size: 7, align: "right", color: PAPER.inkMuted }),
-    text({ x: COL.amount, y, text: "AMOUNT", size: 7, align: "right", color: PAPER.inkMuted }),
-    rect({ x: LEFT, y: y - 6, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
+    text({ x: LEFT, y: TOP, text: BREAKDOWN_TITLE, size: TYPE.heading, bold: true }),
+    text({ x: COL.project, y, text: "PROJECT", size: TYPE.tick, color: PAPER.inkMuted }),
+    text({ x: COL.description, y, text: "DESCRIPTION", size: TYPE.tick, color: PAPER.inkMuted }),
+    text({
+      x: COL.duration,
+      y,
+      text: "DURATION",
+      size: TYPE.tick,
+      align: "right",
+      color: PAPER.inkMuted,
+    }),
+    text({ x: COL.hours, y, text: "HOURS", size: TYPE.tick, align: "right", color: PAPER.inkMuted }),
+    text({ x: COL.percent, y, text: "%", size: TYPE.tick, align: "right", color: PAPER.inkMuted }),
+    text({
+      x: COL.amount,
+      y,
+      text: "AMOUNT",
+      size: TYPE.tick,
+      align: "right",
+      color: PAPER.inkMuted,
+    }),
+    rect({ x: LEFT, y: y - 7, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
   ]
 }
 
@@ -366,8 +391,8 @@ type SizedRow = {
 }
 
 function sizeRow(row: ReportRows["titles"][number], descriptionMaxWidth: number): SizedRow {
-  const descriptionLines = wrapToWidth(row.description, descriptionMaxWidth, 8, false)
-  const projectLines = wrapToWidth(row.project, PROJECT_CELL_WIDTH, 8, false)
+  const descriptionLines = wrapToWidth(row.description, descriptionMaxWidth, TYPE.body, false)
+  const projectLines = wrapToWidth(row.project, PROJECT_CELL_WIDTH, TYPE.body, false)
   const lineCount = Math.max(descriptionLines.length, projectLines.length)
   return { row, descriptionLines, projectLines, height: rowSlotHeight(lineCount) }
 }
@@ -409,7 +434,9 @@ function breakdownRow(
 
   const ops: Array<PdfOp> = []
   descriptionLines.forEach((line, n) => {
-    ops.push(text({ x: COL.description, y: firstLineY - n * LINE_HEIGHT, text: line, size: 8 }))
+    ops.push(
+      text({ x: COL.description, y: firstLineY - n * LINE_HEIGHT, text: line, size: TYPE.body })
+    )
   })
   projectLines.forEach((line, n) => {
     ops.push(
@@ -417,25 +444,31 @@ function breakdownRow(
         x: COL.project,
         y: firstLineY - n * LINE_HEIGHT,
         text: line,
-        size: 8,
+        size: TYPE.body,
         color: PAPER.inkMuted,
       })
     )
   })
   ops.push(
-    text({ x: COL.duration, y: centerY, text: formatClock(row.totalMs), size: 8, align: "right" }),
+    text({
+      x: COL.duration,
+      y: centerY,
+      text: formatClock(row.totalMs),
+      size: TYPE.body,
+      align: "right",
+    }),
     text({
       x: COL.hours,
       y: centerY,
       text: formatDecimalHours(row.totalMs),
-      size: 8,
+      size: TYPE.body,
       align: "right",
     }),
     text({
       x: COL.percent,
       y: centerY,
       text: `${row.percent}%`,
-      size: 8,
+      size: TYPE.body,
       align: "right",
       color: PAPER.inkMuted,
     }),
@@ -443,7 +476,7 @@ function breakdownRow(
       x: COL.amount,
       y: centerY,
       text: moneyOr(row.billableCents, currency, row.unpriced),
-      size: 8,
+      size: TYPE.body,
       align: "right",
       color: row.unpriced ? PAPER.inkMuted : PAPER.brass,
     })
@@ -466,8 +499,8 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
    * the column position is one constant for the whole document, not per-row.
    */
   const maxDurationTextWidth = Math.max(
-    ...rows.titles.map((row) => helveticaWidth(formatClock(row.totalMs), 8, false)),
-    helveticaWidth(formatClock(rows.totals.totalMs), 9, true)
+    ...rows.titles.map((row) => textWidth(formatClock(row.totalMs), TYPE.body, false)),
+    textWidth(formatClock(rows.totals.totalMs), TYPE.strong, true)
   )
   const descriptionMaxWidth = COL.duration - maxDurationTextWidth - GUTTER - COL.description
 
@@ -543,10 +576,24 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
       const y = cursor - LINE_HEIGHT
       ops.push(
         rect({ x: LEFT, y: ruleY - 2, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
-        text({ x: COL.project, y, text: "TOTAL", size: 9, bold: true }),
-        text({ x: COL.duration, y, text: formatClock(rows.totals.totalMs), size: 9, bold: true, align: "right" }),
-        text({ x: COL.hours, y, text: formatDecimalHours(rows.totals.totalMs), size: 9, bold: true, align: "right" }),
-        text({ x: COL.percent, y, text: "100%", size: 9, bold: true, align: "right" }),
+        text({ x: COL.project, y, text: "TOTAL", size: TYPE.strong, bold: true }),
+        text({
+          x: COL.duration,
+          y,
+          text: formatClock(rows.totals.totalMs),
+          size: TYPE.strong,
+          bold: true,
+          align: "right",
+        }),
+        text({
+          x: COL.hours,
+          y,
+          text: formatDecimalHours(rows.totals.totalMs),
+          size: TYPE.strong,
+          bold: true,
+          align: "right",
+        }),
+        text({ x: COL.percent, y, text: "100%", size: TYPE.strong, bold: true, align: "right" }),
         text({
           x: COL.amount,
           y,
@@ -555,7 +602,7 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
             currency,
             rows.totals.unratedBillableMs >= rows.totals.billableMs
           ),
-          size: 9,
+          size: TYPE.strong,
           bold: true,
           align: "right",
           color: PAPER.brass,
@@ -564,12 +611,12 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
       cursor -= totalRowHeight
       if (rows.titlesTruncated) {
         ops.push(
-          text({ x: LEFT, y: y - 20, text: TITLE_CAP_NOTE, size: 8, color: PAPER.inkMuted })
+          text({ x: LEFT, y: y - 26, text: TITLE_CAP_NOTE, size: TYPE.body, color: PAPER.inkMuted })
         )
       }
       if (rows.totals.unratedBillableMs > 0) {
         ops.push(
-          text({ x: LEFT, y: y - 34, text: UNPRICED_NOTE, size: 8, color: PAPER.inkMuted })
+          text({ x: LEFT, y: y - 44, text: UNPRICED_NOTE, size: TYPE.body, color: PAPER.inkMuted })
         )
       }
     }
@@ -590,7 +637,7 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
         x: RIGHT,
         y: BOTTOM - 18,
         text: `Page ${n + 1} / ${finished.length}`,
-        size: 7,
+        size: TYPE.footer,
         align: "right",
         color: PAPER.inkMuted,
       })
