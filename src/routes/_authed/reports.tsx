@@ -6,6 +6,7 @@ import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilterBar } from "@/components/history/filter-bar"
+import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -130,18 +131,60 @@ export function Reports() {
   )
   const [view, setView] = useState<View>("summary")
 
+  /*
+   * The breakdown, read HERE as well as inside SummaryTab.
+   *
+   * Deliberately the same `breakdownArgs` key, which is why that helper is
+   * exported: convexQuery + TanStack Query dedupe an identical key into ONE
+   * Convex subscription, so with the Summary tab open this costs no extra
+   * reads. With the Detailed tab open it costs one, which is the price of
+   * export working from either tab — and exporting only from the tab that
+   * happens to be mounted would be a worse answer than a second subscription.
+   */
+  const range = useMemo(
+    () => rangeOf(filters, settings.timezone),
+    [filters, settings.timezone]
+  )
+  const { data: breakdown, isPlaceholderData } = useQuery({
+    ...convexQuery(
+      api.entries.rangeBreakdown,
+      breakdownArgs(range, settings.timezone, filters)
+    ),
+    placeholderData: (previous) => previous,
+  })
+
+  const exportDisabledReason =
+    breakdown === undefined || isPlaceholderData
+      ? "Still totalling this period."
+      : breakdown.truncated
+        ? "This period is too large to total exactly — the figures are a floor, not the real total. Narrow the dates."
+        : breakdown.count === 0
+          ? "Nothing tracked in this period."
+          : null
+
   return (
     <div className="flex flex-col">
       {/* `w-full px-4`, the same pair the rows below it take, so the filter
           row and everything under it share their left and right edges. */}
       <div className="flex w-full flex-col gap-3 px-4 pt-3">
-        <FilterBar
-          filters={filters}
-          projects={projects}
-          today={today}
-          weekStartDay={settings.weekStartDay}
-          onChange={setFilters}
-        />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <FilterBar
+              filters={filters}
+              projects={projects}
+              today={today}
+              weekStartDay={settings.weekStartDay}
+              onChange={setFilters}
+            />
+          </div>
+          <ExportMenu
+            breakdown={breakdown ?? EMPTY_BREAKDOWN}
+            from={filters.from}
+            to={filters.to}
+            currency={settings.currency}
+            disabledReason={exportDisabledReason}
+          />
+        </div>
       </div>
 
       <Tabs
