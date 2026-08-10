@@ -39,6 +39,10 @@ export type TitleTotal = {
   projectId: string | null
   project: string
   title: string
+  /** The DayString of the first day of the local week this row's entries'
+   *  starts fall in — see the field's own doc in convex/entries.ts. Lets the
+   *  export split this same flat list into weeks without a second query. */
+  weekStart: DayString
   totalMs: number
   billableMs: number
   billableCents: number

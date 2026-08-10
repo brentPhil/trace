@@ -9,7 +9,7 @@ import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
 import { timeEntryDoc } from "./lib/docs"
 import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
-import { dayOf, isValidTimeZone, localPartsOf } from "./lib/day"
+import { dayOf, isValidTimeZone, localPartsOf, weekWindow } from "./lib/day"
 import { isFilterActive, matchesFilter } from "./lib/entryFilter"
 import { defaultRateCents } from "./settings"
 import type { EntryFilter } from "./lib/entryFilter"
@@ -660,6 +660,18 @@ const titleTotal = v.object({
   project: v.string(),
   /** "" is a real, valid title and gets its own row. */
   title: v.string(),
+  /**
+   * The `DayString` of the first day of the local week this row's entries'
+   * STARTS fall in, per `weekStartDay` and the query's `timeZone`.
+   *
+   * The reason this field exists at all: `days` has no project or title, and
+   * `projects` has no date, so the titles cut was the only grouping with
+   * both a date and a description — and until this field existed it had no
+   * date either, which made grouping the export by week impossible without a
+   * second, differently-shaped query. Attribution is by START, matching
+   * `days` and `hours` above: an entry never splits across two weeks.
+   */
+  weekStart: v.string(),
   totalMs: v.number(),
   billableMs: v.number(),
   billableCents: v.number(),
@@ -726,6 +738,17 @@ const breakdownArgs = {
    * sends the same `settings.timezone` that `groupByDay` uses.
    */
   timeZone: v.string(),
+  /**
+   * 0 (Sunday) through 6, matching `userSettings.weekStartDay`.
+   *
+   * Passed by the caller rather than read from `userSettings` here, for the
+   * same reason `timeZone` is: this stays a pure function of its arguments,
+   * so the Summary tab and the export cannot end up grouping the SAME range
+   * into two different sets of weeks. Honoured rather than assumed — Sunday
+   * is wrong for most of the world, which is why `userSettings.weekStartDay`
+   * exists in the first place.
+   */
+  weekStartDay: v.number(),
   /**
    * The FilterBar, applied server-side over the whole range.
    *
@@ -807,21 +830,32 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
   const byProject = new Map<string, Ledger>()
   const hours = Array.from({ length: 24 }, () => 0)
   /*
-   * Keyed by `projectId\u0000title`, with "" for the unassigned project.
+   * Keyed by `weekStart\u0000projectId\u0000title`, with "" for the
+   * unassigned project.
    *
-   * A NUL separator rather than a `:` or a `|`, because the second half is a
-   * user-supplied title that may contain any printable character — a project id
-   * plus "a:b" and a project id ending ":a" plus "b" must not collide into one
-   * row. NUL is the one byte a title cannot hold.
+   * NUL separators rather than `:` or `|`, because the last part is a
+   * user-supplied title that may contain any printable character — a project
+   * id plus "a:b" and a project id ending ":a" plus "b" must not collide into
+   * one row. NUL is the one byte a title cannot hold. `weekStart` (a fixed
+   * "YYYY-MM-DD") leads the key so it can be split off with one `indexOf`,
+   * the same way the project half is already split from the title below.
    */
   const byTitle = new Map<string, Ledger>()
 
   for (const row of rows) {
     const rateCents = rateOf(row, projectDocs, accountRate)
+    const day = dayOf(row.startedAt, args.timeZone)
+    // The same local day just computed for `byDay` — re-used, not re-derived,
+    // since `weekWindow` only needs to know which day the entry landed on.
+    const weekStart = weekWindow(day, args.timeZone, args.weekStartDay).firstDay
     post(total, row, rateCents)
-    post(bucket(byDay, dayOf(row.startedAt, args.timeZone)), row, rateCents)
+    post(bucket(byDay, day), row, rateCents)
     post(bucket(byProject, row.projectId ?? ""), row, rateCents)
-    post(bucket(byTitle, `${row.projectId ?? ""}\u0000${row.title}`), row, rateCents)
+    post(
+      bucket(byTitle, `${weekStart}\u0000${row.projectId ?? ""}\u0000${row.title}`),
+      row,
+      rateCents
+    )
     if (row.durationMs !== null) {
       hours[localPartsOf(row.startedAt, args.timeZone).hour] += row.durationMs
     }
@@ -890,14 +924,18 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
    */
   const allTitles = [...byTitle.entries()]
     .map(([key, ledger]) => {
-      const split = key.indexOf("\u0000")
-      const projectKey = key.slice(0, split)
+      const firstSplit = key.indexOf("\u0000")
+      const weekStart = key.slice(0, firstSplit)
+      const rest = key.slice(firstSplit + 1)
+      const secondSplit = rest.indexOf("\u0000")
+      const projectKey = rest.slice(0, secondSplit)
       const doc =
         projectKey === "" ? undefined : projectDocs.get(projectKey as Id<"projects">)
       return {
         projectId: doc?._id ?? null,
         project: doc?.name ?? "",
-        title: key.slice(split + 1),
+        title: rest.slice(secondSplit + 1),
+        weekStart,
         totalMs: ledger.totalMs,
         billableMs: ledger.billableMs,
         billableCents: centsOf(ledger),

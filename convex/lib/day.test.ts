@@ -262,6 +262,24 @@ describe("weekWindow", () => {
     // 7 days, one of which is 25 hours long.
     expect(w.toMs - w.fromMs).toBe(7 * 24 * HOUR + HOUR)
   })
+
+  // The export's weekly grouping keys every title row off `firstDay`, so a
+  // week whose first day falls in the PREVIOUS calendar month or year is
+  // exactly the case a naive "same month" shortcut (e.g. slicing the day
+  // string's first 7 characters) would get wrong.
+  it("finds a week's first day in the previous month, when the week spans a month boundary", () => {
+    // Saturday 1 Aug 2026, Monday-start week -> the week began Monday 27 Jul.
+    const w = weekWindow("2026-08-01", "UTC", 1)
+    expect(w.firstDay).toBe("2026-07-27")
+    expect(w.lastDay).toBe("2026-08-02")
+  })
+
+  it("finds a week's first day in the previous year, when the week spans a year boundary", () => {
+    // Thursday 1 Jan 2026, Monday-start week -> the week began Monday 29 Dec 2025.
+    const w = weekWindow("2026-01-01", "UTC", 1)
+    expect(w.firstDay).toBe("2025-12-29")
+    expect(w.lastDay).toBe("2026-01-04")
+  })
 })
 
 describe("parseDayString", () => {

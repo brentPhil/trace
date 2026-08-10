@@ -38,6 +38,7 @@ function amount(cents: number, unpriced: boolean): string {
 
 const HEADER = [
   "Project",
+  "Week",
   "Description",
   "Duration",
   "Decimal hours",
@@ -52,6 +53,10 @@ export function toCsv(rows: ReportRows): string {
   const body = rows.titles.map((row) =>
     record([
       row.project,
+      // The plain DayString the backend attributed the row to (see
+      // convex/entries.ts) — not a formatted span like the PDF's week
+      // headings, so a spreadsheet can sort or pivot on it directly.
+      row.weekStart,
       row.description,
       formatClock(row.totalMs),
       formatDecimalHours(row.totalMs),
@@ -70,6 +75,7 @@ export function toCsv(rows: ReportRows): string {
    */
   const total = record([
     "TOTAL",
+    "", // no single week — same reason Description is blank here
     "",
     formatClock(rows.totals.totalMs),
     formatDecimalHours(rows.totals.totalMs),

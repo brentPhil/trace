@@ -129,6 +129,7 @@ function breakdownSheet(rows: ReportRows): SheetData {
   return [
     [
       text("Project", true),
+      text("Week", true),
       text("Description", true),
       text("Duration", true),
       text("Hours", true),
@@ -137,6 +138,10 @@ function breakdownSheet(rows: ReportRows): SheetData {
     ],
     ...rows.titles.map((row) => [
       text(row.project),
+      // A real Date cell, not text — the same rule `date()` already applies
+      // to the By-day sheet, and for the same reason: it is a value a pivot
+      // can group by, not a string a formula has to re-parse first.
+      date(row.weekStart),
       text(row.description),
       // The clock form stays as text beside the numeric one: it is what the
       // reference report prints, and a reader reconciling against that PDF
@@ -148,6 +153,7 @@ function breakdownSheet(rows: ReportRows): SheetData {
     ]),
     [
       text("TOTAL", true),
+      null, // no single week, matching Description's own null below
       null,
       text(formatClock(rows.totals.totalMs), true),
       hours(rows.totals.totalMs),

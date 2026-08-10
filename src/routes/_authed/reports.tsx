@@ -69,13 +69,15 @@ type View = (typeof VIEWS)[number]["value"]
 export function breakdownArgs(
   range: { fromMs: number; toMs: number },
   timeZone: string,
-  filters: Filters
+  filters: Filters,
+  weekStartDay: number
 ) {
   const filter = entryFilterOf(filters)
   return {
     fromMs: range.fromMs,
     toMs: range.toMs,
     timeZone,
+    weekStartDay,
     projectId: filter.projectId,
     billableOnly: filter.billableOnly,
     text: filter.text,
@@ -107,7 +109,7 @@ export const Route = createFileRoute("/_authed/reports")({
     await context.queryClient.ensureQueryData(
       convexQuery(
         api.entries.rangeBreakdown,
-        breakdownArgs(range, settings.timezone, filters)
+        breakdownArgs(range, settings.timezone, filters, settings.weekStartDay)
       )
     )
   },
@@ -149,7 +151,7 @@ export function Reports() {
   const { data: breakdown, isPlaceholderData } = useQuery({
     ...convexQuery(
       api.entries.rangeBreakdown,
-      breakdownArgs(range, settings.timezone, filters)
+      breakdownArgs(range, settings.timezone, filters, settings.weekStartDay)
     ),
     placeholderData: (previous) => previous,
   })
@@ -243,7 +245,7 @@ function SummaryTab({ filters, settings }: { filters: Filters; settings: Setting
   const { data, isPlaceholderData } = useQuery({
     ...convexQuery(
       api.entries.rangeBreakdown,
-      breakdownArgs(range, settings.timezone, filters)
+      breakdownArgs(range, settings.timezone, filters, settings.weekStartDay)
     ),
     placeholderData: (previous) => previous,
   })

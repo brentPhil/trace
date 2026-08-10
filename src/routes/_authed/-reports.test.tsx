@@ -219,7 +219,12 @@ function seedBreakdown(
   queryClient.setQueryData(
     convexKey(
       api.entries.rangeBreakdown,
-      breakdownArgs(rangeOf(filters, SETTINGS.timezone), SETTINGS.timezone, filters)
+      breakdownArgs(
+        rangeOf(filters, SETTINGS.timezone),
+        SETTINGS.timezone,
+        filters,
+        SETTINGS.weekStartDay
+      )
     ),
     value
   )

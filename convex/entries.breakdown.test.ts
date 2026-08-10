@@ -30,7 +30,9 @@ const HOUR = 3_600_000
 const MON = Date.parse("2026-08-03T00:00:00Z")
 const TUE = MON + 24 * HOUR
 const WED = TUE + 24 * HOUR
-const RANGE = { fromMs: MON, toMs: MON + 7 * 24 * HOUR, timeZone: "UTC" }
+// weekStartDay: 1 (Monday) so MON is itself a week start and every fixture
+// entry below stays inside one week unless a test deliberately spans two.
+const RANGE = { fromMs: MON, toMs: MON + 7 * 24 * HOUR, timeZone: "UTC", weekStartDay: 1 }
 
 async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
   try {
@@ -646,6 +648,94 @@ describe("rangeBreakdown — by description", () => {
     await entry(t, { startedAt: TUE + HOUR, title: "B", durationMs: 45 * 60_000 })
 
     const result = await breakdown(t)
+    const summed = result.titles.reduce((n, row) => n + row.totalMs, 0)
+    expect(summed).toBe(result.totalMs)
+  })
+})
+
+describe("rangeBreakdown — weekly grouping", () => {
+  /*
+   * The export needs to split its breakdown by week, and the `titles` cut is
+   * the only place that can carry a date: `days` has no project/title, and
+   * `projects` has no date at all. Attribution is by START, matching every
+   * other grouping in this file (days, hours) — an entry never splits across
+   * two weeks.
+   */
+  it("labels each row with the local week its entries' starts fall in", async () => {
+    const t = setup()
+    // Monday and Tuesday of the same Monday-started week.
+    await entry(t, { startedAt: MON + 9 * HOUR, title: "Standup" })
+    await entry(t, { startedAt: TUE + 9 * HOUR, title: "Standup" })
+
+    const { titles } = await breakdown(t, { weekStartDay: 1 })
+    expect(titles).toHaveLength(1)
+    expect(titles[0].weekStart).toBe("2026-08-03") // the Monday both fall in
+  })
+
+  it("honours weekStartDay rather than assuming Sunday", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + 9 * HOUR, title: "Standup" }) // a Monday
+
+    // Sunday week start: Monday 3 Aug's week began Sunday 2 Aug.
+    const sunday = await breakdown(t, { weekStartDay: 0 })
+    expect(sunday.titles[0].weekStart).toBe("2026-08-02")
+
+    // Monday week start: the entry's own day IS the week start.
+    const monday = await breakdown(t, { weekStartDay: 1 })
+    expect(monday.titles[0].weekStart).toBe("2026-08-03")
+  })
+
+  it("keeps the same title in two different weeks as two separate rows, not merged", async () => {
+    const t = setup()
+    const nextMon = MON + 7 * 24 * HOUR
+    await entry(t, { startedAt: MON + 9 * HOUR, title: "Standup" }) // week of 3 Aug
+    await entry(t, { startedAt: nextMon + 9 * HOUR, title: "Standup" }) // week of 10 Aug
+
+    const result = await t.query(internal.entries.rangeBreakdownAs, {
+      userId: ALICE,
+      fromMs: MON,
+      toMs: MON + 14 * 24 * HOUR,
+      timeZone: "UTC",
+      weekStartDay: 1,
+    })
+    expect(result.titles).toHaveLength(2)
+    expect(result.titles.map((row) => row.weekStart).sort()).toEqual([
+      "2026-08-03",
+      "2026-08-10",
+    ])
+  })
+
+  it("keeps one title on two projects in the same week as two rows, unaffected by the week key", async () => {
+    const t = setup()
+    const { projectId: acme } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+    })
+    const { projectId: beta } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Beta",
+    })
+    await entry(t, { startedAt: MON + HOUR, title: "Standup", projectId: acme })
+    await entry(t, { startedAt: TUE + HOUR, title: "Standup", projectId: beta })
+
+    const { titles } = await breakdown(t)
+    expect(titles).toHaveLength(2)
+    expect(new Set(titles.map((row) => row.weekStart)).size).toBe(1)
+  })
+
+  it("cuts the week key from the same scan, so titles still sum to the headline total", async () => {
+    const t = setup()
+    const nextMon = MON + 7 * 24 * HOUR
+    await entry(t, { startedAt: MON + HOUR, title: "A", durationMs: 90 * 60_000 })
+    await entry(t, { startedAt: nextMon + HOUR, title: "B", durationMs: 45 * 60_000 })
+
+    const result = await t.query(internal.entries.rangeBreakdownAs, {
+      userId: ALICE,
+      fromMs: MON,
+      toMs: MON + 14 * 24 * HOUR,
+      timeZone: "UTC",
+      weekStartDay: 1,
+    })
     const summed = result.titles.reduce((n, row) => n + row.totalMs, 0)
     expect(summed).toBe(result.totalMs)
   })

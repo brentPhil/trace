@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { reportPages, COL } from "./report-doc"
 import { PAGE, TYPE } from "./paper"
 import { textWidth } from "./ops"
+import { groupWeeks } from "../report-rows"
 import type { PdfOp } from "./ops"
 import type { ReportRows } from "../report-rows"
 
@@ -9,26 +10,52 @@ const BOTTOM = PAGE.margin
 
 const HOUR = 3_600_000
 
+/**
+ * `over.weeks` is derived from `over.titles` (or the default rows) with the
+ * SAME `groupWeeks` the real export pipeline uses, unless a test supplies its
+ * own `weeks` — most tests here are about pagination geometry and truncation,
+ * not grouping, so they get a realistic single-week `weeks` for free just by
+ * giving their rows a `weekStart`. Tests about the week sections themselves
+ * (headings, subtotals, the orphan rule) pass `weeks` explicitly instead, so
+ * they can pick exact row counts to land on a page boundary.
+ */
 function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRows {
+  const meta = {
+    from: "2026-07-13",
+    to: "2026-07-25",
+    currency: "USD",
+    daysWorked: 11,
+    granularity: "day" as const,
+    ...over.meta,
+  }
+  const totals = {
+    totalMs: 355_680_000,
+    billableMs: 355_680_000,
+    billablePercent: 100,
+    billableCents: 98_800,
+    unratedBillableMs: 0,
+    averageDailyMs: 32_334_545,
+    count: titleCount,
+    truncated: false,
+    ...over.totals,
+  }
+  const titles =
+    over.titles ??
+    Array.from({ length: titleCount }, (_, n) => ({
+      project: "Vessel Vanguard",
+      description: `CB-${n} Fixing something`,
+      weekStart: "2026-07-13",
+      totalMs: HOUR,
+      centiHours: 100,
+      percent: 1,
+      billableCents: 1_000,
+      unpriced: false,
+    }))
+
   return {
-    meta: {
-      from: "2026-07-13",
-      to: "2026-07-25",
-      currency: "USD",
-      daysWorked: 11,
-      granularity: "day",
-    },
-    totals: {
-      totalMs: 355_680_000,
-      billableMs: 355_680_000,
-      billablePercent: 100,
-      billableCents: 98_800,
-      unratedBillableMs: 0,
-      averageDailyMs: 32_334_545,
-      count: titleCount,
-      truncated: false,
-    },
-    buckets: [
+    meta,
+    totals,
+    buckets: over.buckets ?? [
       {
         key: "2026-07-13",
         label: "Mon 13",
@@ -42,7 +69,7 @@ function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRow
         empty: false,
       },
     ],
-    projects: [
+    projects: over.projects ?? [
       {
         name: "Vessel Vanguard",
         color: "amber",
@@ -52,17 +79,9 @@ function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRow
         unratedBillableMs: 0,
       },
     ],
-    titles: Array.from({ length: titleCount }, (_, n) => ({
-      project: "Vessel Vanguard",
-      description: `CB-${n} Fixing something`,
-      totalMs: HOUR,
-      centiHours: 100,
-      percent: 1,
-      billableCents: 1_000,
-      unpriced: false,
-    })),
-    titlesTruncated: false,
-    ...over,
+    titles,
+    weeks: over.weeks ?? groupWeeks(titles, totals.totalMs, meta.from, meta.to),
+    titlesTruncated: over.titlesTruncated ?? false,
   }
 }
 
@@ -225,6 +244,7 @@ describe("reportPages", () => {
           project: "Sealogs",
           description:
             "[B-CB-326] Building Crew Training CSV and PDF download for the offshore vessel maintenance logs",
+          weekStart: "2026-07-13",
           totalMs: 445_507_000, // formatClock -> "123:45:07", as wide as a duration string gets
           centiHours: 44550,
           percent: 42,
@@ -277,6 +297,7 @@ describe("reportPages", () => {
           project: "Sealogs",
           description:
             "[B-CB-326] Building Crew Training CSV and PDF download for the offshore vessel maintenance logs",
+          weekStart: "2026-07-13",
           totalMs: HOUR,
           centiHours: 100,
           percent: 42,
@@ -311,6 +332,7 @@ describe("reportPages", () => {
         {
           project: "A Genuinely Long Client-Facing Project Name For The Fleet",
           description: "Short note",
+          weekStart: "2026-07-13",
           totalMs: 3_661_000,
           centiHours: 101,
           percent: 12,
@@ -352,6 +374,7 @@ describe("reportPages", () => {
       titles: Array.from({ length: 40 }, (_, n) => ({
         project: "Vessel Vanguard",
         description: `[B-CB-${300 + n}] ${LONG_DESCRIPTION}`,
+        weekStart: "2026-07-13",
         totalMs: HOUR,
         centiHours: 100,
         percent: 1,
@@ -375,5 +398,118 @@ describe("reportPages", () => {
         expect(op.y).toBeGreaterThanOrEqual(BOTTOM)
       }
     }
+  })
+
+  describe("weekly grouping", () => {
+    it("draws each week's own heading, with its clamped date span", () => {
+      // The default fixture's single week runs 2026-07-13 to 2026-07-19,
+      // computed by the same `groupWeeks` the real pipeline uses.
+      const pages = reportPages(rowsWith(1))
+      expect(pages.flatMap(textOf)).toContain("13 – 19 Jul 2026")
+    })
+
+    it("draws a subtotal row beneath each week's rows, distinct from the grand TOTAL", () => {
+      const pages = reportPages(rowsWith(3))
+      const strings = pages.flatMap(textOf)
+      expect(strings).toContain("Subtotal")
+      expect(strings).toContain("TOTAL")
+    })
+
+    it("draws one heading and one subtotal per week, for a range spanning two weeks", () => {
+      const week1 = Array.from({ length: 2 }, (_, n) => ({
+        project: "Vessel Vanguard",
+        description: `W1-${n}`,
+        weekStart: "2026-07-13",
+        totalMs: HOUR,
+        centiHours: 100,
+        percent: 12.5,
+        billableCents: 1_000,
+        unpriced: false,
+      }))
+      const week2 = Array.from({ length: 2 }, (_, n) => ({
+        project: "Vessel Vanguard",
+        description: `W2-${n}`,
+        weekStart: "2026-07-20",
+        totalMs: HOUR,
+        centiHours: 100,
+        percent: 12.5,
+        billableCents: 1_000,
+        unpriced: false,
+      }))
+      const titles = [...week1, ...week2]
+      const rows = rowsWith(titles.length, {
+        titles,
+        // Extended past both weeks' real spans so neither label is clamped —
+        // clamping itself is `reportRows`' own concern and is covered in
+        // report-rows.test.ts; this test is only about one heading and one
+        // subtotal appearing per week.
+        meta: { ...rowsWith(0).meta, to: "2026-07-26" },
+        totals: { ...rowsWith(0).totals, totalMs: 4 * HOUR, count: 4 },
+      })
+
+      const strings = reportPages(rows).flatMap(textOf)
+      // Two distinct week headings, and two "Subtotal" rows — one per week.
+      expect(strings).toContain("13 – 19 Jul 2026")
+      expect(strings).toContain("20 – 26 Jul 2026")
+      expect(strings.filter((s) => s === "Subtotal")).toHaveLength(2)
+    })
+
+    /*
+     * THE ORPHAN RULE. A week heading with its first row pushed to the next
+     * page reads as an announcement of a week with no work in it — the exact
+     * defect `report-doc.ts`'s pagination pass exists to prevent by looking
+     * ahead to the heading's own first row before deciding whether the
+     * heading fits.
+     *
+     * The row counts here are engineered, not arbitrary: `perPageBudget` at
+     * this document's fixed geometry (TOP/BOTTOM margins, HEADER_GAP, the
+     * reserved TOTAL slot) is 672.89pt, and every single-line row/heading/
+     * subtotal slot is 20pt. Thirty week-one rows plus its own heading and
+     * subtotal consume exactly 640pt, leaving 32.89pt of page one — enough
+     * for week two's heading (20pt) ALONE, but not enough for the heading
+     * plus its first row (40pt). A page-one-only accumulator would therefore
+     * place the heading on page one and bump only the row to page two; the
+     * guarded packer must move both together instead.
+     */
+    it("keeps a week heading on the same page as its first row, never split across a page boundary", () => {
+      const week1 = Array.from({ length: 30 }, (_, n) => ({
+        project: "Vessel Vanguard",
+        description: `W1-${n}`,
+        weekStart: "2026-07-13",
+        totalMs: HOUR,
+        centiHours: 100,
+        percent: 1,
+        billableCents: 1_000,
+        unpriced: false,
+      }))
+      const week2 = Array.from({ length: 3 }, (_, n) => ({
+        project: "Vessel Vanguard",
+        description: `W2-${n}`,
+        weekStart: "2026-07-20",
+        totalMs: HOUR,
+        centiHours: 100,
+        percent: 1,
+        billableCents: 1_000,
+        unpriced: false,
+      }))
+      const titles = [...week1, ...week2]
+      const rows = rowsWith(titles.length, {
+        titles,
+        // Extended past week two's real span so its label is not clamped —
+        // clamping is exercised separately in report-rows.test.ts.
+        meta: { ...rowsWith(0).meta, to: "2026-07-26" },
+        totals: { ...rowsWith(0).totals, totalMs: 33 * HOUR, count: 33 },
+      })
+
+      const pages = reportPages(rows)
+      const pageOf = (needle: string) =>
+        pages.findIndex((page) => textOf(page).includes(needle))
+
+      const headingPage = pageOf("20 – 26 Jul 2026")
+      const firstRowPage = pageOf("W2-0")
+      expect(headingPage).toBeGreaterThan(-1)
+      expect(firstRowPage).toBeGreaterThan(-1)
+      expect(headingPage).toBe(firstRowPage)
+    })
   })
 })

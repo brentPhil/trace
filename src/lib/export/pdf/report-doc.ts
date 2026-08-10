@@ -419,6 +419,72 @@ function sizeRow(row: ReportRows["titles"][number], descriptionMaxWidth: number)
  * two-line description with its duration glued to the top line reads as
  * though the second line belongs to the row below.
  */
+/**
+ * One item in the breakdown table's page-packing sequence: a week's own
+ * heading, one of its (already-sized) rows, or its subtotal.
+ *
+ * Flattening the table into this sequence — rather than pagination knowing
+ * about weeks directly — is what lets a single accumulate-until-full pass
+ * place headings, rows and subtotals with one shared budget, the same way
+ * the pre-weeks version paginated a flat list of rows.
+ */
+type Block =
+  | { kind: "heading"; label: string; height: number }
+  | { kind: "row"; sized: SizedRow; height: number }
+  | { kind: "subtotal"; week: ReportRows["weeks"][number]; height: number }
+
+function weekHeadingOp(label: string, y: number): PdfOp {
+  return text({ x: LEFT, y, text: label, size: TYPE.body, bold: true })
+}
+
+/** A week's subtotal row — same columns as a body row, bold like TOTAL but
+ *  at body size so it reads as a subordinate figure, not a second grand
+ *  total. Labelled "Subtotal" in the PROJECT column, matching where TOTAL's
+ *  own label sits. */
+function weekSubtotalOps(
+  week: ReportRows["weeks"][number],
+  y: number,
+  currency: string
+): Array<PdfOp> {
+  return [
+    text({ x: COL.project, y, text: "Subtotal", size: TYPE.body, bold: true }),
+    text({
+      x: COL.duration,
+      y,
+      text: formatClock(week.subtotal.totalMs),
+      size: TYPE.body,
+      bold: true,
+      align: "right",
+    }),
+    text({
+      x: COL.hours,
+      y,
+      text: formatDecimalHours(week.subtotal.totalMs),
+      size: TYPE.body,
+      bold: true,
+      align: "right",
+    }),
+    text({
+      x: COL.percent,
+      y,
+      text: `${week.subtotal.percent}%`,
+      size: TYPE.body,
+      bold: true,
+      align: "right",
+      color: PAPER.inkMuted,
+    }),
+    text({
+      x: COL.amount,
+      y,
+      text: moneyOr(week.subtotal.billableCents, currency, week.subtotal.unpriced),
+      size: TYPE.body,
+      bold: true,
+      align: "right",
+      color: week.subtotal.unpriced ? PAPER.inkMuted : PAPER.brass,
+    }),
+  ]
+}
+
 function breakdownRow(
   sized: SizedRow,
   firstLineY: number,
@@ -504,11 +570,6 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
   )
   const descriptionMaxWidth = COL.duration - maxDurationTextWidth - GUTTER - COL.description
 
-  // Wrapped and measured ONCE, up front, for every row — pagination below
-  // needs each row's real height before it can decide what fits on a page,
-  // and drawing later reuses these same wrapped lines (see `SizedRow`).
-  const sizedRows = rows.titles.map((row) => sizeRow(row, descriptionMaxWidth))
-
   /*
    * The TOTAL row is reserved a slot on the last page from the start, sized
    * against its OWN actual height (via `rowSlotHeight`) rather than a
@@ -536,38 +597,86 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
   const perPageBudget = pageBodyHeight - totalReserve
 
   /*
-   * Height-accumulating pagination: fill a page until the NEXT row would
-   * cross the reserved budget, then start a new one — a fixed rows-per-page
-   * count (the previous approach) assumed every row the same height, which
-   * wrapping makes false. `current.length > 0` is what stops a single row
-   * taller than a whole page's budget from being dropped: it still gets its
-   * own (overflowing) page rather than vanishing from the document.
+   * Height-accumulating pagination over BLOCKS (headings, rows, subtotals),
+   * not just rows — fill a page until the next block would cross the
+   * reserved budget, then start a new one. A fixed rows-per-page count (the
+   * pre-wrapping approach) assumed every row the same height, which
+   * wrapping makes false, and treating headings/subtotals as ordinary blocks
+   * in the SAME accumulator is what lets a single pass paginate the whole
+   * table without a week ever needing to know which page it landed on.
+   *
+   * THE ORPHAN RULE lives here: a week's heading and its own first row are
+   * placed as one atomic step (`pairHeight` below), guarded by the SAME
+   * "would this cross the budget" check every other block uses. Without the
+   * pairing, an ordinary per-block check places the heading wherever it
+   * fits — including a sliver of room too small for the row that has to
+   * follow it — and a heading with its first row bumped to the next page
+   * reads as an announcement of a week with no work in it. `current.length
+   * > 0` is what stops a heading+row pair (or a single oversized row) taller
+   * than a whole page's budget from being dropped entirely: it still gets
+   * its own (overflowing) page rather than vanishing from the document —
+   * the same escape hatch the original per-row version relied on.
    */
-  const rowPages: Array<Array<SizedRow>> = []
-  let current: Array<SizedRow> = []
+  const rowPages: Array<Array<Block>> = []
+  let current: Array<Block> = []
   let used = 0
-  for (const sized of sizedRows) {
-    if (current.length > 0 && used + sized.height > perPageBudget) {
-      rowPages.push(current)
-      current = []
-      used = 0
+
+  function breakPage(): void {
+    rowPages.push(current)
+    current = []
+    used = 0
+  }
+
+  for (const week of rows.weeks) {
+    const sizedWeekRows = week.rows.map((row) => sizeRow(row, descriptionMaxWidth))
+    const headingHeight = rowSlotHeight(1)
+    const firstRowHeight = sizedWeekRows[0]?.height ?? 0
+
+    if (current.length > 0 && used + headingHeight + firstRowHeight > perPageBudget) {
+      breakPage()
     }
-    current.push(sized)
-    used += sized.height
+    current.push({ kind: "heading", label: week.label, height: headingHeight })
+    used += headingHeight
+
+    sizedWeekRows.forEach((sized, index) => {
+      // The first row is placed UNCONDITIONALLY, right after its heading —
+      // the pair check above already decided whether the two fit together,
+      // and re-checking here would let this row alone bump to a fresh page
+      // while its heading stays behind, recreating the exact orphan the pair
+      // check exists to prevent.
+      if (index > 0 && used + sized.height > perPageBudget) {
+        breakPage()
+      }
+      current.push({ kind: "row", sized, height: sized.height })
+      used += sized.height
+    })
+
+    const subtotalHeight = rowSlotHeight(1)
+    if (used + subtotalHeight > perPageBudget) breakPage()
+    current.push({ kind: "subtotal", week, height: subtotalHeight })
+    used += subtotalHeight
   }
   rowPages.push(current)
 
-  rowPages.forEach((pageRows, pageIndex) => {
+  rowPages.forEach((pageBlocks, pageIndex) => {
     const isLastPage = pageIndex === rowPages.length - 1
     const ops = breakdownHeader()
 
     // `cursor` is the y just below whatever was drawn last — the top
-    // boundary the next row (or TOTAL) starts filling from.
+    // boundary the next block (or TOTAL) starts filling from.
     let cursor = TOP - HEADER_GAP
-    for (const sized of pageRows) {
-      const firstLineY = cursor - LINE_HEIGHT
-      ops.push(...breakdownRow(sized, firstLineY, currency))
-      cursor -= sized.height
+    for (const block of pageBlocks) {
+      if (block.kind === "heading") {
+        ops.push(weekHeadingOp(block.label, cursor - LINE_HEIGHT))
+        cursor -= block.height
+      } else if (block.kind === "row") {
+        const firstLineY = cursor - LINE_HEIGHT
+        ops.push(...breakdownRow(block.sized, firstLineY, currency))
+        cursor -= block.height
+      } else {
+        ops.push(...weekSubtotalOps(block.week, cursor - LINE_HEIGHT, currency))
+        cursor -= block.height
+      }
     }
 
     if (isLastPage) {

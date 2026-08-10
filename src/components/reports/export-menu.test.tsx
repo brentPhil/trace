@@ -38,6 +38,7 @@ const BREAKDOWN: Breakdown = {
       projectId: null,
       project: "Acme",
       title: "Standup",
+      weekStart: "2026-07-13",
       totalMs: HOUR,
       billableMs: HOUR,
       billableCents: 1_000,

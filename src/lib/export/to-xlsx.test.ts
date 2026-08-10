@@ -50,6 +50,7 @@ const ROWS: ReportRows = {
     {
       project: "Acme",
       description: "Standup",
+      weekStart: "2026-07-13",
       totalMs: 3 * HOUR,
       centiHours: 300,
       percent: 100,
@@ -57,6 +58,10 @@ const ROWS: ReportRows = {
       unpriced: false,
     },
   ],
+  // Not exercised by these tests — `xlsxSheets` reads the flat `titles` list
+  // plus each row's own `weekStart`, never the grouped shape (see
+  // report-rows.ts).
+  weeks: [],
   titlesTruncated: false,
 }
 
@@ -78,7 +83,23 @@ describe("xlsxSheets", () => {
   it("writes durations as numbers, so the recipient can sum the column", () => {
     const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
-    expect(first[3]).toEqual({ value: 3, type: Number, format: "0.00" })
+    expect(first[4]).toEqual({ value: 3, type: Number, format: "0.00" })
+  })
+
+  /*
+   * A real Date cell, at UTC midnight — the same rule the By-day sheet's own
+   * date column follows, and for the same reason: the calendar date was
+   * already decided server-side under the user's stored zone, so
+   * re-interpreting it in the browser's zone at render time is how a Monday
+   * becomes the previous Sunday in a pivot.
+   */
+  it("writes the week as a real Date cell, so a pivot can group by it", () => {
+    const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
+    const [, first] = breakdown.data
+    expect(first[1]).toMatchObject({ type: Date, format: "yyyy-mm-dd" })
+    expect((first[1] as { value: Date }).value.toISOString()).toBe(
+      "2026-07-13T00:00:00.000Z"
+    )
   })
 
   /*
@@ -98,13 +119,13 @@ describe("xlsxSheets", () => {
     }
     const breakdown = xlsxSheets(floored).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
-    expect((first[3] as { value: number }).value).toBe(8.19)
+    expect((first[4] as { value: number }).value).toBe(8.19)
   })
 
   it("writes amounts as currency-formatted numbers, not strings", () => {
     const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
-    expect(first[5]).toEqual({ value: 30, type: Number, format: '#,##0.00" "USD' })
+    expect(first[6]).toEqual({ value: 30, type: Number, format: '#,##0.00" "USD' })
   })
 
   it("writes days as real dates, so a pivot can group them by week", () => {
@@ -123,13 +144,13 @@ describe("xlsxSheets", () => {
       titles: [{ ...ROWS.titles[0], billableCents: 0, unpriced: true }],
     }
     const breakdown = xlsxSheets(unpriced).find((s) => s.sheet === "Breakdown")!
-    expect(breakdown.data[1][5]).toBeNull()
+    expect(breakdown.data[1][6]).toBeNull()
     // The TOTAL row has its own unpriced branch — money(rows.totals.billableCents,
     // currency, rows.totals.unratedBillableMs > 0) — separate from the body row's,
     // and asserting only the body row above left this one able to regress to `0`
     // unseen.
     const total = breakdown.data.at(-1)!
-    expect(total[5]).toBeNull()
+    expect(total[6]).toBeNull()
   })
 
   /*
@@ -146,7 +167,13 @@ describe("xlsxSheets", () => {
     }
     const breakdown = xlsxSheets(empty).find((s) => s.sheet === "Breakdown")!
     const total = breakdown.data.at(-1)!
-    expect(total[4]).toEqual({ value: 0, type: Number, format: "0.00" })
+    expect(total[5]).toEqual({ value: 0, type: Number, format: "0.00" })
+  })
+
+  it("leaves the TOTAL row's Week cell blank — it is not any one week", () => {
+    const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
+    const total = breakdown.data.at(-1)!
+    expect(total[1]).toBeNull()
   })
 
   it("says out loud when the description list was capped", () => {

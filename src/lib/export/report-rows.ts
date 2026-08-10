@@ -1,3 +1,4 @@
+import { addDays, parseDayString } from "@shared/day"
 import { centiHours } from "@shared/duration"
 import { bucketDays } from "@/lib/report-series"
 import type { Bucket, Breakdown, Granularity } from "@/lib/report-series"
@@ -40,13 +41,69 @@ export type ReportProjectRow = {
 export type ReportTitleRow = {
   project: string
   description: string
+  /** The DayString of the first day of the local week this row belongs to —
+   *  carried through from `entries.rangeBreakdown` so CSV and XLSX can offer
+   *  it as a plain column, and so `reportRows` can partition this same flat
+   *  list into `weeks` below without a second query. */
+  weekStart: DayString
   totalMs: number
   /** Hundredths of an hour — the quantity an invoice line would bill. */
   centiHours: number
+  /**
+   * This row's share of the WHOLE RANGE — not of the week it is grouped
+   * under below. A row inside a light week and a row inside a heavy week can
+   * both show "25%" and mean the same duration; if this were percent-of-week
+   * instead, two different weeks' "50%" rows could name two entirely
+   * different durations with nothing on the page to say so. It is also what
+   * makes every row across every week still sum to the 100% the grand TOTAL
+   * row prints.
+   */
   percent: number
   billableCents: number
   /** Some of this row's billable time has no rate, so its amount is a floor. */
   unpriced: boolean
+}
+
+/**
+ * One calendar week's worth of `ReportTitleRow`s, plus its own subtotal.
+ *
+ * `rows` is a partition of `ReportRows.titles`, not a re-derivation: every
+ * title row in the range appears in EXACTLY one week here, in the same
+ * relative order it holds in the flat list. Grouping is client-side rather
+ * than a second backend cut for the same reason `bucketDays` above is: the
+ * export re-partitions the SAME scan `entries.rangeBreakdown` already did.
+ */
+export type ReportWeek = {
+  /** This week's own grouping key, and the DayString every row inside it
+   *  shares — the local week its entries' starts fall in. */
+  weekStart: DayString
+  /** The span as printed, e.g. "1 – 7 Aug 2026". Clamped to the report's own
+   *  `from`/`to` at both ends: a week's true calendar span can start before
+   *  the range or run past it, and claiming days nothing was queried for is
+   *  the same defect `report-series.ts`'s `titleOf` avoids for the weekly
+   *  chart label. */
+  label: string
+  rows: Array<ReportTitleRow>
+  subtotal: {
+    totalMs: number
+    centiHours: number
+    /** This week's share of the range — NOT its rows' percents summed by a
+     *  reader; those are already range-relative (see `ReportTitleRow.percent`
+     *  above), and this is the same quantity computed once for the heading. */
+    percent: number
+    /**
+     * The sum of this week's rows' OWN independently-rounded amounts — the
+     * same choice `projects` makes and for the same reason: a week's amount
+     * is a figure a reader adds up by hand from the rows beneath it, so it
+     * has to equal that sum exactly. It may therefore differ from a
+     * proportional slice of the grand total by a few cents, which is a real
+     * property of money, not a bug — see `centsOf` in convex/entries.ts.
+     */
+    billableCents: number
+    /** True when ANY row in the week is itself unpriced — the same
+     *  "this figure is a floor" meaning a row's own `unpriced` carries. */
+    unpriced: boolean
+  }
 }
 
 export type ReportRows = {
@@ -70,7 +127,13 @@ export type ReportRows = {
   }
   buckets: Array<Bucket>
   projects: Array<ReportProjectRow>
+  /** Flat, in the SAME order `entries.rangeBreakdown` returns it (time
+   *  descending, ties broken by title) — kept alongside `weeks` because CSV
+   *  and XLSX read it directly with a `Week` column rather than the nested
+   *  shape (see to-csv.ts, to-xlsx.ts). */
   titles: Array<ReportTitleRow>
+  /** `titles`, split by week, ascending — what the PDF renders as sections. */
+  weeks: Array<ReportWeek>
   titlesTruncated: boolean
 }
 
@@ -85,6 +148,95 @@ export type ReportRows = {
 export function percentOf(part: number, whole: number): number {
   if (whole <= 0) return 0
   return Math.round((part / whole) * 10_000) / 100
+}
+
+/**
+ * A day string formatted with the given fields, at noon UTC.
+ *
+ * Noon, not local midnight, and formatted in UTC — the same trick
+ * `report-series.ts`'s `atNoon` uses: the calendar date is already decided
+ * by the time it reaches here, and noon sits far enough from either boundary
+ * that no zone offset can move the rendered day off it.
+ */
+function fmt(day: DayString, options: Intl.DateTimeFormatOptions): string {
+  const { year, month, day: date } = parseDayString(day)
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...options }).format(
+    new Date(Date.UTC(year, month - 1, date, 12))
+  )
+}
+
+/**
+ * A week's printed span, e.g. "1 – 7 Aug 2026" or "28 Jul – 3 Aug 2026".
+ *
+ * The month and year are stated once, on whichever end needs to introduce
+ * them, rather than on both ends unconditionally — repeating "Aug 2026" on a
+ * week that never leaves August reads as noise on a document meant to be
+ * scanned quickly. `start` and `end` arrive already clamped to the report's
+ * own range by the caller.
+ */
+function weekLabel(start: DayString, end: DayString): string {
+  const sameMonth = start.slice(0, 7) === end.slice(0, 7)
+  if (sameMonth) {
+    return `${fmt(start, { day: "numeric" })} – ${fmt(end, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    })}`
+  }
+  const sameYear = start.slice(0, 4) === end.slice(0, 4)
+  const startOptions: Intl.DateTimeFormatOptions = sameYear
+    ? { day: "numeric", month: "short" }
+    : { day: "numeric", month: "short", year: "numeric" }
+  return `${fmt(start, startOptions)} – ${fmt(end, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  })}`
+}
+
+/**
+ * `titles`, partitioned into `ReportWeek`s — ascending by `weekStart`, each
+ * carrying its own clamped label and a subtotal derived from its own rows.
+ *
+ * Kept as its own function (rather than inlined into `reportRows`) so the
+ * grouping — the part a PDF layout test needs to drive directly with a hand
+ * built list of rows — is callable without constructing a whole `Breakdown`.
+ */
+export function groupWeeks(
+  titles: ReadonlyArray<ReportTitleRow>,
+  rangeTotalMs: number,
+  from: DayString,
+  to: DayString
+): Array<ReportWeek> {
+  const byWeek = new Map<DayString, Array<ReportTitleRow>>()
+  for (const row of titles) {
+    const existing = byWeek.get(row.weekStart)
+    if (existing === undefined) byWeek.set(row.weekStart, [row])
+    else existing.push(row)
+  }
+
+  return [...byWeek.keys()].sort().map((weekStart) => {
+    const rows = byWeek.get(weekStart)!
+    const totalMs = rows.reduce((n, row) => n + row.totalMs, 0)
+    const billableCents = rows.reduce((n, row) => n + row.billableCents, 0)
+
+    const rawEnd = addDays(weekStart, 6)
+    const labelStart = weekStart < from ? from : weekStart
+    const labelEnd = rawEnd > to ? to : rawEnd
+
+    return {
+      weekStart,
+      label: weekLabel(labelStart, labelEnd),
+      rows,
+      subtotal: {
+        totalMs,
+        centiHours: centiHours(totalMs),
+        percent: percentOf(totalMs, rangeTotalMs),
+        billableCents,
+        unpriced: rows.some((row) => row.unpriced),
+      },
+    }
+  })
 }
 
 export function reportRows(
@@ -104,6 +256,17 @@ export function reportRows(
    */
   const daysWorked = breakdown.days.length
   const averageDailyMs = daysWorked === 0 ? 0 : breakdown.totalMs / daysWorked
+
+  const titles = breakdown.titles.map((row) => ({
+    project: row.project === "" ? NO_PROJECT : row.project,
+    description: row.title === "" ? NO_DESCRIPTION : row.title,
+    weekStart: row.weekStart,
+    totalMs: row.totalMs,
+    centiHours: centiHours(row.totalMs),
+    percent: percentOf(row.totalMs, breakdown.totalMs),
+    billableCents: row.billableCents,
+    unpriced: row.unratedBillableMs > 0,
+  }))
 
   return {
     meta: {
@@ -132,15 +295,8 @@ export function reportRows(
       billableCents: project.billableCents,
       unratedBillableMs: project.unratedBillableMs,
     })),
-    titles: breakdown.titles.map((row) => ({
-      project: row.project === "" ? NO_PROJECT : row.project,
-      description: row.title === "" ? NO_DESCRIPTION : row.title,
-      totalMs: row.totalMs,
-      centiHours: centiHours(row.totalMs),
-      percent: percentOf(row.totalMs, breakdown.totalMs),
-      billableCents: row.billableCents,
-      unpriced: row.unratedBillableMs > 0,
-    })),
+    titles,
+    weeks: groupWeeks(titles, breakdown.totalMs, opts.from, opts.to),
     titlesTruncated: breakdown.titlesTruncated,
   }
 }

@@ -26,6 +26,11 @@ function rowsOf(titles: ReportRows["titles"]): ReportRows {
     buckets: [],
     projects: [],
     titles,
+    // Not exercised by these tests — `toCsv` reads the flat `titles` list
+    // plus each row's own `weekStart`, never the grouped shape (see
+    // report-rows.ts). Left empty rather than derived, so a bug in the
+    // grouping logic cannot mask a bug here by accident.
+    weeks: [],
     titlesTruncated: false,
   }
 }
@@ -34,6 +39,7 @@ const ONE: ReportRows["titles"] = [
   {
     project: "Acme",
     description: "Standup",
+    weekStart: "2026-07-13",
     totalMs: HOUR,
     centiHours: 100,
     percent: 100,
@@ -46,14 +52,22 @@ describe("toCsv", () => {
   it("leads with a header row and nothing else — a preamble is not a CSV", () => {
     const [header] = toCsv(rowsOf(ONE)).split("\r\n")
     expect(header).toBe(
-      "Project,Description,Duration,Decimal hours,Percent,Amount,Currency"
+      "Project,Week,Description,Duration,Decimal hours,Percent,Amount,Currency"
     )
   })
 
   it("writes both duration forms, so the reader need not convert either", () => {
     expect(toCsv(rowsOf(ONE)).split("\r\n")[1]).toBe(
-      "Acme,Standup,1:00:00,1.00,100,10.00,USD"
+      "Acme,2026-07-13,Standup,1:00:00,1.00,100,10.00,USD"
     )
+  })
+
+  // The whole reason the column exists: grouping or pivoting a flat export by
+  // week needs a plain value to key on, and this is the DayString the backend
+  // already attributed the row to — not re-derived on the client.
+  it("writes the week as the plain DayString its rows were attributed to", () => {
+    const csv = toCsv(rowsOf([{ ...ONE[0], weekStart: "2026-08-10" }]))
+    expect(csv.split("\r\n")[1]).toBe("Acme,2026-08-10,Standup,1:00:00,1.00,100,10.00,USD")
   })
 
   it("separates records with CRLF, per RFC 4180", () => {
@@ -71,6 +85,7 @@ describe("toCsv", () => {
         {
           project: "Acme",
           description: 'Fixing "toggle" bleeding across Maintenance, Log\nEntries',
+          weekStart: "2026-07-13",
           totalMs: HOUR,
           centiHours: 100,
           percent: 100,
@@ -81,13 +96,15 @@ describe("toCsv", () => {
     )
 
     expect(csv.split("\r\n")[1]).toBe(
-      'Acme,"Fixing ""toggle"" bleeding across Maintenance, Log\nEntries",1:00:00,1.00,100,10.00,USD'
+      'Acme,2026-07-13,"Fixing ""toggle"" bleeding across Maintenance, Log\nEntries",1:00:00,1.00,100,10.00,USD'
     )
   })
 
   it("ends with a TOTAL record, so a truncated paste is visibly incomplete", () => {
     const lines = toCsv(rowsOf(ONE)).split("\r\n")
-    expect(lines.at(-1)).toBe("TOTAL,,1:00:00,1.00,100,10.00,USD")
+    // Week is blank on TOTAL, matching Description — the row spans every
+    // week in the export, and it is not any one of them.
+    expect(lines.at(-1)).toBe("TOTAL,,,1:00:00,1.00,100,10.00,USD")
   })
 
   it("writes an amount of nothing for an unpriced row rather than 0.00", () => {
@@ -96,7 +113,7 @@ describe("toCsv", () => {
     )
     // Empty, not "0.00". Zero is a real rate somebody chose; unpriced is a
     // question nobody has answered, and the two must not share a cell value.
-    expect(csv.split("\r\n")[1]).toBe("Acme,Standup,1:00:00,1.00,100,,USD")
+    expect(csv.split("\r\n")[1]).toBe("Acme,2026-07-13,Standup,1:00:00,1.00,100,,USD")
   })
 
   it("agrees with its own body rows even when the range is entirely non-billable", () => {
@@ -115,6 +132,6 @@ describe("toCsv", () => {
         billableCents: 0,
       },
     })
-    expect(csv.split("\r\n").at(-1)).toBe("TOTAL,,1:00:00,1.00,100,0.00,USD")
+    expect(csv.split("\r\n").at(-1)).toBe("TOTAL,,,1:00:00,1.00,100,0.00,USD")
   })
 })
