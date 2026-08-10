@@ -68,14 +68,44 @@ describe("useForceCloseWhenClosed", () => {
 
   it("cancels the pending force-close when the component goes away", () => {
     const { ref, unmount } = makeRef()
+    // Opened first, so there is genuinely a timer in flight to cancel. Starting
+    // closed would pass this vacuously now that a never-opened popover arms
+    // nothing at all — see the case below.
     const view = renderHook(({ open }) => useForceCloseWhenClosed(open, ref), {
-      initialProps: { open: false },
+      initialProps: { open: true },
     })
 
+    view.rerender({ open: false })
     view.unmount()
     vi.advanceTimersByTime(1_000)
 
     expect(unmount).not.toHaveBeenCalled()
+  })
+
+  /*
+   * `EntryTimePopover` renders once per log row, so keying purely on `open`
+   * armed a 200ms timer per row at mount — fifty on a fresh log, fifty more on
+   * every "Load earlier entries" — for popups that had never been on screen.
+   * Nothing needs forcing out of the DOM before a popup has ever been in it.
+   */
+  it("arms nothing for a popover that has never been opened", () => {
+    const { ref, unmount } = makeRef()
+    renderHook(({ open }) => useForceCloseWhenClosed(open, ref), {
+      initialProps: { open: false },
+    })
+
+    // Several closed re-renders, as a row gets in a real log.
+    vi.advanceTimersByTime(1_000)
+    expect(unmount).not.toHaveBeenCalled()
+
+    // And it still works the first time it really does open and close.
+    const view = renderHook(({ open }) => useForceCloseWhenClosed(open, ref), {
+      initialProps: { open: false },
+    })
+    view.rerender({ open: true })
+    view.rerender({ open: false })
+    vi.advanceTimersByTime(200)
+    expect(unmount).toHaveBeenCalledTimes(1)
   })
 
   it("does nothing if the popover has already unmounted on its own", () => {

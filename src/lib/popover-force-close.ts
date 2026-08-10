@@ -50,16 +50,30 @@ const SAFETY_MS = 200
  *     real it applies just as much to Escape, an outside click and the Close
  *     button, none of which went anywhere near this helper. Driving off `open`
  *     covers every way a popover can close, including ones not written yet.
+ *
+ * AND ONLY AFTER IT HAS OPENED ONCE. `EntryTimePopover` renders once per log
+ * row, so keying purely on `open` armed a timer per row at MOUNT — fifty on a
+ * fresh log, fifty more on every "Load earlier entries" — for popups that had
+ * never been on screen. They were all cleaned up and each fired once into a
+ * null ref, so this was waste rather than a leak, but there is nothing to
+ * force out of the DOM before a popup has ever been in it.
  */
 export function useForceCloseWhenClosed(
   open: boolean,
   actionsRef: PopoverActionsRef
 ): void {
+  // Written during render rather than in an effect, so a close that happens in
+  // the same commit as the open — Escape on the frame it appeared — still sees
+  // it. A ref, not state, because nothing should re-render when it flips.
+  const hasOpened = useRef(false)
+  if (open) hasOpened.current = true
+
   useEffect(() => {
-    // Nothing to force while it is meant to be on screen. Returning early here
-    // is also what makes re-opening cancel a pending force-close, via this
-    // effect re-running and disposing the previous timer.
-    if (open) return undefined
+    // Nothing to force while it is meant to be on screen, and nothing to force
+    // for a popup that has never mounted one. Returning early on `open` is also
+    // what makes re-opening cancel a pending force-close, via this effect
+    // re-running and disposing the previous timer.
+    if (open || !hasOpened.current) return undefined
     const id = setTimeout(() => actionsRef.current?.unmount(), SAFETY_MS)
     return () => clearTimeout(id)
   }, [open, actionsRef])
