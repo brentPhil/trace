@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   formatTimeOfDay,
   parseTimeOfDay,
+  parseEndTime,
   resolveEndAfterStart,
 } from "./timeOfDay"
 
@@ -131,6 +132,88 @@ describe("resolveEndAfterStart", () => {
         const endAbs = end.dayOffset * 1440 + end.minutes
         expect(endAbs, `${s} -> ${e}`).toBeGreaterThan(startAbs)
       }
+    }
+  })
+})
+
+describe("parseEndTime", () => {
+  /*
+   * The whole point of this function, and the case `resolveEndAfterStart`'s
+   * docstring has always claimed while nothing asserted it: a 9-to-5 day.
+   *
+   * Parsing an end with the plain nearest-reading rule got this wrong, because
+   * "nearest to 09:00" picks 05:00 over 17:00 (4 hours away versus 8), and
+   * pushing THAT past the start lands at 05:00 the following day — a 20-hour
+   * entry from two keystrokes. An end is not a free-floating time of day; it
+   * is bounded below by its start, and that bound has to be applied while the
+   * reading is chosen, not after.
+   */
+  it("reads a bare end hour as the first one at or after the start", () => {
+    const start = { minutes: at(9), dayOffset: 0 }
+    const result = parseEndTime("5", start)
+    expect(result.ok && result.time).toEqual({ minutes: at(17), dayOffset: 0 })
+  })
+
+  it("still reads a genuine overnight end as the next day", () => {
+    const start = { minutes: at(22), dayOffset: 0 }
+    const result = parseEndTime("2", start)
+    expect(result.ok && result.time).toEqual({ minutes: at(2), dayOffset: 1 })
+  })
+
+  it("resolves a bare 12 by the start, not by a working-day guess", () => {
+    // Lunch after a 09:00 start is noon...
+    expect(parseEndTime("12", { minutes: at(9), dayOffset: 0 })).toEqual({
+      ok: true,
+      time: { minutes: at(12), dayOffset: 0 },
+    })
+    // ...but after a 13:00 start the only 12 still ahead is midnight.
+    expect(parseEndTime("12", { minutes: at(13), dayOffset: 0 })).toEqual({
+      ok: true,
+      time: { minutes: 0, dayOffset: 1 },
+    })
+  })
+
+  it("leaves an unambiguous end exactly as typed", () => {
+    const start = { minutes: at(9), dayOffset: 0 }
+    // Explicit meridiem, 24-hour, and compact h:mm are not guesses.
+    expect(parseEndTime("5pm", start)).toEqual({
+      ok: true,
+      time: { minutes: at(17), dayOffset: 0 },
+    })
+    expect(parseEndTime("17", start)).toEqual({
+      ok: true,
+      time: { minutes: at(17), dayOffset: 0 },
+    })
+    expect(parseEndTime("1730", start)).toEqual({
+      ok: true,
+      time: { minutes: at(17) + 30, dayOffset: 0 },
+    })
+    // An explicit 05:00 after a 09:00 start really is overnight.
+    expect(parseEndTime("5am", start)).toEqual({
+      ok: true,
+      time: { minutes: at(5), dayOffset: 1 },
+    })
+  })
+
+  it("never produces an end at or before the start, for any pair", () => {
+    const inputs = ["1", "5", "9", "11", "12", "0", "17", "23", "930", "5pm", "5am"]
+    for (const s of [0, at(9), at(13), at(22), 1439]) {
+      for (const input of inputs) {
+        const start = { minutes: s, dayOffset: 0 }
+        const result = parseEndTime(input, start)
+        if (!result.ok) continue
+        const endAbs = result.time.dayOffset * 1440 + result.time.minutes
+        expect(endAbs, `${s} -> ${input}`).toBeGreaterThan(s)
+        // And never so far ahead that the backend's 24-hour ceiling refuses it.
+        expect(endAbs - s, `${s} -> ${input}`).toBeLessThanOrEqual(1440)
+      }
+    }
+  })
+
+  it("rejects what parseTimeOfDay rejects", () => {
+    const start = { minutes: at(9), dayOffset: 0 }
+    for (const junk of ["24", "9:60", "abc", "13pm", ""]) {
+      expect(parseEndTime(junk, start).ok, junk).toBe(false)
     }
   })
 })

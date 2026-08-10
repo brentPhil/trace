@@ -24,7 +24,7 @@ export type TimeParseResult =
   | { ok: true; time: TimeOfDay }
   | { ok: false; reason: "empty" | "unparseable" }
 
-const MINUTES_PER_DAY = 1440
+export const MINUTES_PER_DAY = 1440
 
 // "9", "09", "1430", "930"
 const BARE = /^(\d{1,4})$/
@@ -138,11 +138,81 @@ function fail(): TimeParseResult {
 }
 
 /**
- * End times always resolve forward from start.
+ * Parses the END of an interval. Prefer this over `parseTimeOfDay` for any
+ * field that ends something.
  *
- * Typing `9` then `5` means 09:00 to 17:00, not a negative eight hours. Pushing
- * the end to the next day makes a negative duration structurally impossible at
- * the input layer, rather than something caught later by an error message.
+ * An end is not a free-floating time of day: it is bounded below by its start,
+ * and that bound has to be applied while the reading is CHOSEN, not after.
+ * Parsing with the nearest-reading rule and then pushing the result forward is
+ * the combination this function exists to make unexpressible — it read `9`
+ * then `5` as a 20-hour entry, because "nearest to 09:00" prefers 05:00 (4
+ * hours away) over 17:00 (8), and 05:00 after a 09:00 start is tomorrow. Two
+ * keystrokes, a twelve-hour over-bill, and the wrong answer looked exactly
+ * like the right one.
+ *
+ * So a bare 1-12 resolves to the first of its two readings that falls after
+ * the start, which also retires the working-day guess for `12`: after 09:00 it
+ * is noon, after 13:00 it is midnight, and neither is a guess. Every other
+ * form is unambiguous already and is simply anchored forward as written — an
+ * explicit `5am` after a 09:00 start really is overnight.
+ */
+export function parseEndTime(input: string, start: TimeOfDay): TimeParseResult {
+  const readings = ambiguousBareReadings(input)
+  if (readings !== null) return { ok: true, time: firstAfter(readings, start) }
+
+  const parsed = parseTimeOfDay(input, start.minutes)
+  if (!parsed.ok) return parsed
+  return { ok: true, time: resolveEndAfterStart(parsed.time, start) }
+}
+
+/**
+ * The two readings a bare hour could mean, or `null` if it means only one.
+ *
+ * Mirrors the cases `parseBare` treats as ambiguous, and must keep mirroring
+ * them: a leading zero is an explicit 24-hour hour, three and four digits are
+ * a compact h:mm, `0` is midnight, and 13-23 are already 24-hour.
+ */
+function ambiguousBareReadings(input: string): [number, number] | null {
+  const text = input.trim().toLowerCase().replace(/\s+/g, " ")
+  const bare = /^(\d{1,2})$/.exec(text)
+  if (bare === null) return null
+
+  const digits = bare[1]
+  if (digits.length === 2 && digits.startsWith("0")) return null
+
+  const value = Number(digits)
+  if (value < 1 || value > 12) return null
+
+  // `% 12` so that 12 yields [00:00, 12:00] alongside 9's [09:00, 21:00] —
+  // the same shape, which is why 12 no longer needs a rule of its own here.
+  const am = (value % 12) * 60
+  return [am, am + 12 * 60]
+}
+
+/** Whichever reading lands soonest after the start, by the rule below. */
+function firstAfter(readings: [number, number], start: TimeOfDay): TimeOfDay {
+  const resolved = readings.map((minutes) =>
+    resolveEndAfterStart({ minutes, dayOffset: 0 }, start)
+  )
+  return resolved.reduce((a, b) => (absoluteMinutes(a) <= absoluteMinutes(b) ? a : b))
+}
+
+/** Minutes from the start of the reference day, folding `dayOffset` back in. */
+export function absoluteMinutes(time: TimeOfDay): number {
+  return time.dayOffset * MINUTES_PER_DAY + time.minutes
+}
+
+/**
+ * Anchors an end forward of its start.
+ *
+ * `22` then `2` is the ordinary overnight case, and pushing the end to the
+ * next day makes a negative duration structurally impossible at the input
+ * layer rather than something caught later by an error message.
+ *
+ * This only ever moves a reading that has already been chosen. Choosing it is
+ * `parseEndTime`'s job, and callers should go through that — reaching for
+ * `parseTimeOfDay` and this function separately is what produced the 20-hour
+ * entry described there.
  */
 export function resolveEndAfterStart(end: TimeOfDay, start: TimeOfDay): TimeOfDay {
   const startAbs = start.dayOffset * MINUTES_PER_DAY + start.minutes

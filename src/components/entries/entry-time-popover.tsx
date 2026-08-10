@@ -10,7 +10,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { dayOf } from "@shared/day"
-import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
+import { parseEndTime, parseTimeOfDay } from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
 import type { Entry } from "@/lib/group-entries"
 
@@ -111,7 +111,17 @@ export function EntryTimePopover({
   }, [open, entry.startedAt, entry.endedAt, entryDay, timeZone, use12Hour])
 
   const commitTime = (field: "start" | "end", raw: string) => {
-    const parsed = parseTimeOfDay(raw, startMinutes)
+    // A start belongs to the day it is filed under; the calendar is what moves
+    // an entry, not a typed time. An END is bounded below by that start, so it
+    // goes through `parseEndTime` — which both reads a bare hour as the first
+    // one after the start ("9" then "5" is eight hours, not twenty) and
+    // anchors a genuinely earlier end to the next day, the ordinary overnight
+    // case.
+    const startAnchor = { minutes: startMinutes, dayOffset: 0 }
+    const parsed =
+      field === "start"
+        ? parseTimeOfDay(raw, startMinutes)
+        : parseEndTime(raw, startAnchor)
     if (!parsed.ok) {
       setError(
         field === "start"
@@ -122,16 +132,8 @@ export function EntryTimePopover({
     }
     setError(null)
 
-    // A start belongs to the day it is filed under; the calendar is what moves
-    // an entry, not a typed time. An END earlier in the clock than the start is
-    // the ordinary overnight case, anchored to the start's day.
     const time =
-      field === "start"
-        ? { minutes: parsed.time.minutes, dayOffset: 0 }
-        : resolveEndAfterStart(parsed.time, {
-            minutes: startMinutes,
-            dayOffset: 0,
-          })
+      field === "start" ? { minutes: parsed.time.minutes, dayOffset: 0 } : parsed.time
 
     void onCommitTime(
       field,

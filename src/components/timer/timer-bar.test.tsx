@@ -681,6 +681,30 @@ describe("the duration's popover", () => {
     expect(screen.getByText("9:00 PM – 8:00 PM +1d")).toBeTruthy()
   })
 
+  /**
+   * The call-site half of the 9-to-5 defect. `parseEndTime` owns the rule and
+   * `convex/lib/regressions.test.ts` pins it, but nothing stopped this file
+   * from going back to `parseTimeOfDay` + `resolveEndAfterStart` — the
+   * composition that read "5" after a 09:00 start as 05:00 TOMORROW.
+   *
+   * `confirm` and the echo derive from the same resolver, so asserting the
+   * echo asserts what would be written.
+   */
+  it("reads a terse 9-to-5 as eight hours, not twenty", () => {
+    // 10:00 AM, so a bare "9" is this morning. (At 9 PM it would be 9 PM, and
+    // 9 PM to 5 AM is a real overnight shift — the wrong fixture for this.)
+    vi.setSystemTime(Date.parse("2026-08-07T09:00:00Z")) // 10:00 AM BST
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("Start time"), { target: { value: "9" } })
+    fireEvent.change(screen.getByLabelText("End time"), { target: { value: "5" } })
+
+    // No `+1d`: the marker's absence is the assertion.
+    expect(screen.getByText("9:00 AM – 5:00 PM")).toBeTruthy()
+  })
+
   it("stops showing an error once the field it described has changed", async () => {
     vi.setSystemTime(Date.parse("2026-08-07T20:00:00Z"))
     const { actions } = makeActions()

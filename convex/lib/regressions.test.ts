@@ -16,7 +16,12 @@ import {
   msToIsoDuration,
   parseDuration,
 } from "./duration"
-import { formatTimeOfDay, parseTimeOfDay, resolveEndAfterStart } from "./timeOfDay"
+import {
+  formatTimeOfDay,
+  parseEndTime,
+  parseTimeOfDay,
+  resolveEndAfterStart,
+} from "./timeOfDay"
 import { applyTimeEdit, crossesMidnight, elapsedMs, entryTimes } from "./entryTimes"
 
 const MINUTE = 60_000
@@ -72,6 +77,41 @@ describe("wrong money", () => {
     const compact = parseTimeOfDay("0900", fourPm)
     const short = parseTimeOfDay("09", fourPm)
     expect(compact.ok && compact.time).toEqual(short.ok && short.time)
+  })
+
+  /**
+   * A 9-to-5 day, typed the terse way the parser exists to support, recorded
+   * twenty hours.
+   *
+   * `resolveEndAfterStart`'s docstring claimed "9 then 5 means 09:00 to 17:00"
+   * from the day it was written, and nothing asserted it. Parsing the end with
+   * the nearest-reading rule picks 05:00 over 17:00 (4 hours from 09:00 versus
+   * 8), and anchoring THAT forward lands on 05:00 tomorrow. The composition was
+   * the bug — each half was behaving as documented — so the fix was to stop
+   * callers being able to express it. This test is the reason `parseEndTime`
+   * exists rather than a note in a comment.
+   */
+  it("a bare end hour never reads as the far side of the clock", () => {
+    const nineToFive = parseEndTime("5", { minutes: 9 * 60, dayOffset: 0 })
+    expect(nineToFive).toEqual({ ok: true, time: { minutes: 17 * 60, dayOffset: 0 } })
+
+    // The overnight case it was confused with still resolves overnight.
+    expect(parseEndTime("2", { minutes: 22 * 60, dayOffset: 0 })).toEqual({
+      ok: true,
+      time: { minutes: 2 * 60, dayOffset: 1 },
+    })
+
+    // No start/bare-hour pair can produce more than a 12-hour span, so none of
+    // them can reach the backend's 24-hour ceiling the way "9" then "5" did.
+    for (let s = 0; s < 1440; s += 17) {
+      for (let hour = 1; hour <= 12; hour += 1) {
+        const result = parseEndTime(String(hour), { minutes: s, dayOffset: 0 })
+        if (!result.ok) throw new Error(`"${hour}" at ${s} did not parse`)
+        const span = result.time.dayOffset * 1440 + result.time.minutes - s
+        expect(span, `${s} -> ${hour}`).toBeGreaterThan(0)
+        expect(span, `${s} -> ${hour}`).toBeLessThanOrEqual(12 * 60)
+      }
+    }
   })
 
   /**

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
 import { errorMessage } from "@/lib/error-message"
 import { instantOfDayTime, localMinutesOf } from "@/lib/format-time"
-import { parseTimeOfDay, resolveEndAfterStart } from "@shared/timeOfDay"
+import { parseEndTime, parseTimeOfDay } from "@shared/timeOfDay"
 import { cn } from "@/lib/utils"
 import type { DayString } from "@shared/day"
 
@@ -90,21 +90,21 @@ export function ManualEntryDialog({
       setError("Start time — try 9:15, 0915, or 2pm.")
       return
     }
-    const end = parseTimeOfDay(to, start.time.minutes)
+    const startTime = { minutes: start.time.minutes, dayOffset: 0 }
+    // `parseEndTime`, not `parseTimeOfDay`: an end is bounded below by its
+    // start, and reading it against that bound is what makes "9" then "5" an
+    // eight-hour day rather than a twenty-hour one. An end earlier in the
+    // clock than the start is still the overnight case, not a typo — 23:40 to
+    // 01:15 is one shift, and refusing it would make people record two
+    // entries for one piece of work.
+    const end = parseEndTime(to, startTime)
     if (!end.ok) {
       setError("End time — try 17:30, 1730, or 5:30pm.")
       return
     }
 
-    const startedAt = instantOfDayTime(day, { ...start.time, dayOffset: 0 }, timeZone)
-    // An end earlier in the clock than the start is the overnight case, not a
-    // typo: 23:40 to 01:15 is one shift, and refusing it would make people
-    // record two entries for one piece of work.
-    const endedAt = instantOfDayTime(
-      day,
-      resolveEndAfterStart(end.time, { minutes: start.time.minutes, dayOffset: 0 }),
-      timeZone
-    )
+    const startedAt = instantOfDayTime(day, startTime, timeZone)
+    const endedAt = instantOfDayTime(day, end.time, timeZone)
 
     setSaving(true)
     try {

@@ -17,9 +17,11 @@ import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-for
 import { dayOf } from "@shared/day"
 import { spokenDuration } from "@shared/duration"
 import {
+  MINUTES_PER_DAY,
+  absoluteMinutes,
   formatTimeOfDay,
+  parseEndTime,
   parseTimeOfDay,
-  resolveEndAfterStart,
 } from "@shared/timeOfDay"
 import type { DayString } from "@shared/day"
 import type { TimeOfDay } from "@shared/timeOfDay"
@@ -347,43 +349,33 @@ function IdleDurationPopover({
     if (saving) return
     setError(null)
 
-    const startParsed = parseTimeOfDay(start, nowMinutes())
-    if (!startParsed.ok) {
-      setError(`Start time — ${TIME_HELP}`)
-      return
-    }
-    const endParsed = parseTimeOfDay(end, startParsed.time.minutes)
-    if (!endParsed.ok) {
-      setError(`Stop time — ${TIME_HELP}`)
+    const interval = resolveInterval(start, end, nowMinutes())
+    if (!interval.ok) {
+      setError(
+        interval.field === "start"
+          ? `Start time — ${TIME_HELP}`
+          : `Stop time — ${TIME_HELP}`
+      )
       return
     }
     // Both fields default to the SAME instant on open, and confirming without
     // touching either is a real path — someone logging a task the moment it
-    // finishes. `resolveEndAfterStart` treats an end equal to the start as a
-    // full day later (it exists to catch a stop typed EARLIER than the start,
-    // an overnight shift), which here would silently create a 24-hour entry
-    // from a bare double-click. Asking for a real stop is safer than guessing
-    // which of "zero length" or "a whole day" was meant.
-    if (endParsed.time.minutes === startParsed.time.minutes) {
+    // finishes. An end equal to the start resolves to a full day later (the
+    // rule exists to catch a stop typed EARLIER than the start, an overnight
+    // shift), which here would silently create a 24-hour entry from a bare
+    // double-click. Asking for a real stop is safer than guessing which of
+    // "zero length" or "a whole day" was meant.
+    //
+    // Measured on the RESOLVED span rather than on the two raw readings, so
+    // that "9:00 PM" against "9pm" — the same instant, spelled two ways — is
+    // caught too.
+    if (absoluteMinutes(interval.end) - absoluteMinutes(interval.start) === MINUTES_PER_DAY) {
       setError("Stop time — must be after the start.")
       return
     }
 
-    const startedAt = instantOfDayTime(
-      day,
-      { minutes: startParsed.time.minutes, dayOffset: 0 },
-      timeZone
-    )
-    // An end earlier in the clock than the start is the overnight case, not a
-    // typo — the same reasoning ManualEntryDialog and EntryTimePopover use.
-    const endedAt = instantOfDayTime(
-      day,
-      resolveEndAfterStart(endParsed.time, {
-        minutes: startParsed.time.minutes,
-        dayOffset: 0,
-      }),
-      timeZone
-    )
+    const startedAt = instantOfDayTime(day, interval.start, timeZone)
+    const endedAt = instantOfDayTime(day, interval.end, timeZone)
 
     setSaving(true)
     try {
@@ -512,18 +504,41 @@ function ParseEcho({
   use12Hour: boolean
   nowMinutes: () => number
 }) {
-  const startParsed = parseTimeOfDay(start, nowMinutes())
-  if (!startParsed.ok) return null
-  const endParsed = parseTimeOfDay(end, startParsed.time.minutes)
-  if (!endParsed.ok) return null
-
-  const startTime: TimeOfDay = { minutes: startParsed.time.minutes, dayOffset: 0 }
-  const endTime = resolveEndAfterStart(endParsed.time, startTime)
+  const interval = resolveInterval(start, end, nowMinutes())
+  if (!interval.ok) return null
 
   return (
     // The Tabular Rule: every duration, timestamp and total, at any size.
     <span className="tabular text-xs text-muted-foreground">
-      {formatTimeOfDay(startTime, use12Hour)} – {formatTimeOfDay(endTime, use12Hour)}
+      {formatTimeOfDay(interval.start, use12Hour)} –{" "}
+      {formatTimeOfDay(interval.end, use12Hour)}
     </span>
   )
+}
+
+/**
+ * The two fields as this popover will COMMIT them.
+ *
+ * `confirm` and the echo above must never disagree. The echo is the product's
+ * stated defence against a mis-parse — showing one interval while writing
+ * another is worse than showing nothing, because it converts a visible mistake
+ * into a confident wrong answer. Deriving both from here is what makes that
+ * disagreement unexpressible rather than merely unlikely.
+ */
+function resolveInterval(
+  start: string,
+  end: string,
+  nowMinutes: number
+):
+  | { ok: true; start: TimeOfDay; end: TimeOfDay }
+  | { ok: false; field: "start" | "end" } {
+  const startParsed = parseTimeOfDay(start, nowMinutes)
+  if (!startParsed.ok) return { ok: false, field: "start" }
+
+  // The start anchors the day; the calendar is what moves an entry.
+  const startTime: TimeOfDay = { minutes: startParsed.time.minutes, dayOffset: 0 }
+  const endParsed = parseEndTime(end, startTime)
+  if (!endParsed.ok) return { ok: false, field: "end" }
+
+  return { ok: true, start: startTime, end: endParsed.time }
 }
