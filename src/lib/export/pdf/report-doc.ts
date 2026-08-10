@@ -160,7 +160,7 @@ function summaryPage(rows: ReportRows): PdfPage {
       LEFT + tileWidth * 2,
       tileY,
       "Amount",
-      moneyOr(totals.billableCents, meta.currency, totals.unratedBillableMs >= totals.billableMs),
+      moneyOr(totals.billableCents, meta.currency, totals.unpriced),
       { brass: true }
     ),
     /*
@@ -174,7 +174,7 @@ function summaryPage(rows: ReportRows): PdfPage {
     })
   )
 
-  if (totals.unratedBillableMs > 0) {
+  if (totals.unpriced) {
     ops.push(
       text({ x: LEFT, y: tileY - 58, text: UNPRICED_NOTE, size: TYPE.body, color: PAPER.inkMuted })
     )
@@ -263,6 +263,15 @@ function summaryPage(rows: ReportRows): PdfPage {
     text({ x: LEFT, y: donutTop, text: "Project distribution", size: TYPE.heading, bold: true })
   )
 
+  // IMPORTANT 2: `donutSlices` skips any project with `totalMs <= 0`, so the
+  // slices it returns are no longer in one-to-one POSITION with
+  // `rows.projects` the moment such a project exists — indexing
+  // `rows.projects[sliceIndex]` (the previous code) shifts every slice AFTER
+  // a zero-duration project onto the NEXT project's colour, while the legend
+  // below (which walks `rows.projects` directly and draws every project,
+  // zero-duration ones included) still names the right one beside the wrong
+  // swatch. Each slice now carries the INDEX of the value it was built from,
+  // so colour and legend are paired by source rather than by position.
   const slices = donutSlices(
     rows.projects.map((project) => project.totalMs),
     cx,
@@ -270,13 +279,13 @@ function summaryPage(rows: ReportRows): PdfPage {
     DONUT_RADIUS,
     DONUT_INNER
   )
-  slices.forEach((d, index) => {
+  slices.forEach((slice) => {
     ops.push({
       kind: "path",
       x: 0,
       y: 0,
-      d,
-      color: paperColorFor(rows.projects[index]?.color ?? ""),
+      d: slice.d,
+      color: paperColorFor(rows.projects[slice.index]?.color ?? ""),
     })
   })
 
@@ -702,19 +711,31 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
           bold: true,
           align: "right",
         }),
-        text({ x: COL.percent, y, text: "100%", size: TYPE.strong, bold: true, align: "right" }),
         text({
-          x: COL.amount,
+          // Matches CSV/XLSX's own `totalMs === 0 ? 0 : 100` (to-csv.ts,
+          // to-xlsx.ts): a hardcoded "100%" here disagreed with both of them
+          // for an empty range, where there is no duration for 100% to be a
+          // share OF.
+          x: COL.percent,
           y,
-          text: moneyOr(
-            rows.totals.billableCents,
-            currency,
-            rows.totals.unratedBillableMs >= rows.totals.billableMs
-          ),
+          text: `${rows.totals.totalMs === 0 ? 0 : 100}%`,
           size: TYPE.strong,
           bold: true,
           align: "right",
-          color: PAPER.brass,
+        }),
+        text({
+          x: COL.amount,
+          y,
+          text: moneyOr(rows.totals.billableCents, currency, rows.totals.unpriced),
+          size: TYPE.strong,
+          bold: true,
+          align: "right",
+          // Brass is a CURRENCY amount and nothing else (DESIGN.md) — never
+          // hardcoded, the same rule `weekSubtotalOps` above already applies
+          // to a week's own subtotal amount, matched here so the one row
+          // that sits directly beneath every week's subtotal isn't the one
+          // place on the page that still paints a "—" as if it were money.
+          color: rows.totals.unpriced ? PAPER.inkMuted : PAPER.brass,
         })
       )
       cursor -= totalRowHeight
@@ -723,7 +744,7 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
           text({ x: LEFT, y: y - 26, text: TITLE_CAP_NOTE, size: TYPE.body, color: PAPER.inkMuted })
         )
       }
-      if (rows.totals.unratedBillableMs > 0) {
+      if (rows.totals.unpriced) {
         ops.push(
           text({ x: LEFT, y: y - 44, text: UNPRICED_NOTE, size: TYPE.body, color: PAPER.inkMuted })
         )

@@ -18,6 +18,7 @@ const ROWS: ReportRows = {
     billablePercent: 100,
     billableCents: 3_000,
     unratedBillableMs: 0,
+    unpriced: false,
     averageDailyMs: 1.5 * HOUR,
     count: 2,
     truncated: false,
@@ -140,7 +141,7 @@ describe("xlsxSheets", () => {
   it("leaves an unpriced amount empty rather than writing a zero a pivot would sum", () => {
     const unpriced = {
       ...ROWS,
-      totals: { ...ROWS.totals, unratedBillableMs: 1 },
+      totals: { ...ROWS.totals, unratedBillableMs: 1, unpriced: true },
       titles: [{ ...ROWS.titles[0], billableCents: 0, unpriced: true }],
     }
     const breakdown = xlsxSheets(unpriced).find((s) => s.sheet === "Breakdown")!
@@ -183,7 +184,7 @@ describe("xlsxSheets", () => {
       .flat()
       .map((cell) => (cell as { value?: unknown } | null)?.value)
     expect(flat).toContain(
-      "Only the 500 longest descriptions are listed. Narrow the range for a complete breakdown."
+      "Only the 500 highest-duration rows in the range are listed — the same description in two different weeks counts as two rows — so a week's Subtotal may not include all of that week's work. Narrow the range for a complete breakdown."
     )
   })
 })

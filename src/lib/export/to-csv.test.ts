@@ -19,6 +19,7 @@ function rowsOf(titles: ReportRows["titles"]): ReportRows {
       billablePercent: 100,
       billableCents: 1_000,
       unratedBillableMs: 0,
+      unpriced: false,
       averageDailyMs: HOUR,
       count: 1,
       truncated: false,
@@ -133,5 +134,50 @@ describe("toCsv", () => {
       },
     })
     expect(csv.split("\r\n").at(-1)).toBe("TOTAL,,,1:00:00,1.00,100,0.00,USD")
+  })
+
+  /*
+   * IMPORTANT 4: the PDF and XLSX both state the truncation and unpriced
+   * notes (report-doc.ts, to-xlsx.ts); this file previously stated neither,
+   * so a capped CSV ended on a TOTAL exceeding the sum of its own rows with
+   * nothing on the page to explain the gap. Trailing, not a leading
+   * preamble — see the comment in to-csv.ts for why that distinction is
+   * what keeps the file's own "no preamble" rule intact.
+   */
+  it("appends the truncation note as a trailing record, after TOTAL", () => {
+    const lines = toCsv({ ...rowsOf(ONE), titlesTruncated: true }).split("\r\n")
+    expect(lines.at(-2)).toBe("TOTAL,,,1:00:00,1.00,100,10.00,USD")
+    expect(lines.at(-1)).toContain("Only the 500 highest-duration rows")
+  })
+
+  it("appends the unpriced note as a trailing record, after TOTAL", () => {
+    const rows = rowsOf(ONE)
+    const csv = toCsv({ ...rows, totals: { ...rows.totals, unpriced: true } })
+    const lines = csv.split("\r\n")
+    expect(lines.at(-2)).toBe("TOTAL,,,1:00:00,1.00,100,,USD")
+    expect(lines.at(-1)).toBe(
+      "Some billable time has no hourly rate and is not in the amount above."
+    )
+  })
+
+  it("appends both notes when both apply, truncation first", () => {
+    const rows = rowsOf(ONE)
+    const csv = toCsv({
+      ...rows,
+      totals: { ...rows.totals, unpriced: true },
+      titlesTruncated: true,
+    })
+    const lines = csv.split("\r\n")
+    // header, one body row, TOTAL, two trailing notes.
+    expect(lines).toHaveLength(5)
+    expect(lines.at(-2)).toContain("Only the 500 highest-duration rows")
+    expect(lines.at(-1)).toBe(
+      "Some billable time has no hourly rate and is not in the amount above."
+    )
+  })
+
+  it("appends neither note when neither applies", () => {
+    const lines = toCsv(rowsOf(ONE)).split("\r\n")
+    expect(lines.at(-1)).toBe("TOTAL,,,1:00:00,1.00,100,10.00,USD")
   })
 })

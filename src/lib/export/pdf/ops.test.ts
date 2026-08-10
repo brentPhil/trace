@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { PROJECT_COLORS } from "@shared/palette"
 import { PAPER, paperColorFor } from "./paper"
-import {
-  axisTickIndices,
-  barColumns,
-  donutSlices,
-  textWidth,
-  truncateToWidth,
-  wrapToWidth,
-} from "./ops"
+import { axisTickIndices, barColumns, donutSlices, textWidth, wrapToWidth } from "./ops"
 
 describe("donutSlices", () => {
   it("returns one path per non-zero value", () => {
@@ -30,8 +23,20 @@ describe("donutSlices", () => {
    * which most renderers draw as nothing at all.
    */
   it("closes a full circle as two arcs rather than one degenerate one", () => {
-    const [path] = donutSlices([1], 100, 100, 40, 24)
-    expect(path.match(/A/g)).toHaveLength(4)
+    const [slice] = donutSlices([1], 100, 100, 40, 24)
+    expect(slice.d.match(/A/g)).toHaveLength(4)
+  })
+
+  /*
+   * IMPORTANT 2's fix: a caller pairing each returned slice with something
+   * else it keeps per-value (a colour, a legend label) must not assume the
+   * slice at position N came from `values[N]` — zero-length values are
+   * skipped, so position and source index diverge as soon as one exists.
+   * `index` is what lets the caller pair correctly regardless.
+   */
+  it("carries each slice's ORIGINAL index, not its position among the returned slices", () => {
+    const slices = donutSlices([3, 0, 1], 100, 100, 40, 24)
+    expect(slices.map((s) => s.index)).toEqual([0, 2])
   })
 })
 
@@ -131,32 +136,7 @@ describe("barColumns", () => {
   })
 })
 
-describe("textWidth / truncateToWidth", () => {
-  // The report's own reference case (P0-1): a real description long enough to
-  // run through the DURATION column when drawn at full width.
-  const LONG = "[B-CB-326] Building Crew Training CSV and PDF download"
-
-  it("returns a short string untouched", () => {
-    expect(truncateToWidth("Short", 200, 8, false)).toBe("Short")
-  })
-
-  it("shortens a string that overflows its column", () => {
-    const truncated = truncateToWidth(LONG, 60, 8, false)
-    expect(truncated.length).toBeLessThan(LONG.length)
-  })
-
-  it("appends a single-character ellipsis when it truncates", () => {
-    const truncated = truncateToWidth(LONG, 60, 8, false)
-    expect(truncated.endsWith("…")).toBe(true)
-    expect(truncated.match(/…/g)).toHaveLength(1)
-  })
-
-  it("keeps the truncated result within the width it was given", () => {
-    const maxWidth = 60
-    const truncated = truncateToWidth(LONG, maxWidth, 8, false)
-    expect(textWidth(truncated, 8, false)).toBeLessThanOrEqual(maxWidth)
-  })
-
+describe("textWidth", () => {
   it("falls back to a default advance instead of throwing on a character outside the table", () => {
     expect(() => textWidth("café — a title", 8, false)).not.toThrow()
     expect(textWidth("café — a title", 8, false)).toBeGreaterThan(0)

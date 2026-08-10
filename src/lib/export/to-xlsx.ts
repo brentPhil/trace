@@ -83,7 +83,7 @@ function summarySheet(rows: ReportRows): SheetData {
     [text("Billable %", true), { value: totals.billablePercent, type: Number, format: "0.00" }],
     [
       text("Amount", true),
-      money(totals.billableCents, meta.currency, totals.unratedBillableMs > 0),
+      money(totals.billableCents, meta.currency, totals.unpriced),
     ],
     [text("Average daily hours", true), hours(totals.averageDailyMs)],
     [text("Days worked", true), { value: meta.daysWorked, type: Number }],
@@ -98,7 +98,7 @@ function summarySheet(rows: ReportRows): SheetData {
     ]),
   ]
 
-  if (totals.unratedBillableMs > 0) {
+  if (totals.unpriced) {
     data.push([], [text("Note"), text(UNPRICED_NOTE)])
   }
   if (rows.titlesTruncated) {
@@ -162,11 +162,7 @@ function breakdownSheet(rows: ReportRows): SheetData {
         type: Number,
         format: "0.00",
       } as const,
-      money(
-        rows.totals.billableCents,
-        currency,
-        rows.totals.unratedBillableMs > 0
-      ),
+      money(rows.totals.billableCents, currency, rows.totals.unpriced),
     ],
   ]
 }

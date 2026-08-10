@@ -1,4 +1,5 @@
 import { formatClock, formatDecimalHours } from "@shared/duration"
+import { TITLE_CAP_NOTE, UNPRICED_NOTE } from "./report-rows"
 import type { ReportRows } from "./report-rows"
 
 /**
@@ -79,12 +80,37 @@ export function toCsv(rows: ReportRows): string {
     "",
     formatClock(rows.totals.totalMs),
     formatDecimalHours(rows.totals.totalMs),
+    // NOT `billablePercent` — that measures the range's billable SHARE, and
+    // this column measures each row's share of TOTAL DURATION instead. A
+    // range with hours but zero billable work has `billablePercent: 0`;
+    // branching this cell on it printed "0" beneath a column of rows whose
+    // own Percents summed to 100, a CSV visibly contradicting its own rows.
+    // "0 unless there was any duration at all" is the question this column
+    // is actually answering.
     String(rows.totals.totalMs === 0 ? 0 : 100),
-    amount(rows.totals.billableCents, rows.totals.unratedBillableMs > 0),
+    amount(rows.totals.billableCents, rows.totals.unpriced),
     currency,
   ])
 
-  return [record(HEADER), ...body, total].join("\r\n")
+  /*
+   * IMPORTANT 4: the truncation and unpriced notes, as trailing records AFTER
+   * TOTAL — the PDF and XLSX both state them (report-doc.ts, to-xlsx.ts) and
+   * this file previously stated neither, so a capped CSV ended on a TOTAL
+   * exceeding the sum of its own rows with nothing on the page to explain it.
+   *
+   * Trailing, not a leading preamble: the file's own "no preamble" rule above
+   * exists because a line ABOVE the header is what makes Excel read the
+   * WHOLE file as one ragged column (it commits to the header row's shape
+   * before it has seen anything past it). A record appended after every real
+   * row and the TOTAL cannot cause that — the header and all of `body` are
+   * already parsed as an ordinary table by the time a reader (or Excel)
+   * reaches it.
+   */
+  const notes: Array<string> = []
+  if (rows.titlesTruncated) notes.push(record([TITLE_CAP_NOTE]))
+  if (rows.totals.unpriced) notes.push(record([UNPRICED_NOTE]))
+
+  return [record(HEADER), ...body, total, ...notes].join("\r\n")
 }
 
 /**

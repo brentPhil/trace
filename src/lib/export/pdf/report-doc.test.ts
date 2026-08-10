@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { reportPages, COL } from "./report-doc"
-import { PAGE, TYPE } from "./paper"
+import { PAGE, TYPE, paperColorFor } from "./paper"
 import { textWidth } from "./ops"
 import { groupWeeks } from "../report-rows"
 import type { PdfOp } from "./ops"
@@ -34,6 +34,7 @@ function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRow
     billablePercent: 100,
     billableCents: 98_800,
     unratedBillableMs: 0,
+    unpriced: false,
     averageDailyMs: 32_334_545,
     count: titleCount,
     truncated: false,
@@ -162,14 +163,14 @@ describe("reportPages", () => {
   it("carries the capped-list sentence onto the document, not just the screen", () => {
     const pages = reportPages(rowsWith(3, { titlesTruncated: true }))
     expect(pages.flatMap(textOf)).toContain(
-      "Only the 500 longest descriptions are listed. Narrow the range for a complete breakdown."
+      "Only the 500 highest-duration rows in the range are listed — the same description in two different weeks counts as two rows — so a week's Subtotal may not include all of that week's work. Narrow the range for a complete breakdown."
     )
   })
 
   it("qualifies the amount when some billable time was never priced", () => {
     const pages = reportPages(
       rowsWith(3, {
-        totals: { ...rowsWith(3).totals, unratedBillableMs: HOUR },
+        totals: { ...rowsWith(3).totals, unratedBillableMs: HOUR, unpriced: true },
       })
     )
     expect(pages.flatMap(textOf)).toContain(
@@ -223,8 +224,40 @@ describe("reportPages", () => {
 
     expect(realY).toBeLessThan(heading.y)
     // Not just "less than" by a rounding error: comfortably clear of the
-    // heading's own cap height (~8pt for 11pt bold Helvetica).
+    // heading's own cap height (~8pt for 14pt bold DM Sans).
     expect(heading.y - realY).toBeGreaterThanOrEqual(8)
+  })
+
+  /*
+   * IMPORTANT 2 — `donutSlices` (ops.ts) skips any project with
+   * `totalMs <= 0`, so the returned slices are no longer in one-to-one
+   * position with `rows.projects`. Indexing `rows.projects[sliceIndex]` by
+   * SLICE index (the previous code) therefore shifts every slice AFTER a
+   * zero-duration project onto the wrong project's colour, while the legend
+   * — which iterates `rows.projects` directly and draws every project,
+   * zero-duration ones included — still names the right one beside the
+   * wrong swatch. This fixture puts the zero-duration project in the
+   * MIDDLE of the list, the case a naive "skip the first" fix would miss.
+   */
+  it("colours each donut slice for its own project, even with a zero-duration project in the middle", () => {
+    const rows = rowsWith(0, {
+      titles: [],
+      projects: [
+        { name: "Alpha", color: "amber", totalMs: HOUR, percent: 50, billableCents: 100, unratedBillableMs: 0 },
+        { name: "Zero Co", color: "slate", totalMs: 0, percent: 0, billableCents: 0, unratedBillableMs: 0 },
+        { name: "Beta", color: "indigo", totalMs: HOUR, percent: 50, billableCents: 100, unratedBillableMs: 0 },
+      ],
+    })
+    const [first] = reportPages(rows)
+    const slices = first.ops.filter(
+      (op): op is Extract<PdfOp, { kind: "path" }> => op.kind === "path"
+    )
+
+    // Two slices for two non-zero projects, in the SAME order they appear in
+    // `rows.projects` (Alpha, then Beta) — Zero Co contributes no slice at all.
+    expect(slices).toHaveLength(2)
+    expect(slices[0].color).toEqual(paperColorFor("amber")) // Alpha
+    expect(slices[1].color).toEqual(paperColorFor("indigo")) // Beta, NOT Zero Co's slate
   })
 
   /*

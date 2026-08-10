@@ -26,8 +26,11 @@ export const NO_PROJECT = "No project"
  * `timeEntries.title` allows "" deliberately, so these rows are real and their
  * time is real. An empty description cell reads as a rendering fault; a stated
  * placeholder reads as work nobody named, which is the truth.
+ *
+ * Not exported: nothing outside this file needs to name the placeholder
+ * itself, only the rows it produces.
  */
-export const NO_DESCRIPTION = "(no description)"
+const NO_DESCRIPTION = "(no description)"
 
 export type ReportProjectRow = {
   name: string
@@ -121,6 +124,27 @@ export type ReportRows = {
     billablePercent: number
     billableCents: number
     unratedBillableMs: number
+    /**
+     * Whether `billableCents` above is a floor rather than the real figure —
+     * the ONE derivation all three writers must read instead of each
+     * re-deciding it from `unratedBillableMs` (see the writers' own
+     * `moneyOr`/`amount`/`money` calls).
+     *
+     * `unratedBillableMs > 0` — ANY unrated billable time, not
+     * `unratedBillableMs >= billableMs` ("ALL of it"). The two make
+     * different claims: `billableCents: 0` with `unratedBillableMs: 0` is
+     * work genuinely worth nothing (a zero rate somebody chose, or no
+     * billable time at all) and IS a real amount — under the "ALL" rule
+     * `0 >= 0` is true and that real zero gets dashed out as if it were
+     * unknown. `unratedBillableMs > 0` means some of the figure is actually
+     * missing, so the total UNDERSTATES — the "ALL" rule only dashes once
+     * EVERY billable cent is unrated, leaving a partly-unrated total to
+     * print as if it were complete. This is the same "ANY" basis a row's own
+     * `unpriced` and a week's `subtotal.unpriced` already use below — this
+     * field is what stopped the grand total from being the one figure on
+     * the page computed by a different rule than everything beneath it.
+     */
+    unpriced: boolean
     averageDailyMs: number
     count: number
     truncated: boolean
@@ -282,6 +306,7 @@ export function reportRows(
       billablePercent: percentOf(breakdown.billableMs, breakdown.totalMs),
       billableCents: breakdown.billableCents,
       unratedBillableMs: breakdown.unratedBillableMs,
+      unpriced: breakdown.unratedBillableMs > 0,
       averageDailyMs,
       count: breakdown.count,
       truncated: breakdown.truncated,
@@ -310,7 +335,7 @@ export function reportRows(
  * rows themselves are: one derivation, three renderings.
  */
 export const TITLE_CAP_NOTE =
-  "Only the 500 longest descriptions are listed. Narrow the range for a complete breakdown."
+  "Only the 500 highest-duration rows in the range are listed — the same description in two different weeks counts as two rows — so a week's Subtotal may not include all of that week's work. Narrow the range for a complete breakdown."
 
 /** The sentence unpriced billable time must carry. Same reasoning. */
 export const UNPRICED_NOTE =

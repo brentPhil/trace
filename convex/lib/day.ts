@@ -287,6 +287,26 @@ export function weekdayOf(day: DayString): number {
 }
 
 /**
+ * The `DayString` of the first day of the local week containing `day` —
+ * `weekWindow`'s own `firstDay`, factored out so a caller that only needs
+ * the week's identity (not its instant range) never pays for `startOfDay`
+ * to compute one.
+ *
+ * `weekStartDay` is 0 (Sunday) through 6, matching userSettings.weekStartDay.
+ */
+export function weekStartOf(day: DayString, weekStartDay: number): DayString {
+  // Validated rather than taken modulo 7. An ISO weekday (1-7, Monday-first)
+  // has a 7 in it, and silently aliasing that to Sunday would shift every week
+  // total by a day with nothing to notice. A non-integer used to be truncated;
+  // a NaN used to throw an error blaming the (perfectly valid) day string.
+  if (!Number.isInteger(weekStartDay) || weekStartDay < 0 || weekStartDay > 6) {
+    throw new Error(`weekStartDay must be an integer 0-6, got ${weekStartDay}`)
+  }
+  const offset = (weekdayOf(day) - weekStartDay + 7) % 7
+  return addDays(day, -offset)
+}
+
+/**
  * The half-open range covering the local week containing `day`.
  *
  * `weekStartDay` is 0 (Sunday) through 6, matching userSettings.weekStartDay.
@@ -299,15 +319,7 @@ export function weekWindow(
   timeZone: string,
   weekStartDay: number
 ): { fromMs: number; toMs: number; firstDay: DayString; lastDay: DayString } {
-  // Validated rather than taken modulo 7. An ISO weekday (1-7, Monday-first)
-  // has a 7 in it, and silently aliasing that to Sunday would shift every week
-  // total by a day with nothing to notice. A non-integer used to be truncated;
-  // a NaN used to throw an error blaming the (perfectly valid) day string.
-  if (!Number.isInteger(weekStartDay) || weekStartDay < 0 || weekStartDay > 6) {
-    throw new Error(`weekStartDay must be an integer 0-6, got ${weekStartDay}`)
-  }
-  const offset = (weekdayOf(day) - weekStartDay + 7) % 7
-  const firstDay = addDays(day, -offset)
+  const firstDay = weekStartOf(day, weekStartDay)
   const lastDay = addDays(firstDay, 6)
   return {
     fromMs: startOfDay(firstDay, timeZone),

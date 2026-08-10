@@ -124,34 +124,6 @@ export function textWidth(str: string, size: number, bold: boolean): number {
   return (units / 1000) * size
 }
 
-const ELLIPSIS = "…"
-
-/**
- * Shortens `text` to fit `maxWidth`, appending a one-character ellipsis.
- *
- * Fixes the overprint where a long description ran straight through the
- * DURATION column: text was drawn at a column x with no width limit, so two
- * cells' glyphs landed on top of each other on a document a client
- * reconciles line by line against an invoice.
- */
-export function truncateToWidth(
-  str: string,
-  maxWidth: number,
-  size: number,
-  bold: boolean
-): string {
-  if (textWidth(str, size, bold) <= maxWidth) return str
-
-  const budget = maxWidth - textWidth(ELLIPSIS, size, bold)
-  if (budget <= 0) return ELLIPSIS
-
-  let cut = str.length
-  while (cut > 0 && textWidth(str.slice(0, cut), size, bold) > budget) {
-    cut -= 1
-  }
-  return str.slice(0, cut) + ELLIPSIS
-}
-
 /**
  * Splits `word` into chunks that each measure `<= maxWidth`, for a single
  * token with no space for greedy wrapping to land on (an imported ticket ID
@@ -283,8 +255,17 @@ function pointOn(cx: number, cy: number, radius: number, angle: number): [number
   return [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]
 }
 
+/** One donut slice's path, paired with the index of the VALUE it was built
+ *  from in the input array — not its position among the returned slices.
+ *  Zero-length values are skipped (see `donutSlices` below), so those two
+ *  indices diverge the moment any value is zero; a caller matching this
+ *  slice back to whatever else it keeps per-value (a colour, a legend
+ *  label) must use `index`, not its position in this array. */
+export type DonutSlice = { d: string; index: number }
+
 /**
- * A donut, as one SVG path per slice.
+ * A donut, as one SVG path per non-zero-length slice, each carrying the
+ * index of its own source value.
  *
  * Zero-length slices are skipped rather than emitted as degenerate arcs, and a
  * single 100% slice — the reference report's own case, one project — is drawn
@@ -298,18 +279,24 @@ export function donutSlices(
   cy: number,
   outer: number,
   inner: number
-): Array<string> {
+): Array<DonutSlice> {
   const total = values.reduce((sum, value) => sum + Math.max(0, value), 0)
   if (total <= 0) return []
 
-  const paths: Array<string> = []
+  const slices: Array<DonutSlice> = []
   let angle = -Math.PI / 2 // Twelve o'clock, which is where a reader starts.
 
-  for (const value of values) {
-    if (value <= 0) continue
+  values.forEach((value, index) => {
+    if (value <= 0) return
     const sweep = (value / total) * TAU
     const end = angle + sweep
-    // Split anything past a half-turn, which also covers the full-circle case.
+    // Always split into two arcs, even for an ordinary partial slice that
+    // is nowhere near a half-turn: an SVG arc command cannot express a sweep
+    // of exactly 360 degrees (start and end points coincide, so most
+    // renderers draw nothing), and the one slice that CAN reach 360 degrees
+    // — a single value holding the whole total — is built by this same code
+    // path, not a special case of it. Splitting unconditionally means that
+    // slice never has to be detected or branched on.
     const mid = angle + sweep / 2
     const large = 0
 
@@ -320,8 +307,8 @@ export function donutSlices(
     const [ixm, iym] = pointOn(cx, cy, inner, mid)
     const [ix1, iy1] = pointOn(cx, cy, inner, angle)
 
-    paths.push(
-      [
+    slices.push({
+      d: [
         `M ${ox1} ${oy1}`,
         `A ${outer} ${outer} 0 ${large} 1 ${oxm} ${oym}`,
         `A ${outer} ${outer} 0 ${large} 1 ${ox2} ${oy2}`,
@@ -329,11 +316,12 @@ export function donutSlices(
         `A ${inner} ${inner} 0 ${large} 0 ${ixm} ${iym}`,
         `A ${inner} ${inner} 0 ${large} 0 ${ix1} ${iy1}`,
         "Z",
-      ].join(" ")
-    )
+      ].join(" "),
+      index,
+    })
     angle = end
-  }
-  return paths
+  })
+  return slices
 }
 
 const COLUMN_GAP = 3

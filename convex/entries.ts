@@ -9,7 +9,7 @@ import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
 import { timeEntryDoc } from "./lib/docs"
 import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
-import { dayOf, isValidTimeZone, localPartsOf, weekWindow } from "./lib/day"
+import { dayOf, isValidTimeZone, localPartsOf, weekStartOf } from "./lib/day"
 import { isFilterActive, matchesFilter } from "./lib/entryFilter"
 import { defaultRateCents } from "./settings"
 import type { EntryFilter } from "./lib/entryFilter"
@@ -642,12 +642,24 @@ const projectTotal = v.object({
 })
 
 /**
- * How many distinct descriptions a breakdown will name.
+ * How many `(week, project, description)` ROWS a breakdown will keep — NOT
+ * how many distinct descriptions.
  *
- * Past this the block is not a table anyone reads, and shipping every row of a
- * pathological range costs the client more than the answer is worth.
- * `titlesTruncated` is what stops the list from merely ending: a document that
- * silently stops naming work reads as a complete account of the period.
+ * `byTitle` below is keyed by `weekStart\u0000projectId\u0000title`, so the
+ * same description repeated in a second week, or under a second project,
+ * counts twice against this cap, not once. Past this the block is not a
+ * table anyone reads, and shipping every row of a pathological range costs
+ * the client more than the answer is worth. `titlesTruncated` is what stops
+ * the list from merely ending: a document that silently stops naming work
+ * reads as a complete account of the period.
+ *
+ * The cut is taken from `allTitles` AFTER it is sorted by time across the
+ * WHOLE RANGE (see below), not per week — so a week whose own rows happen to
+ * sort late in that global ordering can lose some of them while an earlier,
+ * larger week keeps every one of its own. That week's printed Subtotal is
+ * then a genuine UNDERSTATEMENT of its real total, not merely an incomplete
+ * list, and `titlesTruncated` alone does not say so — see `TITLE_CAP_NOTE`
+ * in report-rows.ts, which is what has to carry that warning to the reader.
  */
 const TITLE_LIMIT = 500
 
@@ -836,18 +848,27 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
    * NUL separators rather than `:` or `|`, because the last part is a
    * user-supplied title that may contain any printable character — a project
    * id plus "a:b" and a project id ending ":a" plus "b" must not collide into
-   * one row. NUL is the one byte a title cannot hold. `weekStart` (a fixed
-   * "YYYY-MM-DD") leads the key so it can be split off with one `indexOf`,
-   * the same way the project half is already split from the title below.
+   * one row. The split below is correct no matter what the title itself
+   * contains, because it only ever looks for the FIRST two NULs:
+   * `weekStart` is a fixed "YYYY-MM-DD" that can never contain one, and a
+   * Convex `Id<"projects">` is opaque id text that never contains one
+   * either — so `indexOf` twice always isolates exactly `weekStart` and
+   * `projectId`, and whatever remains (NULs included) is the title,
+   * untouched. `weekStart` leads the key so it can be split off with the
+   * first `indexOf`, the same way the project half is already split from
+   * the title below.
    */
   const byTitle = new Map<string, Ledger>()
 
   for (const row of rows) {
     const rateCents = rateOf(row, projectDocs, accountRate)
     const day = dayOf(row.startedAt, args.timeZone)
-    // The same local day just computed for `byDay` — re-used, not re-derived,
-    // since `weekWindow` only needs to know which day the entry landed on.
-    const weekStart = weekWindow(day, args.timeZone, args.weekStartDay).firstDay
+    // The same local day just computed for `byDay` — re-used, not re-derived.
+    // `weekStartOf` rather than `weekWindow(...).firstDay`: this loop runs
+    // once per scanned row and only ever needs the week's IDENTITY, and
+    // `weekWindow` computes two `startOfDay` instants (`fromMs`/`toMs`) to
+    // answer that — both discarded here on every single row.
+    const weekStart = weekStartOf(day, args.weekStartDay)
     post(total, row, rateCents)
     post(bucket(byDay, day), row, rateCents)
     post(bucket(byProject, row.projectId ?? ""), row, rateCents)
