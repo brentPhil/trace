@@ -57,11 +57,30 @@ const EMPTY_SUMMARY = {
 }
 
 // A dimmed-but-still-legible affordance for "this is the last thing we knew,
-// not the answer to the question just asked" — never colour alone (DESIGN.md),
-// paired everywhere it's used with an explicit "Updating…" or `aria-busy`.
+// not the answer to the question just asked" — never colour alone (DESIGN.md).
 // The transition is real motion, so it gets the reduced-motion opt-out every
 // animation in this app carries.
 const STALE_CLASSES = "opacity-60 transition-opacity duration-150 motion-reduce:transition-none"
+
+/**
+ * The dimming AND its `aria-busy`, as one thing that cannot be half-applied.
+ *
+ * The rule was previously stated in prose above `STALE_CLASSES` and then
+ * applied by hand at three sites — and one of the three forgot the ARIA half,
+ * which is part of why this branch exists: the log was dimmed by opacity
+ * alone, signalling nothing whatsoever to a screen-reader user changing the
+ * date range. Spreading this makes the dimming unreachable without the half
+ * that carries it to everybody else.
+ *
+ * `className` is the site's OWN classes; the stale ones are composed on top,
+ * because every one of the three has layout classes of its own.
+ */
+function staleProps(isStale: boolean, className?: string) {
+  return {
+    "aria-busy": isStale,
+    className: cn(className, isStale && STALE_CLASSES),
+  }
+}
 
 export function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
@@ -282,10 +301,7 @@ export function Reports() {
           {stillLoading ? (
             "Loading the rest of this period…"
           ) : filtering ? (
-            <span
-              aria-busy={logIsStale}
-              className={cn("inline", logIsStale && STALE_CLASSES)}
-            >
+            <span {...staleProps(logIsStale, "inline")}>
               <strong className="font-medium tabular text-foreground">
                 {formatTotal(shownMs, settings.durationDisplay)}
               </strong>{" "}
@@ -296,10 +312,7 @@ export function Reports() {
               ) : null}
             </span>
           ) : (
-            <span
-              aria-busy={summaryIsStale}
-              className={cn("inline", summaryIsStale && STALE_CLASSES)}
-            >
+            <span {...staleProps(summaryIsStale, "inline")}>
               <strong className="font-medium tabular text-foreground">
                 {formatTotal(shownSummary.totalMs, settings.durationDisplay)}
               </strong>{" "}
@@ -415,16 +428,13 @@ export function Reports() {
       </div>
 
       {/*
-        `aria-busy` as well as the dimming. The summary sentence above already
-        carries both an `aria-busy` and a literal "Updating…"; the log had only
-        `STALE_CLASSES`, so the staleness of the ROWS — the larger, more
-        consequential half of the page — was signalled by opacity alone, which
-        is nothing at all to a screen-reader user changing the range.
+        `aria-busy` as well as the dimming, which `staleProps` is now what
+        guarantees. This site is the one that forgot it: the staleness of the
+        ROWS — the larger, more consequential half of the page — was signalled
+        by opacity alone, which is nothing at all to a screen-reader user
+        changing the range.
       */}
-      <div
-        aria-busy={logIsStale}
-        className={cn("flex-1 border-t border-edge-soft", logIsStale && STALE_CLASSES)}
-      >
+      <div {...staleProps(logIsStale, "flex-1 border-t border-edge-soft")}>
         {/*
           An onboarding-empty-state flash is the bug this guards against: while
           `logLoading` is true, `groups` is `[]` for reasons that have nothing
