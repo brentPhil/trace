@@ -97,6 +97,31 @@ describe("barColumns", () => {
     expect(zeroMark.height).toBeGreaterThan(0)
     expect(zeroMark.y).toBe(BOX.y)
   })
+
+  /*
+   * Proportional scaling means a real bar can shrink below the fixed
+   * measured-zero tick: one minute against an 8-hour peak in this 50pt box
+   * scales to under a point, shorter than the 1pt mark drawn for a day with
+   * NO entry. That inverts the chart's meaning — a day with real work reads
+   * shorter than a day with none — which is unacceptable on a document a
+   * client reconciles. A non-zero bar must always outdraw the zero mark.
+   */
+  it("draws a genuinely tiny non-zero bar taller than the measured-zero mark", () => {
+    const ONE_MINUTE = 60_000
+    const EIGHT_HOURS = 8 * 60 * 60_000
+    const ops = barColumns(
+      [
+        { billableMs: EIGHT_HOURS, nonBillableMs: 0, empty: false },
+        { billableMs: ONE_MINUTE, nonBillableMs: 0, empty: false },
+        { billableMs: 0, nonBillableMs: 0, empty: false },
+      ],
+      BOX
+    )
+    const rects = ops.filter((op) => op.kind === "rect")
+    expect(rects).toHaveLength(3)
+    const [, tinyBar, zeroMark] = rects
+    expect(tinyBar.height).toBeGreaterThan(zeroMark.height)
+  })
 })
 
 describe("paperColorFor palette coverage", () => {

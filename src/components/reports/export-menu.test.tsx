@@ -151,10 +151,11 @@ describe("ExportMenu", () => {
     const alert = await screen.findByRole("alert")
     expect(within(alert).getByText("PDF export failed.")).toBeTruthy()
 
-    // Never the thrown Error's own text — that names an internal ("PDF
-    // export is not implemented yet") written for a developer, not a client
-    // reading a toast.
-    expect(screen.queryByText(/not implemented/i)).toBeNull()
+    // Never the thrown Error's own text. The mock rejects with "boom"; if the
+    // catch block regressed to interpolating the caught error's message
+    // (e.g. `errorMessage(thrown)`) instead of the fixed format-naming
+    // string, this would leak straight into the toast a client reads.
+    expect(screen.queryByText(/boom/i)).toBeNull()
 
     const trigger = screen.getByRole("button", { name: /export/i })
     expect((trigger as HTMLButtonElement).disabled).toBe(false)

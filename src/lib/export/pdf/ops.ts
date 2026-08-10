@@ -113,6 +113,21 @@ export function donutSlices(
 const COLUMN_GAP = 3
 
 /**
+ * The measured-zero tick's height. A real bar must always clear this, or a
+ * genuine (if tiny) duration reads as less certain than an explicit zero —
+ * see `MIN_BAR_HEIGHT` below.
+ */
+const ZERO_MARK_HEIGHT = 1
+
+/**
+ * The floor for a bar with a real, non-zero duration. Set above
+ * `ZERO_MARK_HEIGHT` rather than equal to it, so a boosted bar can never
+ * land exactly on the tick and read as ambiguous between "measured, tiny"
+ * and "measured, zero".
+ */
+const MIN_BAR_HEIGHT = 1.5
+
+/**
  * A stacked bar per span, scaled to the tallest one.
  *
  * An empty span is HATCHED, never drawn as a bar of height zero (the Hatch
@@ -145,8 +160,22 @@ export function barColumns(
     // has already taken — but a non-empty span holding a zero-length entry
     // reaches here, so the guard stays.
     const scale = tallest <= 0 ? 0 : box.height / tallest
-    const billable = value.billableMs * scale
-    const nonBillable = value.nonBillableMs * scale
+    const rawBillable = value.billableMs * scale
+    const rawNonBillable = value.nonBillableMs * scale
+    const rawTotal = rawBillable + rawNonBillable
+
+    // Proportional scaling alone can draw a genuinely tiny non-zero duration
+    // shorter than the fixed measured-zero tick: one minute against an
+    // 8-hour peak in a tall chart lands under a third of a point. That
+    // states a day with real work as LESS than a day with none — on a
+    // document a client reconciles line by line, the worst error this
+    // pipeline can make. Floor the total at `MIN_BAR_HEIGHT` and redistribute
+    // the two segments in their original ratio; a bar already taller than
+    // the floor is untouched, so ordinary columns keep their proportional
+    // reading.
+    const boost = rawTotal > 0 && rawTotal < MIN_BAR_HEIGHT ? MIN_BAR_HEIGHT / rawTotal : 1
+    const billable = rawBillable * boost
+    const nonBillable = rawNonBillable * boost
 
     if (billable > 0) {
       ops.push(rect({ x, y: box.y, width: barWidth, height: billable, color: PAPER.bar }))
@@ -173,7 +202,9 @@ export function barColumns(
      * and zero.
      */
     if (billable <= 0 && nonBillable <= 0) {
-      ops.push(rect({ x, y: box.y, width: barWidth, height: 1, color: PAPER.bar }))
+      ops.push(
+        rect({ x, y: box.y, width: barWidth, height: ZERO_MARK_HEIGHT, color: PAPER.bar })
+      )
     }
   })
   return ops
