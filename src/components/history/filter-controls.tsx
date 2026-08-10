@@ -79,6 +79,10 @@ export function FilterControls<T extends QuickFilters>({
   )
 }
 
+/** What "on" looks like for every chip that is not about money. */
+const CHIP_ACTIVE_NEUTRAL =
+  "border-edge-raised bg-surface-raised font-medium text-foreground"
+
 /**
  * State carried by weight and a border, never hue alone — and `aria-pressed`
  * is what actually says "on" to anyone reading neither.
@@ -92,10 +96,19 @@ export function FilterControls<T extends QuickFilters>({
  */
 export function Chip({
   active,
+  activeClassName = CHIP_ACTIVE_NEUTRAL,
   onClick,
   children,
 }: {
   active: boolean
+  /**
+   * The ONLY thing a chip is allowed to vary, and the only thing that ever
+   * differed between the two chips this file used to hold. The hit target, the
+   * focus ring, the reduced-motion opt-out and the inactive state are not
+   * negotiable per chip — the accessibility fixes above land once or not at
+   * all.
+   */
+  activeClassName?: string
   onClick: () => void
   children: React.ReactNode
 }) {
@@ -109,7 +122,7 @@ export function Chip({
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         "motion-reduce:transition-none",
         active
-          ? "border-edge-raised bg-surface-raised font-medium text-foreground"
+          ? activeClassName
           : "border-edge-raised text-muted-foreground hover:text-foreground"
       )}
     >
@@ -119,33 +132,24 @@ export function Chip({
 }
 
 /**
- * Billable gets its own chip rather than the generic one above it: DESIGN.md
- * reserves brass for money, and this is the one filter that means money.
- * Using the neutral `Chip` here — as the pre-extraction code did — was the
- * inconsistency; every other chip on either page (period, no-project, no-note,
- * under-a-minute) stays neutral because none of them are.
+ * Billable gets a brass ACTIVE state rather than the neutral one above:
+ * DESIGN.md reserves brass for money, and this is the one filter that means
+ * money. Rendering it as a plain `Chip` — as the pre-extraction code did — was
+ * the inconsistency; every other chip on either page (period, no-project,
+ * no-note, under-a-minute) stays neutral because none of them are.
+ *
+ * 3.84:1 on ground, 3.73:1 on surface — measured composited the way a browser
+ * does it, in gamma-encoded sRGB. Clears 3:1 in both bands this bar appears
+ * in, so it keeps brass.
  */
 function BillableChip({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
+    <Chip
+      active={active}
+      activeClassName="border-brass/60 font-medium text-brass"
       onClick={onClick}
-      className={cn(
-        "touch-target rounded-full border px-2.5 py-1 text-xs transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        "motion-reduce:transition-none",
-        active
-          ? // 3.84:1 on ground, 3.73:1 on surface — measured composited the
-            // way a browser does it, in gamma-encoded sRGB. Clears 3:1 in
-            // both bands this bar appears in, so it keeps brass.
-            "border-brass/60 font-medium text-brass"
-          : // Fill-less, and on /timer this bar sits on `bg-surface`. See
-            // `Chip` above.
-            "border-edge-raised text-muted-foreground hover:text-foreground"
-      )}
     >
       Billable
-    </button>
+    </Chip>
   )
 }
