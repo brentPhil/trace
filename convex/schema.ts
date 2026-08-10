@@ -75,6 +75,24 @@ export const projectFields = {
   archived: v.boolean(),
   billableByDefault: v.boolean(),
   hourlyRateCents: v.optional(v.number()),
+  /** Optional, and stays optional: a project without a client is normal and
+   *  must remain startable. What makes "Create invoice" able to pre-fill. */
+  clientId: v.optional(v.id("clients")),
+  updatedAt: v.number(),
+  deletedAt: v.union(v.number(), v.null()),
+}
+
+export const clientFields = {
+  userId: v.string(),
+  name: v.string(),
+  /** A free-text block rendered VERBATIM on the invoice, newlines included.
+   *  Deliberately not a structured address: a street/city/postcode schema is a
+   *  taxonomy nobody asked for and gets the international cases wrong. */
+  address: v.string(),
+  email: v.optional(v.string()),
+  /** Archive, never delete — the same rule as projects, and for the same
+   *  reason: an invoice raised last year must still render its client. */
+  archived: v.boolean(),
   updatedAt: v.number(),
   deletedAt: v.union(v.number(), v.null()),
 }
@@ -123,6 +141,12 @@ export default defineSchema({
     .index("by_user_project", ["userId", "projectId"]),
 
   projects: defineTable(projectFields).index("by_user_archived_name", [
+    "userId",
+    "archived",
+    "name",
+  ]),
+
+  clients: defineTable(clientFields).index("by_user_archived_name", [
     "userId",
     "archived",
     "name",

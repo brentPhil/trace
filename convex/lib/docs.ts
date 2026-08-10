@@ -1,5 +1,5 @@
 import { v } from "convex/values"
-import { projectFields, tagFields, timeEntryFields } from "../schema"
+import { clientFields, projectFields, tagFields, timeEntryFields } from "../schema"
 
 /**
  * `returns` validators for the public queries that hand back whole documents.
@@ -30,4 +30,10 @@ export const tagDoc = v.object({
   _id: v.id("tags"),
   _creationTime: v.number(),
   ...tagFields,
+})
+
+export const clientDoc = v.object({
+  _id: v.id("clients"),
+  _creationTime: v.number(),
+  ...clientFields,
 })

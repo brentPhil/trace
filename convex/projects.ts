@@ -234,6 +234,9 @@ const updateArgs = {
   color: v.optional(v.string()),
   billableByDefault: v.optional(v.boolean()),
   hourlyRateCents: v.optional(v.union(v.number(), v.null())),
+  /** null clears the link; undefined (omission) leaves it untouched — the
+   *  same convention as hourlyRateCents above. */
+  clientId: v.optional(v.union(v.id("clients"), v.null())),
 }
 
 type UpdateArgs = {
@@ -242,6 +245,7 @@ type UpdateArgs = {
   color?: string
   billableByDefault?: boolean
   hourlyRateCents?: number | null
+  clientId?: Id<"clients"> | null
 }
 
 /**
@@ -281,6 +285,11 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   const project = await getOwned(ctx, userId, "projects", args.projectId)
   checkRate(args.hourlyRateCents)
 
+  // Ownership of the CLIENT, not just the project. Without this a crafted
+  // mutation could file one user's project against another user's client id,
+  // which then leaks that client's name onto a pre-filled invoice.
+  if (args.clientId != null) await getOwned(ctx, userId, "clients", args.clientId)
+
   const patch: Partial<Doc<"projects">> = { updatedAt: Date.now() }
   if (args.name !== undefined) patch.name = checkName(args.name)
   if (args.color !== undefined) patch.color = checkColor(args.color, project.color)
@@ -289,6 +298,9 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   }
   if (args.hourlyRateCents !== undefined) {
     patch.hourlyRateCents = args.hourlyRateCents ?? undefined
+  }
+  if (args.clientId !== undefined) {
+    patch.clientId = args.clientId ?? undefined
   }
 
   await ctx.db.patch(project._id, patch)

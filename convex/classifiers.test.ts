@@ -452,6 +452,55 @@ describe("projects", () => {
     const rows = await t.query(internal.projects.listAs, { userId: ALICE })
     expect(rows[0].name).toBe("Acme Corp")
   })
+
+  it("refuses to file a project against another user's client", async () => {
+    // Without checking ownership of the CLIENT (not just the project), a
+    // crafted mutation could point a project at someone else's client id,
+    // which would then leak that client's name onto a pre-filled invoice.
+    const t = setup()
+    const projectId = await project(t, ALICE, "Acme")
+    const { clientId: bobsClientId } = await t.mutation(internal.clients.createAs, {
+      userId: BOB,
+      name: "Bob's Client",
+      address: "",
+    })
+
+    await expectCode(
+      t.mutation(internal.projects.updateAs, {
+        userId: ALICE,
+        projectId,
+        clientId: bobsClientId,
+      }),
+      "NOT_FOUND"
+    )
+    // Refused, not partially applied.
+    const rows = await t.query(internal.projects.listAs, { userId: ALICE })
+    expect(rows[0].clientId).toBeUndefined()
+  })
+
+  it("lets a project's client be set and cleared, distinguishing null from omission", async () => {
+    const t = setup()
+    const projectId = await project(t, ALICE, "Acme")
+    const { clientId } = await t.mutation(internal.clients.createAs, {
+      userId: ALICE,
+      name: "Acme Inc",
+      address: "",
+    })
+
+    await t.mutation(internal.projects.updateAs, { userId: ALICE, projectId, clientId })
+    let rows = await t.query(internal.projects.listAs, { userId: ALICE })
+    expect(rows[0].clientId).toBe(clientId)
+
+    // Omitting clientId leaves it untouched.
+    await t.mutation(internal.projects.updateAs, { userId: ALICE, projectId, name: "Acme" })
+    rows = await t.query(internal.projects.listAs, { userId: ALICE })
+    expect(rows[0].clientId).toBe(clientId)
+
+    // null clears it.
+    await t.mutation(internal.projects.updateAs, { userId: ALICE, projectId, clientId: null })
+    rows = await t.query(internal.projects.listAs, { userId: ALICE })
+    expect(rows[0].clientId).toBeUndefined()
+  })
 })
 
 // ---------------------------------------------------------------------------
