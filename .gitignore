@@ -14,3 +14,7 @@ todos.json
 
 # typescript
 *.tsbuildinfo
+
+# Generated import payloads — they embed an account id and are reproducible
+# from scripts/toggl-import/payload.mjs.
+scripts/toggl-import/batches/

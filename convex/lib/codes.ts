@@ -54,6 +54,15 @@ export type TraceErrorCode =
    *  than swallowed, because the recovery path stops all of them and the user
    *  deserves to know their data was repaired. */
   | "INVARIANT_MULTIPLE_RUNNING"
+  /** A bulk import was handed no rows. Refused rather than treated as a no-op:
+   *  the only way to send an empty batch is a caller whose parse produced
+   *  nothing, and reporting "imported 0" as success is how a broken importer
+   *  gets shipped. */
+  | "EMPTY_IMPORT"
+  /** An import asked for a project with a blank name. Distinct from TOO_LONG:
+   *  the name came from a file rather than a field, so there is no input to
+   *  send anyone back to. */
+  | "INVALID_PROJECT_NAME"
 
 export type TraceErrorData = {
   code: TraceErrorCode

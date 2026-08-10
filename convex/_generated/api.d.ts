@@ -15,6 +15,7 @@ import type * as entryTags from "../entryTags.js";
 import type * as errors from "../errors.js";
 import type * as healthcheck from "../healthcheck.js";
 import type * as http from "../http.js";
+import type * as import_ from "../import.js";
 import type * as lib_codes from "../lib/codes.js";
 import type * as lib_day from "../lib/day.js";
 import type * as lib_docs from "../lib/docs.js";
@@ -45,6 +46,7 @@ declare const fullApi: ApiFromModules<{
   errors: typeof errors;
   healthcheck: typeof healthcheck;
   http: typeof http;
+  import: typeof import_;
   "lib/codes": typeof lib_codes;
   "lib/day": typeof lib_day;
   "lib/docs": typeof lib_docs;

@@ -1225,6 +1225,16 @@ type CreateArgs = {
   projectId?: Id<"projects">
   tagIds?: Array<Id<"tags">>
   billable?: boolean
+  /**
+   * How the row got here, for `timeEntries.source`. Internal callers only —
+   * the public `create` never passes it, so anything typed into the app is
+   * "manual" and cannot claim otherwise.
+   *
+   * It exists because a bulk import has to be undoable. Sixty rows that
+   * arrived together and are indistinguishable from sixty the user typed is
+   * not a state anyone can get out of.
+   */
+  source?: "manual" | "import"
 }
 
 /**
@@ -1274,7 +1284,7 @@ async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
     projectId: args.projectId,
     tagIds,
     billable: args.billable ?? project?.billableByDefault ?? false,
-    source: "manual",
+    source: args.source ?? "manual",
     updatedAt: now,
     deletedAt: null,
   })
@@ -1282,6 +1292,11 @@ async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
 
   return { entryId, replayed: false }
 }
+
+/** Exported for `convex/import.ts`, which needs the same validation, the same
+ *  clientKey idempotency and the same tag sync — but a different `source`. A
+ *  mutation cannot call another mutation in Convex, so it calls this. */
+export { createImpl }
 
 export const create = mutation({
   args: createArgs,
