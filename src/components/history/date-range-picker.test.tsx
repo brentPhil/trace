@@ -53,14 +53,6 @@ function setViewportWidth(width: number) {
 
 beforeEach(() => {
   setViewportWidth(1280)
-  class NoopResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    NoopResizeObserver
-  Element.prototype.scrollIntoView = function scrollIntoView() {}
 })
 
 afterEach(cleanup)

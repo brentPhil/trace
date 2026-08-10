@@ -24,6 +24,22 @@ window.matchMedia = function stubMatchMedia(query: string): MediaQueryList {
   } as MediaQueryList
 }
 
+// jsdom has no layout engine, so it implements neither `ResizeObserver` nor
+// `Element.prototype.scrollIntoView`. Base UI's positioner measures its anchor
+// with the former on every popover, dialog and sheet; `picker-list.tsx` calls
+// the latter to keep the active option in view. Both are pure measurement —
+// nothing this suite asserts on depends on what they return — so a no-op stub
+// is the honest shim, and it belongs here rather than copy-pasted into the
+// `beforeEach` of every file that happens to render a floating element.
+class NoopResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+  NoopResizeObserver
+Element.prototype.scrollIntoView = function scrollIntoView() {}
+
 // `@testing-library/jest-dom` is not a dependency of this project — no other
 // test file has needed a DOM-attribute matcher before. Rather than add a
 // package (risky here: the default install cache lives on `C:`, which this

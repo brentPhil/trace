@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 
@@ -10,17 +10,6 @@ import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
  */
 
 const LONDON = "Europe/London"
-
-beforeEach(() => {
-  class NoopResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    NoopResizeObserver
-  Element.prototype.scrollIntoView = function scrollIntoView() {}
-})
 
 afterEach(() => {
   cleanup()

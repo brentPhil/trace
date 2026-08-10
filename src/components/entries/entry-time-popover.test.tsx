@@ -36,14 +36,6 @@ vi.mock("@/lib/popover-force-close", async (importOriginal) => {
  */
 
 beforeEach(() => {
-  class NoopResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    NoopResizeObserver
-  Element.prototype.scrollIntoView = function scrollIntoView() {}
   sharedActionsRef.current = null
 })
 

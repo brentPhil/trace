@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { FilterBar } from "@/components/history/filter-bar"
 import { defaultFilters } from "@/lib/history-filters"
@@ -12,17 +12,6 @@ import type { Filters } from "@/lib/history-filters"
  * calendar is covered by date-range-picker.test.tsx against the component
  * directly.
  */
-
-beforeEach(() => {
-  class NoopResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    NoopResizeObserver
-  Element.prototype.scrollIntoView = function scrollIntoView() {}
-})
 
 afterEach(cleanup)
 

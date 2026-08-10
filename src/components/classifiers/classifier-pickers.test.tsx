@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { ProjectPicker, TagPicker } from "@/components/classifiers/classifier-pickers"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
@@ -14,17 +14,9 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
  * hand.
  */
 
-beforeEach(() => {
-  // Base UI's positioner measures its anchor; jsdom has neither.
-  class NoopResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    NoopResizeObserver
-  Element.prototype.scrollIntoView = function scrollIntoView() {}
-})
+// Base UI's positioner measures its anchor and `picker-list.tsx` scrolls the
+// active option into view; jsdom implements neither. Stubbed for every DOM
+// test in `src/test-utils/setup-dom.ts`.
 
 afterEach(cleanup)
 

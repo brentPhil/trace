@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { Toast, ToastViewport } from "@/components/ui/toast"
@@ -56,18 +56,10 @@ function Harness({
 
 const textarea = () => screen.getByLabelText<HTMLTextAreaElement>("What did you do?")
 
-beforeEach(() => {
-  // Base UI's dialog positioning/animation machinery reaches for APIs jsdom
-  // doesn't have; the popover suite hits the same wall (see
-  // popover-force-close.test.ts) and papers over it the same way.
-  class NoopResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  }
-  ;(globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
-    NoopResizeObserver
-})
+// Base UI's dialog positioning/animation machinery reaches for APIs jsdom
+// doesn't have; the popover suite hits the same wall (see
+// popover-force-close.test.ts). Papered over for every DOM test in
+// `src/test-utils/setup-dom.ts`.
 
 afterEach(cleanup)
 
