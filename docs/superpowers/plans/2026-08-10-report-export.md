@@ -1402,10 +1402,12 @@ Create `src/lib/export/to-xlsx.ts`:
 
 ```ts
 import { parseDayString } from "@shared/day"
-import { formatClock } from "@shared/duration"
+import { centiHours, formatClock } from "@shared/duration"
 import { TITLE_CAP_NOTE, UNPRICED_NOTE } from "./report-rows"
 import type { ReportRows } from "./report-rows"
-import type { SheetData } from "write-excel-file"
+// `/browser`, not the bare package name: write-excel-file@4.1.1 publishes NO
+// "." export — only ./node, ./browser, ./universal and ./utility.
+import type { SheetData } from "write-excel-file/browser"
 
 /**
  * The report as a workbook.
@@ -1426,7 +1428,15 @@ const BOLD = { fontWeight: "bold" } as const
 
 /** A duration in HOURS, as a number a spreadsheet can sum. */
 function hours(ms: number) {
-  return { value: ms / 3_600_000, type: Number, format: "0.00" } as const
+  /*
+   * `centiHours`, NOT `ms / 3_600_000`.
+   *
+   * `format: "0.00"` makes Excel ROUND for display, so an un-floored value can
+   * render as more time than was recorded — and the same entry then reads 8.20
+   * here and 8.19 in the CSV, which obeys the flooring rule. Two documents in
+   * one email that disagree is what this pipeline exists to prevent.
+   */
+  return { value: centiHours(ms) / 100, type: Number, format: "0.00" } as const
 }
 
 /**
@@ -1541,7 +1551,9 @@ function breakdownSheet(rows: ReportRows): SheetData {
       null,
       text(formatClock(rows.totals.totalMs), true),
       hours(rows.totals.totalMs),
-      { value: 100, type: Number, format: "0.00" } as const,
+      // Same expression as the CSV's TOTAL row. Hardcoding 100 exported an
+      // empty range as 100% here and 0% there, from identical data.
+      { value: rows.totals.totalMs === 0 ? 0 : 100, type: Number, format: "0.00" } as const,
       money(
         rows.totals.billableCents,
         currency,
@@ -1562,7 +1574,7 @@ export function xlsxSheets(rows: ReportRows): Array<{ sheet: string; data: Sheet
 export async function xlsxBlob(rows: ReportRows): Promise<Blob> {
   // Dynamic, so the library never reaches the main bundle. A user who does not
   // export pays nothing for the button.
-  const { default: writeXlsxFile } = await import("write-excel-file")
+  const { default: writeXlsxFile } = await import("write-excel-file/browser")
   return await writeXlsxFile(xlsxSheets(rows)).toBlob()
 }
 ```
