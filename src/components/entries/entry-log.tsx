@@ -8,6 +8,7 @@ import { useEntryMutations } from "@/hooks/use-entry-mutations"
 import { errorMessage } from "@/lib/error-message"
 import { instantMovedToDay } from "@/lib/format-time"
 import { dayLabel } from "@/lib/group-entries"
+import { UNDO_MS, toastWithUndo } from "@/lib/undo-toast"
 import { addDays, dayOf } from "@shared/day"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
@@ -16,15 +17,16 @@ import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayGroup, Entry } from "@/lib/group-entries"
 
-/** Long enough to notice and reach, short enough not to linger. */
-const UNDO_MS = 6_000
-
 /**
  * The log, and everything a row can do to itself.
  *
  * The writes live here rather than in the rows so there is one place where an
  * entry changes, one place that raises the undo toast, and one place that knows
  * what to do when the server refuses. Rows stay renderable against fixtures.
+ *
+ * The SHAPE of that toast — window, Undo button, what happens when the undo is
+ * itself refused — is `src/lib/undo-toast.ts`, so the sheet below can report a
+ * dismissal in the same words without a second copy of it.
  */
 export function EntryLog({
   groups,
@@ -78,18 +80,10 @@ export function EntryLog({
           return
         }
 
-        toasts.add({
+        toastWithUndo(toasts, {
           title: `Deleted ${label}`,
           description: formatCompactDuration(elapsedMs(entry, Date.now())),
-          timeout: UNDO_MS,
-          actionProps: {
-            children: "Undo",
-            onClick: () => {
-              void restore(entry).catch((thrown: unknown) => {
-                toasts.add({ title: errorMessage(thrown), priority: "high" })
-              })
-            },
-          },
+          undo: () => restore(entry),
         })
       })()
     },
@@ -133,17 +127,9 @@ export function EntryLog({
       // The same label the day headers use, so the toast names the heading the
       // row has just gone to rather than a raw date string.
       const today = dayOf(Date.now(), timeZone)
-      toasts.add({
+      toastWithUndo(toasts, {
         title: `Moved to ${dayLabel(day, today, addDays(today, -1))}`,
-        timeout: UNDO_MS,
-        actionProps: {
-          children: "Undo",
-          onClick: () => {
-            void editTime(entry._id, "day", from).catch((thrown: unknown) => {
-              toasts.add({ title: errorMessage(thrown), priority: "high" })
-            })
-          },
-        },
+        undo: () => editTime(entry._id, "day", from),
       })
     },
     [editTime, timeZone, toasts]

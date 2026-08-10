@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
 import { Toast } from "@/components/ui/toast"
 import { errorMessage } from "@/lib/error-message"
+import { UNDO_MS, toastWithUndo } from "@/lib/undo-toast"
 import { formatCompactDuration } from "@shared/duration"
 import { elapsedMs } from "@shared/entryTimes"
 import { cn } from "@/lib/utils"
@@ -10,10 +11,6 @@ import type { Entry } from "@/lib/group-entries"
 import type { Id } from "../../../convex/_generated/dataModel"
 
 const MAX_NOTE_LENGTH = 2_000
-
-/** Matches the undo window `entry-log.tsx` uses for delete and re-date, so a
- * dismissed note behaves like every other reversible write in the product. */
-const UNDO_MS = 6_000
 
 /**
  * The fifteen-second window.
@@ -35,8 +32,9 @@ const UNDO_MS = 6_000
  * lost note worse than friction, and a confirm dialog would be friction on
  * every dismissal to prevent a mistake on a few — the ban on
  * modal-as-first-thought stays. Instead: dismissal with unsaved text now
- * SAVES that text on the way out and reports it with the same
- * undo-toast vocabulary `entry-log.tsx` uses for delete and re-date — an
+ * SAVES that text on the way out and reports it in the same undo-toast
+ * vocabulary delete and re-date use — literally the same, via
+ * `toastWithUndo`, rather than a third hand-rolled copy of it — an
  * action already taken, reversible for `UNDO_MS`. `draftsRef` keeps a copy in
  * memory too, keyed by entry id, so if the save is still in flight (or fails)
  * and the sheet is reopened on the same entry before the page unloads, the
@@ -139,7 +137,16 @@ export function NoteSheet({
    * The sheet still closes immediately — no blocking, no confirm dialog, the
    * same "cheap to leave" the sheet's header comment promises — and a toast
    * reports what happened with an Undo that puts the previous note back,
-   * exactly the vocabulary `entry-log.tsx` uses for delete and re-date.
+   * raised through the same `toastWithUndo` delete and re-date go through.
+   *
+   * The `toasts` manager is the one thing this component reaches for rather
+   * than takes as a prop. Lifting the whole sequence into `EntryLog` would put
+   * the toast beside the other two — but `draftsRef` is spliced through it at
+   * three points (armed before the write, dropped on success, re-armed by
+   * Undo) and would have to go with it, and the draft-survival semantics those
+   * three points encode are pinned by tests here that render this sheet alone.
+   * The duplication that mattered — the window and the toast shape — is gone;
+   * this last thread is not worth trading that coverage for.
    */
   const handleDismiss = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -157,17 +164,14 @@ export function NoteSheet({
             // back over by the next dismissal. The failed path below
             // deliberately keeps it: there, the draft is the only copy.
             draftsRef.current.delete(entry._id)
-            toasts.add({
+            toastWithUndo(toasts, {
               title: `Saved note for ${label}`,
-              timeout: UNDO_MS,
-              actionProps: {
-                children: "Undo",
-                onClick: () => {
-                  draftsRef.current.set(entry._id, previous)
-                  void onSave(entry._id, previous).catch((undoThrown: unknown) => {
-                    toasts.add({ title: errorMessage(undoThrown), priority: "high" })
-                  })
-                },
+              undo: () => {
+                // Re-armed BEFORE the inverse write, for the same reason the
+                // dismissal arms it before its own: from here until that write
+                // lands, the previous note is a value only this tab holds.
+                draftsRef.current.set(entry._id, previous)
+                return onSave(entry._id, previous)
               },
             })
           })
