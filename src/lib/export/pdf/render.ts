@@ -13,7 +13,14 @@ import type { PDFFont, PDFPage } from "pdf-lib"
  * brand; a report handed over as evidence does not.
  */
 
-const HATCH_SPACING = 5
+// P1-5: on a range with many empty days and few real bars (26 empty against
+// 5 real, the observed case), a dense hatch reads louder than the data next
+// to it — absence shouting over presence. Widened spacing and a thinner
+// stroke (was 5pt / 0.4pt) keep it a quiet texture while staying visibly
+// distinct from both a real bar (a fill) and the measured-zero mark (a solid
+// tick) — the Hatch Rule requires the distinction survive, not that it shout.
+const HATCH_SPACING = 9
+const HATCH_THICKNESS = 0.3
 
 function drawHatch(
   page: PDFPage,
@@ -27,7 +34,12 @@ function drawHatch(
     const y1 = op.y + Math.max(0, offset - op.width)
     const x2 = op.x + Math.max(0, offset - op.height)
     const y2 = op.y + Math.min(offset, op.height)
-    page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness: 0.4, color })
+    page.drawLine({
+      start: { x: x1, y: y1 },
+      end: { x: x2, y: y2 },
+      thickness: HATCH_THICKNESS,
+      color,
+    })
   }
 }
 

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { reportPages } from "./report-doc"
+import { PAGE } from "./paper"
+import type { PdfOp } from "./ops"
 import type { ReportRows } from "../report-rows"
 
 const HOUR = 3_600_000
@@ -160,5 +162,46 @@ describe("reportPages", () => {
       totals: { ...rowsWith(0).totals, totalMs: 0, billableMs: 0, count: 0 },
     })
     expect(reportPages(empty)).toHaveLength(1)
+  })
+
+  // P1-6: the Billable tile previously jammed `40:17:00 100%` into one string,
+  // which reads as a single figure. The percent belongs on its own sub-line,
+  // the same anatomy the Average tile already uses for its divisor.
+  it("keeps the Billable tile's percent on its own sub-line, not glued to the duration", () => {
+    const [first] = reportPages(rowsWith(1))
+    const strings = textOf(first)
+    expect(strings).toContain("98:48:00")
+    expect(strings).not.toContain("98:48:00  100%")
+    expect(strings.some((s) => s.includes("100%") && s !== "98:48:00")).toBe(true)
+  })
+
+  // P0-3: the donut is drawn through render.ts's SVG-space flip (`scale(1,-1)`
+  // about `PAGE.height`), so a real, y-up page position must be converted with
+  // `PAGE.height - realY` before being handed to `donutSlices`. Feeding a
+  // plain y-up value straight through (the previous bug) put the donut's own
+  // top edge a few points ABOVE its heading's baseline instead of below it.
+  it("keeps the donut's top edge below its heading once the SVG y-flip is accounted for", () => {
+    const [first] = reportPages(rowsWith(1))
+    const heading = first.ops.find(
+      (op): op is Extract<PdfOp, { kind: "text" }> =>
+        op.kind === "text" && op.text === "Project distribution"
+    )
+    const slice = first.ops.find(
+      (op): op is Extract<PdfOp, { kind: "path" }> => op.kind === "path"
+    )
+    expect(heading).toBeDefined()
+    expect(slice).toBeDefined()
+    if (!heading || !slice) return
+
+    // The path's `M` command starts at the outer arc's twelve-o'clock point —
+    // the donut's own top edge — in the y-DOWN space the SVG flip expects.
+    const [, svgY] = slice.d.match(/^M [\d.eE+-]+ ([\d.eE+-]+)/) ?? []
+    expect(svgY).toBeDefined()
+    const realY = PAGE.height - Number(svgY)
+
+    expect(realY).toBeLessThan(heading.y)
+    // Not just "less than" by a rounding error: comfortably clear of the
+    // heading's own cap height (~8pt for 11pt bold Helvetica).
+    expect(heading.y - realY).toBeGreaterThanOrEqual(8)
   })
 })

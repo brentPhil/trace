@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { PROJECT_COLORS } from "@shared/palette"
 import { PAPER, paperColorFor } from "./paper"
-import { barColumns, donutSlices } from "./ops"
+import { axisTickIndices, barColumns, donutSlices, helveticaWidth, truncateToWidth } from "./ops"
 
 describe("donutSlices", () => {
   it("returns one path per non-zero value", () => {
@@ -121,6 +121,61 @@ describe("barColumns", () => {
     expect(rects).toHaveLength(3)
     const [, tinyBar, zeroMark] = rects
     expect(tinyBar.height).toBeGreaterThan(zeroMark.height)
+  })
+})
+
+describe("helveticaWidth / truncateToWidth", () => {
+  // The report's own reference case (P0-1): a real description long enough to
+  // run through the DURATION column when drawn at full width.
+  const LONG = "[B-CB-326] Building Crew Training CSV and PDF download"
+
+  it("returns a short string untouched", () => {
+    expect(truncateToWidth("Short", 200, 8, false)).toBe("Short")
+  })
+
+  it("shortens a string that overflows its column", () => {
+    const truncated = truncateToWidth(LONG, 60, 8, false)
+    expect(truncated.length).toBeLessThan(LONG.length)
+  })
+
+  it("appends a single-character ellipsis when it truncates", () => {
+    const truncated = truncateToWidth(LONG, 60, 8, false)
+    expect(truncated.endsWith("…")).toBe(true)
+    expect(truncated.match(/…/g)).toHaveLength(1)
+  })
+
+  it("keeps the truncated result within the width it was given", () => {
+    const maxWidth = 60
+    const truncated = truncateToWidth(LONG, maxWidth, 8, false)
+    expect(helveticaWidth(truncated, 8, false)).toBeLessThanOrEqual(maxWidth)
+  })
+
+  it("falls back to a default advance instead of throwing on a character outside the table", () => {
+    expect(() => helveticaWidth("café — a title", 8, false)).not.toThrow()
+    expect(helveticaWidth("café — a title", 8, false)).toBeGreaterThan(0)
+  })
+})
+
+describe("axisTickIndices", () => {
+  // The observed defect: a 31-day range at 6pt across ~465pt, where `Mon 10`
+  // overlapped into `Mon 1`.
+  const labels = Array.from({ length: 31 }, (_, n) => `Mon ${n + 1}`)
+
+  it("emits materially fewer labels than one per bucket on a colliding 31-day axis", () => {
+    const indices = axisTickIndices(labels, 465, 6, false)
+    expect(indices.length).toBeLessThan(31)
+    expect(indices.length).toBeLessThan(20)
+  })
+
+  it("always includes the first and last bucket, so the axis still states its own range", () => {
+    const indices = axisTickIndices(labels, 465, 6, false)
+    expect(indices[0]).toBe(0)
+    expect(indices.at(-1)).toBe(30)
+  })
+
+  it("keeps every label when they already fit without collision", () => {
+    const few = ["Mon 13", "Tue 14", "Wed 15"]
+    expect(axisTickIndices(few, 500, 6, false)).toEqual([0, 1, 2])
   })
 })
 
