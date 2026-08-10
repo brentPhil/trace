@@ -6,8 +6,8 @@ import {
   periodFilters,
   stepPeriod,
 } from "./history-filters"
+import { filterEntry as entry } from "@/test-utils/fixtures"
 import type { Filters } from "./history-filters"
-import type { Doc } from "../../convex/_generated/dataModel"
 
 const base: Filters = {
   period: "custom",
@@ -17,25 +17,6 @@ const base: Filters = {
   billableOnly: false,
   text: "",
   presets: [],
-}
-
-function entry(over: Partial<Doc<"timeEntries">> = {}): Doc<"timeEntries"> {
-  return {
-    _id: "e1" as Doc<"timeEntries">["_id"],
-    _creationTime: 0,
-    userId: "u",
-    clientKey: "k",
-    title: "Work",
-    startedAt: 0,
-    endedAt: 1,
-    durationMs: 3_600_000,
-    tagIds: [],
-    billable: false,
-    source: "web",
-    updatedAt: 0,
-    deletedAt: null,
-    ...over,
-  }
 }
 
 const noNames = () => ""

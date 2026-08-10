@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { getFunctionName } from "convex/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import { Projects } from "@/routes/_authed/projects"
+import { convexKey } from "@/test-utils/convex-query"
+import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { api } from "../../../convex/_generated/api"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -46,18 +47,6 @@ afterEach(() => {
   for (const fn of Object.values(mutations)) fn.mockClear()
 })
 
-const NOW = Date.parse("2026-08-05T12:00:00.000Z")
-
-const SETTINGS = {
-  timezone: "UTC",
-  weekStartDay: 1,
-  durationDisplay: "hms" as const,
-  timeFormat: "24" as const,
-  runawayThresholdMs: 8 * 60 * 60 * 1000,
-  tabTitleClock: false,
-  currency: "USD",
-}
-
 function makeProject(overrides: Partial<Doc<"projects">> & { name: string }): Doc<"projects"> {
   return {
     _id: overrides.name as unknown as Id<"projects">,
@@ -71,10 +60,6 @@ function makeProject(overrides: Partial<Doc<"projects">> & { name: string }): Do
     deletedAt: null,
     ...overrides,
   }
-}
-
-function convexKey(fn: Parameters<typeof getFunctionName>[0], args: unknown) {
-  return ["convexQuery", getFunctionName(fn), args] as const
 }
 
 function renderProjects(

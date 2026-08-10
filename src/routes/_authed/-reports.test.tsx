@@ -5,9 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Reports } from "@/routes/_authed/reports"
 import { defaultFilters, rangeOf, stepPeriod } from "@/lib/history-filters"
+import {
+  convexKey,
+  paginatedKey,
+  resetPaginatedStore,
+  resolvePage,
+} from "@/test-utils/convex-query"
+import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { dayOf } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
-import type { Doc, Id } from "../../../convex/_generated/dataModel"
+import type { Id } from "../../../convex/_generated/dataModel"
 import type * as ConvexReactModuleType from "convex/react"
 import type * as RouterModuleType from "@tanstack/react-router"
 
@@ -86,109 +93,27 @@ vi.mock("@/components/entries/entry-log", () => ({
 
 /*
  * `usePaginatedQuery` (from "convex/react") reads and writes a subscription
- * this test does not have — there is no real `ConvexReactClient` here. This
- * fake reproduces exactly the one behaviour the fix in reports.tsx depends
- * on: the REAL hook resets `results` to `[]` and `status` to
- * "LoadingFirstPage" the instant its args (the query key) change,
- * synchronously, before the new first page round-trips — see
- * `node_modules/convex/dist/esm/react/use_paginated_query.js`. Keyed by
- * (function name, args) via a tiny external store, so the test controls
- * exactly when a page "arrives" with `resolvePage`.
+ * this test does not have — there is no real `ConvexReactClient` here. The
+ * double in `@/test-utils/convex-query` reproduces exactly the one behaviour
+ * the fix in reports.tsx depends on: the REAL hook resets `results` to `[]`
+ * and `status` to "LoadingFirstPage" the instant its args (the query key)
+ * change, synchronously, before the new first page round-trips. A test
+ * controls when a page "arrives" with `resolvePage`.
  */
-const { paginatedStore, paginatedListeners, resolvePage } = vi.hoisted(() => {
-  const store = new Map<string, { page: unknown[]; isDone: boolean }>()
-  const listeners = new Map<string, Set<() => void>>()
-  return {
-    paginatedStore: store,
-    paginatedListeners: listeners,
-    resolvePage: (key: string, value: { page: unknown[]; isDone: boolean }) => {
-      store.set(key, value)
-      listeners.get(key)?.forEach((notify) => notify())
-    },
-  }
-})
-
 vi.mock("convex/react", async (importOriginal) => {
   const actual = await importOriginal<ConvexReactModule>()
-  const { getFunctionName: fnName } = await import("convex/server")
-  const { useSyncExternalStore } = await import("react")
-
-  return {
-    ...actual,
-    usePaginatedQuery: (query: unknown, args: unknown) => {
-      const key = `${fnName(query as Parameters<typeof fnName>[0])}:${JSON.stringify(args)}`
-      const snapshot = useSyncExternalStore(
-        (onStoreChange) => {
-          let set = paginatedListeners.get(key)
-          if (!set) {
-            set = new Set()
-            paginatedListeners.set(key, set)
-          }
-          set.add(onStoreChange)
-          return () => set.delete(onStoreChange)
-        },
-        () => paginatedStore.get(key)
-      )
-      if (snapshot === undefined) {
-        return { results: [], status: "LoadingFirstPage" as const, loadMore: () => {} }
-      }
-      const status: "Exhausted" | "CanLoadMore" = snapshot.isDone
-        ? "Exhausted"
-        : "CanLoadMore"
-      return { results: snapshot.page, status, loadMore: () => {} }
-    },
-  }
+  const { usePaginatedQueryDouble } = await import("@/test-utils/convex-query")
+  return { ...actual, usePaginatedQuery: usePaginatedQueryDouble }
 })
 
 beforeEach(() => {
-  // `usePaginatedQuery`'s pagination ids and this fake store are both module
+  // `usePaginatedQuery`'s pagination ids and that fake store are both module
   // state that would otherwise leak a resolved page from one test's range
   // into the next test's identical-looking key.
-  paginatedStore.clear()
-  paginatedListeners.clear()
+  resetPaginatedStore()
 })
 
 afterEach(cleanup)
-
-const NOW = Date.parse("2026-08-05T12:00:00.000Z") // a Wednesday, mid-week
-const SETTINGS = {
-  timezone: "UTC",
-  weekStartDay: 1,
-  durationDisplay: "hms" as const,
-  timeFormat: "24" as const,
-  runawayThresholdMs: 8 * 60 * 60 * 1000,
-  tabTitleClock: false,
-  currency: "USD",
-}
-
-function makeEntry(overrides: Partial<Doc<"timeEntries">>): Doc<"timeEntries"> {
-  return {
-    _id: "entry" as unknown as Id<"timeEntries">,
-    _creationTime: NOW,
-    userId: "user-1",
-    clientKey: "client-1",
-    title: "Untitled entry",
-    note: undefined,
-    startedAt: NOW,
-    endedAt: NOW + 3_600_000,
-    durationMs: 3_600_000,
-    projectId: undefined,
-    tagIds: [],
-    billable: false,
-    source: "web",
-    updatedAt: NOW,
-    deletedAt: null,
-    ...overrides,
-  }
-}
-
-function convexKey(fn: Parameters<typeof getFunctionName>[0], args: unknown) {
-  return ["convexQuery", getFunctionName(fn), args] as const
-}
-
-function paginatedKey(fn: Parameters<typeof getFunctionName>[0], args: unknown) {
-  return `${getFunctionName(fn)}:${JSON.stringify(args)}`
-}
 
 /**
  * A re-suspending boundary does not always strip its old children from the

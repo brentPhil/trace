@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { SUPPORTED_CURRENCIES, formatMoney, isValidCurrency, parseMoney } from "./money"
+import { formatMoney, isValidCurrency, parseMoney, supportedCurrencies } from "./money"
 
 describe("parseMoney", () => {
   it("reads a bare integer as whole units", () => {
@@ -125,14 +125,14 @@ describe("formatMoney", () => {
   })
 })
 
-describe("SUPPORTED_CURRENCIES", () => {
+describe("supportedCurrencies", () => {
   it("is the runtime's own ISO 4217 list, narrowed to hundredths currencies", () => {
-    expect(SUPPORTED_CURRENCIES).toContain("USD")
-    expect(SUPPORTED_CURRENCIES).toContain("SGD")
-    expect(SUPPORTED_CURRENCIES).toContain("EUR")
+    expect(supportedCurrencies()).toContain("USD")
+    expect(supportedCurrencies()).toContain("SGD")
+    expect(supportedCurrencies()).toContain("EUR")
     // Every offered code really does divide into hundredths, which is the
     // assumption the word `cents` bakes in.
-    for (const code of SUPPORTED_CURRENCIES) {
+    for (const code of supportedCurrencies()) {
       const digits = new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: code,
@@ -146,10 +146,22 @@ describe("SUPPORTED_CURRENCIES", () => {
     // the picker while storing hundredths is what made `formatMoney(1050,
     // "JPY")` render a silently-rounded "11" and KWD render three decimals
     // that `parseMoney` then refused to read back.
-    expect(SUPPORTED_CURRENCIES).not.toContain("JPY")
-    expect(SUPPORTED_CURRENCIES).not.toContain("KWD")
-    expect(SUPPORTED_CURRENCIES).not.toContain("BHD")
-    expect(SUPPORTED_CURRENCIES).not.toContain("TND")
+    expect(supportedCurrencies()).not.toContain("JPY")
+    expect(supportedCurrencies()).not.toContain("KWD")
+    expect(supportedCurrencies()).not.toContain("BHD")
+    expect(supportedCurrencies()).not.toContain("TND")
+  })
+
+  /*
+   * The whole point of the list being a function rather than a constant.
+   * Narrowing it constructs 162 throwaway `Intl.NumberFormat`s, so a caller
+   * that asks twice — /settings re-renders on every keystroke elsewhere on the
+   * page — must not pay twice, and nobody who never asks must pay at all.
+   */
+  it("builds the list once and hands back the same frozen array after that", () => {
+    const first = supportedCurrencies()
+    expect(supportedCurrencies()).toBe(first)
+    expect(Object.isFrozen(first)).toBe(true)
   })
 })
 

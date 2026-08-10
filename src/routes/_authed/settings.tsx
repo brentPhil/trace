@@ -7,7 +7,7 @@ import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
-import { SUPPORTED_CURRENCIES } from "@shared/money"
+import { supportedCurrencies } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 
 export const Route = createFileRoute("/_authed/settings")({
@@ -245,16 +245,24 @@ function TimezoneField({
 /**
  * Same idea as `TimezoneField`, with one extra narrowing.
  *
- * The list is `money.SUPPORTED_CURRENCIES` — the runtime's own ISO 4217 codes,
- * minus the ones whose minor unit is not a hundredth. That is the SAME
- * constant `settings.update`'s server-side guard checks against, so the picker
- * and the validator cannot disagree: previously the picker offered all 162
- * codes while the guard accepted any three letters, and neither matched what
- * `formatMoney` could actually render honestly (JPY silently rounded stored
- * hundredths away; KWD showed a third decimal `parseMoney` then refused).
+ * The list is `money.supportedCurrencies()` — the runtime's own ISO 4217 codes,
+ * minus the ones whose minor unit is not a hundredth. That is the SAME list
+ * `settings.update`'s server-side guard checks against, so the picker and the
+ * validator cannot disagree: previously the picker offered all 162 codes while
+ * the guard accepted any three letters, and neither matched what `formatMoney`
+ * could actually render honestly (JPY silently rounded stored hundredths away;
+ * KWD showed a third decimal `parseMoney` then refused).
  *
  * A stored code outside the list is still shown, so a value already saved is
  * never silently swapped for something else under the user.
+ *
+ * Computed during render, NOT held in a `useState` initializer the way
+ * `TimezoneField` above holds its zones. That shape earns its place there — the
+ * lazy initializer is what stops a `try`/`catch` around a runtime call from
+ * re-running every render. Here there is nothing to guard: the module memoises
+ * the list itself, so this is a plain read, and freezing a derived value at
+ * first render only bought a fallback that could not follow `value` if the
+ * stored currency changed underneath it.
  */
 function CurrencyField({
   value,
@@ -263,9 +271,11 @@ function CurrencyField({
   value: string
   onChange: (value: string) => void
 }) {
-  const [codes] = useState<Array<string>>(() =>
-    SUPPORTED_CURRENCIES.length > 0 ? [...SUPPORTED_CURRENCIES] : [value, "USD"]
-  )
+  const supported = supportedCurrencies()
+  // Empty only on a runtime that cannot enumerate currencies at all. Keep
+  // whatever is stored so the field is never empty and the user's own currency
+  // is never silently replaced — the same fallback `TimezoneField` makes.
+  const codes = supported.length > 0 ? supported : [value, "USD"]
 
   const options = codes.includes(value) ? codes : [value, ...codes]
 

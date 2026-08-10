@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { FilterControls } from "@/components/history/filter-controls"
 import { matches } from "@/lib/history-filters"
+import { filterEntry as entry } from "@/test-utils/fixtures"
 import type { QuickFilters } from "@/lib/history-filters"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
@@ -14,25 +15,6 @@ import type { Doc } from "../../../convex/_generated/dataModel"
  */
 
 afterEach(cleanup)
-
-function entry(over: Partial<Doc<"timeEntries">> = {}): Doc<"timeEntries"> {
-  return {
-    _id: "e0" as never,
-    _creationTime: 0,
-    userId: "u",
-    clientKey: "k",
-    title: "",
-    startedAt: 0,
-    endedAt: 1,
-    durationMs: 3_600_000,
-    tagIds: [],
-    billable: false,
-    source: "web",
-    updatedAt: 0,
-    deletedAt: null,
-    ...over,
-  }
-}
 
 const projects = [
   { _id: "p1", name: "Website" } as unknown as Doc<"projects">,

@@ -12,9 +12,9 @@
  * rather than rounded into an answer nobody asked for.
  *
  * MINOR UNITS ARE HUNDREDTHS, EVERYWHERE, BY CONSTRUCTION. `cents` means
- * exactly that, and `SUPPORTED_CURRENCIES` below is the enforcement: the only
+ * exactly that, and `supportedCurrencies()` below is the enforcement: the only
  * currencies this product offers are the ones whose minor unit really is a
- * hundredth. See that constant for why the alternative was rejected.
+ * hundredth. See that function for why the alternative was rejected.
  *
  * Pure. No Convex imports, no DOM — `Intl` is a JS global available in both
  * the browser and the Convex runtime.
@@ -90,31 +90,65 @@ function formatterFor(locale: string, currency: string): Intl.NumberFormat {
  *
  * Empty when the runtime cannot enumerate currencies at all — `isValidCurrency`
  * falls back to a shape check in that case rather than locking everyone to USD.
+ *
+ * BUILT ON FIRST USE, NOT AT MODULE LOAD. Narrowing the list means constructing
+ * one throwaway `Intl.NumberFormat` per code to read its minor-unit exponent —
+ * 162 of them, measured at ~16ms on a desktop against 0.08ms for a single-code
+ * check, and several times worse on a mid-range phone. That is exactly the
+ * expense the `formatterFor` cache above exists to avoid paying even once, and
+ * as an eager module-level constant it was paid 162 times before anything had
+ * been formatted.
+ *
+ * It was also paid in the wrong places. This module lands in the ROOT entry
+ * chunk, so the constant blocked hydration on /login and /signup — routes with
+ * no money on them — ran again on every SSR render, and ran in the Convex
+ * isolate on every cold start, because convex/settings.ts imports
+ * `isValidCurrency` and `settings.get` is what every page load calls. Exactly
+ * one caller needs the whole list: the currency `<select>` on /settings.
  */
-export const SUPPORTED_CURRENCIES: ReadonlyArray<string> = Object.freeze(
-  ((): Array<string> => {
-    // Reached through a structural type rather than `Intl.supportedValuesOf`
-    // directly: convex/tsconfig.json targets `lib: ES2021`, which predates the
-    // declaration, and the optional call is the runtime guard this needs
-    // anyway. Verified present in both the edge runtime the Convex tests use
-    // and in Node.
-    const enumerate = (Intl as IntlMaybeEnumerable).supportedValuesOf
-    if (typeof enumerate !== "function") return []
-    let all: Array<string>
-    try {
-      all = enumerate.call(Intl, "currency")
-    } catch {
-      return []
-    }
-    return all.filter((code) => minorUnitDigits(code) === 2)
-  })()
-)
+let currencyList: ReadonlyArray<string> | null = null
+
+export function supportedCurrencies(): ReadonlyArray<string> {
+  if (currencyList !== null) return currencyList
+
+  // Reached through a structural type rather than `Intl.supportedValuesOf`
+  // directly: convex/tsconfig.json targets `lib: ES2021`, which predates the
+  // declaration, and the optional call is the runtime guard this needs
+  // anyway. Verified present in both the edge runtime the Convex tests use
+  // and in Node.
+  const enumerate = (Intl as IntlMaybeEnumerable).supportedValuesOf
+  currencyList = Object.freeze(enumerateHundredths(enumerate))
+  return currencyList
+}
+
+function enumerateHundredths(
+  enumerate: IntlMaybeEnumerable["supportedValuesOf"]
+): Array<string> {
+  if (typeof enumerate !== "function") return []
+  let all: Array<string>
+  try {
+    all = enumerate.call(Intl, "currency")
+  } catch {
+    return []
+  }
+  return all.filter((code) => minorUnitDigits(code) === 2)
+}
 
 type IntlMaybeEnumerable = {
   supportedValuesOf?: (key: "currency" | "timeZone") => Array<string>
 }
 
-const SUPPORTED = new Set(SUPPORTED_CURRENCIES)
+/** The same list as a set, for `isValidCurrency`. Lazy for the same reason. */
+let currencySet: ReadonlySet<string> | null = null
+
+function supportedSet(): ReadonlySet<string> {
+  if (currencySet !== null) return currencySet
+  currencySet = new Set(supportedCurrencies())
+  return currencySet
+}
+
+/** Every code in the list has this shape, so anything that fails it is a no. */
+const CURRENCY_CODE = /^[A-Z]{3}$/
 
 /**
  * How many digits of minor unit a currency has, or null if the runtime cannot
@@ -143,12 +177,19 @@ function minorUnitDigits(currency: string): number | null {
  *
  * Case-sensitive on purpose: `"usd"` is not the string this product stores, and
  * quietly upcasing an argument inside a validator hides a caller bug.
+ *
+ * Shape is checked BEFORE membership. Every code in the list matches
+ * `CURRENCY_CODE`, so the answer for anything that does not is already `false`
+ * — and answering it that way keeps the list's construction cost off every path
+ * that never sees a well-formed code at all.
  */
 export function isValidCurrency(currency: string): boolean {
-  if (SUPPORTED.size > 0) return SUPPORTED.has(currency)
+  if (!CURRENCY_CODE.test(currency)) return false
+  const supported = supportedSet()
+  if (supported.size > 0) return supported.has(currency)
   // A runtime with no `Intl.supportedValuesOf`. Degrade to the shape check
-  // plus the hundredths rule rather than refusing everything.
-  return /^[A-Z]{3}$/.test(currency) && minorUnitDigits(currency) === 2
+  // above plus the hundredths rule rather than refusing everything.
+  return minorUnitDigits(currency) === 2
 }
 
 // 1-9 digits, then an OPTIONAL decimal point followed by EXACTLY one or two
@@ -258,7 +299,7 @@ export function parseMoney(input: string, currency?: string): ParseMoneyResult {
  * decimal count are right for the currency rather than a hardcoded `$`.
  *
  * The minor unit is a hundredth for every currency this product offers, which
- * `SUPPORTED_CURRENCIES` guarantees rather than assumes.
+ * `supportedCurrencies()` guarantees rather than assumes.
  *
  * `locale` exists for tests that need to assert a specific rendering.
  * Production always omits it and gets `MONEY_LOCALE`, deterministically, on

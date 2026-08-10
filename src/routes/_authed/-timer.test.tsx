@@ -1,12 +1,18 @@
 import { useEffect } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { getFunctionName } from "convex/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Timer } from "@/routes/_authed/timer"
+import {
+  convexKey,
+  paginatedKey,
+  resetPaginatedStore,
+  resolvePage,
+} from "@/test-utils/convex-query"
+import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
-import type { Doc, Id } from "../../../convex/_generated/dataModel"
+import type { Id } from "../../../convex/_generated/dataModel"
 import type * as ConvexReactModuleType from "convex/react"
 import type * as UseClockModuleType from "@/hooks/use-clock"
 
@@ -32,10 +38,8 @@ type UseClockModule = typeof UseClockModuleType
  * generation from treating this as a route (see `-reports.test.tsx`).
  */
 
-const { logLifecycle, NOW } = vi.hoisted(() => ({
+const { logLifecycle } = vi.hoisted(() => ({
   logLifecycle: { mounts: 0, unmounts: 0 },
-  // A Wednesday, mid-week.
-  NOW: Date.parse("2026-08-05T12:00:00.000Z"),
 }))
 
 /*
@@ -44,10 +48,15 @@ const { logLifecycle, NOW } = vi.hoisted(() => ({
  * installed — and Timer derives `today`, and therefore its whole query key,
  * from it. Pinning the hook is the only way to make that key predictable.
  */
-vi.mock("@/hooks/use-clock", async (importOriginal) => ({
-  ...(await importOriginal<UseClockModule>()),
-  useSecond: () => Math.floor(NOW / 1000),
-}))
+vi.mock("@/hooks/use-clock", async (importOriginal) => {
+  // `vi.mock` is hoisted above the imports, so the pinned instant has to be
+  // pulled in from inside the factory rather than closed over.
+  const { NOW: pinned } = await import("@/test-utils/fixtures")
+  return {
+    ...(await importOriginal<UseClockModule>()),
+    useSecond: () => Math.floor(pinned / 1000),
+  }
+})
 
 /*
  * `EntryLog` stands in as a mount-counting stub. What matters here is not what
@@ -80,67 +89,17 @@ vi.mock("@/components/entries/manual-entry-dialog", () => ({
 
 /* The same hand-driven `usePaginatedQuery` double `-reports.test.tsx` uses:
  * the real hook wants a subscription this test does not have, and the branch
- * under test keys off its `status`. */
-const { paginatedStore, paginatedListeners, resolvePage } = vi.hoisted(() => {
-  const store = new Map<string, { page: unknown[]; isDone: boolean }>()
-  const listeners = new Map<string, Set<() => void>>()
-  return {
-    paginatedStore: store,
-    paginatedListeners: listeners,
-    resolvePage: (key: string, value: { page: unknown[]; isDone: boolean }) => {
-      store.set(key, value)
-      listeners.get(key)?.forEach((notify) => notify())
-    },
-  }
-})
-
+ * under test keys off its `status`. See `@/test-utils/convex-query`. */
 vi.mock("convex/react", async (importOriginal) => {
   const actual = await importOriginal<ConvexReactModule>()
-  const { getFunctionName: fnName } = await import("convex/server")
-  const { useSyncExternalStore } = await import("react")
-
-  return {
-    ...actual,
-    usePaginatedQuery: (query: unknown, args: unknown) => {
-      const key = `${fnName(query as Parameters<typeof fnName>[0])}:${JSON.stringify(args)}`
-      const snapshot = useSyncExternalStore(
-        (onStoreChange) => {
-          let set = paginatedListeners.get(key)
-          if (!set) {
-            set = new Set()
-            paginatedListeners.set(key, set)
-          }
-          set.add(onStoreChange)
-          return () => set.delete(onStoreChange)
-        },
-        () => paginatedStore.get(key)
-      )
-      if (snapshot === undefined) {
-        return { results: [], status: "LoadingFirstPage" as const, loadMore: () => {} }
-      }
-      const status: "Exhausted" | "CanLoadMore" = snapshot.isDone
-        ? "Exhausted"
-        : "CanLoadMore"
-      return { results: snapshot.page, status, loadMore: () => {} }
-    },
-  }
+  const { usePaginatedQueryDouble } = await import("@/test-utils/convex-query")
+  return { ...actual, usePaginatedQuery: usePaginatedQueryDouble }
 })
-
-const SETTINGS = {
-  timezone: "UTC",
-  weekStartDay: 1,
-  durationDisplay: "hms" as const,
-  timeFormat: "24" as const,
-  runawayThresholdMs: 8 * 60 * 60 * 1000,
-  tabTitleClock: false,
-  currency: "USD",
-}
 
 let dateSpy: ReturnType<typeof vi.spyOn> | null = null
 
 beforeEach(() => {
-  paginatedStore.clear()
-  paginatedListeners.clear()
+  resetPaginatedStore()
   logLifecycle.mounts = 0
   logLifecycle.unmounts = 0
   dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
@@ -150,35 +109,6 @@ afterEach(() => {
   cleanup()
   dateSpy?.mockRestore()
 })
-
-function makeEntry(overrides: Partial<Doc<"timeEntries">>): Doc<"timeEntries"> {
-  return {
-    _id: "entry" as unknown as Id<"timeEntries">,
-    _creationTime: NOW,
-    userId: "user-1",
-    clientKey: "client-1",
-    title: "Untitled entry",
-    note: undefined,
-    startedAt: NOW,
-    endedAt: NOW + 3_600_000,
-    durationMs: 3_600_000,
-    projectId: undefined,
-    tagIds: [],
-    billable: false,
-    source: "web",
-    updatedAt: NOW,
-    deletedAt: null,
-    ...overrides,
-  }
-}
-
-function convexKey(fn: Parameters<typeof getFunctionName>[0], args: unknown) {
-  return ["convexQuery", getFunctionName(fn), args] as const
-}
-
-function paginatedKey(fn: Parameters<typeof getFunctionName>[0], args: unknown) {
-  return `${getFunctionName(fn)}:${JSON.stringify(args)}`
-}
 
 const today = dayOf(NOW, SETTINGS.timezone)
 const week = weekWindow(today, SETTINGS.timezone, SETTINGS.weekStartDay)
