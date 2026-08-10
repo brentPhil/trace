@@ -26,7 +26,6 @@ function totalsFor(over: {
     billableMs: over.billableMs,
     billablePercent: 100,
     billableCents: over.billableCents,
-    unratedBillableMs: over.unratedBillableMs,
     averageDailyMs: HOUR,
     count: 1,
     truncated: false,

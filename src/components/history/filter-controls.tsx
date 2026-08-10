@@ -1,6 +1,7 @@
 import { Search } from "lucide-react"
-import { NO_PROJECT } from "@shared/entryFilter"
+import { NO_PROJECT_FILTER } from "@shared/entryFilter"
 import { cn } from "@/lib/utils"
+import { NO_PROJECT_LABEL } from "@/lib/report-series"
 import type { QuickFilters } from "@/lib/history-filters"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
@@ -63,8 +64,10 @@ export function FilterControls<T extends QuickFilters>({
         <option value="all">All projects</option>
         {/* A real, findable state rather than the absence of a choice.
             The sentinel is named in convex/lib/entryFilter.ts, which is where
-            the predicate reads it back. */}
-        <option value={NO_PROJECT}>No project</option>
+            the predicate reads it back; the text is the SAME label the
+            export pipeline prints (report-series.ts), so a reader never sees
+            "No project" here and something else on the document. */}
+        <option value={NO_PROJECT_FILTER}>{NO_PROJECT_LABEL}</option>
         {projects.map((project) => (
           <option key={project._id} value={project._id}>
             {project.name}

@@ -22,10 +22,19 @@ import type { DayString } from "@shared/day"
  * pipeline are built from) is the one thing `project-chart.tsx` and
  * `report-rows.ts` already both import; a label the live chart needs has no
  * business living in an export-only module the chart would otherwise have no
- * reason to reach into. Two independent `"No project"` literals is how the
- * screen and the document it's exported into read differently.
+ * reason to reach into.
+ *
+ * Named `NO_PROJECT_LABEL`, not `NO_PROJECT`, so it can never collide with
+ * `convex/lib/entryFilter.ts`'s `NO_PROJECT_FILTER` — that one is the empty
+ * string a filter's `projectId` is set to for "entries with no project", a
+ * different value for a different purpose. The two used to share the name
+ * `NO_PROJECT`, which is exactly what let `filter-controls.tsx` import the
+ * FILTER sentinel for an `<option value>` while hardcoding this LABEL as the
+ * option's text on the same line: the two constants looked deduplicated
+ * because they shared a name, while the label itself still lived in two
+ * uncoupled places.
  */
-export const NO_PROJECT = "No project"
+export const NO_PROJECT_LABEL = "No project"
 
 /** One day's totals, as `entries.rangeBreakdown` returns them. */
 export type DayTotal = {

@@ -187,6 +187,38 @@ describe("wrapToWidth", () => {
   })
 
   /*
+   * Greedy-MAXIMALITY, not just "fits": every line but the last must be as
+   * full as the greedy algorithm can make it, so appending the next line's
+   * first word would overflow `maxWidth`. The existing "every line <=
+   * maxWidth" assertion only catches the running width UNDER-counting the
+   * inter-word space (lines would run long); it still passes if the space is
+   * OVER-counted, because an over-count just breaks lines earlier than truly
+   * necessary and every line produced is still, individually, <= maxWidth.
+   *
+   * The width has to be a TIGHT fit for that to be catchable at all: `LONG`
+   * at a loose width breaks so far short of the boundary that an over-counted
+   * space still leaves the next word overflowing anyway, and the assertion
+   * would pass whether or not the bug is present. Four equal-width words and
+   * a budget sized for exactly two of them (plus one real inter-word space,
+   * plus a hair of slack) is tight enough that over-counting the space by
+   * even one extra `spaceWidth` forces an early break this check can see.
+   */
+  it("packs each line as full as it can go — the next line's first word would always overflow", () => {
+    const size = 8
+    const wordWidth = textWidth("TEST", size, false)
+    const spaceWidth = textWidth(" ", size, false)
+    const maxWidth = wordWidth * 2 + spaceWidth + 0.01
+    const lines = wrapToWidth("TEST TEST TEST TEST", maxWidth, size, false)
+    expect(lines).toEqual(["TEST TEST", "TEST TEST"])
+    for (let i = 0; i < lines.length - 1; i++) {
+      const nextFirstWord = lines[i + 1].split(" ")[0]
+      expect(
+        textWidth(`${lines[i]} ${nextFirstWord}`, size, false)
+      ).toBeGreaterThan(maxWidth)
+    }
+  })
+
+  /*
    * A description budget can legitimately reach zero (an extreme duration
    * string can consume the whole reserved gap — see `descriptionMaxWidth` in
    * report-doc.ts). Every character's advance is positive, so a naive

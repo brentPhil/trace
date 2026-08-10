@@ -6,7 +6,7 @@ import { BAR_CURSOR, TooltipCard, hoveredRow } from "@/components/reports/chart-
 import { formatTotal } from "@/lib/format-total"
 import { unpriced } from "@/lib/format-money"
 import { projectColorVar } from "@/lib/project-color"
-import { NO_PROJECT } from "@/lib/report-series"
+import { NO_PROJECT_LABEL } from "@/lib/report-series"
 import { formatMoney } from "@shared/money"
 import type { TooltipRow } from "@/components/reports/chart-tooltip"
 import type { DurationDisplay } from "@/lib/format-total"
@@ -104,7 +104,7 @@ function rollUp(projects: Array<ProjectTotal>, hatchId: string): Array<Row> {
     project.projectId === null ? `url(#${hatchId})` : projectColorVar(project.color)
 
   const named = (project: ProjectTotal): string =>
-    project.projectId === null ? NO_PROJECT : project.name
+    project.projectId === null ? NO_PROJECT_LABEL : project.name
 
   if (projects.length <= MAX_BARS) {
     return projects.map((project) => ({

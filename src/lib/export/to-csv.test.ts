@@ -18,7 +18,6 @@ function rowsOf(titles: ReportRows["titles"]): ReportRows {
       billableMs: HOUR,
       billablePercent: 100,
       billableCents: 1_000,
-      unratedBillableMs: 0,
       unpriced: false,
       averageDailyMs: HOUR,
       count: 1,

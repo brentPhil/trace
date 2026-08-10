@@ -33,7 +33,6 @@ function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRow
     billableMs: 355_680_000,
     billablePercent: 100,
     billableCents: 98_800,
-    unratedBillableMs: 0,
     unpriced: false,
     averageDailyMs: 32_334_545,
     count: titleCount,
@@ -170,7 +169,7 @@ describe("reportPages", () => {
   it("qualifies the amount when some billable time was never priced", () => {
     const pages = reportPages(
       rowsWith(3, {
-        totals: { ...rowsWith(3).totals, unratedBillableMs: HOUR, unpriced: true },
+        totals: { ...rowsWith(3).totals, unpriced: true },
       })
     )
     expect(pages.flatMap(textOf)).toContain(

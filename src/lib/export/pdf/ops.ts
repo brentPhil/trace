@@ -111,17 +111,25 @@ const DM_SANS_BOLD_WIDTHS: Record<string, number> = {
  */
 const DEFAULT_ADVANCE = 570
 
+/** The 1/1000-em advance units a string sums to under `table` — `textWidth`
+ *  before the em-to-points conversion, and the shared core `wrapToWidth` and
+ *  `hardBreak` both accumulate in, so that division only ever happens once
+ *  per measured span (see the comment on `wrapToWidth`'s `spaceUnits`). */
+function advanceUnits(str: string, table: Record<string, number>): number {
+  let units = 0
+  for (const ch of str) {
+    units += table[ch] ?? DEFAULT_ADVANCE
+  }
+  return units
+}
+
 /** A string's width in points under the DM Sans this document actually
  *  embeds, matching what `render.ts`'s embedded TTFs will draw it at. Lets
  *  `report-doc.ts` measure text without importing pdf-lib and losing its
  *  purity. */
 export function textWidth(str: string, size: number, bold: boolean): number {
   const table = bold ? DM_SANS_BOLD_WIDTHS : DM_SANS_WIDTHS
-  let units = 0
-  for (const ch of str) {
-    units += table[ch] ?? DEFAULT_ADVANCE
-  }
-  return (units / 1000) * size
+  return (advanceUnits(str, table) / 1000) * size
 }
 
 /**
@@ -134,17 +142,26 @@ export function textWidth(str: string, size: number, bold: boolean): number {
  * small width) — the alternative, waiting for a character to "fit" a budget
  * that no character can, is what turns a bad column width into a hang
  * instead of a merely ugly page.
+ *
+ * Tracks a running unit total rather than re-measuring `current` from
+ * scratch on every character — the same O(n²) pattern `wrapToWidth` below
+ * was rewritten to avoid, just bounded by one word's length here instead of
+ * a whole line's, so it never showed up as a real cost.
  */
 function hardBreak(word: string, maxWidth: number, size: number, bold: boolean): Array<string> {
+  const table = bold ? DM_SANS_BOLD_WIDTHS : DM_SANS_WIDTHS
   const chunks: Array<string> = []
   let current = ""
+  let currentUnits = 0
   for (const ch of word) {
-    const candidate = current + ch
-    if (current !== "" && textWidth(candidate, size, bold) > maxWidth) {
+    const candidateUnits = currentUnits + (table[ch] ?? DEFAULT_ADVANCE)
+    if (current !== "" && (candidateUnits / 1000) * size > maxWidth) {
       chunks.push(current)
       current = ch
+      currentUnits = table[ch] ?? DEFAULT_ADVANCE
     } else {
-      current = candidate
+      current += ch
+      currentUnits = candidateUnits
     }
   }
   if (current !== "") chunks.push(current)
@@ -174,31 +191,43 @@ export function wrapToWidth(
 ): Array<string> {
   if (str === "") return [""]
 
-  // `textWidth` sums per-character advances with no kerning between them, so
-  // `textWidth(current) + textWidth(" ") + textWidth(piece)` is exactly (not
-  // approximately) `textWidth(`${current} ${piece}`)` — splitting the sum
-  // this way is what lets `currentWidth` be tracked incrementally instead of
+  const table = bold ? DM_SANS_BOLD_WIDTHS : DM_SANS_WIDTHS
+
+  // Accumulated as integer 1/1000-em UNITS, not points, and converted to
+  // points with ONE division at each comparison — not, as an earlier version
+  // of this comment claimed, by summing three already-converted point values
+  // (`textWidth(current) + textWidth(" ") + textWidth(piece)`). Converting
+  // each term separately and adding the results is not exact: `(units /
+  // 1000) * size` rounds per term, and three separately-rounded terms need
+  // not sum to the same float as one division over their combined units —
+  // they disagreed in roughly 3 of every 10 (word, space, word) triples,
+  // by 1 ULP, which is only cosmetic (it can only flip a `candidateWidth ===
+  // maxWidth` tie) but made the old comment's "exactly" false. Summing units
+  // first is what actually reproduces the single-measurement result bit for
+  // bit, while still tracking the running total incrementally instead of
   // re-measuring the whole growing line, character by character, for every
-  // word. That re-measurement was the O(words²) cost: a line N words long
-  // paid for its first word's characters N more times on the way to N+1.
-  const spaceWidth = textWidth(" ", size, bold)
+  // word — that re-measurement was the O(words²) cost this function replaced:
+  // a line N words long paid for its first word's characters N more times on
+  // the way to N+1.
+  const spaceUnits = advanceUnits(" ", table)
 
   const lines: Array<string> = []
   let current = ""
-  let currentWidth = 0
+  let currentUnits = 0
 
   for (const word of str.split(" ")) {
-    const wordWidth = textWidth(word, size, bold)
+    const wordUnits = advanceUnits(word, table)
+    const wordWidth = (wordUnits / 1000) * size
     const pieces = wordWidth > maxWidth ? hardBreak(word, maxWidth, size, bold) : [word]
 
     pieces.forEach((piece, pieceIndex) => {
-      // The common case (`pieces` is just `[word]`) reuses `wordWidth` rather
+      // The common case (`pieces` is just `[word]`) reuses `wordUnits` rather
       // than measuring `piece` again — the fix for the OTHER half of this
       // function's quadratic cost, where a word's width was measured once to
       // decide whether it needed hard-breaking and a second time as part of
       // the candidate line. A hard-broken piece has no such width in hand, so
       // it is measured once, here, and nowhere else.
-      const pieceWidth = pieces.length === 1 ? wordWidth : textWidth(piece, size, bold)
+      const pieceUnits = pieces.length === 1 ? wordUnits : advanceUnits(piece, table)
 
       // A piece past the first is a continuation of a hard-broken word, not a
       // new word — it must start its own line unconditionally (no leading
@@ -208,22 +237,22 @@ export function wrapToWidth(
       if (pieceIndex > 0) {
         lines.push(current)
         current = piece
-        currentWidth = pieceWidth
+        currentUnits = pieceUnits
         return
       }
       if (current === "") {
         current = piece
-        currentWidth = pieceWidth
+        currentUnits = pieceUnits
         return
       }
-      const candidateWidth = currentWidth + spaceWidth + pieceWidth
-      if (candidateWidth <= maxWidth) {
+      const candidateUnits = currentUnits + spaceUnits + pieceUnits
+      if ((candidateUnits / 1000) * size <= maxWidth) {
         current = `${current} ${piece}`
-        currentWidth = candidateWidth
+        currentUnits = candidateUnits
       } else {
         lines.push(current)
         current = piece
-        currentWidth = pieceWidth
+        currentUnits = pieceUnits
       }
     })
   }

@@ -34,8 +34,16 @@ export type Preset = "no-project" | "no-note" | "under-a-minute"
  * (src/components/history/filter-controls.tsx) — a native select has to carry a
  * literal string value. Two uncoupled spellings of a sentinel is how one of
  * them becomes `"none"` and the filter silently matches nothing.
+ *
+ * Named `NO_PROJECT_FILTER`, not `NO_PROJECT`, so it can never collide with
+ * `src/lib/report-series.ts`'s `NO_PROJECT_LABEL` — that one is the display
+ * string "No project", a different value for a different purpose (this is a
+ * sentinel a caller compares `projectId` against; that is text a reader
+ * sees). Sharing the name `NO_PROJECT` is what previously let
+ * `filter-controls.tsx` import this sentinel for its `<option value>` while
+ * hardcoding "No project" as the option's own text right beside it.
  */
-export const NO_PROJECT = ""
+export const NO_PROJECT_FILTER = ""
 
 export type EntryFilter = {
   projectId: string | null
@@ -86,7 +94,7 @@ export function matchesFilter(
   projectName: (id: string | undefined) => string
 ): boolean {
   if (filter.projectId !== null) {
-    const want = filter.projectId === NO_PROJECT ? undefined : filter.projectId
+    const want = filter.projectId === NO_PROJECT_FILTER ? undefined : filter.projectId
     if (entry.projectId !== want) return false
   }
 

@@ -8,6 +8,7 @@ import {
   localPartsOf,
   parseDayString,
   startOfDay,
+  weekStartOf,
   weekWindow,
   weekdayOf,
 } from "./day"
@@ -236,6 +237,58 @@ describe("weekdayOf", () => {
     expect(weekdayOf("2026-08-09")).toBe(0) // a Sunday
     expect(weekdayOf("2026-08-10")).toBe(1)
     expect(weekdayOf("2026-08-06")).toBe(4) // a Thursday
+  })
+})
+
+/*
+ * `weekStartOf` is `weekWindow`'s own `firstDay` computation, factored out —
+ * exercised above only transitively through `weekWindow`, which also builds
+ * two `startOfDay` instants no test here needs. Direct coverage so a break in
+ * just the offset arithmetic (not `startOfDay`) fails here, not two layers up
+ * in `entries.ts`'s breakdown, which is `weekStartOf`'s only caller.
+ */
+describe("weekStartOf", () => {
+  // 2026-08-06 is a Thursday (weekdayOf === 4, per the suite above), so its
+  // week start walks backward by a different number of days for every
+  // possible `weekStartDay`.
+  const THURSDAY = "2026-08-06"
+
+  it("finds the start for a Sunday-start week (weekStartDay 0)", () => {
+    expect(weekStartOf(THURSDAY, 0)).toBe("2026-08-02")
+  })
+
+  it("finds the start for a Monday-start week (weekStartDay 1)", () => {
+    expect(weekStartOf(THURSDAY, 1)).toBe("2026-08-03")
+  })
+
+  it("finds the start for a Tuesday-start week (weekStartDay 2)", () => {
+    expect(weekStartOf(THURSDAY, 2)).toBe("2026-08-04")
+  })
+
+  it("finds the start for a Wednesday-start week (weekStartDay 3)", () => {
+    expect(weekStartOf(THURSDAY, 3)).toBe("2026-08-05")
+  })
+
+  it("returns the day itself for a Thursday-start week (weekStartDay 4)", () => {
+    expect(weekStartOf(THURSDAY, 4)).toBe("2026-08-06")
+  })
+
+  it("finds the start for a Friday-start week (weekStartDay 5)", () => {
+    expect(weekStartOf(THURSDAY, 5)).toBe("2026-07-31")
+  })
+
+  it("finds the start for a Saturday-start week (weekStartDay 6)", () => {
+    expect(weekStartOf(THURSDAY, 6)).toBe("2026-08-01")
+  })
+
+  it("finds a week's start in the previous month, when the week spans a month boundary", () => {
+    // Saturday 1 Aug 2026, Monday-start week -> the week began Monday 27 Jul.
+    expect(weekStartOf("2026-08-01", 1)).toBe("2026-07-27")
+  })
+
+  it("finds a week's start in the previous year, when the week spans a year boundary", () => {
+    // Thursday 1 Jan 2026, Monday-start week -> the week began Monday 29 Dec 2025.
+    expect(weekStartOf("2026-01-01", 1)).toBe("2025-12-29")
   })
 })
 

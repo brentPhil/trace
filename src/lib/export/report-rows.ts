@@ -1,6 +1,6 @@
 import { addDays } from "@shared/day"
 import { TITLE_ROW_LIMIT } from "@shared/scan"
-import { NO_PROJECT, bucketDays, format } from "@/lib/report-series"
+import { NO_PROJECT_LABEL, bucketDays, format } from "@/lib/report-series"
 import type { Bucket, Breakdown, Granularity } from "@/lib/report-series"
 import type { DayString } from "@shared/day"
 
@@ -117,11 +117,10 @@ export type ReportRows = {
     billableMs: number
     billablePercent: number
     billableCents: number
-    unratedBillableMs: number
     /**
      * Whether `billableCents` above is a floor rather than the real figure —
      * the ONE derivation all three writers must read instead of each
-     * re-deciding it from `unratedBillableMs` (see the writers' own
+     * re-deciding it from `breakdown.unratedBillableMs` (see the writers' own
      * `moneyOr`/`amount`/`money` calls).
      *
      * `unratedBillableMs > 0` — ANY unrated billable time, not
@@ -274,7 +273,7 @@ export function reportRows(
   const averageDailyMs = daysWorked === 0 ? 0 : breakdown.totalMs / daysWorked
 
   const titles = breakdown.titles.map((row) => ({
-    project: row.project === "" ? NO_PROJECT : row.project,
+    project: row.project === "" ? NO_PROJECT_LABEL : row.project,
     description: row.title === "" ? NO_DESCRIPTION : row.title,
     weekStart: row.weekStart,
     totalMs: row.totalMs,
@@ -296,7 +295,6 @@ export function reportRows(
       billableMs: breakdown.billableMs,
       billablePercent: percentOf(breakdown.billableMs, breakdown.totalMs),
       billableCents: breakdown.billableCents,
-      unratedBillableMs: breakdown.unratedBillableMs,
       unpriced: breakdown.unratedBillableMs > 0,
       averageDailyMs,
       count: breakdown.count,
@@ -305,7 +303,7 @@ export function reportRows(
     },
     buckets,
     projects: breakdown.projects.map((project) => ({
-      name: project.name === "" ? NO_PROJECT : project.name,
+      name: project.name === "" ? NO_PROJECT_LABEL : project.name,
       color: project.color,
       totalMs: project.totalMs,
       percent: percentOf(project.totalMs, breakdown.totalMs),

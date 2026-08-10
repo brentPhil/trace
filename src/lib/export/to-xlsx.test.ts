@@ -17,7 +17,6 @@ const ROWS: ReportRows = {
     billableMs: 3 * HOUR,
     billablePercent: 100,
     billableCents: 3_000,
-    unratedBillableMs: 0,
     unpriced: false,
     averageDailyMs: 1.5 * HOUR,
     count: 2,
@@ -141,14 +140,14 @@ describe("xlsxSheets", () => {
   it("leaves an unpriced amount empty rather than writing a zero a pivot would sum", () => {
     const unpriced = {
       ...ROWS,
-      totals: { ...ROWS.totals, unratedBillableMs: 1, unpriced: true },
+      totals: { ...ROWS.totals, unpriced: true },
       titles: [{ ...ROWS.titles[0], billableCents: 0, unpriced: true }],
     }
     const breakdown = xlsxSheets(unpriced).find((s) => s.sheet === "Breakdown")!
     expect(breakdown.data[1][6]).toBeNull()
     // The TOTAL row has its own unpriced branch — money(rows.totals.billableCents,
-    // currency, rows.totals.unratedBillableMs > 0) — separate from the body row's,
-    // and asserting only the body row above left this one able to regress to `0`
+    // currency, rows.totals.unpriced) — separate from the body row's, and
+    // asserting only the body row above left this one able to regress to `0`
     // unseen.
     const total = breakdown.data.at(-1)!
     expect(total[6]).toBeNull()

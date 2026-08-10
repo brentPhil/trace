@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { percentOf, reportRows } from "./report-rows"
-import { NO_PROJECT } from "@/lib/report-series"
+import { NO_PROJECT_LABEL } from "@/lib/report-series"
 import type { Breakdown } from "@/lib/report-series"
 
 const HOUR = 3_600_000
@@ -124,8 +124,8 @@ describe("reportRows — projects and descriptions", () => {
       RANGE
     )
 
-    expect(rows.projects[0].name).toBe(NO_PROJECT)
-    expect(rows.titles[0].project).toBe(NO_PROJECT)
+    expect(rows.projects[0].name).toBe(NO_PROJECT_LABEL)
+    expect(rows.titles[0].project).toBe(NO_PROJECT_LABEL)
     // An untitled entry gets a stated placeholder too — an empty description
     // cell reads as a rendering fault, not as work nobody named.
     expect(rows.titles[0].description).toBe("(no description)")

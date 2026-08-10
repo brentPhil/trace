@@ -40,7 +40,7 @@ const BOTTOM = PAGE.margin
 //
 // `description` sits at LEFT + 100, not the wider LEFT + 120 this used to be.
 // This app's own project names are short ("Sealogs", "No project" — see
-// NO_PROJECT in report-series.ts) while descriptions are imported ticket
+// NO_PROJECT_LABEL in report-series.ts) while descriptions are imported ticket
 // titles that run long; a project column sized for names nobody has just
 // starves the column that actually needs the room. 100pt comfortably fits a
 // name like "Vessel Vanguard" (~78pt at the body size below) with room to
