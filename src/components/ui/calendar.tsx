@@ -3,6 +3,8 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { DayPicker, getDefaultClassNames } from "react-day-picker"
 import type { DayButton } from "react-day-picker"
 
+import { formatDayName } from "@/lib/format-time"
+import { weekdayLabels } from "@/lib/month-grid"
 import { cn } from "@/lib/utils"
 
 /**
@@ -68,23 +70,8 @@ function Calendar({
           "absolute inset-x-0 top-0 flex w-full items-center justify-between",
           defaultClassNames.nav
         ),
-        // `border-edge-raised` on both steppers: no fill of their own, sitting
-        // on the `bg-surface-raised` above, where `--edge` measures 2.60:1 and
-        // misses SC 1.4.11's 3:1. See src/styles.css.
-        button_previous: cn(
-          "touch-target rounded-md border border-edge-raised p-1 text-muted-foreground",
-          "transition-colors hover:text-foreground motion-reduce:transition-none",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          "aria-disabled:pointer-events-none aria-disabled:opacity-50",
-          defaultClassNames.button_previous
-        ),
-        button_next: cn(
-          "touch-target rounded-md border border-edge-raised p-1 text-muted-foreground",
-          "transition-colors hover:text-foreground motion-reduce:transition-none",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          "aria-disabled:pointer-events-none aria-disabled:opacity-50",
-          defaultClassNames.button_next
-        ),
+        button_previous: cn(MONTH_STEPPER, defaultClassNames.button_previous),
+        button_next: cn(MONTH_STEPPER, defaultClassNames.button_next),
         month_caption: cn(
           "flex h-8 items-center justify-center px-8 text-sm font-medium",
           defaultClassNames.month_caption
@@ -108,11 +95,12 @@ function Calendar({
         ...classNames,
       }}
       formatters={{
-        // 3-letter weekday abbreviations ("Sun", "Mon", …) to match
-        // `month-grid.ts`'s `weekdayLabels` — two calendars in this app must
-        // not disagree about how a weekday header reads. Stock formats
-        // `cccccc` (2-letter, e.g. "Mo").
-        formatWeekdayName: (date) => WEEKDAY_ABBR[date.getDay()],
+        // The very same labels `time-popover-fields.tsx`'s calendar draws —
+        // taken from `month-grid.ts` rather than restated, so the invariant is
+        // an import instead of a comment. Unrotated (`weekdayLabels(0)`) is
+        // Sunday-first, which is how `Date.prototype.getDay` indexes; stock
+        // formats `cccccc` (2-letter, e.g. "Mo").
+        formatWeekdayName: (date) => SUNDAY_FIRST_WEEKDAYS[date.getDay()],
         ...formatters,
       }}
       labels={{
@@ -134,33 +122,40 @@ function Calendar({
   )
 }
 
-const WEEKDAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+/**
+ * Both month steppers' classes, in one place.
+ *
+ * These were five identical lines typed twice in adjacent blocks, differing
+ * only in which `defaultClassNames` key they merged — which is how the
+ * `border-edge-raised` contrast fix had to be typed twice as well.
+ *
+ * `border-edge-raised` and not `--edge`: no fill of their own, sitting on the
+ * `bg-surface-raised` above, where `--edge` measures 2.60:1 and misses SC
+ * 1.4.11's 3:1. See src/styles.css.
+ */
+const MONTH_STEPPER = cn(
+  "touch-target rounded-md border border-edge-raised p-1 text-muted-foreground",
+  "transition-colors hover:text-foreground motion-reduce:transition-none",
+  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+  "aria-disabled:pointer-events-none aria-disabled:opacity-50"
+)
 
-/** Formats a day for a screen reader: "Wednesday 12 August 2026". */
-const dayNameFormatter = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "UTC",
-  weekday: "long",
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-})
+/** `["Sun", "Mon", …]` — unrotated, so the index is `getDay()`'s. */
+const SUNDAY_FIRST_WEEKDAYS = weekdayLabels(0)
 
 /**
  * Matches `time-popover-fields.tsx`'s day label exactly (weekday, no comma,
  * no ordinal suffix) rather than react-day-picker's stock `date-fns` "PPPP"
  * format ("Thursday, August 3rd, 2026") — one app should have one way a day
- * reads to a screen reader.
+ * reads to a screen reader. Both go through `formatDayName`.
  *
  * `date` here is a calendar-grid placeholder, not an instant tied to the
- * user's data — formatting it through a UTC-noon reconstruction of its LOCAL
- * y/m/d fields (the same trick `time-popover-fields.tsx` uses) is what keeps
- * this correct regardless of the browser's zone, without importing
- * `dayToDate`/`dateToDay` into a `ui/` primitive that has no business
- * knowing about `DayString`.
+ * user's data, so its LOCAL y/m/d fields are the date being named. Passing
+ * those three numbers keeps this out of `DayString` — which a `ui/` primitive
+ * has no business knowing about — while still sharing the formatter.
  */
 function dayButtonLabel(date: Date, modifiers: Record<string, boolean>): string {
-  const noon = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12))
-  let label = dayNameFormatter.format(noon)
+  let label = formatDayName(date.getFullYear(), date.getMonth() + 1, date.getDate())
   if (modifiers.today) label += ", today"
   if (modifiers.range_start) {
     label += ", start of range"
@@ -183,7 +178,6 @@ function CalendarDayButton({
   className,
   day,
   modifiers,
-  onKeyDown,
   ...props
 }: React.ComponentProps<typeof DayButton>) {
   const ref = React.useRef<HTMLButtonElement>(null)
@@ -199,27 +193,10 @@ function CalendarDayButton({
   const endpoint = modifiers.range_start || modifiers.range_end || single
   const inRangeMiddle = modifiers.range_middle && !endpoint
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    // react-day-picker's own handler (arrow/Home/End/PageUp/PageDown
-    // navigation) runs first.
-    onKeyDown?.(event)
-    if (event.defaultPrevented) return
-    if (event.key === "Enter" || event.key === " ") {
-      // A real browser synthesizes a click when Enter/Space fires on a
-      // focused native <button> — jsdom does not, so selecting a day by
-      // keyboard would silently work only in production and never under
-      // test. Triggering the click explicitly makes both agree, and is a
-      // no-op layered on top of what a real browser already does.
-      event.preventDefault()
-      event.currentTarget.click()
-    }
-  }
-
   return (
     <button
       ref={ref}
       type="button"
-      onKeyDown={handleKeyDown}
       // Today is already conveyed by the dot below and by ", today" in the
       // accessible name, which satisfies never-colour-alone on its own. This
       // is the conventional programmatic hook for it, and what an assistive

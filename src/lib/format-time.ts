@@ -48,6 +48,32 @@ export function formatShortDate(instantMs: number, timeZone: string): string {
   return dateFormatter(timeZone).format(new Date(instantMs))
 }
 
+// Locale pinned and the formatter built once, for the same reason as the two
+// above: constructing an `Intl.DateTimeFormat` is the expensive part, and
+// every day cell in every calendar in the app asks for one.
+const dayNameFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+})
+
+/**
+ * `Wednesday 12 August 2026` — the accessible name of a day cell, in both of
+ * the app's calendars (`ui/calendar.tsx` and `time-popover-fields.tsx`). One
+ * app should have one way a day reads to a screen reader.
+ *
+ * Takes the calendar date in pieces (`month` 1-based, as everywhere else here)
+ * rather than an instant, because that is what a grid cell IS: a date already
+ * decided, with no zone attached. Formatted through a UTC-noon reconstruction
+ * — noon is far enough from either boundary that no zone can shift the
+ * rendered weekday off the date it was given.
+ */
+export function formatDayName(year: number, month: number, day: number): string {
+  return dayNameFormatter.format(new Date(Date.UTC(year, month - 1, day, 12)))
+}
+
 /**
  * `09:12 – 10:58`, or `09:12 – …` while running.
  *

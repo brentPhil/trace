@@ -40,6 +40,26 @@ class NoopResizeObserver {
   NoopResizeObserver
 Element.prototype.scrollIntoView = function scrollIntoView() {}
 
+// A real browser synthesizes a `click` when Enter (or Space) fires on a
+// focused native <button>. jsdom does not, so any keyboard-activated button
+// looks inert under test even though it works in production — and the fix
+// used to live INSIDE `ui/calendar.tsx`, a shared primitive, where it
+// `preventDefault()`ed first and so REPLACED the browser's own synthesis
+// rather than layering on it. Shipped keyboard behaviour was defined by a
+// workaround for the test runner.
+//
+// Here it is what it always was: an emulation of the missing browser
+// behaviour, at the document level, for every button in the suite. No
+// `preventDefault` — nothing in jsdom needs suppressing — and skipped when a
+// handler further down already claimed the key (react-day-picker's grid
+// navigation does exactly that for the arrows).
+document.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented) return
+  if (event.key !== "Enter" && event.key !== " ") return
+  const target = event.target
+  if (target instanceof HTMLButtonElement) target.click()
+})
+
 // `@testing-library/jest-dom` is not a dependency of this project — no other
 // test file has needed a DOM-attribute matcher before. Rather than add a
 // package (risky here: the default install cache lives on `C:`, which this

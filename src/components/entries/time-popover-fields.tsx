@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { formatDayName } from "@/lib/format-time"
 import { addMonths, monthGrid, monthLabel, weekdayLabels } from "@/lib/month-grid"
 import { cn } from "@/lib/utils"
 import type { DayString } from "@shared/day"
@@ -214,15 +215,6 @@ function MonthButton({
   )
 }
 
-/** Formats a day for a screen reader: "Wednesday 12 August 2026". */
-const dayNameFormatter = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "UTC",
-  weekday: "long",
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-})
-
 function DayCell({
   day,
   selected,
@@ -233,10 +225,9 @@ function DayCell({
   onPick: () => void
 }) {
   const [year, month, date] = day.split("-").map(Number)
-  // Formatted from a UTC noon instant: the calendar date is already decided,
-  // and noon is far enough from either boundary that no zone can shift the
-  // rendered weekday off it. Same trick as the day headers in the log.
-  const label = dayNameFormatter.format(new Date(Date.UTC(year, month - 1, date, 12)))
+  // "Wednesday 12 August 2026" — shared with `ui/calendar.tsx`, the app's
+  // other date grid, so the two cannot disagree about how a day reads out.
+  const label = formatDayName(year, month, date)
 
   return (
     <button
