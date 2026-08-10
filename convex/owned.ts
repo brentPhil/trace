@@ -8,7 +8,14 @@ import type { MutationCtx, QueryCtx } from "./_generated/server"
  * `userSettings` is excluded deliberately: it is looked up BY user rather than
  * by id, so there is never an id from the client to verify.
  */
-const OWNED_TABLES = ["timeEntries", "projects", "tags", "clients"] as const
+const OWNED_TABLES = [
+  "timeEntries",
+  "projects",
+  "tags",
+  "clients",
+  "invoices",
+  "invoiceLines",
+] as const
 type OwnedTable = (typeof OWNED_TABLES)[number]
 
 /** Every owned row carries these two, whatever else it holds. */
@@ -108,5 +115,9 @@ function label(table: OwnedTable): string {
       return "tag"
     case "clients":
       return "client"
+    case "invoices":
+      return "invoice"
+    case "invoiceLines":
+      return "invoice line"
   }
 }

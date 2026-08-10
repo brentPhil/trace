@@ -104,6 +104,62 @@ export const tagFields = {
   deletedAt: v.union(v.number(), v.null()),
 }
 
+export const invoiceFields = {
+  userId: v.string(),
+  /** UUIDv7 minted client-side before the mutation is sent — the same
+   *  idempotency device `timeEntries.clientKey` uses. A retry after a lost
+   *  response must not mint a second invoice number. */
+  clientKey: v.string(),
+  number: v.string(),
+  status: v.union(v.literal("draft"), v.literal("issued"), v.literal("paid")),
+  clientId: v.union(v.id("clients"), v.null()),
+  /** SNAPSHOT of the client's block at creation, not a join. Renaming a client
+   *  must not rewrite last year's invoices; `clientId` beside it is what still
+   *  answers "show me everything billed to Vessel Vanguard". */
+  billedTo: v.string(),
+  payTo: v.string(),
+  /** Snapshot. `userSettings.currency` may change; this invoice may not. */
+  currency: v.string(),
+  issuedAt: v.number(),
+  dueAt: v.number(),
+  purchaseOrder: v.optional(v.string()),
+  paymentTerms: v.optional(v.string()),
+  notes: v.optional(v.string()),
+  /** Ordered, applied to the subtotal in order. `basisPoints` rather than a
+   *  percentage float: 8.25% is 825, and no tax line is ever the result of
+   *  0.1 + 0.2. */
+  taxes: v.array(v.object({ label: v.string(), basisPoints: v.number() })),
+  /** Provenance: which range built this. NEVER read to recompute anything — it
+   *  exists so a human can ask where the figures came from. */
+  sourceFromMs: v.union(v.number(), v.null()),
+  sourceToMs: v.union(v.number(), v.null()),
+  updatedAt: v.number(),
+  deletedAt: v.union(v.number(), v.null()),
+}
+
+export const invoiceLineFields = {
+  userId: v.string(),
+  invoiceId: v.id("invoices"),
+  kind: v.union(v.literal("time"), v.literal("custom")),
+  description: v.string(),
+  /** Hundredths of an hour. 98.8 h is 9880. An integer, never a float — the
+   *  same reason money is held in cents. */
+  quantityCentis: v.number(),
+  unitCents: v.number(),
+  /** STORED, not derived at render. Deriving it would make a printed document
+   *  a function of today's rounding rules rather than of the day it was
+   *  raised. */
+  amountCents: v.number(),
+  /** Provenance only. Never read for money. */
+  projectId: v.optional(v.id("projects")),
+  sortKey: v.number(),
+  /** Unused: `invoiceLines` is hard-deleted with its parent invoice, never
+   *  soft-deleted on its own. Carried anyway so every OWNED_TABLES row has the
+   *  same shape and `owned.ts`'s `getOwned` keeps ONE code path rather than a
+   *  second one for the tables without it. */
+  deletedAt: v.union(v.number(), v.null()),
+}
+
 /**
  * The index Convex cannot build over `timeEntries.tagIds`.
  *
@@ -153,6 +209,16 @@ export default defineSchema({
   ]),
 
   tags: defineTable(tagFields).index("by_user_name", ["userId", "name"]),
+
+  invoices: defineTable(invoiceFields)
+    .index("by_user_number", ["userId", "number"])
+    .index("by_user_clientKey", ["userId", "clientKey"])
+    .index("by_user_issued", ["userId", "issuedAt"]),
+
+  invoiceLines: defineTable(invoiceLineFields).index("by_user_invoice", [
+    "userId",
+    "invoiceId",
+  ]),
 
   /**
    * Which one-off data migrations have finished.

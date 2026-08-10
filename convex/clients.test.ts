@@ -26,8 +26,30 @@ async function expectCode(promise: Promise<unknown>, code: string): Promise<void
 describe("clients", () => {
   it("rejects anonymous callers on every public function", async () => {
     const t = setup()
+    // A REAL id belonging to a real user. A made-up string fails argument
+    // validation before the handler runs, so the call never reaches the auth
+    // check and the test would pass without proving anything about it.
+    const { clientId } = await t.mutation(internal.clients.createAs, {
+      userId: ALICE, name: "Acme", address: "",
+    })
+
+    // Named "every", and it means every. An earlier version of this test
+    // covered two of them, which read as a complete sweep to anyone auditing
+    // coverage by test name — the most expensive kind of gap, because it looks
+    // closed.
     await expectCode(t.query(api.clients.list, {}), "UNAUTHENTICATED")
-    await expectCode(t.mutation(api.clients.create, { name: "Acme", address: "" }), "UNAUTHENTICATED")
+    await expectCode(
+      t.mutation(api.clients.create, { name: "Acme", address: "" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.clients.update, { clientId, name: "Stolen" }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.clients.setArchived, { clientId, archived: true }),
+      "UNAUTHENTICATED"
+    )
   })
 
   it("never returns another user's clients", async () => {
