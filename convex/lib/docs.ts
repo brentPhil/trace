@@ -1,5 +1,12 @@
 import { v } from "convex/values"
-import { clientFields, projectFields, tagFields, timeEntryFields } from "../schema"
+import {
+  clientFields,
+  invoiceFields,
+  invoiceLineFields,
+  projectFields,
+  tagFields,
+  timeEntryFields,
+} from "../schema"
 
 /**
  * `returns` validators for the public queries that hand back whole documents.
@@ -36,4 +43,16 @@ export const clientDoc = v.object({
   _id: v.id("clients"),
   _creationTime: v.number(),
   ...clientFields,
+})
+
+export const invoiceDoc = v.object({
+  _id: v.id("invoices"),
+  _creationTime: v.number(),
+  ...invoiceFields,
+})
+
+export const invoiceLineDoc = v.object({
+  _id: v.id("invoiceLines"),
+  _creationTime: v.number(),
+  ...invoiceLineFields,
 })

@@ -800,8 +800,17 @@ function bucket<K>(buckets: Map<K, Ledger>, key: K): Ledger {
  * every bar drawn from these groupings are the same arithmetic over the same
  * rows. The alternative (a second query per chart) is four independent chances
  * to disagree with the sentence above them, at four times the read cost.
+ *
+ * EXPORTED for `invoices.createFromRangeImpl` (convex/invoices.ts), which
+ * calls this directly with a `MutationCtx` rather than re-scanning: a second
+ * scan is a second rounding rule, and an invoice that disagrees with the
+ * /reports page it was raised from is the one disagreement this product
+ * cannot afford. Typechecks unmodified — `MutationCtx["db"]` is a
+ * `DatabaseWriter`, which structurally satisfies the `DatabaseReader` this
+ * function's `ctx: QueryCtx` parameter declares, so a mutation can pass its own
+ * ctx straight through with no cast.
  */
-async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: BreakdownArgs) {
+export async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: BreakdownArgs) {
   if (!isValidTimeZone(args.timeZone)) {
     traceError("INVALID_TIMEZONE", `"${args.timeZone}" is not a timezone I know.`)
   }

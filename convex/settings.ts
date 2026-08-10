@@ -98,6 +98,20 @@ export async function defaultRateCents(
   return row?.defaultHourlyRateCents ?? null
 }
 
+/**
+ * The user's currency, or the default when nobody has opened /settings.
+ *
+ * Its own tiny reader for the same reason `defaultRateCents` is one:
+ * `invoices.createFromRangeImpl` needs to SNAPSHOT this onto an invoice at
+ * creation (`invoiceFields.currency`) without pulling the whole settings row's
+ * meaning into that file, and without a second, hand-copied fallback to
+ * `SETTINGS_DEFAULTS.currency` drifting from this one.
+ */
+export async function currencyOf(ctx: QueryCtx, userId: string): Promise<string> {
+  const row = await readSettings(ctx, userId)
+  return row?.currency ?? SETTINGS_DEFAULTS.currency
+}
+
 export const get = query({
   args: {},
   returns: settingsReturns,

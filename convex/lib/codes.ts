@@ -63,6 +63,15 @@ export type TraceErrorCode =
    *  the name came from a file rather than a field, so there is no input to
    *  send anyone back to. */
   | "INVALID_PROJECT_NAME"
+  /** A range too large for `rangeBreakdownImpl` to total exactly. Refused
+   *  outright rather than invoiced as a floor: every figure on a truncated
+   *  /reports is a floor, and a floor on an invoice under-bills a client by an
+   *  unknown amount with nothing on the document to reveal it. */
+  | "RANGE_TOO_LARGE"
+  /** A range whose billable time touches more than one client's projects.
+   *  Refused rather than merged: silently combining them bills one company
+   *  for another company's work, on one document, with one total. */
+  | "MIXED_CLIENTS"
 
 export type TraceErrorData = {
   code: TraceErrorCode
