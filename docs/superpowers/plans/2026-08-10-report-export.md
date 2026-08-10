@@ -1138,7 +1138,11 @@ export function toCsv(rows: ReportRows): string {
     "",
     formatClock(rows.totals.totalMs),
     formatDecimalHours(rows.totals.totalMs),
-    String(rows.totals.billablePercent === 0 ? 0 : 100),
+    // Checked against TOTAL DURATION, which is what this column measures —
+    // NOT `billablePercent`. A range can be entirely non-billable and still
+    // hold many hours, and branching on the billable share printed `0` here
+    // beneath title rows that correctly summed to 100.
+    String(rows.totals.totalMs === 0 ? 0 : 100),
     amount(rows.totals.billableCents, rows.totals.unratedBillableMs > 0),
     currency,
   ])
