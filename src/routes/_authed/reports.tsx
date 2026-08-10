@@ -508,7 +508,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                 <>
                   {" "}
                   {unpricedAll ? (
-                    "None of it is priced: no hourly rate is set for that work."
+                    "None of it is priced: no rate is set for that work, and no default rate either."
                   ) : (
                     <>
                       <strong className="font-medium tabular text-foreground">
@@ -518,11 +518,23 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                         )}
                       </strong>{" "}
                       of that is unpriced and is not in the amount above: no
-                      hourly rate is set for it.
+                      rate is set for it, and no default rate either.
                     </>
                   )}{" "}
+                  {/*
+                    BOTH places, because there are now two and they answer
+                    different questions. A project rate is "this client pays
+                    X"; the default is "my rate is X" — and the default is the
+                    only one that can reach billable time with no project at
+                    all, which is exactly the time this sentence is usually
+                    about.
+                  */}
                   <Link to="/projects" className="underline underline-offset-2">
-                    Set rates on Projects
+                    Set a rate on Projects
+                  </Link>
+                  , or{" "}
+                  <Link to="/settings" className="underline underline-offset-2">
+                    a default in Settings
                   </Link>
                   .
                 </>

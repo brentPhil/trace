@@ -11,6 +11,7 @@ import { timeEntryDoc } from "./lib/docs"
 import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
 import { dayOf, isValidTimeZone, localPartsOf } from "./lib/day"
 import { isFilterActive, matchesFilter } from "./lib/entryFilter"
+import { defaultRateCents } from "./settings"
 import type { EntryFilter } from "./lib/entryFilter"
 import type { EntryTimes, TimeEdit, TimesResult } from "./lib/entryTimes"
 import type { Doc, Id } from "./_generated/dataModel"
@@ -528,16 +529,31 @@ async function projectsOf(
 /**
  * The rate to price a row at, or `null` when nobody has set one.
  *
- * Zero-rate projects are NOT null. `hourlyRateCents: 0` is a price somebody set
- * on purpose (pro bono), and it is the distinction `unratedBillableMs` exists
- * to carry.
+ * THE MOST GRANULAR RATE WINS: the project's own, then the account's fallback
+ * (`userSettings.defaultHourlyRateCents`), then nothing. That is the same
+ * resolution order Toggl uses, where a workspace rate is "used as your default
+ * billable rate unless you add a workspace member, project or project member
+ * rate" — and it is what makes billable time with NO PROJECT priceable at all.
+ * Before the fallback existed, a freelancer on one rate had to file their own
+ * standups under a client to get paid for them, and 2h24m of real billable time
+ * silently sat outside the total with only a footnote to explain it.
+ *
+ * Zero is NOT null, at either level. `hourlyRateCents: 0` is a price somebody
+ * set on purpose (pro bono), and it is the distinction `unratedBillableMs`
+ * exists to carry — so a zero-rate PROJECT still overrides a non-zero account
+ * default, rather than falling through to it. `??` rather than `||` is what
+ * makes that true, and it is the whole reason this is not a one-liner.
  */
 function rateOf(
   row: Pick<Doc<"timeEntries">, "projectId">,
-  projects: Map<Id<"projects">, Doc<"projects">>
+  projects: Map<Id<"projects">, Doc<"projects">>,
+  accountRateCents: number | null
 ): number | null {
-  if (row.projectId === undefined) return null
-  return projects.get(row.projectId)?.hourlyRateCents ?? null
+  if (row.projectId !== undefined) {
+    const projectRate = projects.get(row.projectId)?.hourlyRateCents
+    if (projectRate !== undefined) return projectRate
+  }
+  return accountRateCents
 }
 
 /**
@@ -569,9 +585,10 @@ async function rangeSummaryImpl(
    * `if (row.billable)` branch.
    */
   const projects = await projectsOf(ctx, live.filter((row) => row.billable))
+  const accountRate = await defaultRateCents(ctx, userId)
 
   const ledger = emptyLedger()
-  for (const row of live) post(ledger, row, rateOf(row, projects))
+  for (const row of live) post(ledger, row, rateOf(row, projects, accountRate))
 
   return {
     totalMs: ledger.totalMs,
@@ -730,6 +747,7 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
 
   const { truncated, live } = await scanRange(ctx, userId, args.fromMs, args.toMs)
   const projectDocs = await projectsOf(ctx, live)
+  const accountRate = await defaultRateCents(ctx, userId)
 
   const filter: EntryFilter = {
     projectId: args.projectId ?? null,
@@ -752,7 +770,7 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
   const hours = Array.from({ length: 24 }, () => 0)
 
   for (const row of rows) {
-    const rateCents = rateOf(row, projectDocs)
+    const rateCents = rateOf(row, projectDocs, accountRate)
     post(total, row, rateCents)
     post(bucket(byDay, dayOf(row.startedAt, args.timeZone)), row, rateCents)
     post(bucket(byProject, row.projectId ?? ""), row, rateCents)

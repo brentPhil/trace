@@ -6,8 +6,9 @@ import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
+import { rateHelp } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
-import { supportedCurrencies } from "@shared/money"
+import { formatMoney, parseMoney, supportedCurrencies } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 
 export const Route = createFileRoute("/_authed/settings")({
@@ -174,6 +175,26 @@ function Settings() {
           />
         </Section>
 
+        {/*
+          THE FALLBACK, not "the" rate. A project's own rate always wins; this
+          is what prices everything no project rate covers — including billable
+          time with no project at all, which was previously unpriceable however
+          billable it was, and showed up on /reports only as a footnote saying
+          so. Toggl resolves rates the same way and calls this the workspace
+          rate: the most granular rate wins, and this is the least granular one
+          there is.
+        */}
+        <Section
+          title="Default hourly rate"
+          hint="Used for billable time that no project rate covers — including entries with no project, like a standup. A project with its own rate always overrides this, and a project set to 0.00 really does mean unpaid rather than falling back here. Leave it blank and that time stays unpriced, and /reports says so rather than counting it as nothing."
+        >
+          <RateField
+            cents={settings.defaultHourlyRateCents}
+            currency={settings.currency}
+            onChange={(defaultHourlyRateCents) => save({ defaultHourlyRateCents })}
+          />
+        </Section>
+
         <Section
           title="Tab title"
           hint="Announced by screen readers whenever it changes, which is why it can be switched off. It updates once a minute rather than once a second for the same reason."
@@ -268,6 +289,90 @@ function TimezoneField({
  * first render only bought a fallback that could not follow `value` if the
  * stored currency changed underneath it.
  */
+/**
+ * The account's fallback rate, as an amount in the user's own currency.
+ *
+ * Commits on blur and on Enter rather than on every keystroke, unlike the
+ * selects and checkboxes on this page: a rate is typed a character at a time,
+ * and saving "1", then "10", then "100" would write three rates and re-price
+ * every historical report twice on the way to the one the user meant.
+ *
+ * EMPTY CLEARS IT, and that is a real state rather than zero — `null` on the
+ * wire, an absent field in the row. "Nobody has priced this" and "priced at
+ * nothing" are different facts, and `unratedBillableMs` on /reports exists to
+ * tell them apart.
+ */
+function RateField({
+  cents,
+  currency,
+  onChange,
+}: {
+  cents: number | undefined
+  currency: string
+  onChange: (cents: number | null) => void
+}) {
+  // Seeded with the bare number, no currency symbol, so the input round-trips
+  // through `parseMoney` cleanly — the DISPLAY is where a symbol belongs. The
+  // same split /projects makes for a project's own rate.
+  const [text, setText] = useState(cents === undefined ? "" : (cents / 100).toFixed(2))
+  const [error, setError] = useState<string | null>(null)
+
+  const commit = () => {
+    // `currency` is passed so the user's OWN sign and ISO code are strippable
+    // noise rather than a parse failure — an SGD user pasting "S$10" back out
+    // of a figure this app rendered for them. Empty input is `parseMoney`'s own
+    // `{ ok: true, cents: null }`, so "clear it" comes through the same parser
+    // as every other value rather than being special-cased ahead of it.
+    const parsed = parseMoney(text, currency)
+    if (!parsed.ok) {
+      setError(rateHelp(currency))
+      return
+    }
+    setError(null)
+    if (parsed.cents === null) {
+      setText("")
+      onChange(null)
+      return
+    }
+    setText((parsed.cents / 100).toFixed(2))
+    onChange(parsed.cents)
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <input
+          aria-label="Default hourly rate"
+          aria-invalid={error !== null}
+          aria-describedby={error === null ? undefined : "default-rate-error"}
+          value={text}
+          placeholder="No rate"
+          onChange={(event) => setText(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur()
+            if (event.key === "Escape") {
+              setError(null)
+              setText(cents === undefined ? "" : (cents / 100).toFixed(2))
+            }
+          }}
+          className={cn(fieldClass, "w-32 tabular", error !== null && "border-alarm")}
+        />
+        <span className="text-sm text-muted-foreground">
+          per hour
+          {cents === undefined ? null : ` · ${formatMoney(cents, currency)}`}
+        </span>
+      </div>
+      {/* The colour is never the only carrier — see DESIGN.md on error states. */}
+      {error === null ? null : (
+        <p id="default-rate-error" role="alert" className="text-xs text-alarm">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function CurrencyField({
   value,
   onChange,

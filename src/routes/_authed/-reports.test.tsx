@@ -751,7 +751,9 @@ describe("Reports — the Summary tab", () => {
     }, "summary")
 
     expect(screen.queryByText(/\$/)).toBeNull()
-    expect(screen.getByText("no rate set")).toBeTruthy()
+    // Names where to fix it, now that a rate can come from a project OR the
+    // account default in Settings.
+    expect(screen.getByText("no rate set — see Settings")).toBeTruthy()
 
     dateSpy.mockRestore()
   })

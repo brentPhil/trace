@@ -90,7 +90,7 @@ export function SummaryPanel({
           money={!unpricedAll}
           note={
             unpricedAll
-              ? "no rate set"
+              ? "no rate set — see Settings"
               : unpricedSome
                 ? `${formatTotal(breakdown.unratedBillableMs, display)} unpriced`
                 : undefined

@@ -2,6 +2,7 @@ import { v } from "convex/values"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { traceError } from "./errors"
+import { checkRate } from "./projects"
 import { isValidTimeZone } from "./lib/day"
 import { isValidCurrency } from "./lib/money"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
@@ -30,6 +31,9 @@ export type Settings = {
    *  user whose currency is not USD (e.g. because their timezone is
    *  `Asia/Singapore`) can say so. */
   currency: string
+  /** The account's fallback hourly rate, in cents, or absent when nobody has
+   *  set one. See the schema — absent is not zero. */
+  defaultHourlyRateCents?: number
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -51,6 +55,7 @@ async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
 
 const settingsReturns = v.object({
   timezone: v.string(),
+  defaultHourlyRateCents: v.optional(v.number()),
   weekStartDay: v.number(),
   durationDisplay: v.union(v.literal("hms"), v.literal("decimal")),
   timeFormat: v.union(v.literal("12"), v.literal("24")),
@@ -64,6 +69,7 @@ async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
   if (row === null) return SETTINGS_DEFAULTS
   return {
     timezone: row.timezone,
+    defaultHourlyRateCents: row.defaultHourlyRateCents,
     weekStartDay: row.weekStartDay,
     durationDisplay: row.durationDisplay,
     timeFormat: row.timeFormat,
@@ -74,6 +80,22 @@ async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
     // state rather than one worth a backfill migration.
     currency: row.currency ?? SETTINGS_DEFAULTS.currency,
   }
+}
+
+/**
+ * The account's fallback hourly rate, or null when nobody has set one.
+ *
+ * Its own tiny reader so `entries.rangeSummary` can price billable time that no
+ * project rate covers without pulling the whole settings row's meaning into
+ * that file — and so there is one place that turns "field absent" into "null",
+ * which is the shape the rate resolution in convex/entries.ts branches on.
+ */
+export async function defaultRateCents(
+  ctx: QueryCtx,
+  userId: string
+): Promise<number | null> {
+  const row = await readSettings(ctx, userId)
+  return row?.defaultHourlyRateCents ?? null
 }
 
 export const get = query({
@@ -150,6 +172,10 @@ const updateArgs = {
   runawayThresholdMs: v.optional(v.number()),
   tabTitleClock: v.optional(v.boolean()),
   currency: v.optional(v.string()),
+  /** `null` CLEARS it, `undefined` leaves it alone — the same three-state
+   *  shape `projects.update` uses for the same field, because "set it to
+   *  nothing" and "do not touch it" are different requests. */
+  defaultHourlyRateCents: v.optional(v.union(v.number(), v.null())),
 }
 
 type UpdateArgs = {
@@ -160,6 +186,7 @@ type UpdateArgs = {
   runawayThresholdMs?: number
   tabTitleClock?: boolean
   currency?: string
+  defaultHourlyRateCents?: number | null
 }
 
 async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
@@ -187,8 +214,26 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
     )
   }
 
+  checkRate(args.defaultHourlyRateCents)
+
   const row = await readSettings(ctx, userId)
-  const patch = { ...args, updatedAt: Date.now() }
+  /*
+   * `null` has to become `undefined` before it reaches the patch, and the field
+   * has to be LIFTED OUT of the spread to do it — a conditional override on top
+   * of `...args` still carries `null` in the type, and would store one.
+   *
+   * A stored null is not the same state as an absent field: the schema's
+   * `v.optional(v.number())` rejects it, and it would mean "cleared" and "never
+   * set" were two different values in the table for one fact.
+   */
+  const { defaultHourlyRateCents, ...rest } = args
+  const patch = {
+    ...rest,
+    ...(defaultHourlyRateCents === undefined
+      ? {}
+      : { defaultHourlyRateCents: defaultHourlyRateCents ?? undefined }),
+    updatedAt: Date.now(),
+  }
   if (row === null) {
     await ctx.db.insert("userSettings", { userId, ...SETTINGS_DEFAULTS, ...patch })
   } else {

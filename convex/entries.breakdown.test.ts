@@ -409,3 +409,129 @@ describe("rangeBreakdown — the FilterBar, applied server-side", () => {
     expect(result.hours[3]).toBe(0)
   })
 })
+
+describe("the account's default hourly rate", () => {
+  /*
+   * THE FALLBACK, and the reason it exists.
+   *
+   * A rate used to live only on a project, so billable time with NO project
+   * could never be priced however billable it was — a freelancer on one rate
+   * had to file their own standups under a client to get paid for them, and
+   * 2h24m of real work sat outside the total with a footnote to explain it.
+   *
+   * Resolution is most-granular-wins, the same order Toggl uses: the project's
+   * own rate, then the account's, then nothing.
+   */
+  const setRate = async (t: ReturnType<typeof setup>, cents: number | null) => {
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      defaultHourlyRateCents: cents,
+    })
+  }
+
+  it("prices billable time with no project at all", async () => {
+    const t = setup()
+    await setRate(t, 1_000) // $10/hr
+    await entry(t, { startedAt: MON + 9 * HOUR, billable: true })
+
+    const result = await breakdown(t)
+    expect(result.billableCents).toBe(1_000)
+    // Priced, so it is no longer "billable work nobody has valued".
+    expect(result.unratedBillableMs).toBe(0)
+  })
+
+  it("prices a project that has no rate of its own", async () => {
+    const t = setup()
+    await setRate(t, 1_000)
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Unrated Co",
+    })
+    await entry(t, { startedAt: MON + 9 * HOUR, projectId, billable: true })
+
+    expect((await breakdown(t)).billableCents).toBe(1_000)
+  })
+
+  it("lets a project's own rate win over it", async () => {
+    const t = setup()
+    await setRate(t, 1_000)
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+      hourlyRateCents: 6_100, // $61/hr
+    })
+    await entry(t, { startedAt: MON + 9 * HOUR, projectId, billable: true })
+
+    expect((await breakdown(t)).billableCents).toBe(6_100)
+  })
+
+  /*
+   * The case that makes `??` load-bearing rather than a style choice. A project
+   * priced at zero is a DECISION — pro bono — and falling through to the
+   * account rate would silently bill a client the user chose not to charge.
+   */
+  it("lets a project priced at ZERO win over it, rather than falling through", async () => {
+    const t = setup()
+    await setRate(t, 1_000)
+    const { projectId } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Pro Bono Co",
+      hourlyRateCents: 0,
+    })
+    await entry(t, { startedAt: MON + 9 * HOUR, projectId, billable: true })
+
+    const result = await breakdown(t)
+    expect(result.billableCents).toBe(0)
+    // Priced at nothing, NOT unpriced — the distinction the whole
+    // `unratedBillableMs` field exists to carry.
+    expect(result.unratedBillableMs).toBe(0)
+  })
+
+  it("leaves time unpriced when neither the project nor the account has a rate", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + 9 * HOUR, billable: true })
+
+    const result = await breakdown(t)
+    expect(result.billableCents).toBe(0)
+    expect(result.unratedBillableMs).toBe(HOUR)
+  })
+
+  it("stops applying once the rate is cleared", async () => {
+    const t = setup()
+    await setRate(t, 1_000)
+    await entry(t, { startedAt: MON + 9 * HOUR, billable: true })
+    expect((await breakdown(t)).billableCents).toBe(1_000)
+
+    // `null` clears it. An absent field and a stored zero are different facts.
+    await setRate(t, null)
+    const cleared = await breakdown(t)
+    expect(cleared.billableCents).toBe(0)
+    expect(cleared.unratedBillableMs).toBe(HOUR)
+  })
+
+  it("refuses a rate that is not a whole number of cents", async () => {
+    const t = setup()
+    await expectCode(
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        defaultHourlyRateCents: Number.NaN,
+      }),
+      "INVALID_RATE"
+    )
+  })
+
+  it("reaches rangeSummary too, not only the charts", async () => {
+    const t = setup()
+    await setRate(t, 1_000)
+    await entry(t, { startedAt: MON + 9 * HOUR, billable: true })
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      fromMs: RANGE.fromMs,
+      toMs: RANGE.toMs,
+    })
+    // The sentence above the charts and the charts themselves price the same
+    // hour the same way, or the page contradicts itself.
+    expect(summary.billableCents).toBe(1_000)
+  })
+})

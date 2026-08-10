@@ -178,6 +178,16 @@ export default defineSchema({
      *  billable amount on /reports are displayed — never assume `$`, a
      *  freelancer's stored timezone says nothing about their currency. */
     currency: v.optional(v.string()),
+    /** The account's fallback hourly rate, in cents.
+     *
+     *  Applies to billable time that no project rate covers — including time
+     *  with NO project, which was previously unpriceable however billable it
+     *  was. Toggl calls this the workspace rate and resolves the same way:
+     *  the most granular rate wins, and this is the least granular one there
+     *  is. Optional, and ABSENT rather than zero when unset — "nobody has
+     *  priced this" and "priced at nothing" are different facts, and
+     *  `unratedBillableMs` exists to tell them apart. */
+    defaultHourlyRateCents: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 })

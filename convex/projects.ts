@@ -67,8 +67,13 @@ export const MAX_RATE_CENTS = Math.min(
  *
  * `undefined` and `null` are not rates and are not checked here: they mean
  * "not supplied" and "clear it" respectively, which the callers handle.
+ *
+ * Exported because `userSettings.defaultHourlyRateCents` is the same kind of
+ * number with the same ceiling, and a second copy of this check is a second
+ * place for NaN to get in. It stays HERE, beside `MAX_RATE_CENTS`, because the
+ * ceiling and the rule that enforces it are one fact.
  */
-function checkRate(cents: number | null | undefined): void {
+export function checkRate(cents: number | null | undefined): void {
   if (cents === undefined || cents === null) return
   if (!Number.isInteger(cents)) {
     // Catches NaN and both infinities as well as 10.5 — `Number.isInteger` is
