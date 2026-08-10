@@ -81,6 +81,26 @@ describe("xlsxSheets", () => {
     expect(first[3]).toEqual({ value: 3, type: Number, format: "0.00" })
   })
 
+  /*
+   * 8h 11m 42s (29_502_000 ms) is 8.195 hours unfloored but 8.19 floored — the
+   * two diverge exactly when a bare `ms / HOUR` division and `centiHours()`
+   * round different ways. `format: "0.00"` only makes Excel ROUND the cell for
+   * display; the underlying `value` an unfloored `hours()` would write is
+   * 8.195, which Excel shows as 8.20. The same entry then reads 8.20 in this
+   * workbook and 8.19 in the CSV exported from identical data — two documents
+   * in one email that disagree, which is the failure this export pipeline
+   * exists to prevent.
+   */
+  it("floors the hours it writes, so the workbook never shows more time than the CSV for the same entry", () => {
+    const floored = {
+      ...ROWS,
+      titles: [{ ...ROWS.titles[0], totalMs: 29_502_000, centiHours: 819 }],
+    }
+    const breakdown = xlsxSheets(floored).find((s) => s.sheet === "Breakdown")!
+    const [, first] = breakdown.data
+    expect((first[3] as { value: number }).value).toBe(8.19)
+  })
+
   it("writes amounts as currency-formatted numbers, not strings", () => {
     const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
@@ -99,10 +119,34 @@ describe("xlsxSheets", () => {
   it("leaves an unpriced amount empty rather than writing a zero a pivot would sum", () => {
     const unpriced = {
       ...ROWS,
+      totals: { ...ROWS.totals, unratedBillableMs: 1 },
       titles: [{ ...ROWS.titles[0], billableCents: 0, unpriced: true }],
     }
     const breakdown = xlsxSheets(unpriced).find((s) => s.sheet === "Breakdown")!
     expect(breakdown.data[1][5]).toBeNull()
+    // The TOTAL row has its own unpriced branch — money(rows.totals.billableCents,
+    // currency, rows.totals.unratedBillableMs > 0) — separate from the body row's,
+    // and asserting only the body row above left this one able to regress to `0`
+    // unseen.
+    const total = breakdown.data.at(-1)!
+    expect(total[5]).toBeNull()
+  })
+
+  /*
+   * `to-csv.ts` writes `rows.totals.totalMs === 0 ? 0 : 100` for this cell, for
+   * exactly this reason: a range with nothing in it has nothing to be 100% of.
+   * A hardcoded 100 here would export 100% in the workbook and 0% in the CSV
+   * from identical data.
+   */
+  it("writes the TOTAL row's percent as 0 for an empty range, matching the CSV's 0-not-100", () => {
+    const empty = {
+      ...ROWS,
+      totals: { ...ROWS.totals, totalMs: 0 },
+      titles: [],
+    }
+    const breakdown = xlsxSheets(empty).find((s) => s.sheet === "Breakdown")!
+    const total = breakdown.data.at(-1)!
+    expect(total[4]).toEqual({ value: 0, type: Number, format: "0.00" })
   })
 
   it("says out loud when the description list was capped", () => {

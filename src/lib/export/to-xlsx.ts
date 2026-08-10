@@ -1,5 +1,5 @@
 import { parseDayString } from "@shared/day"
-import { formatClock } from "@shared/duration"
+import { centiHours, formatClock } from "@shared/duration"
 import { TITLE_CAP_NOTE, UNPRICED_NOTE } from "./report-rows"
 import type { ReportRows } from "./report-rows"
 // The package has no default "." export — only "/node", "/browser",
@@ -25,9 +25,18 @@ import type { SheetData } from "write-excel-file/browser"
 
 const BOLD = { fontWeight: "bold" } as const
 
-/** A duration in HOURS, as a number a spreadsheet can sum. */
+/**
+ * A duration in HOURS, as a number a spreadsheet can sum.
+ *
+ * Floored through `centiHours`, not `ms / 3_600_000`. `format: "0.00"` only
+ * makes Excel ROUND the raw value for display — it does not floor it — so an
+ * unfloored value here can render as MORE time than was recorded. 8h 11m 42s
+ * is 8.195 unfloored, which Excel shows as 8.20, while the CSV exported from
+ * the same entry prints 8.19: two documents in the same email disagreeing
+ * about the same duration.
+ */
 function hours(ms: number) {
-  return { value: ms / 3_600_000, type: Number, format: "0.00" } as const
+  return { value: centiHours(ms) / 100, type: Number, format: "0.00" } as const
 }
 
 /**
@@ -142,7 +151,11 @@ function breakdownSheet(rows: ReportRows): SheetData {
       null,
       text(formatClock(rows.totals.totalMs), true),
       hours(rows.totals.totalMs),
-      { value: 100, type: Number, format: "0.00" } as const,
+      {
+        value: rows.totals.totalMs === 0 ? 0 : 100,
+        type: Number,
+        format: "0.00",
+      } as const,
       money(
         rows.totals.billableCents,
         currency,
