@@ -66,15 +66,13 @@ export function DayList({
             )}
           >
             {/*
-              `max-w-log px-4`, exactly as `EntryRow` does it, so the day label
-              starts on the same pixel as the entry titles underneath it. The
-              padding lives HERE and not on the header, because the header's
-              background and border are meant to stay full-bleed — and because
-              a cap measured inside a padded parent lands somewhere different
-              from the same cap measured inside an unpadded one, which is how
-              the label ended up twelve pixels left of its own rows.
+              `w-full px-4`, exactly as `EntryRow` does it, so the day label
+              starts on the same pixel as the entry titles underneath it and
+              the day total lands on the same right edge as their durations.
+              The padding lives HERE and not on the header, because the
+              header's background and border are meant to stay full-bleed.
             */}
-            <div className="flex w-full max-w-log items-baseline justify-between gap-3 px-4">
+            <div className="flex w-full items-baseline justify-between gap-3 px-4">
               <div className="flex items-baseline gap-3">
                 <h2 className="text-sm font-semibold">{group.label}</h2>
                 {/*
@@ -198,9 +196,9 @@ export function LogSkeleton() {
         {[0, 1].map((group) => (
           <div key={group} className="flex flex-col">
             <div className="border-b border-edge-soft py-2">
-              {/* Same `max-w-log px-4` as the header it stands in for, so the
+              {/* Same `w-full px-4` as the header it stands in for, so the
                   page does not shift sideways when the real rows arrive. */}
-              <div className="flex w-full max-w-log items-baseline justify-between gap-3 px-4">
+              <div className="flex w-full items-baseline justify-between gap-3 px-4">
                 <Skeleton className="h-4 w-32" />
                 <Skeleton className="h-4 w-14" />
               </div>
@@ -208,7 +206,7 @@ export function LogSkeleton() {
             <div className="flex flex-col">
               {[0, 1, 2].map((row) => (
                 <div key={row} className="border-b border-edge-soft">
-                  <div className="flex h-[50px] w-full max-w-log items-center gap-3 px-4">
+                  <div className="flex h-[50px] w-full items-center gap-3 px-4">
                     <Skeleton className="h-4 flex-1 max-w-64" />
                     <Skeleton className="h-4 w-16 shrink-0" />
                   </div>

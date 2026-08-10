@@ -92,24 +92,26 @@
 
   --radius: 0.45rem;
 
-  /* THE MEASURE. Two of them, defined once, because three pages have to agree
-   * on where a line of content starts and ends and a repeated `max-w-[1100px]`
-   * literal is three chances for them to drift. Exposed as `max-w-log` and
-   * `max-w-form` below.
+  /* THE MEASURE. One of them, and it is for FORMS only.
    *
-   * Every capped block is LEFT-FLUSH, never `mx-auto`. Centring makes the left
-   * edge a function of the page's own cap — 1100px on the log, 46rem on the
-   * forms — so /timer's rows and /settings' fields would start in two
-   * different places, and neither would line up with the timer bar, which sits
-   * in the shell and belongs to no page. Left-flush gives one edge from the
-   * sidebar rail down through every page.
+   * The log surfaces — the timer bar, /timer's totals and filter band, the day
+   * headers, the entry rows, /reports' summary — take the full width and are
+   * capped by nothing. They are a TABLE: the title takes what is left after
+   * the trailing cluster pins right, which is what a wide row is supposed to
+   * look like. A measure was tried here for one release and produced a dead
+   * band of page to the right of every row instead.
    *
-   * --log-measure: the log is a TABLE. It wants width for the title and the
-   *   note, and stops before a four-word title and the classifier cluster are
-   *   a thousand pixels apart at 1600.
-   * --form-measure: a column of labelled controls (/projects, /settings). A
-   *   reading measure, not a table. */
-  --log-measure: 1100px;
+   * `--form-measure` is a column of labelled controls (/projects, /settings) —
+   * a reading measure, where a long line really is harder to read. Defined
+   * once because two pages have to agree on it, and exposed as `max-w-form`
+   * below.
+   *
+   * Capped or not, every block is LEFT-FLUSH, never `mx-auto`. Centring makes
+   * the left edge a function of the page's own cap, so /settings' fields would
+   * start somewhere /timer's rows do not, and neither would line up with the
+   * timer bar, which sits in the shell and belongs to no page. Left-flush plus
+   * a shared `px-4` gives one edge from the sidebar rail down through every
+   * page. */
   --form-measure: 46rem;
 
   --sidebar: var(--surface);
@@ -140,10 +142,8 @@
   --color-brass: var(--brass);
   --color-alarm: var(--alarm);
 
-  /* `max-w-log` / `max-w-form`. Tailwind builds its width utilities from the
-   * `--container-*` namespace, so naming them here is what turns the two
-   * measures above into classes. */
-  --container-log: var(--log-measure);
+  /* `max-w-form`. Tailwind builds its width utilities from the `--container-*`
+   * namespace, so naming it here is what turns the measure above into a class. */
   --container-form: var(--form-measure);
 
   --color-sidebar-ring: var(--sidebar-ring);

@@ -143,10 +143,10 @@ export function Timer() {
         `justify-between` used to put this cluster hard left and "+ Add
         entry" at the far right — opposite corners of a 1344px+ row, for a
         button whose entire reason to exist is "I forgot to start the timer",
-        prompted BY the numbers to its left. Capped and adjacent instead, so
-        the control sits next to the totals it relates to.
+        prompted BY the numbers to its left. Adjacent instead, so the control
+        sits next to the totals it relates to however wide the page gets.
       */}
-      <div className="flex w-full max-w-log items-center gap-4 pr-4">
+      <div className="flex w-full items-center gap-4 px-4">
         <TotalsRow
           className="py-3"
           todayMs={totals.todayMs}
@@ -163,12 +163,12 @@ export function Timer() {
 
       {/*
         The band is full-bleed — it is a strip of the page, like a day header —
-        but its CONTROLS take the log measure, so the search box starts on the
-        same pixel as the entry titles below it and the totals above it. It was
-        the one thing on this page that did neither.
+        and its CONTROLS take the same `px-4` gutter as everything else, so the
+        search box starts on the same pixel as the entry titles below it and
+        the totals above it. It was the one thing on this page that did neither.
       */}
       <div className="border-y border-edge-soft bg-surface py-2.5">
-        <div className="w-full max-w-log px-4">
+        <div className="w-full px-4">
           <FilterControls filters={filters} projects={projects} onChange={setFilters} />
         </div>
       </div>

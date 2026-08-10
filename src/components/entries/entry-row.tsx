@@ -85,17 +85,17 @@ export function EntryRow({
       )}
     >
       {/*
-        The row's CONTENT is capped at `max-w-log` and left-flush; the outer
-        element above keeps the full-bleed border and hover fill, so the log
-        still reads as edge-to-edge bands. Uncapped, the title/note column that
-        grows to fill whatever room it is given spent the extra width on gap
-        rather than on either — measured at 1600px as ~1000px of nothing
-        between a four-word title and the classifier cluster.
+        Full width, left-flush, `px-4` for the gutter — the same pair the day
+        header above and the timer bar in the shell use, so three files that
+        cannot see each other put the left edge in the same place.
 
-        `max-w-log` + `px-4` is the exact pair the day header above and the
-        timer bar in the shell both use, and that is the whole point of it
-        being a token: three files have to put the left edge in the same place
-        and none of them can see the other two.
+        This content was capped at a 1100px measure for exactly one release.
+        The argument for the cap was that the title column grows to fill
+        whatever it is given and spends the extra on gap: ~1000px between a
+        four-word title and the classifier cluster at 1600. That is true, and
+        it is also what a table row looks like — the trailing cluster pins
+        right, the title takes the rest. The cap traded that gap for a dead
+        band of page to the right of every row, which reads worse.
 
         4 + 20 + 2 + 20 + 4 = the 50px the row is specified at, so `min-h` is a
         floor the content sits exactly on rather than a number it fights. The
@@ -103,7 +103,7 @@ export function EntryRow({
         written note does not — left to size themselves, a day of mixed rows
         would ripple by two pixels down the whole column.
       */}
-      <div className="flex min-h-[50px] w-full max-w-log items-center gap-2 px-4">
+      <div className="flex min-h-[50px] w-full items-center gap-2 px-4">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
           <div className="flex min-w-0 items-center gap-1.5">
             <EditableTitle

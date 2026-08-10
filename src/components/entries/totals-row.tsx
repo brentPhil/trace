@@ -28,7 +28,12 @@ export function TotalsRow({
       className={cn(
         // A tighter gap on narrow screens, so "Today" and "This week" share a
         // line at 375px instead of each taking one.
-        "flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 text-sm sm:gap-x-6",
+        //
+        // No horizontal padding of its own: the page's `px-4` gutter is the
+        // page's business, and carrying it here meant /timer had to compensate
+        // with `pr-4` to avoid doubling the left inset. A second caller would
+        // have inherited a gutter that was never about it.
+        "flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm sm:gap-x-6",
         className
       )}
     >

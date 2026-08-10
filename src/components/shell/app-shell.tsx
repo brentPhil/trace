@@ -64,14 +64,13 @@ export function AppShell({
                 there and ⌘B toggles it. */}
             <SidebarTrigger className="shrink-0 md:hidden" />
             {/*
-              `max-w-log`: the bar takes the same measure as the log below it
-              (src/styles.css). It is the one control on screen that belongs to
-              no page, so nothing else can cap it — and left uncapped its title
-              input began at x≈16 while every entry title beneath it began at
-              x≈262 on a 1600px viewport. The title you type into and the title
-              you read back are the same field; they line up.
+              Uncapped, like the log below it. The bar is the one control on
+              screen that belongs to no page, so what matters is that it takes
+              the SAME width as the rows beneath it — the title you type into
+              and the title you read back are the same field, and they line up.
+              Both are now full-bleed, so they still do.
             */}
-            <div className="min-w-0 max-w-log flex-1">{timer}</div>
+            <div className="min-w-0 flex-1">{timer}</div>
           </div>
 
           {/*
@@ -86,15 +85,16 @@ export function AppShell({
             room for.
 
             THE ALIGNMENT CONTRACT, and where it lives. The shell caps and pads
-            nothing here. Every page instead caps its own content at one of the
-            two measures in src/styles.css (`max-w-log` for the log surfaces,
-            `max-w-form` for /projects and /settings) and applies its own
-            `px-4`, left-flush. The timer bar above does the same. That is what
+            nothing here. Every page instead applies its own `px-4`, left-flush,
+            and the timer bar above does the same — that shared gutter is what
             keeps the bar's title input, the totals, the filter band, the day
-            labels and the entry titles on one left edge — an inset here would
+            labels and the entry titles on one left edge. An inset here would
             offset the pages by 8px against the bar, which is not in this
-            container. Backgrounds, borders and hover fills stay on the
-            uncapped parents, so the log still reads as edge-to-edge bands.
+            container. The log surfaces take the full width; only /projects and
+            /settings cap themselves, at `max-w-form` (src/styles.css), because
+            a column of labelled controls is prose and the log is a table.
+            Backgrounds, borders and hover fills stay on the padded content's
+            parents, so the log still reads as edge-to-edge bands.
           */}
           <div className="flex w-full flex-1 flex-col">{children}</div>
 

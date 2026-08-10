@@ -261,10 +261,9 @@ export function Reports() {
 
   return (
     <div className="flex flex-col">
-      {/* `max-w-log`, the same measure the rows below it take — see
-          src/styles.css. Uncapped, the filter row and the totals sentence ran
-          the full 1600px while every row beneath them stopped at 1100. */}
-      <div className="flex w-full max-w-log flex-col gap-3 px-4 py-3">
+      {/* `w-full px-4`, the same pair the rows below it take, so the filter
+          row and the totals sentence share their left and right edges. */}
+      <div className="flex w-full flex-col gap-3 px-4 py-3">
         <FilterBar
           filters={filters}
           projects={projects}
