@@ -158,10 +158,24 @@ async function ensureProject(
 /**
  * Removes everything a previous import added, and nothing else.
  *
- * `source: "import"` is the whole reason this can exist. Soft-deletes, like
- * every other delete in the product, so an import undone in haste is still
- * recoverable — and so the undo cannot outrun the entryTags rows that point at
- * these entries.
+ * `source: "import"` is the whole reason this can exist — it is the only thing
+ * distinguishing sixty imported rows from sixty typed ones. Projects, tags and
+ * settings are untouched: the project an import attached itself to almost
+ * certainly predates it, and deleting a rate the user configured because their
+ * import was wrong would be its own small disaster.
+ *
+ * HARD delete, unlike every other delete in this product, and the exception is
+ * the point. The reason to undo an import is to run a better one, and
+ * `createImpl` dedupes on `clientKey` WITHOUT regard to `deletedAt` — so a
+ * soft-deleted row silently turns the retry into a no-op, reporting "replayed"
+ * for entries the user can no longer see. An undo that quietly prevents the
+ * thing it exists to enable is worse than no undo. The rows are reconstructible
+ * from the file they came from, which is what makes the hard delete affordable
+ * here and nowhere else.
+ *
+ * The entryTags join rows go FIRST, so a run that exhausts its budget partway
+ * leaves the index describing rows that still exist rather than rows that are
+ * gone — the same ordering, for the same reason, as `maintenance.purgeUser`.
  *
  * Bounded, and reports what is left, so the caller loops rather than hitting
  * the transaction ceiling on a large import.
@@ -175,12 +189,19 @@ export const undoImport = internalMutation({
       .query("timeEntries")
       .withIndex("by_user_started", (q) => q.eq("userId", args.userId))
       .collect()
-    const imported = rows.filter((r) => r.source === "import" && r.deletedAt === null)
+    const imported = rows.filter((r) => r.source === "import")
 
-    const now = Date.now()
     let deleted = 0
     for (const row of imported.slice(0, limit)) {
-      await ctx.db.patch(row._id, { deletedAt: now, updatedAt: now })
+      const joins = await ctx.db
+        .query("entryTags")
+        .withIndex("by_user_entry", (q) =>
+          q.eq("userId", args.userId).eq("entryId", row._id)
+        )
+        .collect()
+      for (const join of joins) await ctx.db.delete(join._id)
+
+      await ctx.db.delete(row._id)
       deleted++
     }
     return { deleted, remaining: imported.length - deleted }

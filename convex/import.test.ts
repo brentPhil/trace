@@ -256,17 +256,75 @@ describe("undoImport", () => {
   })
 
   /**
-   * Soft-delete, like every other delete here. An import undone in haste is
-   * still recoverable, and the entryTags rows pointing at these entries do not
-   * become dangling.
+   * The property the undo exists for, and the one a soft delete silently broke.
+   *
+   * `createImpl` dedupes on `clientKey` without looking at `deletedAt`, so
+   * soft-deleting left the keys claimed: the retry reported "replayed" for
+   * every row and inserted nothing, and the user was left staring at an empty
+   * log wondering why their re-import did nothing.
    */
-  it("soft-deletes rather than dropping the rows", async () => {
+  it("frees the clientKeys, so the same batch can be imported again", async () => {
+    const t = setup()
+    const batch = { userId: ALICE, entries: [entry(0), entry(1)] }
+
+    await t.mutation(internal.import.importEntries, batch)
+    await t.mutation(internal.import.undoImport, { userId: ALICE })
+    const retry = await t.mutation(internal.import.importEntries, batch)
+
+    expect(retry.inserted).toBe(2)
+    expect(retry.replayed).toBe(0)
+  })
+
+  it("hard-deletes rather than leaving tombstones behind", async () => {
     const t = setup()
     await t.mutation(internal.import.importEntries, { userId: ALICE, entries: [entry(0)] })
     await t.mutation(internal.import.undoImport, { userId: ALICE })
 
     const rows = await t.run(async (ctx) => await ctx.db.query("timeEntries").collect())
-    expect(rows).toHaveLength(1)
-    expect(rows[0]?.deletedAt).not.toBeNull()
+    expect(rows).toHaveLength(0)
+  })
+
+  /** The project and its rate predate the import and must survive it. */
+  it("leaves projects, and their rates, alone", async () => {
+    const t = setup()
+    await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Sealogs",
+      hourlyRateCents: 1000,
+    })
+    await t.mutation(internal.import.importEntries, {
+      userId: ALICE,
+      projectName: "Sealogs",
+      entries: [entry(0)],
+    })
+
+    await t.mutation(internal.import.undoImport, { userId: ALICE })
+
+    const projects = await t.run(async (ctx) =>
+      (await ctx.db.query("projects").collect()).filter((p) => p.deletedAt === null)
+    )
+    expect(projects).toHaveLength(1)
+    expect(projects[0]?.hourlyRateCents).toBe(1000)
+  })
+
+  /** A half-finished undo must not leave the join index describing dead rows. */
+  it("drops the entryTags join rows with the entries", async () => {
+    const t = setup()
+    const tag = await t.mutation(internal.tags.ensureAs, { userId: ALICE, name: "meeting" })
+    await t.mutation(internal.import.importEntries, { userId: ALICE, entries: [entry(0)] })
+    const row = await t.run(async (ctx) => await ctx.db.query("timeEntries").first())
+    await t.mutation(internal.entries.updateAs, {
+      userId: ALICE,
+      entryId: row!._id,
+      tagIds: [tag.tagId],
+    })
+    expect(
+      await t.run(async (ctx) => (await ctx.db.query("entryTags").collect()).length)
+    ).toBe(1)
+
+    await t.mutation(internal.import.undoImport, { userId: ALICE })
+
+    const joins = await t.run(async (ctx) => await ctx.db.query("entryTags").collect())
+    expect(joins).toHaveLength(0)
   })
 })
