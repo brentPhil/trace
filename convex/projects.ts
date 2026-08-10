@@ -3,6 +3,7 @@ import { internalMutation, internalQuery, mutation, query } from "./_generated/s
 import { requireUserId } from "./auth"
 import { getOwned } from "./owned"
 import { traceError } from "./errors"
+import { MAX_DURATION_MS } from "./lib/duration"
 import { ENTRY_SCAN_LIMIT } from "./lib/scan"
 import { projectDoc } from "./lib/docs"
 import { DEFAULT_PROJECT_COLOR, isProjectColor, suggestProjectColor } from "./lib/palette"
@@ -17,12 +18,39 @@ const MAX_NAME_LENGTH = 120
  *
  * A ceiling rather than no ceiling, for the same reason MAX_NAME_LENGTH exists
  * — past some point the input is a typo, and a typo that lands is permanent.
- * This particular value also keeps the money arithmetic EXACT: a single entry
- * is capped at 24h (DURATION_TOO_LONG), so `durationMs * hourlyRateCents` tops
- * out at 86,400,000 * 100,000,000 = 8.64e15, inside JavaScript's 9.007e15
- * exact-integer range. See `rangeSummaryImpl` in convex/entries.ts.
+ *
+ * DERIVED rather than chosen, so the arithmetic invariant behind it is
+ * executable instead of a sentence in a comment. `rangeSummaryImpl` in
+ * convex/entries.ts accumulates `durationMs * hourlyRateCents` as an integer,
+ * and a single entry is capped at 24h (DURATION_TOO_LONG) — so one entry's
+ * term stays inside JavaScript's 9.007e15 exact-integer range exactly when the
+ * rate is at or below `MAX_SAFE_INTEGER / MAX_DURATION_MS`, which is
+ * 104,249,991. The product ceiling of 1,000,000.00 is lower and is what
+ * actually binds; writing the other bound down is what stops a future change
+ * to `MAX_DURATION_MS` silently invalidating it. Three files, one invariant,
+ * and now only one of them states it.
+ *
+ * WHAT THIS DOES NOT COVER, said plainly because the previous version of this
+ * comment read as though it did. The bound is per ENTRY. `rangeSummaryImpl`
+ * SUMS that term over every row in a range — up to `SUMMARY_SCAN_LIMIT` of
+ * them — and the sum has no such ceiling. It leaves the exact-integer range
+ * once one query's billable time passes about 25 hours at the maximum rate, or
+ * about 25,000 hours at a more plausible 1,000.00 an hour.
+ *
+ * That is not a live bug, and the reason is worth recording rather than
+ * rediscovering. Past 2^53 the sum is not garbage, it is QUANTISED: the error
+ * is bounded by roughly one unit in the last place per addition, and the total
+ * is divided by 3,600,000 before being rounded to a cent. Even at the absurd
+ * ceiling — `SUMMARY_SCAN_LIMIT` entries of 24 hours each at the maximum rate,
+ * a range worth 120 billion — that is single-digit cents against a figure of
+ * 1.2e13 cents. At any plausible magnitude it is orders of magnitude under the
+ * half-cent that could flip the rounded total, which is the same residual the
+ * rounding rule in convex/entries.ts already accepts by name.
  */
-const MAX_RATE_CENTS = 100_000_000
+export const MAX_RATE_CENTS = Math.min(
+  100_000_000,
+  Math.floor(Number.MAX_SAFE_INTEGER / MAX_DURATION_MS)
+)
 
 /**
  * Validates an hourly rate server-side.

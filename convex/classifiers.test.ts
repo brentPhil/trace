@@ -13,6 +13,8 @@ import schema from "./schema"
 import { api, internal } from "./_generated/api"
 import { isTraceError, traceErrorCode } from "./lib/codes"
 import type { TraceErrorData } from "./lib/codes"
+import { MAX_DURATION_MS } from "./lib/duration"
+import { MAX_RATE_CENTS } from "./projects"
 import { PROJECT_COLORS } from "./lib/palette"
 import { ENTRY_SCAN_LIMIT } from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
@@ -373,6 +375,25 @@ describe("projects", () => {
         const rows = await t.query(internal.projects.listAs, { userId: ALICE })
         expect(rows[0].hourlyRateCents).toBe(cents)
       }
+    })
+
+    /*
+     * The rate ceiling is one arithmetic invariant spread over three files:
+     * `MAX_RATE_CENTS` here, `MAX_DURATION_MS` in convex/lib/duration.ts, and
+     * the `billableCentMs` accumulator in convex/entries.ts. It was stated only
+     * in prose, so raising the 24-hour cap would have silently invalidated it
+     * with nothing failing. `MAX_RATE_CENTS` is derived from the other two now;
+     * this pins the derivation and the value it currently lands on.
+     */
+    it("keeps a 24-hour entry at the maximum rate inside the exact-integer range", () => {
+      expect(MAX_RATE_CENTS).toBe(100_000_000)
+      const worstEntry = MAX_RATE_CENTS * MAX_DURATION_MS
+      expect(Number.isSafeInteger(worstEntry)).toBe(true)
+      // And the derivation is what makes that true, not a coincidence: one
+      // cent more per hour than the derived bound would leave the range.
+      const derivedCeiling = Math.floor(Number.MAX_SAFE_INTEGER / MAX_DURATION_MS)
+      expect(MAX_RATE_CENTS).toBeLessThanOrEqual(derivedCeiling)
+      expect(Number.isSafeInteger((derivedCeiling + 1) * MAX_DURATION_MS)).toBe(false)
     })
 
     it("still treats null as clearing the rate rather than an invalid one", async () => {
