@@ -5,6 +5,13 @@
       "name": "trace",
       "port": 3000,
       "url": "http://localhost:3000"
+    },
+    {
+      "name": "trace-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["exec", "vite", "dev", "--port", "3101", "--host", "127.0.0.1"],
+      "port": 3101,
+      "url": "http://localhost:3101"
     }
   ]
 }

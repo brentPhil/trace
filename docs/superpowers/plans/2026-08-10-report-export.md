@@ -2205,15 +2205,31 @@ export const PAPER = {
  * throwing: a project colour added to `convex/lib/palette.ts` later must not
  * break an export of last year's work.
  */
+/*
+ * All twelve keys of `convex/lib/palette.ts`, and exactly those.
+ *
+ * DERIVED, not invented: each is the app's own `--project-*` oklch from
+ * src/styles.css — every one of which is `oklch(0.72 C H)`, tuned for a dark
+ * room — re-rendered at L = 0.55 for white paper, keeping its chroma and hue.
+ * The trailing figure is the result's contrast against white; the floor for a
+ * filled shape is 3:1 (WCAG 2.2 SC 1.4.11) and the worst here is 4.51:1.
+ *
+ * L = 0.55 is the LIGHTEST value that clears 4.5:1 across all twelve, so it
+ * keeps as much of each hue's identity as legibility allows.
+ */
 const PROJECT_INK: Record<string, Rgb> = {
-  amber: [0.72, 0.51, 0.12],
-  sage: [0.36, 0.51, 0.36],
-  slate: [0.36, 0.44, 0.53],
-  clay: [0.68, 0.40, 0.31],
-  plum: [0.50, 0.36, 0.53],
-  moss: [0.44, 0.50, 0.28],
-  denim: [0.29, 0.40, 0.60],
-  rust: [0.65, 0.36, 0.20],
+  slate: [0.412, 0.450, 0.491], // 4.84:1
+  rose: [0.687, 0.299, 0.377], // 5.20:1
+  coral: [0.690, 0.317, 0.225], // 5.15:1
+  amber: [0.655, 0.359, 0.0], // 5.05:1
+  olive: [0.462, 0.465, 0.102], // 4.77:1
+  moss: [0.265, 0.515, 0.208], // 4.61:1
+  sage: [0.233, 0.508, 0.373], // 4.64:1
+  teal: [0.0, 0.525, 0.455], // 4.51:1
+  cyan: [0.0, 0.512, 0.535], // 4.59:1
+  indigo: [0.363, 0.411, 0.739], // 5.00:1
+  violet: [0.494, 0.366, 0.696], // 5.12:1
+  plum: [0.607, 0.323, 0.585], // 5.20:1
 }
 
 export function paperColorFor(paletteKey: string): Rgb {
@@ -2221,10 +2237,12 @@ export function paperColorFor(paletteKey: string): Rgb {
 }
 ```
 
-> **Note for the implementer:** open `convex/lib/palette.ts` and make
-> `PROJECT_INK`'s keys exactly its key set. If a key there has no entry above,
-> add one at roughly 45–55% lightness in the same hue. Do not delete the
-> fallback.
+> **Note for the implementer:** the twelve keys above ARE
+> `convex/lib/palette.ts`'s key set as of this plan — verified, not assumed.
+> Add a test asserting `PROJECT_COLORS.every((key) => key in PROJECT_INK)`, so a
+> colour added to the palette later fails a test rather than silently rendering
+> grey in an exported chart. Do not delete the fallback: it is what keeps an
+> export of last year's work rendering after such an addition.
 
 - [ ] **Step 5: Write `ops.ts`**
 
