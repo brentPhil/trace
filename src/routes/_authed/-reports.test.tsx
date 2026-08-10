@@ -4,6 +4,7 @@ import { getFunctionName } from "convex/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Reports, breakdownArgs } from "@/routes/_authed/reports"
+import { Toast, ToastViewport } from "@/components/ui/toast"
 import { defaultFilters, rangeOf, stepPeriod } from "@/lib/history-filters"
 import {
   convexKey,
@@ -252,15 +253,23 @@ function renderReports(
   render(
     <QueryClientProvider client={queryClient}>
       {/*
-        The router itself wraps every routed component in a Suspense boundary
-        with no fallback of its own configured for /reports — this stand-in
-        makes that boundary visible so a regression that still suspends shows
-        up as a fallback replacing the page, exactly like the reported bug,
-        rather than an opaque React error.
+        `Toast.Provider`, matching `RootComponent` in routes/__root.tsx — this
+        route is not mounted under it here, and `ExportMenu` calls
+        `Toast.useToastManager()` unconditionally.
       */}
-      <Suspense fallback={<div data-testid="suspense-fallback">Loading…</div>}>
-        <Reports />
-      </Suspense>
+      <Toast.Provider>
+        {/*
+          The router itself wraps every routed component in a Suspense boundary
+          with no fallback of its own configured for /reports — this stand-in
+          makes that boundary visible so a regression that still suspends shows
+          up as a fallback replacing the page, exactly like the reported bug,
+          rather than an opaque React error.
+        */}
+        <Suspense fallback={<div data-testid="suspense-fallback">Loading…</div>}>
+          <Reports />
+        </Suspense>
+        <ToastViewport />
+      </Toast.Provider>
     </QueryClientProvider>
   )
   if (view === "detailed") {

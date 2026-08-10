@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { ExportMenu } from "@/components/reports/export-menu"
+import { Toast, ToastViewport } from "@/components/ui/toast"
 import type { Breakdown } from "@/lib/report-series"
+import type { ComponentProps } from "react"
 
 /*
  * `fireEvent`, not `@testing-library/user-event`, and plain assertions rather
@@ -48,9 +50,22 @@ const PROPS = {
   currency: "USD",
 }
 
+// `ExportMenu` reads `Toast.useToastManager()`, which throws with no
+// ancestor `Toast.Provider` — the same wrapper `RootComponent` supplies app
+// wide (see routes/__root.tsx) and `note-sheet.test.tsx` copies for the same
+// reason.
+function renderMenu(props: ComponentProps<typeof ExportMenu>) {
+  return render(
+    <Toast.Provider>
+      <ExportMenu {...props} />
+      <ToastViewport />
+    </Toast.Provider>
+  )
+}
+
 describe("ExportMenu", () => {
   it("offers exactly the three formats", async () => {
-    render(<ExportMenu {...PROPS} disabledReason={null} />)
+    renderMenu({ ...PROPS, disabledReason: null })
 
     fireEvent.click(screen.getByRole("button", { name: /export/i }))
 
@@ -67,13 +82,11 @@ describe("ExportMenu", () => {
    * after a click that appeared to work.
    */
   it("refuses a truncated range, and says why on the control itself", () => {
-    render(
-      <ExportMenu
-        {...PROPS}
-        breakdown={{ ...BREAKDOWN, truncated: true }}
-        disabledReason="This period is too large to total exactly. Narrow the dates."
-      />
-    )
+    renderMenu({
+      ...PROPS,
+      breakdown: { ...BREAKDOWN, truncated: true },
+      disabledReason: "This period is too large to total exactly. Narrow the dates.",
+    })
 
     const trigger = screen.getByRole("button", { name: /export/i })
     expect((trigger as HTMLButtonElement).disabled).toBe(true)
@@ -97,7 +110,7 @@ describe("ExportMenu", () => {
       revokeObjectURL: () => {},
     })
 
-    render(<ExportMenu {...PROPS} disabledReason={null} />)
+    renderMenu({ ...PROPS, disabledReason: null })
     fireEvent.click(screen.getByRole("button", { name: /export/i }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "CSV" }))
 
@@ -107,5 +120,35 @@ describe("ExportMenu", () => {
 
     vi.unstubAllGlobals()
     click.mockRestore()
+  })
+
+  /*
+   * The bug: `run()` had a `finally` and no `catch`, so a rejected export was
+   * an unhandled promise rejection and the button quietly went back to
+   * "Export" — nothing on screen ever said the click had failed.
+   * `to-pdf.ts`'s stub throws unconditionally, which is a real failure to
+   * drive rather than a mocked one.
+   */
+  it("surfaces a failed export as a toast naming the format, and un-sticks the button", async () => {
+    renderMenu({ ...PROPS, disabledReason: null })
+    fireEvent.click(screen.getByRole("button", { name: /export/i }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "PDF" }))
+
+    // Scoped to the `role="alert"` live region, not a bare `findByText` —
+    // Base UI's toast renders its title twice: once visibly (marked
+    // `aria-hidden`) and once inside this region for screen readers (see
+    // `ToastList` in `ui/toast.tsx`) — and an unscoped text query matches
+    // both.
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText("PDF export failed.")).toBeTruthy()
+
+    // Never the thrown Error's own text — that names an internal ("PDF
+    // export is not implemented yet") written for a developer, not a client
+    // reading a toast.
+    expect(screen.queryByText(/not implemented/i)).toBeNull()
+
+    const trigger = screen.getByRole("button", { name: /export/i })
+    expect((trigger as HTMLButtonElement).disabled).toBe(false)
+    expect(trigger.textContent).toContain("Export")
   })
 })

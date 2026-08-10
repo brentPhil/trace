@@ -20,6 +20,7 @@ import {
   rangeOf,
 } from "@/lib/history-filters"
 import { staleProps } from "@/lib/stale"
+import { exportDisabledReason } from "@/lib/export/export-disabled-reason"
 import { dayOf } from "@shared/day"
 import { unpriced } from "@/lib/format-money"
 import { formatMoney } from "@shared/money"
@@ -153,14 +154,7 @@ export function Reports() {
     placeholderData: (previous) => previous,
   })
 
-  const exportDisabledReason =
-    breakdown === undefined || isPlaceholderData
-      ? "Still totalling this period."
-      : breakdown.truncated
-        ? "This period is too large to total exactly — the figures are a floor, not the real total. Narrow the dates."
-        : breakdown.count === 0
-          ? "Nothing tracked in this period."
-          : null
+  const exportReason = exportDisabledReason(breakdown, isPlaceholderData)
 
   return (
     <div className="flex flex-col">
@@ -182,7 +176,7 @@ export function Reports() {
             from={filters.from}
             to={filters.to}
             currency={settings.currency}
-            disabledReason={exportDisabledReason}
+            disabledReason={exportReason}
           />
         </div>
       </div>

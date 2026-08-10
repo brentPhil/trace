@@ -2,12 +2,20 @@ import { useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu"
+import { Toast } from "@/components/ui/toast"
 import { downloadBlob, exportFilename } from "@/lib/export/download"
 import { csvBlob } from "@/lib/export/to-csv"
 import { reportRows } from "@/lib/export/report-rows"
 import { xlsxBlob } from "@/lib/export/to-xlsx"
 import type { Breakdown } from "@/lib/report-series"
 import type { DayString } from "@shared/day"
+
+/** What each format is called in a sentence a user reads. */
+const FORMAT_LABEL: Record<"pdf" | "csv" | "xlsx", string> = {
+  pdf: "PDF",
+  csv: "CSV",
+  xlsx: "XLSX",
+}
 
 /**
  * The three formats, and the one rule above them.
@@ -32,6 +40,7 @@ export function ExportMenu({
   disabledReason: string | null
 }) {
   const [busy, setBusy] = useState(false)
+  const toasts = Toast.useToastManager()
 
   async function run(format: "pdf" | "csv" | "xlsx") {
     setBusy(true)
@@ -44,6 +53,14 @@ export function ExportMenu({
             ? await xlsxBlob(rows)
             : await (await import("@/lib/export/to-pdf")).pdfBlob(rows)
       downloadBlob(blob, exportFilename(from, to, format))
+    } catch {
+      // Not `errorMessage(thrown)`: that surfaces a caught error's own
+      // message when it has one, and `to-pdf.ts`'s stub — like a future
+      // library failure — throws a string written for a developer, not a
+      // client checking a total. Naming the FORMAT is what the user can act
+      // on here; the failure itself was silent before this, an unhandled
+      // rejection with a button that looked like it had done nothing.
+      toasts.add({ title: `${FORMAT_LABEL[format]} export failed.`, priority: "high" })
     } finally {
       setBusy(false)
     }
