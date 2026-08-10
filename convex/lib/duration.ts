@@ -174,25 +174,36 @@ export function formatCompactDuration(ms: number): string {
 }
 
 /**
- * `1.25` — decimal hours, for export and for users who bill in tenths.
+ * Milliseconds as an integer count of HUNDREDTHS OF AN HOUR.
  *
- * Two decimal places, floored, for the same reason formatCompactDuration
- * floors: this number goes onto an invoice. The contract is stated here
- * because an unspecified decimal conversion is exactly the ambiguity the
- * parser above exists to remove.
+ * The unit an invoice line quantity is stored in, and the number
+ * `formatDecimalHours` renders. Extracted so there is one of it: the invoice's
+ * `quantityCentis` and the figure printed on /reports must be the same
+ * arithmetic, or a client reconciles a document against a screen that disagrees
+ * with it.
+ *
+ * Integer arithmetic, not `Math.floor((ms / HOUR) * 100)`.
+ *
+ * In binary floating point, 0.29 * 100 is 28.999999999999996, so flooring it
+ * gives 28. That understated 144 of 2401 exact centihours — 6% of durations,
+ * always low, never high. 8h 12m billed as 8.19 instead of 8.20. It is
+ * undetectable by eye on an invoice, which is what made it worth an integer.
+ *
+ * 36000 ms is exactly one centihour, so this division has no remainder to lose.
+ *
+ * Flooring is the contract, not a detail: no figure ever displays more time
+ * than was recorded, and a set of parts never sums above the whole.
+ */
+export function centiHours(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return 0
+  return Math.floor(ms / 36_000)
+}
+
+/**
+ * `8.20` — decimal hours, two places, floored. Totals and export only.
  */
 export function formatDecimalHours(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return "0.00"
-  // Integer arithmetic, not `Math.floor((ms / HOUR) * 100)`.
-  //
-  // In binary floating point, 0.29 * 100 is 28.999999999999996, so flooring it
-  // gives 28. That understated 144 of 2401 exact centihours — 6% of durations,
-  // always low, never high. 8h 12m billed as 8.19 instead of 8.20. It is
-  // undetectable by eye on an invoice, which is what made it worth an integer.
-  //
-  // 36000 ms is exactly one centihour, so this division has no remainder to
-  // lose.
-  return (Math.floor(ms / 36_000) / 100).toFixed(2)
+  return (centiHours(ms) / 100).toFixed(2)
 }
 
 /** "1 hour 30 minutes" — for aria-labels, where `1:30:00` is read as a time. */

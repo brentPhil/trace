@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   MAX_DURATION_MS,
+  centiHours,
   formatClock,
   formatCompactDuration,
   formatDecimalHours,
@@ -142,6 +143,37 @@ describe("formatCompactDuration", () => {
   })
 })
 
+describe("centiHours", () => {
+  it("counts whole hundredths of an hour, floored", () => {
+    expect(centiHours(29_520_000)).toBe(820) // 8h 12m -> 8.20 h
+    expect(centiHours(3_600_000)).toBe(100) // 1h
+    expect(centiHours(1_044_000)).toBe(29) // 0.29 h exactly
+  })
+
+  /*
+   * The bug this arithmetic exists to prevent. `Math.floor((ms / 3_600_000) *
+   * 100)` gives 28 here, because 0.29 * 100 is 28.999999999999996 in binary
+   * floating point. It understates, always, and by an amount invisible on an
+   * invoice.
+   */
+  it("never understates a duration to a float rounding error", () => {
+    for (let centi = 1; centi <= 2_401; centi++) {
+      expect(centiHours(centi * 36_000)).toBe(centi)
+    }
+  })
+
+  it("floors a partial hundredth rather than rounding it up", () => {
+    expect(centiHours(35_999)).toBe(0)
+    expect(centiHours(71_999)).toBe(1)
+  })
+
+  it("reads a non-duration as zero rather than NaN", () => {
+    expect(centiHours(0)).toBe(0)
+    expect(centiHours(-1)).toBe(0)
+    expect(centiHours(Number.NaN)).toBe(0)
+  })
+})
+
 describe("formatDecimalHours", () => {
   it("gives two decimal places, floored", () => {
     expect(formatDecimalHours(90 * MINUTE)).toBe("1.50")
@@ -154,6 +186,11 @@ describe("formatDecimalHours", () => {
 
   it("never returns a negative", () => {
     expect(formatDecimalHours(-HOUR)).toBe("0.00")
+  })
+
+  it("renders centiHours to two places", () => {
+    expect(formatDecimalHours(29_520_000)).toBe("8.20")
+    expect(formatDecimalHours(0)).toBe("0.00")
   })
 })
 
