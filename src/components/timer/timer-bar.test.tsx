@@ -70,10 +70,13 @@ function Bar({
   running,
   actions,
   onError,
+  use12Hour = true,
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
   onError?: (thrown: unknown) => void
+  /** Overridable so a settings change arriving mid-interaction is testable. */
+  use12Hour?: boolean
 }) {
   return (
     <TimerBar
@@ -82,7 +85,7 @@ function Bar({
       projects={[]}
       tags={[]}
       timeZone={LONDON}
-      use12Hour
+      use12Hour={use12Hour}
       weekStartDay={1}
       onError={onError}
     />
@@ -815,6 +818,33 @@ describe("the duration's popover", () => {
     expect(
       screen.getByRole("button", { name: /add a completed entry/i })
     ).toBeTruthy()
+  })
+
+  /*
+   * The re-seed used to be an effect with `timeZone` and `use12Hour` in its
+   * dependency list, so a settings change arriving while the popover was open
+   * — settings are a reactive query, so it can — reset both fields to the seed
+   * and threw away whatever had been typed into them. The render-phase
+   * adjustment that replaced it runs on the open transition and nothing else,
+   * which makes that structurally impossible rather than merely unlikely.
+   */
+  it("keeps what was typed when the clock format changes while it is open", () => {
+    vi.setSystemTime(Date.parse("2026-08-07T20:00:00Z")) // 9:00 PM London
+    const { actions } = makeActions()
+    const view = render(<Bar running={null} actions={actions} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("Start time"), {
+      target: { value: "9:15 AM" },
+    })
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "5:30 PM" },
+    })
+
+    view.rerender(<Bar running={null} actions={actions} use12Hour={false} />)
+
+    expect(screen.getByLabelText<HTMLInputElement>("Start time").value).toBe("9:15 AM")
+    expect(screen.getByLabelText<HTMLInputElement>("End time").value).toBe("5:30 PM")
   })
 })
 

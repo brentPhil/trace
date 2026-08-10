@@ -179,29 +179,27 @@ export function TimerBar({
    * The start instant before a timer exists — the same "no row to write to
    * yet" reasoning as `staged` above, extended to WHEN rather than only WHAT.
    *
-   * Two fields rather than one: `stagedStartSetAt` records when the value was
-   * last staged, independent of the instant it targets, which is what lets
+   * Two fields rather than one value: `setAt` records when the instant was
+   * staged, independent of the instant it targets, which is what lets
    * `resolveStagedStart` tell "set five minutes ago for 4:06 AM" (honour it)
    * apart from "set yesterday evening for 4:06 AM" (a tab left open overnight;
-   * drop it). Neither field is read directly outside this file — every use
-   * goes through `resolveStagedStart` so the staleness rule cannot be
-   * bypassed by a caller that forgot to check it.
+   * drop it).
+   *
+   * ONE piece of state holding both, not two holding one each. They are only
+   * ever written together and only ever read together, so two `useState`s made
+   * a desync expressible that no code path wants — and cost two setter helpers
+   * to keep it from happening by convention. Neither field is read directly
+   * outside this file either: every use goes through `resolveStagedStart`, so
+   * the staleness rule cannot be bypassed by a caller that forgot to check it.
    */
-  const [stagedStartAt, setStagedStartAt] = useState<number | null>(null)
-  const [stagedStartSetAt, setStagedStartSetAt] = useState<number | null>(null)
+  const [stagedStart, setStagedStart] = useState<{ at: number; setAt: number } | null>(
+    null
+  )
 
-  const clearStagedStart = () => {
-    setStagedStartAt(null)
-    setStagedStartSetAt(null)
-  }
+  const clearStagedStart = () => setStagedStart(null)
 
   const stageStart = (instantMs: number | null) => {
-    if (instantMs === null) {
-      clearStagedStart()
-      return
-    }
-    setStagedStartAt(instantMs)
-    setStagedStartSetAt(Date.now())
+    setStagedStart(instantMs === null ? null : { at: instantMs, setAt: Date.now() })
   }
 
   /*
@@ -215,8 +213,8 @@ export function TimerBar({
    * Play is actually pressed, which is the only reading a write may use.
    */
   const effectiveStagedStartAt = resolveStagedStart(
-    stagedStartAt,
-    stagedStartSetAt,
+    stagedStart?.at ?? null,
+    stagedStart?.setAt ?? null,
     timeZone,
     Date.now()
   )
@@ -436,8 +434,8 @@ export function TimerBar({
         // unrendered for hours, so the closed-over value is exactly the one
         // the overnight staleness rule exists to reject.
         const startedAt = resolveStagedStart(
-          stagedStartAt,
-          stagedStartSetAt,
+          stagedStart?.at ?? null,
+          stagedStart?.setAt ?? null,
           timeZone,
           Date.now()
         )

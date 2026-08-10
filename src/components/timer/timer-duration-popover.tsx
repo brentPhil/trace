@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Popover } from "@/components/ui/popover"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
@@ -105,15 +105,51 @@ export function TimerDurationPopover({
   onError?: (thrown: unknown) => void
 }) {
   if (running !== null) {
+    // Bound to a `const` so the narrowing survives into the callbacks below.
+    const entry = running
     return (
-      <RunningDurationPopover
-        entry={running}
-        timeZone={timeZone}
-        use12Hour={use12Hour}
-        weekStartDay={weekStartDay}
-        onEditTime={onEditTime}
-        onError={onError}
-      />
+      <>
+        <EntryTimePopover
+          entry={entry}
+          timeZone={timeZone}
+          use12Hour={use12Hour}
+          weekStartDay={weekStartDay}
+          onCommitTime={(field, instantMs) => onEditTime(entry._id, field, instantMs)}
+          onCommitDay={async (day) => {
+            // Reported rather than thrown: this settles after the popup has
+            // gone, so an uncaught rejection was a console warning and a row
+            // that silently jumped back where it started.
+            try {
+              await onEditTime(
+                entry._id,
+                "day",
+                instantMovedToDay(entry.startedAt, day, timeZone)
+              )
+            } catch (thrown) {
+              onError?.(thrown)
+            }
+          }}
+          trigger={
+            <button
+              type="button"
+              // Says what it does, not the digits it wraps — a screen reader
+              // hears "Edit start time — running", never "9:12:04, button".
+              aria-label="Edit start time — running"
+              // The digits themselves, which the button role prunes. See
+              // `SpokenElapsed`.
+              aria-describedby={ELAPSED_DESCRIPTION_ID}
+              className={triggerClass}
+            >
+              <EntryDuration
+                startedAt={entry.startedAt}
+                endedAt={null}
+                className={cn(durationClass, "text-enlarger")}
+              />
+            </button>
+          }
+        />
+        <SpokenElapsed startedAt={entry.startedAt} />
+      </>
     )
   }
 
@@ -178,71 +214,15 @@ function SpokenElapsed({ startedAt }: { startedAt: number }) {
   )
 }
 
-function RunningDurationPopover({
-  entry,
-  timeZone,
-  use12Hour,
-  weekStartDay,
-  onEditTime,
-  onError,
-}: {
-  entry: Doc<"timeEntries">
-  timeZone: string
-  use12Hour: boolean
-  weekStartDay: number
-  onEditTime: (
-    entryId: Id<"timeEntries">,
-    field: "start" | "end" | "day",
-    instantMs: number
-  ) => Promise<void>
-  onError?: (thrown: unknown) => void
-}) {
-  return (
-    <>
-      <EntryTimePopover
-        entry={entry}
-        timeZone={timeZone}
-        use12Hour={use12Hour}
-        weekStartDay={weekStartDay}
-        onCommitTime={(field, instantMs) => onEditTime(entry._id, field, instantMs)}
-        onCommitDay={async (day) => {
-          // Reported rather than thrown: this settles after the popup has gone,
-          // so an uncaught rejection was a console warning and a row that
-          // silently jumped back where it started.
-          try {
-            await onEditTime(
-              entry._id,
-              "day",
-              instantMovedToDay(entry.startedAt, day, timeZone)
-            )
-          } catch (thrown) {
-            onError?.(thrown)
-          }
-        }}
-        trigger={
-          <button
-            type="button"
-            // Says what it does, not the digits it wraps — a screen reader
-            // hears "Edit start time — running", never "9:12:04, button".
-            aria-label="Edit start time — running"
-            // The digits themselves, which the button role prunes. See
-            // `SpokenElapsed`.
-            aria-describedby={ELAPSED_DESCRIPTION_ID}
-            className={triggerClass}
-          >
-            <EntryDuration
-              startedAt={entry.startedAt}
-              endedAt={null}
-              className={cn(durationClass, "text-enlarger")}
-            />
-          </button>
-        }
-      />
-      <SpokenElapsed startedAt={entry.startedAt} />
-    </>
-  )
-}
-
+/**
+ * The IDLE half, which — unlike the running one inlined above — genuinely
+ * needs to be its own component.
+ *
+ * It owns draft state, and unmounting it on start is what resets that draft:
+ * once `start` resolves, `TimerDurationPopover` swaps to the running branch and
+ * whatever was half-typed in here goes with it. Hoisting this body would keep
+ * the draft alive across that transition.
+ */
 function IdleDurationPopover({
   timeZone,
   use12Hour,
@@ -272,16 +252,46 @@ function IdleDurationPopover({
   useForceCloseWhenClosed(open, actionsRef)
 
   /*
-   * The staged instant is read on the OPEN transition only, so it is held in a
-   * ref rather than listed as a dependency of the reseed effect below. Typing
-   * into Start stages what was typed, which would otherwise re-run the effect
-   * and overwrite the field from the value it had just produced — the user
-   * would be fighting their own keystrokes.
+   * Re-seed on the OPEN TRANSITION — from the STAGED start when one is armed,
+   * and from "now" otherwise. A tab left open since yesterday must not offer
+   * yesterday's moment today, which is what the "now" half is for; seeding
+   * from "now" unconditionally made the popover lie, showing 9:00 PM in Start
+   * while the armed row below it still said "Starts 4:06 AM" and Play still
+   * used 4:06 AM. This is the surface someone opens to CHECK the staged time.
+   *
+   * Seeding from the stage rather than re-staging from "now" is the deliberate
+   * direction: the other way round, merely looking at the popover would
+   * destroy a stage that had been set on purpose.
+   *
+   * ADJUSTED DURING RENDER, not in an effect — React's documented pattern for
+   * state derived from a prop change, and the same one `timer-bar.tsx` uses to
+   * re-seed its title draft. An effect could only read `stagedStartAt` without
+   * listing it as a dependency by mirroring it into a ref, because typing into
+   * Start stages what was typed and would otherwise re-run the effect and
+   * overwrite the field from the value it had just produced. That took a ref,
+   * a second effect to sync it, and a paragraph to justify. It also meant
+   * `timeZone` and `use12Hour` were dependencies, so changing either while the
+   * popover was open wiped whatever the user had typed. This form cannot: it
+   * runs on the open transition and nothing else.
    */
-  const stagedRef = useRef(stagedStartAt)
-  useEffect(() => {
-    stagedRef.current = stagedStartAt
-  }, [stagedStartAt])
+  const [wasOpen, setWasOpen] = useState(false)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (open) {
+      const seedFrom = stagedStartAt ?? Date.now()
+      const seedDay = dayOf(seedFrom, timeZone)
+      setDay(seedDay)
+      setMonth(seedDay)
+      // Both fields to the same instant: `confirm` refuses a stop equal to the
+      // start, so the default state asks for a real stop rather than guessing
+      // one. Seeding Stop from "now" against a backdated Start would instead
+      // offer a multi-hour entry a single click could commit.
+      const label = formatTimeOfInstant(seedFrom, timeZone, use12Hour)
+      setStart(label)
+      setEnd(label)
+      setError(null)
+    }
+  }
 
   /**
    * The reference `parseTimeOfDay` disambiguates a bare hour against.
@@ -314,34 +324,6 @@ function IdleDurationPopover({
       instantOfDayTime(dayValue, { minutes: parsed.time.minutes, dayOffset: 0 }, timeZone)
     )
   }
-
-  /*
-   * Re-seed every time it opens — from the STAGED start when one is armed, and
-   * from "now" otherwise. A tab left open since yesterday must not offer
-   * yesterday's moment today, which is what the "now" half is for; seeding
-   * from "now" unconditionally made the popover lie, showing 9:00 PM in Start
-   * while the armed row below it still said "Starts 4:06 AM" and Play still
-   * used 4:06 AM. This is the surface someone opens to CHECK the staged time.
-   *
-   * Seeding from the stage rather than re-staging from "now" is the deliberate
-   * direction: the other way round, merely looking at the popover would
-   * destroy a stage that had been set on purpose.
-   */
-  useEffect(() => {
-    if (!open) return
-    const seedFrom = stagedRef.current ?? Date.now()
-    const seedDay = dayOf(seedFrom, timeZone)
-    setDay(seedDay)
-    setMonth(seedDay)
-    // Both fields to the same instant, as before: `confirm` refuses a stop
-    // equal to the start, so the default state asks for a real stop rather
-    // than guessing one. Seeding Stop from "now" against a backdated Start
-    // would instead offer a multi-hour entry a single click could commit.
-    const label = formatTimeOfInstant(seedFrom, timeZone, use12Hour)
-    setStart(label)
-    setEnd(label)
-    setError(null)
-  }, [open, timeZone, use12Hour])
 
   const confirm = async () => {
     if (saving) return
