@@ -246,6 +246,12 @@ describe("rangeBreakdown — by description", () => {
     expect(titles[0]).toMatchObject({ title: "", project: "", totalMs: HOUR })
   })
 
+  /*
+   * No project rate AND no account default rate. Since ad5b1a8, `rateOf` falls
+   * back to `settings.defaultHourlyRateCents`, so "unrated" now means both are
+   * unset — and a test that only omitted the project rate would start passing
+   * or failing depending on a setting it never mentions.
+   */
   it("marks unpriced billable time per row rather than pricing it at zero", async () => {
     const t = setup()
     const { projectId } = await t.mutation(internal.projects.createAs, {
@@ -439,7 +445,9 @@ And in `Breakdown`, after `hours`:
 
 - [ ] **Step 6: Fix the two fixtures the widened type breaks**
 
-`EMPTY_BREAKDOWN` in `src/routes/_authed/reports.tsx:182-193` gains:
+`EMPTY_BREAKDOWN` lives in `src/lib/report-series.ts` (exported from there
+alongside `EMPTY_TOTALS` as of ad5b1a8 — it is no longer a local const in
+`reports.tsx`). It gains:
 
 ```ts
   titles: [],
@@ -452,7 +460,9 @@ Then:
 pnpm typecheck
 ```
 
-Expected: PASS. If `src/routes/_authed/-reports.test.tsx` also constructs a `Breakdown` literal, add the same two fields there.
+Expected: PASS. Fix every other `Breakdown` literal `tsc` names the same way —
+at time of writing that is `src/routes/_authed/-reports.test.tsx`, but do not
+assume the list; let the compiler produce it.
 
 - [ ] **Step 7: Run tests to verify they pass**
 
@@ -1893,7 +1903,11 @@ export async function pdfBlob(_rows: ReportRows): Promise<Blob> {
 
 - [ ] **Step 6: Wire it into the page**
 
-In `src/routes/_authed/reports.tsx`, replace lines 132-144 with:
+In `src/routes/_authed/reports.tsx`, inside the `Reports` component, replace the
+`return (` block's opening — from `<div className="flex flex-col">` through the
+closing `</div>` of the `<div className="flex w-full flex-col gap-3 px-4 pt-3">`
+that wraps `<FilterBar …/>` — with the following. Locate it structurally, not by
+line number: this file has moved twice already.
 
 ```tsx
   /*
@@ -1959,7 +1973,8 @@ Add the import beside the other component imports:
 import { ExportMenu } from "@/components/reports/export-menu"
 ```
 
-Move `EMPTY_BREAKDOWN` above the `Reports` component so it is defined before use.
+`EMPTY_BREAKDOWN` is already imported at the top of this file from
+`@/lib/report-series`, so nothing needs moving.
 
 - [ ] **Step 7: Run tests to verify they pass**
 
