@@ -55,11 +55,11 @@ export function ExportMenu({
       downloadBlob(blob, exportFilename(from, to, format))
     } catch {
       // Not `errorMessage(thrown)`: that surfaces a caught error's own
-      // message when it has one, and `to-pdf.ts`'s stub — like a future
-      // library failure — throws a string written for a developer, not a
-      // client checking a total. Naming the FORMAT is what the user can act
-      // on here; the failure itself was silent before this, an unhandled
-      // rejection with a button that looked like it had done nothing.
+      // message when it has one, and a library failure (pdf-lib, write-excel-file)
+      // throws a string written for a developer, not a client checking a
+      // total. Naming the FORMAT is what the user can act on here; the
+      // failure itself was silent before this, an unhandled rejection with a
+      // button that looked like it had done nothing.
       toasts.add({ title: `${FORMAT_LABEL[format]} export failed.`, priority: "high" })
     } finally {
       setBusy(false)

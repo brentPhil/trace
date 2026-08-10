@@ -72,6 +72,31 @@ describe("barColumns", () => {
     )
     expect(ops.every((op) => op.kind === "hatch")).toBe(true)
   })
+
+  /*
+   * `Bucket.empty` is `count === 0`, not `totalMs === 0`. A day holding only a
+   * zero-length entry is `empty: false` with zero duration, and before this
+   * fix drew NEITHER a bar (both segments are zero height) NOR a hatch (the
+   * span isn't empty) — a silent blank gap identical to what a rendering bug
+   * would produce. It must be visibly a measured zero, not absence and not
+   * nothing.
+   */
+  it("marks a zero-duration span that has an entry, rather than leaving a blank gap", () => {
+    const ops = barColumns(
+      [
+        { billableMs: 100, nonBillableMs: 0, empty: false },
+        { billableMs: 0, nonBillableMs: 0, empty: false },
+      ],
+      BOX
+    )
+    expect(ops.some((op) => op.kind === "hatch")).toBe(false)
+
+    const rects = ops.filter((op) => op.kind === "rect")
+    expect(rects).toHaveLength(2)
+    const zeroMark = rects[1]
+    expect(zeroMark.height).toBeGreaterThan(0)
+    expect(zeroMark.y).toBe(BOX.y)
+  })
 })
 
 describe("paperColorFor palette coverage", () => {

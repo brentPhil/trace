@@ -13,6 +13,11 @@ import type { ComponentProps } from "react"
  */
 afterEach(cleanup)
 
+// `pdfBlob` now does real work (pdf-lib, layout) — mocked here so the one test
+// that needs it to fail can drive that failure directly, instead of standing
+// up a real report just to reject partway through.
+vi.mock("@/lib/export/to-pdf", () => ({ pdfBlob: vi.fn() }))
+
 const HOUR = 3_600_000
 
 const BREAKDOWN: Breakdown = {
@@ -125,11 +130,15 @@ describe("ExportMenu", () => {
   /*
    * The bug: `run()` had a `finally` and no `catch`, so a rejected export was
    * an unhandled promise rejection and the button quietly went back to
-   * "Export" — nothing on screen ever said the click had failed.
-   * `to-pdf.ts`'s stub throws unconditionally, which is a real failure to
-   * drive rather than a mocked one.
+   * "Export" — nothing on screen ever said the click had failed. Task 8 gave
+   * `to-pdf.ts` a real implementation, so the failure this test drives is now
+   * mocked rather than the stub's unconditional throw — the toast/un-stick
+   * behaviour under test is `run()`'s, not `pdfBlob`'s.
    */
   it("surfaces a failed export as a toast naming the format, and un-sticks the button", async () => {
+    const { pdfBlob } = await import("@/lib/export/to-pdf")
+    vi.mocked(pdfBlob).mockRejectedValueOnce(new Error("boom"))
+
     renderMenu({ ...PROPS, disabledReason: null })
     fireEvent.click(screen.getByRole("button", { name: /export/i }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "PDF" }))

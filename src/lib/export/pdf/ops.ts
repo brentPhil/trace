@@ -162,6 +162,19 @@ export function barColumns(
         })
       )
     }
+
+    /*
+     * `empty` is `count === 0`, not `totalMs === 0` — a span holding only a
+     * zero-length entry is `empty: false` and reaches here with both segments
+     * at zero height, so neither push above fires. Left alone, that is a blank
+     * column indistinguishable from a rendering fault; hatching it would be
+     * wrong too, since it claims "no data arrived" when an entry did. A
+     * baseline tick says the third thing that actually happened: measured,
+     * and zero.
+     */
+    if (billable <= 0 && nonBillable <= 0) {
+      ops.push(rect({ x, y: box.y, width: barWidth, height: 1, color: PAPER.bar }))
+    }
   })
   return ops
 }
