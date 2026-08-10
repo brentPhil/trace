@@ -174,16 +174,32 @@ export function wrapToWidth(
 ): Array<string> {
   if (str === "") return [""]
 
+  // `textWidth` sums per-character advances with no kerning between them, so
+  // `textWidth(current) + textWidth(" ") + textWidth(piece)` is exactly (not
+  // approximately) `textWidth(`${current} ${piece}`)` — splitting the sum
+  // this way is what lets `currentWidth` be tracked incrementally instead of
+  // re-measuring the whole growing line, character by character, for every
+  // word. That re-measurement was the O(words²) cost: a line N words long
+  // paid for its first word's characters N more times on the way to N+1.
+  const spaceWidth = textWidth(" ", size, bold)
+
   const lines: Array<string> = []
   let current = ""
+  let currentWidth = 0
 
   for (const word of str.split(" ")) {
-    const pieces =
-      textWidth(word, size, bold) > maxWidth
-        ? hardBreak(word, maxWidth, size, bold)
-        : [word]
+    const wordWidth = textWidth(word, size, bold)
+    const pieces = wordWidth > maxWidth ? hardBreak(word, maxWidth, size, bold) : [word]
 
     pieces.forEach((piece, pieceIndex) => {
+      // The common case (`pieces` is just `[word]`) reuses `wordWidth` rather
+      // than measuring `piece` again — the fix for the OTHER half of this
+      // function's quadratic cost, where a word's width was measured once to
+      // decide whether it needed hard-breaking and a second time as part of
+      // the candidate line. A hard-broken piece has no such width in hand, so
+      // it is measured once, here, and nowhere else.
+      const pieceWidth = pieces.length === 1 ? wordWidth : textWidth(piece, size, bold)
+
       // A piece past the first is a continuation of a hard-broken word, not a
       // new word — it must start its own line unconditionally (no leading
       // space to test a fit against), because `hardBreak` already sized it
@@ -192,18 +208,22 @@ export function wrapToWidth(
       if (pieceIndex > 0) {
         lines.push(current)
         current = piece
+        currentWidth = pieceWidth
         return
       }
       if (current === "") {
         current = piece
+        currentWidth = pieceWidth
         return
       }
-      const candidate = `${current} ${piece}`
-      if (textWidth(candidate, size, bold) <= maxWidth) {
-        current = candidate
+      const candidateWidth = currentWidth + spaceWidth + pieceWidth
+      if (candidateWidth <= maxWidth) {
+        current = `${current} ${piece}`
+        currentWidth = candidateWidth
       } else {
         lines.push(current)
         current = piece
+        currentWidth = pieceWidth
       }
     })
   }
@@ -215,6 +235,13 @@ export function wrapToWidth(
   // same as the empty-string case above.
   return lines.length > 0 ? lines : [""]
 }
+
+/** The small clearance kept between two neighbouring axis labels' widest
+ *  extents — enough that thinned ticks still read as separate labels rather
+ *  than one run-on string. Every call site (production and every test) used
+ *  the same value, so it is a fact about how this axis is drawn, not a
+ *  parameter callers ever had reason to vary. */
+const AXIS_LABEL_GUTTER = 4
 
 /**
  * Which bucket indices get an x-axis label, thinned so they stop colliding.
@@ -231,15 +258,14 @@ export function axisTickIndices(
   labels: ReadonlyArray<string>,
   totalWidth: number,
   size: number,
-  bold: boolean,
-  gutter = 4
+  bold: boolean
 ): Array<number> {
   if (labels.length === 0) return []
   if (labels.length === 1) return [0]
 
   const slot = totalWidth / labels.length
   const widest = Math.max(...labels.map((label) => textWidth(label, size, bold)))
-  const step = Math.max(1, Math.ceil((widest + gutter) / slot))
+  const step = Math.max(1, Math.ceil((widest + AXIS_LABEL_GUTTER) / slot))
 
   const indices: Array<number> = []
   for (let i = 0; i < labels.length; i += step) indices.push(i)

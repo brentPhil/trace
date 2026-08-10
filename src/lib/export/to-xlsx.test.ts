@@ -22,6 +22,7 @@ const ROWS: ReportRows = {
     averageDailyMs: 1.5 * HOUR,
     count: 2,
     truncated: false,
+    percent: 100,
   },
   buckets: [
     {
@@ -53,7 +54,6 @@ const ROWS: ReportRows = {
       description: "Standup",
       weekStart: "2026-07-13",
       totalMs: 3 * HOUR,
-      centiHours: 300,
       percent: 100,
       billableCents: 3_000,
       unpriced: false,
@@ -116,7 +116,7 @@ describe("xlsxSheets", () => {
   it("floors the hours it writes, so the workbook never shows more time than the CSV for the same entry", () => {
     const floored = {
       ...ROWS,
-      titles: [{ ...ROWS.titles[0], totalMs: 29_502_000, centiHours: 819 }],
+      titles: [{ ...ROWS.titles[0], totalMs: 29_502_000 }],
     }
     const breakdown = xlsxSheets(floored).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
@@ -163,7 +163,7 @@ describe("xlsxSheets", () => {
   it("writes the TOTAL row's percent as 0 for an empty range, matching the CSV's 0-not-100", () => {
     const empty = {
       ...ROWS,
-      totals: { ...ROWS.totals, totalMs: 0 },
+      totals: { ...ROWS.totals, totalMs: 0, percent: 0 },
       titles: [],
     }
     const breakdown = xlsxSheets(empty).find((s) => s.sheet === "Breakdown")!

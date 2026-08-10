@@ -38,6 +38,7 @@ function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRow
     averageDailyMs: 32_334_545,
     count: titleCount,
     truncated: false,
+    percent: 100,
     ...over.totals,
   }
   const titles =
@@ -47,7 +48,6 @@ function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRow
       description: `CB-${n} Fixing something`,
       weekStart: "2026-07-13",
       totalMs: HOUR,
-      centiHours: 100,
       percent: 1,
       billableCents: 1_000,
       unpriced: false,
@@ -182,7 +182,7 @@ describe("reportPages", () => {
     const empty = rowsWith(0, {
       buckets: [],
       projects: [],
-      totals: { ...rowsWith(0).totals, totalMs: 0, billableMs: 0, count: 0 },
+      totals: { ...rowsWith(0).totals, totalMs: 0, billableMs: 0, count: 0, percent: 0 },
     })
     expect(reportPages(empty)).toHaveLength(1)
   })
@@ -279,7 +279,6 @@ describe("reportPages", () => {
             "[B-CB-326] Building Crew Training CSV and PDF download for the offshore vessel maintenance logs",
           weekStart: "2026-07-13",
           totalMs: 445_507_000, // formatClock -> "123:45:07", as wide as a duration string gets
-          centiHours: 44550,
           percent: 42,
           billableCents: 123_456,
           unpriced: false,
@@ -332,7 +331,6 @@ describe("reportPages", () => {
             "[B-CB-326] Building Crew Training CSV and PDF download for the offshore vessel maintenance logs",
           weekStart: "2026-07-13",
           totalMs: HOUR,
-          centiHours: 100,
           percent: 42,
           billableCents: 123_456,
           unpriced: false,
@@ -367,7 +365,6 @@ describe("reportPages", () => {
           description: "Short note",
           weekStart: "2026-07-13",
           totalMs: 3_661_000,
-          centiHours: 101,
           percent: 12,
           billableCents: 4_000,
           unpriced: false,
@@ -409,7 +406,6 @@ describe("reportPages", () => {
         description: `[B-CB-${300 + n}] ${LONG_DESCRIPTION}`,
         weekStart: "2026-07-13",
         totalMs: HOUR,
-        centiHours: 100,
         percent: 1,
         billableCents: 1_000,
         unpriced: false,
@@ -454,7 +450,6 @@ describe("reportPages", () => {
         description: `W1-${n}`,
         weekStart: "2026-07-13",
         totalMs: HOUR,
-        centiHours: 100,
         percent: 12.5,
         billableCents: 1_000,
         unpriced: false,
@@ -464,7 +459,6 @@ describe("reportPages", () => {
         description: `W2-${n}`,
         weekStart: "2026-07-20",
         totalMs: HOUR,
-        centiHours: 100,
         percent: 12.5,
         billableCents: 1_000,
         unpriced: false,
@@ -510,7 +504,6 @@ describe("reportPages", () => {
         description: `W1-${n}`,
         weekStart: "2026-07-13",
         totalMs: HOUR,
-        centiHours: 100,
         percent: 1,
         billableCents: 1_000,
         unpriced: false,
@@ -520,7 +513,6 @@ describe("reportPages", () => {
         description: `W2-${n}`,
         weekStart: "2026-07-20",
         totalMs: HOUR,
-        centiHours: 100,
         percent: 1,
         billableCents: 1_000,
         unpriced: false,

@@ -43,3 +43,32 @@ export const ENTRY_SCAN_LIMIT = 2_000
  * this range"; it is not an acceptable answer to "is this tag safe to delete".
  */
 export const SUMMARY_SCAN_LIMIT = 5_000
+
+/**
+ * How many `(week, project, description)` ROWS a breakdown will keep — NOT
+ * how many distinct descriptions.
+ *
+ * `byTitle` in convex/entries.ts is keyed by
+ * `weekStart\u0000projectId\u0000title`, so the same description repeated in
+ * a second week, or under a second project, counts twice against this cap,
+ * not once. Past this the block is not a table anyone reads, and shipping
+ * every row of a pathological range costs the client more than the answer is
+ * worth. `titlesTruncated` is what stops the list from merely ending: a
+ * document that silently stops naming work reads as a complete account of
+ * the period.
+ *
+ * The cut is taken from `allTitles` AFTER it is sorted by time across the
+ * WHOLE RANGE, not per week — so a week whose own rows happen to sort late in
+ * that global ordering can lose some of them while an earlier, larger week
+ * keeps every one of its own. That week's printed Subtotal is then a genuine
+ * UNDERSTATEMENT of its real total, not merely an incomplete list, and
+ * `titlesTruncated` alone does not say so — see `TITLE_CAP_NOTE` in
+ * src/lib/export/report-rows.ts, which is what has to carry that warning to
+ * the reader and interpolates this same number into it, so the two can never
+ * name two different limits.
+ *
+ * Exported from here — not convex/entries.ts — because `src/` may only reach
+ * into Convex through the `@shared` alias onto convex/lib; entries.ts itself
+ * is off limits to it (see eslint.config.js's component/Convex boundary).
+ */
+export const TITLE_ROW_LIMIT = 500

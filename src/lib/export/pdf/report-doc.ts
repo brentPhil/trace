@@ -40,7 +40,7 @@ const BOTTOM = PAGE.margin
 //
 // `description` sits at LEFT + 100, not the wider LEFT + 120 this used to be.
 // This app's own project names are short ("Sealogs", "No project" — see
-// NO_PROJECT in report-rows.ts) while descriptions are imported ticket
+// NO_PROJECT in report-series.ts) while descriptions are imported ticket
 // titles that run long; a project column sized for names nobody has just
 // starves the column that actually needs the room. 100pt comfortably fits a
 // name like "Vessel Vanguard" (~78pt at the body size below) with room to
@@ -446,6 +446,60 @@ function weekHeadingOp(label: string, y: number): PdfOp {
   return text({ x: LEFT, y, text: label, size: TYPE.body, bold: true })
 }
 
+/**
+ * The four right-aligned numeric columns — DURATION, HOURS, %, AMOUNT — laid
+ * out once and shared by a body row, a week's subtotal, and the grand TOTAL.
+ * Written out three times before this, the file's own comments each pointed
+ * at the other two copies to explain a rule ("brass is a CURRENCY amount and
+ * nothing else") that a near-miss had already shown could drift between them
+ * — a fourth copy is how it actually would.
+ *
+ * `mutedPercent` is the one deliberate difference between call sites: a body
+ * row and a week's subtotal both print % in muted ink because they are
+ * subordinate to the page's real total, while the TOTAL row itself is left
+ * at the row's own ink because it is already bold/`TYPE.strong` and reads as
+ * the page's own emphasis, not a figure to de-emphasise further.
+ */
+function numericColumnsOps(
+  y: number,
+  opts: {
+    durationMs: number
+    percent: number
+    billableCents: number
+    currency: string
+    unpriced: boolean
+    size: number
+    bold: boolean
+    mutedPercent: boolean
+  }
+): Array<PdfOp> {
+  const { durationMs, percent, billableCents, currency, unpriced, size, bold, mutedPercent } = opts
+  return [
+    text({ x: COL.duration, y, text: formatClock(durationMs), size, bold, align: "right" }),
+    text({ x: COL.hours, y, text: formatDecimalHours(durationMs), size, bold, align: "right" }),
+    text({
+      x: COL.percent,
+      y,
+      text: `${percent}%`,
+      size,
+      bold,
+      align: "right",
+      color: mutedPercent ? PAPER.inkMuted : undefined,
+    }),
+    text({
+      x: COL.amount,
+      y,
+      text: moneyOr(billableCents, currency, unpriced),
+      size,
+      bold,
+      align: "right",
+      // Brass is a CURRENCY amount and nothing else (DESIGN.md) — never
+      // hardcoded, the one rule all three numeric-column call sites share.
+      color: unpriced ? PAPER.inkMuted : PAPER.brass,
+    }),
+  ]
+}
+
 /** A week's subtotal row — same columns as a body row, bold like TOTAL but
  *  at body size so it reads as a subordinate figure, not a second grand
  *  total. Labelled "Subtotal" in the PROJECT column, matching where TOTAL's
@@ -457,39 +511,15 @@ function weekSubtotalOps(
 ): Array<PdfOp> {
   return [
     text({ x: COL.project, y, text: "Subtotal", size: TYPE.body, bold: true }),
-    text({
-      x: COL.duration,
-      y,
-      text: formatClock(week.subtotal.totalMs),
+    ...numericColumnsOps(y, {
+      durationMs: week.subtotal.totalMs,
+      percent: week.subtotal.percent,
+      billableCents: week.subtotal.billableCents,
+      currency,
+      unpriced: week.subtotal.unpriced,
       size: TYPE.body,
       bold: true,
-      align: "right",
-    }),
-    text({
-      x: COL.hours,
-      y,
-      text: formatDecimalHours(week.subtotal.totalMs),
-      size: TYPE.body,
-      bold: true,
-      align: "right",
-    }),
-    text({
-      x: COL.percent,
-      y,
-      text: `${week.subtotal.percent}%`,
-      size: TYPE.body,
-      bold: true,
-      align: "right",
-      color: PAPER.inkMuted,
-    }),
-    text({
-      x: COL.amount,
-      y,
-      text: moneyOr(week.subtotal.billableCents, currency, week.subtotal.unpriced),
-      size: TYPE.body,
-      bold: true,
-      align: "right",
-      color: week.subtotal.unpriced ? PAPER.inkMuted : PAPER.brass,
+      mutedPercent: true,
     }),
   ]
 }
@@ -525,35 +555,15 @@ function breakdownRow(
     )
   })
   ops.push(
-    text({
-      x: COL.duration,
-      y: centerY,
-      text: formatClock(row.totalMs),
+    ...numericColumnsOps(centerY, {
+      durationMs: row.totalMs,
+      percent: row.percent,
+      billableCents: row.billableCents,
+      currency,
+      unpriced: row.unpriced,
       size: TYPE.body,
-      align: "right",
-    }),
-    text({
-      x: COL.hours,
-      y: centerY,
-      text: formatDecimalHours(row.totalMs),
-      size: TYPE.body,
-      align: "right",
-    }),
-    text({
-      x: COL.percent,
-      y: centerY,
-      text: `${row.percent}%`,
-      size: TYPE.body,
-      align: "right",
-      color: PAPER.inkMuted,
-    }),
-    text({
-      x: COL.amount,
-      y: centerY,
-      text: moneyOr(row.billableCents, currency, row.unpriced),
-      size: TYPE.body,
-      align: "right",
-      color: row.unpriced ? PAPER.inkMuted : PAPER.brass,
+      bold: false,
+      mutedPercent: true,
     })
   )
   return ops
@@ -695,47 +705,22 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
       ops.push(
         rect({ x: LEFT, y: ruleY - 2, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
         text({ x: COL.project, y, text: "TOTAL", size: TYPE.strong, bold: true }),
-        text({
-          x: COL.duration,
-          y,
-          text: formatClock(rows.totals.totalMs),
+        // `totals.percent` — the one derivation report-rows.ts computes (see
+        // `percentOf(totalMs, totalMs)` there) — not a hardcoded "100%",
+        // which disagreed with CSV/XLSX for an empty range, where there is
+        // no duration for 100% to be a share OF. `mutedPercent: false`
+        // because TOTAL is already the page's own emphasis (bold, strong
+        // size), not a subordinate figure the way a body row's or a week's
+        // subtotal's % is.
+        ...numericColumnsOps(y, {
+          durationMs: rows.totals.totalMs,
+          percent: rows.totals.percent,
+          billableCents: rows.totals.billableCents,
+          currency,
+          unpriced: rows.totals.unpriced,
           size: TYPE.strong,
           bold: true,
-          align: "right",
-        }),
-        text({
-          x: COL.hours,
-          y,
-          text: formatDecimalHours(rows.totals.totalMs),
-          size: TYPE.strong,
-          bold: true,
-          align: "right",
-        }),
-        text({
-          // Matches CSV/XLSX's own `totalMs === 0 ? 0 : 100` (to-csv.ts,
-          // to-xlsx.ts): a hardcoded "100%" here disagreed with both of them
-          // for an empty range, where there is no duration for 100% to be a
-          // share OF.
-          x: COL.percent,
-          y,
-          text: `${rows.totals.totalMs === 0 ? 0 : 100}%`,
-          size: TYPE.strong,
-          bold: true,
-          align: "right",
-        }),
-        text({
-          x: COL.amount,
-          y,
-          text: moneyOr(rows.totals.billableCents, currency, rows.totals.unpriced),
-          size: TYPE.strong,
-          bold: true,
-          align: "right",
-          // Brass is a CURRENCY amount and nothing else (DESIGN.md) — never
-          // hardcoded, the same rule `weekSubtotalOps` above already applies
-          // to a week's own subtotal amount, matched here so the one row
-          // that sits directly beneath every week's subtotal isn't the one
-          // place on the page that still paints a "—" as if it were money.
-          color: rows.totals.unpriced ? PAPER.inkMuted : PAPER.brass,
+          mutedPercent: false,
         })
       )
       cursor -= totalRowHeight

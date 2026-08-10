@@ -8,7 +8,7 @@ import { dropEntryTags, syncEntryTags } from "./entryTags"
 import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
 import { timeEntryDoc } from "./lib/docs"
-import { SUMMARY_SCAN_LIMIT } from "./lib/scan"
+import { SUMMARY_SCAN_LIMIT, TITLE_ROW_LIMIT } from "./lib/scan"
 import { dayOf, isValidTimeZone, localPartsOf, weekStartOf } from "./lib/day"
 import { isFilterActive, matchesFilter } from "./lib/entryFilter"
 import { defaultRateCents } from "./settings"
@@ -641,27 +641,15 @@ const projectTotal = v.object({
   count: v.number(),
 })
 
-/**
- * How many `(week, project, description)` ROWS a breakdown will keep — NOT
- * how many distinct descriptions.
- *
- * `byTitle` below is keyed by `weekStart\u0000projectId\u0000title`, so the
- * same description repeated in a second week, or under a second project,
- * counts twice against this cap, not once. Past this the block is not a
- * table anyone reads, and shipping every row of a pathological range costs
- * the client more than the answer is worth. `titlesTruncated` is what stops
- * the list from merely ending: a document that silently stops naming work
- * reads as a complete account of the period.
- *
- * The cut is taken from `allTitles` AFTER it is sorted by time across the
- * WHOLE RANGE (see below), not per week — so a week whose own rows happen to
- * sort late in that global ordering can lose some of them while an earlier,
- * larger week keeps every one of its own. That week's printed Subtotal is
- * then a genuine UNDERSTATEMENT of its real total, not merely an incomplete
- * list, and `titlesTruncated` alone does not say so — see `TITLE_CAP_NOTE`
- * in report-rows.ts, which is what has to carry that warning to the reader.
- */
-const TITLE_LIMIT = 500
+// `TITLE_ROW_LIMIT` — how many `(week, project, description)` rows a
+// breakdown keeps, NOT how many distinct descriptions (`byTitle` below is
+// keyed by `weekStart\u0000projectId\u0000title`, so the same description
+// repeated in a second week, or under a second project, counts twice) — now
+// lives in convex/lib/scan.ts, with its full reasoning, so
+// src/lib/export/report-rows.ts's `TITLE_CAP_NOTE` can import the SAME
+// number through the `@shared` alias rather than hand-typing "500" into a
+// sentence nothing ties to this cap. `src/` may only reach into Convex
+// through that alias onto convex/lib — entries.ts itself is off limits.
 
 const titleTotal = v.object({
   /** null is the unassigned bucket, same convention as `projectTotal`. */
@@ -733,7 +721,7 @@ const breakdownReturns = v.object({
    * client reconciles cannot disagree with the chart printed above it.
    */
   titles: v.array(titleTotal),
-  /** The list was cut at `TITLE_LIMIT`. Surfaced on the page and in the
+  /** The list was cut at `TITLE_ROW_LIMIT`. Surfaced on the page and in the
    *  document, because a truncated list of work reads as a complete one. */
   titlesTruncated: v.boolean(),
 })
@@ -979,8 +967,8 @@ async function rangeBreakdownImpl(ctx: QueryCtx, userId: string, args: Breakdown
     days,
     projects,
     hours,
-    titles: allTitles.slice(0, TITLE_LIMIT),
-    titlesTruncated: allTitles.length > TITLE_LIMIT,
+    titles: allTitles.slice(0, TITLE_ROW_LIMIT),
+    titlesTruncated: allTitles.length > TITLE_ROW_LIMIT,
   }
 }
 

@@ -1,6 +1,6 @@
-import { addDays, parseDayString } from "@shared/day"
-import { centiHours } from "@shared/duration"
-import { bucketDays } from "@/lib/report-series"
+import { addDays } from "@shared/day"
+import { TITLE_ROW_LIMIT } from "@shared/scan"
+import { NO_PROJECT, bucketDays, format } from "@/lib/report-series"
 import type { Bucket, Breakdown, Granularity } from "@/lib/report-series"
 import type { DayString } from "@shared/day"
 
@@ -16,9 +16,6 @@ import type { DayString } from "@shared/day"
  * own percentages is a CSV that can disagree with the PDF beside it, and the
  * two are handed to the same client in the same email.
  */
-
-/** What an entry with no project is called, once, for every writer. */
-export const NO_PROJECT = "No project"
 
 /**
  * What an entry with no title is called.
@@ -50,8 +47,6 @@ export type ReportTitleRow = {
    *  list into `weeks` below without a second query. */
   weekStart: DayString
   totalMs: number
-  /** Hundredths of an hour — the quantity an invoice line would bill. */
-  centiHours: number
   /**
    * This row's share of the WHOLE RANGE — not of the week it is grouped
    * under below. A row inside a light week and a row inside a heavy week can
@@ -89,7 +84,6 @@ export type ReportWeek = {
   rows: Array<ReportTitleRow>
   subtotal: {
     totalMs: number
-    centiHours: number
     /** This week's share of the range — NOT its rows' percents summed by a
      *  reader; those are already range-relative (see `ReportTitleRow.percent`
      *  above), and this is the same quantity computed once for the heading. */
@@ -148,6 +142,20 @@ export type ReportRows = {
     averageDailyMs: number
     count: number
     truncated: boolean
+    /**
+     * The grand TOTAL row's own Percent cell — each row's share of TOTAL
+     * DURATION, so this is the range's own total as a share of itself: 100,
+     * except an empty range, where `percentOf`'s empty-whole rule answers 0
+     * rather than a nonsensical 100-of-nothing.
+     *
+     * Computed ONCE here, the same fix commit b9b700f already made for the
+     * grand-total Amount: before this field existed, `to-csv.ts`,
+     * `to-xlsx.ts` and `report-doc.ts` each independently wrote
+     * `totalMs === 0 ? 0 : 100`, kept in sync only by a comment in each file
+     * pointing at the other two. NOT `billablePercent` — that measures the
+     * range's billable SHARE, an unrelated question this cell does not ask.
+     */
+    percent: number
   }
   buckets: Array<Bucket>
   projects: Array<ReportProjectRow>
@@ -175,21 +183,6 @@ export function percentOf(part: number, whole: number): number {
 }
 
 /**
- * A day string formatted with the given fields, at noon UTC.
- *
- * Noon, not local midnight, and formatted in UTC — the same trick
- * `report-series.ts`'s `atNoon` uses: the calendar date is already decided
- * by the time it reaches here, and noon sits far enough from either boundary
- * that no zone offset can move the rendered day off it.
- */
-function fmt(day: DayString, options: Intl.DateTimeFormatOptions): string {
-  const { year, month, day: date } = parseDayString(day)
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", ...options }).format(
-    new Date(Date.UTC(year, month - 1, date, 12))
-  )
-}
-
-/**
  * A week's printed span, e.g. "1 – 7 Aug 2026" or "28 Jul – 3 Aug 2026".
  *
  * The month and year are stated once, on whichever end needs to introduce
@@ -201,7 +194,7 @@ function fmt(day: DayString, options: Intl.DateTimeFormatOptions): string {
 function weekLabel(start: DayString, end: DayString): string {
   const sameMonth = start.slice(0, 7) === end.slice(0, 7)
   if (sameMonth) {
-    return `${fmt(start, { day: "numeric" })} – ${fmt(end, {
+    return `${format(start, { day: "numeric" })} – ${format(end, {
       day: "numeric",
       month: "short",
       year: "numeric",
@@ -211,7 +204,7 @@ function weekLabel(start: DayString, end: DayString): string {
   const startOptions: Intl.DateTimeFormatOptions = sameYear
     ? { day: "numeric", month: "short" }
     : { day: "numeric", month: "short", year: "numeric" }
-  return `${fmt(start, startOptions)} – ${fmt(end, {
+  return `${format(start, startOptions)} – ${format(end, {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -254,7 +247,6 @@ export function groupWeeks(
       rows,
       subtotal: {
         totalMs,
-        centiHours: centiHours(totalMs),
         percent: percentOf(totalMs, rangeTotalMs),
         billableCents,
         unpriced: rows.some((row) => row.unpriced),
@@ -286,7 +278,6 @@ export function reportRows(
     description: row.title === "" ? NO_DESCRIPTION : row.title,
     weekStart: row.weekStart,
     totalMs: row.totalMs,
-    centiHours: centiHours(row.totalMs),
     percent: percentOf(row.totalMs, breakdown.totalMs),
     billableCents: row.billableCents,
     unpriced: row.unratedBillableMs > 0,
@@ -310,6 +301,7 @@ export function reportRows(
       averageDailyMs,
       count: breakdown.count,
       truncated: breakdown.truncated,
+      percent: percentOf(breakdown.totalMs, breakdown.totalMs),
     },
     buckets,
     projects: breakdown.projects.map((project) => ({
@@ -333,9 +325,14 @@ export function reportRows(
  * three near-identical sentences drift until they claim three different limits.
  * Kept beside `reportRows` rather than in each writer for the same reason the
  * rows themselves are: one derivation, three renderings.
+ *
+ * The count itself is interpolated from `TITLE_ROW_LIMIT` (convex/lib/scan.ts)
+ * rather than typed as a literal "500" here — a constant in one file and a
+ * hand-typed number in this sentence is how the two stop agreeing the day
+ * only one of them changes.
  */
 export const TITLE_CAP_NOTE =
-  "Only the 500 highest-duration rows in the range are listed — the same description in two different weeks counts as two rows — so a week's Subtotal may not include all of that week's work. Narrow the range for a complete breakdown."
+  `Only the ${TITLE_ROW_LIMIT} highest-duration rows in the range are listed — the same description in two different weeks counts as two rows — so a week's Subtotal may not include all of that week's work. Narrow the range for a complete breakdown.`
 
 /** The sentence unpriced billable time must carry. Same reasoning. */
 export const UNPRICED_NOTE =

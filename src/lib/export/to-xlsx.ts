@@ -157,8 +157,12 @@ function breakdownSheet(rows: ReportRows): SheetData {
       null,
       text(formatClock(rows.totals.totalMs), true),
       hours(rows.totals.totalMs),
+      // `totals.percent` — computed once in report-rows.ts as
+      // `percentOf(totalMs, totalMs)` — not a re-derived `totalMs === 0 ? 0
+      // : 100`, so this cell cannot drift from what to-csv.ts and
+      // report-doc.ts print for the same range.
       {
-        value: rows.totals.totalMs === 0 ? 0 : 100,
+        value: rows.totals.percent,
         type: Number,
         format: "0.00",
       } as const,

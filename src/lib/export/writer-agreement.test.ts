@@ -31,6 +31,9 @@ function totalsFor(over: {
     count: 1,
     truncated: false,
     unpriced: over.unratedBillableMs > 0,
+    // Every case in this fixture keeps `totalMs: HOUR` above, so the TOTAL
+    // row's own share of itself is always the non-empty answer.
+    percent: 100,
   }
 }
 
@@ -41,7 +44,6 @@ function rowsWithTotals(totals: ReportRows["totals"]): ReportRows {
       description: "Standup",
       weekStart: "2026-07-13",
       totalMs: totals.totalMs,
-      centiHours: 100,
       percent: 100,
       billableCents: totals.billableCents,
       unpriced: totals.unpriced,
@@ -60,7 +62,6 @@ function rowsWithTotals(totals: ReportRows["totals"]): ReportRows {
         rows: titles,
         subtotal: {
           totalMs: totals.totalMs,
-          centiHours: 100,
           percent: 100,
           billableCents: totals.billableCents,
           unpriced: totals.unpriced,
@@ -164,6 +165,50 @@ describe("the three writers agree on the grand-total Amount", () => {
   })
 })
 
+/** The PDF's grand-TOTAL row's Percent cell, as printed text. */
+function pdfTotalPercent(rows: ReportRows): string | undefined {
+  const pages = reportPages(rows)
+  const last = pages.at(-1)!
+  const op = last.ops.find(
+    (o): o is Extract<PdfOp, { kind: "text" }> =>
+      o.kind === "text" && o.x === COL.percent && o.size === TYPE.strong && o.align === "right"
+  )
+  return op?.text
+}
+
+function csvTotalPercent(rows: ReportRows): string {
+  const totalLine = toCsv(rows)
+    .split("\r\n")
+    .find((line) => line.startsWith("TOTAL,"))!
+  return totalLine.split(",")[5] // Percent is the sixth field
+}
+
+function xlsxTotalPercent(rows: ReportRows): unknown {
+  const breakdown = xlsxSheets(rows).find((s) => s.sheet === "Breakdown")!
+  const total = breakdown.data.at(-1)!
+  return (total[5] as { value: number } | null)?.value ?? null
+}
+
+/*
+ * All three writers must read `rows.totals.percent` — the ONE derivation
+ * `report-rows.ts` now computes (see `percentOf(totalMs, totalMs)` there) —
+ * rather than each re-deriving `totalMs === 0 ? 0 : 100` on its own. A
+ * fixture with a deliberately distinctive `percent` (42, unreachable by any
+ * totalMs-based rule a writer might reinvent) is what proves a writer is
+ * actually reading the shared field rather than happening to compute the
+ * same answer by coincidence.
+ */
+describe("the three writers agree on the grand-total Percent", () => {
+  it("all print totals.percent verbatim, not a re-derived totalMs-based rule", () => {
+    const totals = totalsFor({ billableMs: HOUR, billableCents: 1_000, unratedBillableMs: 0 })
+    const rows = rowsWithTotals({ ...totals, percent: 42 })
+
+    expect(csvTotalPercent(rows)).toBe("42")
+    expect(xlsxTotalPercent(rows)).toBe(42)
+    expect(pdfTotalPercent(rows)).toBe("42%")
+  })
+})
+
 /*
  * Extends to-xlsx.test.ts's own "writes the TOTAL row's percent as 0 for an
  * empty range" test to all three writers — that test already covers XLSX;
@@ -175,7 +220,7 @@ describe("the three writers agree on the grand-total Percent for an empty range"
     const totals = totalsFor({ billableMs: 0, billableCents: 0, unratedBillableMs: 0 })
     const empty: ReportRows = {
       meta: { from: "2026-07-13", to: "2026-07-13", currency: "USD", daysWorked: 0, granularity: "day" },
-      totals: { ...totals, totalMs: 0, count: 0 },
+      totals: { ...totals, totalMs: 0, count: 0, percent: 0 },
       buckets: [],
       projects: [],
       titles: [],
@@ -190,7 +235,7 @@ describe("the three writers agree on the grand-total Percent for an empty range"
 
     // No titles means no breakdown page is emitted (see reportPages) — put
     // one nominal row in so the TOTAL row itself is drawn.
-    const withRow = rowsWithTotals({ ...totals, totalMs: 0, count: 0 })
+    const withRow = rowsWithTotals({ ...totals, totalMs: 0, count: 0, percent: 0 })
     const pages = reportPages(withRow)
     const percentOp = pages
       .at(-1)!

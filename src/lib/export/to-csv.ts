@@ -85,9 +85,10 @@ export function toCsv(rows: ReportRows): string {
     // range with hours but zero billable work has `billablePercent: 0`;
     // branching this cell on it printed "0" beneath a column of rows whose
     // own Percents summed to 100, a CSV visibly contradicting its own rows.
-    // "0 unless there was any duration at all" is the question this column
-    // is actually answering.
-    String(rows.totals.totalMs === 0 ? 0 : 100),
+    // `totals.percent` is the ONE place that answers "0 unless there was any
+    // duration at all" — see report-rows.ts — read here rather than
+    // re-derived, so this file cannot drift from to-xlsx.ts and report-doc.ts.
+    String(rows.totals.percent),
     amount(rows.totals.billableCents, rows.totals.unpriced),
     currency,
   ])

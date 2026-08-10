@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { NO_PROJECT, percentOf, reportRows } from "./report-rows"
+import { percentOf, reportRows } from "./report-rows"
+import { NO_PROJECT } from "@/lib/report-series"
 import type { Breakdown } from "@/lib/report-series"
 
 const HOUR = 3_600_000
@@ -130,7 +131,7 @@ describe("reportRows — projects and descriptions", () => {
     expect(rows.titles[0].description).toBe("(no description)")
   })
 
-  it("carries decimal hours per row, so a writer never re-derives them", () => {
+  it("gives a single full-range row 100% and no unpriced flag", () => {
     const rows = reportRows(
       breakdownOf({
         totalMs: 29_520_000,
@@ -151,7 +152,6 @@ describe("reportRows — projects and descriptions", () => {
       RANGE
     )
 
-    expect(rows.titles[0].centiHours).toBe(820)
     expect(rows.titles[0].percent).toBe(100)
     expect(rows.titles[0].unpriced).toBe(false)
   })
@@ -324,7 +324,6 @@ describe("reportRows — weeks", () => {
     )
 
     expect(rows.weeks[0].subtotal.totalMs).toBe(3 * HOUR)
-    expect(rows.weeks[0].subtotal.centiHours).toBe(300)
     expect(rows.weeks[0].subtotal.billableCents).toBe(300)
     expect(rows.weeks[0].subtotal.unpriced).toBe(false)
   })

@@ -13,6 +13,20 @@ import type { DayString } from "@shared/day"
  * and a decision inside a render function is a decision nothing can test.
  */
 
+/**
+ * What an entry or project with no project is called, on screen and in every
+ * exported document.
+ *
+ * Lives here — not in `src/lib/export/report-rows.ts` — because this module
+ * (the breakdown/bucket shapes both the on-screen charts and the export
+ * pipeline are built from) is the one thing `project-chart.tsx` and
+ * `report-rows.ts` already both import; a label the live chart needs has no
+ * business living in an export-only module the chart would otherwise have no
+ * reason to reach into. Two independent `"No project"` literals is how the
+ * screen and the document it's exported into read differently.
+ */
+export const NO_PROJECT = "No project"
+
 /** One day's totals, as `entries.rangeBreakdown` returns them. */
 export type DayTotal = {
   day: DayString
@@ -268,10 +282,15 @@ function atNoon(day: DayString): Date {
  * this runs twice per bucket — up to ~200 constructions for a two-year range,
  * on every render. convex/lib/day.ts and src/lib/format-time.ts both cache
  * theirs for the same reason, and say so.
+ *
+ * Exported so `report-rows.ts` shares this ONE cache rather than carrying its
+ * own uncached "parse day → noon UTC instant → `Intl.DateTimeFormat`" copy —
+ * two independent implementations of "which instant do we format" is how a
+ * timezone-edge fix reaches one call site and not the other.
  */
 const formatters = new Map<string, Intl.DateTimeFormat>()
 
-function format(day: DayString, options: Intl.DateTimeFormatOptions): string {
+export function format(day: DayString, options: Intl.DateTimeFormatOptions): string {
   const key = JSON.stringify(options)
   let formatter = formatters.get(key)
   if (formatter === undefined) {
