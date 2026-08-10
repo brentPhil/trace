@@ -1,4 +1,4 @@
-import { periodFilters } from "@/lib/history-filters"
+import { periodWindow } from "@/lib/history-filters"
 import { parseDayString } from "@shared/day"
 import type { Period } from "@/lib/history-filters"
 import type { DayString } from "@shared/day"
@@ -105,17 +105,7 @@ export function rangeTriggerLabel(
   weekStartDay: number
 ): string {
   if (period !== "custom") {
-    // `periodFilters` needs a whole `Filters` to update; only `.from`/`.to`
-    // are read back out, so the rest of this object is inert filler.
-    const current = periodFilters(period, today, weekStartDay, {
-      period,
-      from,
-      to,
-      projectId: null,
-      billableOnly: false,
-      text: "",
-      presets: [],
-    })
+    const current = periodWindow(period, today, weekStartDay)
     if (current.from === from && current.to === to) {
       return period === "day"
         ? "Today"

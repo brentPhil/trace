@@ -82,18 +82,36 @@ export function stepPeriod(filters: Filters, direction: -1 | 1): Filters {
   }
 }
 
+/**
+ * The day bounds a period computes for `today`, and nothing else.
+ *
+ * Separate from `periodFilters` because the range picker's trigger label needs
+ * only this — it asks "is the range on screen still what 'this week' means?"
+ * and has no filter state to thread through. Going through `periodFilters` for
+ * that meant fabricating a whole `Filters` object to read two fields back out
+ * of, so the filler values (`projectId: null`, `billableOnly: false`) sat there
+ * looking like they meant something.
+ */
+export function periodWindow(
+  period: Exclude<Period, "custom">,
+  today: DayString,
+  weekStartDay: number
+): { from: DayString; to: DayString } {
+  if (period === "day") return { from: today, to: today }
+  if (period === "week") {
+    const week = weekWindow(today, "UTC", weekStartDay)
+    return { from: week.firstDay, to: week.lastDay }
+  }
+  return { from: monthStart(today), to: monthEnd(today) }
+}
+
 export function periodFilters(
   period: Exclude<Period, "custom">,
   today: DayString,
   weekStartDay: number,
   current: Filters
 ): Filters {
-  if (period === "day") return { ...current, period, from: today, to: today }
-  if (period === "week") {
-    const week = weekWindow(today, "UTC", weekStartDay)
-    return { ...current, period, from: week.firstDay, to: week.lastDay }
-  }
-  return { ...current, period, from: monthStart(today), to: monthEnd(today) }
+  return { ...current, period, ...periodWindow(period, today, weekStartDay) }
 }
 
 /**
@@ -181,8 +199,19 @@ export function hasClientSideFilter(filters: FilterInput): boolean {
 
 // ---------------------------------------------------------------------------
 
-function daysBetween(from: DayString, to: DayString): number {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
+/**
+ * Calendar days between two day strings, signed.
+ *
+ * Counted from the DATES, not from the instants: two days can be 23 or 25
+ * hours apart across a DST boundary, and "yesterday" must not depend on which.
+ * Exported because `staged-start.ts` asks the same question of the same type —
+ * a second copy is how the timer bar's "3 days ago" and Reports' period
+ * stepping come to disagree about a day boundary.
+ */
+export function daysBetween(from: DayString, to: DayString): number {
+  return Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+  )
 }
 
 function monthStart(day: DayString): DayString {

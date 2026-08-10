@@ -1,7 +1,7 @@
 import { formatShortDate, formatTimeOfInstant } from "@/lib/format-time"
-import { dayOf, parseDayString } from "@shared/day"
+import { daysBetween } from "@/lib/history-filters"
+import { dayOf } from "@shared/day"
 import { MAX_DURATION_MS } from "@shared/duration"
-import type { DayString } from "@shared/day"
 
 /**
  * The staged start: "when Play is pressed, begin the entry HERE rather than
@@ -75,7 +75,7 @@ export function describeStagedStart(
   const stagedDay = dayOf(instantMs, timeZone)
   if (stagedDay === today) return time
   const date = formatShortDate(instantMs, timeZone)
-  return `${time} on ${date} (${relativeDay(wholeDaysBetween(today, stagedDay))})`
+  return `${time} on ${date} (${relativeDay(daysBetween(today, stagedDay))})`
 }
 
 /** "yesterday", "in 5 days" — never a bare number of days in either direction. */
@@ -84,20 +84,4 @@ function relativeDay(delta: number): string {
   if (delta === 1) return "tomorrow"
   if (delta < 0) return `${-delta} days ago`
   return `in ${delta} days`
-}
-
-/**
- * Calendar days between two day strings, signed.
- *
- * Counted from the DATES, not from the instants: two days can be 23 or 25
- * hours apart across a DST boundary, and "yesterday" must not depend on which.
- */
-function wholeDaysBetween(from: DayString, to: DayString): number {
-  const a = parseDayString(from)
-  const b = parseDayString(to)
-  const DAY_MS = 86_400_000
-  return Math.round(
-    (Date.UTC(b.year, b.month - 1, b.day) - Date.UTC(a.year, a.month - 1, a.day)) /
-      DAY_MS
-  )
 }
