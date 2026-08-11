@@ -1,0 +1,156 @@
+import { describe, expect, it } from "vitest"
+import { calendarEvents, dayTotals, earliestHour } from "./calendar-events"
+import type { Doc } from "../../convex/_generated/dataModel"
+
+/*
+ * The mapping into FullCalendar, and the day totals beside it.
+ *
+ * Pure and tested here rather than through the grid, because FullCalendar
+ * measures element geometry to lay itself out and jsdom reports every element
+ * as zero-sized — a rendered assertion about this file would be a rendered
+ * assertion about nothing.
+ */
+
+const UTC = "UTC"
+
+/** A completed entry. Only the fields this module reads are populated. */
+function entry(over: Partial<Doc<"timeEntries">>): Doc<"timeEntries"> {
+  return {
+    _id: "e1",
+    _creationTime: 0,
+    userId: "u1",
+    title: "Fixing the logbook",
+    startedAt: Date.UTC(2026, 7, 10, 9, 0),
+    endedAt: Date.UTC(2026, 7, 10, 10, 0),
+    projectId: undefined,
+    tagIds: [],
+    billable: false,
+    note: undefined,
+    clientKey: "k1",
+    deletedAt: null,
+    ...over,
+  } as unknown as Doc<"timeEntries">
+}
+
+const NOW = Date.UTC(2026, 7, 10, 12, 0)
+
+describe("calendarEvents", () => {
+  it("carries absolute instants, not wall-clock strings", () => {
+    // An ISO string without an offset is interpreted in the calendar's own
+    // timeZone. That is right by accident until something reads the field a
+    // different way, so the contract is a Date built from the stored instant.
+    const [event] = calendarEvents([entry({})], NOW)
+    expect(event.start).toBeInstanceOf(Date)
+    expect((event.start as Date).getTime()).toBe(Date.UTC(2026, 7, 10, 9, 0))
+    expect((event.end as Date).getTime()).toBe(Date.UTC(2026, 7, 10, 10, 0))
+  })
+
+  it("ends a running entry at now", () => {
+    const [event] = calendarEvents([entry({ endedAt: null })], NOW)
+    expect((event.end as Date).getTime()).toBe(NOW)
+    expect(event.extendedProps.running).toBe(true)
+  })
+
+  it("floors a zero-length entry to one minute", () => {
+    // FullCalendar drops an event whose end equals its start. A row that
+    // exists must be visible, or it cannot be edited from this view at all.
+    const at = Date.UTC(2026, 7, 10, 9, 0)
+    const [event] = calendarEvents([entry({ startedAt: at, endedAt: at })], NOW)
+    expect((event.end as Date).getTime()).toBe(at + 60_000)
+  })
+
+  it("passes the classification through for styling", () => {
+    const [event] = calendarEvents(
+      [entry({ projectId: "p1" as never, billable: true })],
+      NOW
+    )
+    expect(event.extendedProps.projectId).toBe("p1")
+    expect(event.extendedProps.billable).toBe(true)
+    expect(event.extendedProps.running).toBe(false)
+    expect(event.id).toBe("e1")
+  })
+})
+
+describe("dayTotals", () => {
+  it("attributes a midnight-crossing entry wholly to the day it began", () => {
+    // convex/entries.ts:207. The grid draws this entry in both columns, so
+    // this is the assertion that keeps a column total from disagreeing with
+    // the same day's header in List.
+    const totals = dayTotals(
+      [
+        entry({
+          startedAt: Date.UTC(2026, 7, 10, 23, 0),
+          endedAt: Date.UTC(2026, 7, 11, 1, 30),
+        }),
+      ],
+      UTC,
+      NOW
+    )
+    expect(totals.get("2026-08-10")).toBe(2.5 * 3_600_000)
+    expect(totals.get("2026-08-11")).toBeUndefined()
+  })
+
+  it("sums several entries on one day", () => {
+    const totals = dayTotals(
+      [
+        entry({
+          startedAt: Date.UTC(2026, 7, 10, 9, 0),
+          endedAt: Date.UTC(2026, 7, 10, 10, 0),
+        }),
+        entry({
+          _id: "e2",
+          startedAt: Date.UTC(2026, 7, 10, 14, 0),
+          endedAt: Date.UTC(2026, 7, 10, 14, 30),
+        } as Partial<Doc<"timeEntries">>),
+      ],
+      UTC,
+      NOW
+    )
+    expect(totals.get("2026-08-10")).toBe(1.5 * 3_600_000)
+  })
+
+  it("counts a running entry's elapsed time so far", () => {
+    const totals = dayTotals(
+      [
+        entry({
+          startedAt: Date.UTC(2026, 7, 10, 11, 0),
+          endedAt: null,
+        }),
+      ],
+      UTC,
+      NOW
+    )
+    expect(totals.get("2026-08-10")).toBe(3_600_000)
+  })
+})
+
+describe("earliestHour", () => {
+  it("returns the hour of the earliest start in the user's zone", () => {
+    const hour = earliestHour(
+      [
+        entry({ startedAt: Date.UTC(2026, 7, 10, 14, 12) }),
+        entry({ _id: "e2", startedAt: Date.UTC(2026, 7, 10, 9, 45) } as Partial<
+          Doc<"timeEntries">
+        >),
+      ],
+      UTC,
+      8
+    )
+    expect(hour).toBe(9)
+  })
+
+  it("falls back when nothing is tracked", () => {
+    expect(earliestHour([], UTC, 8)).toBe(8)
+  })
+
+  it("reads the hour in the stored zone, not the browser's", () => {
+    // 23:30 UTC is 07:30 the next morning in Manila. A grid scrolled to 23:00
+    // for a 07:30 start is a grid scrolled past every block on it.
+    const hour = earliestHour(
+      [entry({ startedAt: Date.UTC(2026, 7, 9, 23, 30) })],
+      "Asia/Manila",
+      8
+    )
+    expect(hour).toBe(7)
+  })
+})
