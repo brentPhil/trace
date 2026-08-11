@@ -5,14 +5,18 @@ import { ProjectDot } from "@/components/classifiers/project-dot"
 import {
   calendarEvents,
   dayTotals,
+  drawnDays,
   earliestHour,
 } from "@/lib/calendar-events"
 import { formatTimeOfInstant, formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
-import { dayOf } from "@shared/day"
+import { dayOf, localPartsOf } from "@shared/day"
 import { formatClock } from "@shared/duration"
-import type { CalendarEventProps } from "@/lib/calendar-events"
+import type {
+  CalendarEventProps,
+  CalendarRange,
+} from "@/lib/calendar-events"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayString } from "@shared/day"
@@ -44,19 +48,53 @@ const PLUGINS = [timeGridPlugin]
  * re-render test is what holds this shut.
  */
 const NO_HIDDEN_DAYS: Array<number> = []
-/** `[0, 6]` hides Saturday and Sunday whatever `firstDay` is, which is exactly
- *  "Monday to Friday regardless of weekStartDay". A 5-day range therefore also
- *  steps by a whole week for free, because it IS the week. */
+/**
+ * `[0, 6]`, AND IT ONLY MEANS "Monday to Friday" BECAUSE OF THE `firstDay`
+ * OVERRIDE BELOW. Neither half of that pair works alone.
+ *
+ * `hiddenDays` does not trim by day-of-week index wherever the day falls.
+ * FullCalendar builds the week from `firstDay` and then removes hidden days
+ * only from the ENDS of it, so a weekend sitting in the INTERIOR of the week is
+ * not removed at all. Measured, anchor 2026-08-11 in Asia/Manila, with
+ * `firstDay = weekStartDay`:
+ *
+ *   0, 1, 6 -> Mon 10 – Fri 14, five columns  (the weekend already sat at an end)
+ *   2       -> Tue 11, Wed 12, Thu 13, Fri 14, MON 17
+ *   3       -> Wed 5, Thu 6, Fri 7, MON 10, TUE 11
+ *   4       -> Thu 6, Fri 7, MON 10, TUE 11, WED 12
+ *   5       -> Fri 7, MON 10, TUE 11, WED 12, THU 13
+ *
+ * `/settings` offers all seven starts, so every one of those rows is reachable:
+ * a user whose week starts on Wednesday got a discontinuous grid — three days
+ * of one week and two of the next — and a `datesSet` range seven days wide
+ * under five columns.
+ *
+ * `WORKING_WEEK_FIRST_DAY` is what makes the trim land right for all seven. With
+ * the week built Mon,Tue,Wed,Thu,Fri,Sat,Sun, trimming from the front stops
+ * immediately at Mon and trimming from the back removes Sun, then Sat, and stops
+ * at Fri. That is also exactly why 0, 1 and 6 already worked.
+ *
+ * OVERRIDING THE USER'S WEEK START HERE IS THE RULE, NOT A WORKAROUND. 5 days is
+ * the working week and the working week is Monday to Friday by definition; the
+ * view exists to hide the weekend, and rotating it by `weekStartDay` would make
+ * it mean something else on a Sunday-start calendar. `week` and `day` still take
+ * the stored `weekStartDay`, which is where it belongs.
+ *
+ * NOT `visibleRange`, which would say the same thing directly: it is an OBJECT,
+ * so it is a freshly allocated dateProfile input on every render — the render
+ * loop the note above this describes. `firstDay` is a number, compared by value.
+ */
 const WEEKEND_HIDDEN = [0, 6]
+
+/** Monday. The 5-day view's own week start, whatever the user's is — see
+ *  `WEEKEND_HIDDEN` for why it is not `weekStartDay`. */
+const WORKING_WEEK_FIRST_DAY = 1
 
 /** 48px an hour, the density every shipping calendar has converged on. */
 const SLOT_MIN_HEIGHT = 48
 
 /** Enough that a four-minute entry is still a click target. */
 const EVENT_MIN_HEIGHT = 18
-
-/** Where the grid opens when the range is empty. */
-const FALLBACK_SCROLL_HOUR = 8
 
 /*
  * Hour rules and column dividers.
@@ -119,7 +157,7 @@ export function CalendarPanel({
   nowMs: number
   projectsById: Map<string, Doc<"projects">>
   onEntryClick: (entryId: string) => void
-  onRangeChange: (range: { fromMs: number; toMs: number }) => void
+  onRangeChange: (range: CalendarRange) => void
 }) {
   const events = useMemo(() => calendarEvents(entries, nowMs), [entries, nowMs])
 
@@ -128,9 +166,27 @@ export function CalendarPanel({
     [entries, timeZone, nowMs]
   )
 
+  /** One of two module constants, never a fresh array — see `WEEKEND_HIDDEN`. */
+  const hiddenDays = size === "5day" ? WEEKEND_HIDDEN : NO_HIDDEN_DAYS
+
+  /*
+   * The CURRENT HOUR on an empty range, which is what every shipping calendar
+   * opens at and what the plan says. A fixed 08:00 was the code's own invention:
+   * it is wrong twice a day for anyone who does not start at eight, and on an
+   * empty range there is nothing on screen to say why the grid is where it is.
+   *
+   * Read through `localPartsOf`, never `getHours()` — the browser's zone is not
+   * the user's. `nowHour` rather than `nowMs` is the dependency deliberately:
+   * this component re-renders every second, and `scrollTime` is a dateProfile
+   * input that resets the scroll position when it changes. An hour-stable number
+   * means the string below is identical across every tick within the hour, so
+   * the grid stays where the user scrolled it. It is also unused entirely
+   * whenever the range holds an entry, which is the ordinary case.
+   */
+  const nowHour = localPartsOf(nowMs, timeZone).hour
   const scrollHour = useMemo(
-    () => earliestHour(entries, timeZone, FALLBACK_SCROLL_HOUR),
-    [entries, timeZone]
+    () => earliestHour(entries, timeZone, nowHour),
+    [entries, timeZone, nowHour]
   )
 
   /*
@@ -186,8 +242,10 @@ export function CalendarPanel({
       // so the grid's midnight and `convex/lib/day.ts`'s midnight are the same
       // instant.
       timeZone={timeZone}
-      firstDay={weekStartDay}
-      hiddenDays={size === "5day" ? WEEKEND_HIDDEN : NO_HIDDEN_DAYS}
+      // Monday for the working week, the stored start for everything else.
+      // The two props below are ONE decision — see `WEEKEND_HIDDEN`.
+      firstDay={size === "5day" ? WORKING_WEEK_FIRST_DAY : weekStartDay}
+      hiddenDays={hiddenDays}
       headerToolbar={false}
       // Nothing here is all-day. An entry is a span of a working day, and an
       // empty all-day rail above every column is a band of nothing.
@@ -214,7 +272,22 @@ export function CalendarPanel({
         const key = `${fromMs}-${toMs}`
         if (key === lastRange.current) return
         lastRange.current = key
-        onRangeChange({ fromMs, toMs })
+        /*
+         * THE COLUMNS GO UP WITH THE RANGE, not just its two ends.
+         *
+         * "Range total" in the header is summed from what this reports, and the
+         * column headers below are looked up per DRAWN day. Handing up only
+         * `fromMs`/`toMs` left the page free to sum a day that has no column —
+         * which it did, and which is the same defect class as a header total
+         * belonging to a range other than the one on screen. `drawnDays` takes
+         * the very `hiddenDays` array the grid was given, one file away from
+         * where it is decided, so the two cannot drift.
+         */
+        onRangeChange({
+          fromMs,
+          toMs,
+          days: drawnDays(fromMs, toMs, timeZone, hiddenDays),
+        })
       }}
       eventClick={(info) => {
         info.jsEvent.preventDefault()
@@ -335,7 +408,22 @@ export function CalendarPanel({
         }
 
         return (
-          <div className="flex min-w-0 flex-col gap-0.5">
+          /*
+           * `title`, in ADDITION to the accessible name the text below already
+           * gives the block. A block only as tall as `eventMinHeight` clips its
+           * own title, and the native tooltip is the only way to read it without
+           * leaving the grid. It goes on this element rather than on the block
+           * itself because `columnEventClass` is the only hook the block element
+           * has and it takes class names, not attributes — and this div fills
+           * the block's content box, so the hover target is the same one.
+           *
+           * The midnight TAIL is deliberately excluded: it returns above, and
+           * "no title on the tail" is the Hatch Rule, not an oversight.
+           */
+          <div
+            title={titleOf(info.event)}
+            className="flex min-w-0 flex-col gap-0.5"
+          >
             <span className="truncate text-xs font-medium">
               {titleOf(info.event)}
             </span>

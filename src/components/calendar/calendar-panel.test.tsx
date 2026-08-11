@@ -342,9 +342,21 @@ describe("CalendarPanel", () => {
         "2026-08-23",
       ])
       // And the range goes upward, so the query and the total follow the grid.
+      // The DAYS go up with it, not only the two instants: "Range total" is
+      // summed over exactly this list, and a week view hides nothing, so it is
+      // every column drawn above.
       expect(onRangeChange).toHaveBeenCalledWith({
         fromMs: Date.parse("2026-08-16T16:00:00Z"), // Mon 17th, Manila midnight
         toMs: Date.parse("2026-08-23T16:00:00Z"),
+        days: [
+          "2026-08-17",
+          "2026-08-18",
+          "2026-08-19",
+          "2026-08-20",
+          "2026-08-21",
+          "2026-08-22",
+          "2026-08-23",
+        ],
       })
     })
 
@@ -381,8 +393,11 @@ describe("CalendarPanel", () => {
 
   describe("the range sizes", () => {
     it("renders five weekday columns for a 5-day range", () => {
-      // `[0, 6]`, so Monday to Friday whatever `weekStartDay` is. On a Sunday
-      // start the range is still the working week.
+      // `[0, 6]` AND `firstDay: 1` — Monday to Friday whatever `weekStartDay`
+      // is, because the hidden days only get trimmed off the ENDS of the week
+      // `firstDay` built. A Sunday start is one of the three that happened to
+      // work without the override; `calendar-range-label.test.tsx` walks all
+      // seven, which is what this single case could not.
       const { container } = renderPanel({ size: "5day", weekStartDay: 0 })
       expect(renderedDays(container)).toEqual([
         "2026-08-10",

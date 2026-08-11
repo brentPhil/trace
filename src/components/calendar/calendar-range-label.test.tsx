@@ -3,9 +3,12 @@ import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 import { CalendarHeader } from "@/components/calendar/calendar-header"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
+import { rangeTotal } from "@/lib/calendar-events"
 import { calendarLabel } from "@/lib/calendar-label"
 import { visibleDaysOf } from "@/routes/_authed/timer"
+import type { CalendarRange } from "@/lib/calendar-events"
 import type { CalendarSize } from "@/lib/calendar-label"
+import type { Doc } from "../../../convex/_generated/dataModel"
 
 /*
  * THE LABEL AND THE COLUMNS, over every combination that can produce them.
@@ -73,20 +76,20 @@ function Harness({
   anchor,
   size,
   weekStartDay,
+  entries = [],
 }: {
   anchor: string
   size: CalendarSize
   weekStartDay: number
+  entries?: Array<Doc<"timeEntries">>
 }) {
-  const [range, setRange] = useState<{ fromMs: number; toMs: number } | null>(
-    null
-  )
+  const [range, setRange] = useState<CalendarRange | null>(null)
   const days = range === null ? null : visibleDaysOf(range, MANILA)
 
   return (
     <>
       <CalendarPanel
-        entries={[]}
+        entries={entries}
         size={size}
         anchor={anchor}
         timeZone={MANILA}
@@ -98,7 +101,7 @@ function Harness({
         onEntryClick={() => {}}
         onRangeChange={setRange}
       />
-      {days === null ? null : (
+      {days === null || range === null ? null : (
         <div
           data-testid="range-bar"
           data-first={days.firstDay}
@@ -109,7 +112,11 @@ function Harness({
             lastDay={days.lastDay}
             size={size}
             today={TODAY}
-            rangeMs={0}
+            // The page's own function, not a sum written a second time here —
+            // the same reason `visibleDaysOf` is imported rather than
+            // reimplemented: this test cannot pass while /timer does something
+            // else with the range the grid reported.
+            rangeMs={rangeTotal(entries, MANILA, NOW, range.days)}
             display="hms"
             onStep={() => {}}
             onToday={() => {}}
@@ -151,6 +158,75 @@ function measure(anchor: string, size: CalendarSize, weekStartDay: number) {
   }
 }
 
+/** Only the fields the grid and `dayTotals` read. */
+function entry(
+  id: string,
+  startedAt: number,
+  hours: number
+): Doc<"timeEntries"> {
+  return {
+    _id: id,
+    _creationTime: 0,
+    userId: "u1",
+    title: `Entry ${id}`,
+    startedAt,
+    endedAt: startedAt + hours * 3_600_000,
+    durationMs: hours * 3_600_000,
+    projectId: undefined,
+    tagIds: [],
+    billable: false,
+    note: undefined,
+    source: "web",
+    clientKey: id,
+    updatedAt: 0,
+    deletedAt: null,
+  } as unknown as Doc<"timeEntries">
+}
+
+/** 09:00 Manila on the given day. */
+const at = (day: string, hour: number) =>
+  Date.parse(`${day}T00:00:00+08:00`) + hour * 3_600_000
+
+/**
+ * One entry on each of Tue, Thu, Sat and Sun of the working week under test,
+ * so a total that leaked a day without a column cannot pass by being zero.
+ */
+const SPREAD = [
+  entry("tue", at("2026-08-11", 9), 1),
+  entry("thu", at("2026-08-13", 9), 2),
+  entry("sat", at("2026-08-15", 9), 4),
+  entry("sun", at("2026-08-16", 9), 8),
+]
+
+/**
+ * Renders one combination with entries on it and reads the FIGURES back off the
+ * screen — the column headers' own totals and the header's range total.
+ */
+function measureTotals(
+  anchor: string,
+  size: CalendarSize,
+  weekStartDay: number
+) {
+  const { container } = render(
+    <Harness
+      anchor={anchor}
+      size={size}
+      weekStartDay={weekStartDay}
+      entries={SPREAD}
+    />
+  )
+  // `.tabular.text-xs` inside a column header is the day total and only the
+  // day total: the weekday text is not `tabular` and the date is `text-base`.
+  const columnTotals = [
+    ...container.querySelectorAll('[role="columnheader"] .tabular.text-xs'),
+  ].map((span) => span.textContent)
+  return {
+    columns: columnDates(container),
+    columnTotals,
+    rangeMs: screen.getByText("Range total").textContent,
+  }
+}
+
 describe("the header's label and the grid's own columns", () => {
   describe.each(WEEK_STARTS)("weekStartDay %i", (weekStartDay) => {
     it("names the first and last column the week view actually drew", () => {
@@ -182,14 +258,30 @@ describe("the header's label and the grid's own columns", () => {
       }
     })
 
-    it("names the first and last column the 5-day view actually drew", () => {
+    it("draws Monday to Friday, and names them", () => {
       /*
-       * The case the old derivation got wrong 31 times. `hiddenDays={[0, 6]}`
-       * is trimmed off the ENDS of the week `firstDay` built, so this range is
-       * only Mon–Fri when the week starts on a Sunday or a Monday; from Tuesday
-       * onward the weekend falls inside the week and the columns run
-       * Tue–Fri + Mon. Whatever they are, the label has to say so.
+       * THE ASSERTION THAT WAS MISSING, and the reason a false claim survived
+       * two reviews: this used to check only that the label matched WHATEVER
+       * the grid drew. It did — and what the grid drew was not Mon–Fri.
+       *
+       * `hiddenDays={[0, 6]}` is trimmed off the ENDS of the week `firstDay`
+       * built, so with `firstDay = weekStartDay` the weekend fell in the
+       * INTERIOR from Tuesday onward and was not removed at all: `weekStartDay:
+       * 3` drew Wed 5, Thu 6, Fri 7, MON 10, TUE 11 — five columns spanning
+       * seven days of two different weeks. `calendar-panel.tsx` pins `firstDay`
+       * to Monday for this size, which puts the weekend back at the end where
+       * the trim can reach it, for all seven starts.
+       *
+       * `/settings` offers all seven, so this is the whole reachable matrix.
        */
+      const WORKING_WEEK = [
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+      ]
+
       for (const anchor of ANCHORS) {
         const { columns, derived, label } = measure(
           anchor,
@@ -197,7 +289,9 @@ describe("the header's label and the grid's own columns", () => {
           weekStartDay
         )
 
-        expect(columns).toHaveLength(5)
+        // Every anchor here is inside Mon 10 – Sun 16, so every one of them
+        // resolves to the same working week however the user's week starts.
+        expect({ anchor, columns }).toEqual({ anchor, columns: WORKING_WEEK })
         expect({ anchor, days: derived }).toEqual({
           anchor,
           days: [columns[0], columns[columns.length - 1]],
@@ -214,6 +308,36 @@ describe("the header's label and the grid's own columns", () => {
 
         cleanup()
       }
+    })
+
+    it("keeps the range total to the days it drew a column for", () => {
+      /*
+       * THE HEADER'S TOTAL IS THE SUM OF THE COLUMN HEADERS' TOTALS, asserted
+       * against the figures actually on screen rather than against a second
+       * computation of them.
+       *
+       * `calendarTotalMs` used to sum every key `dayTotals` produced, which is
+       * every day the QUERY covers — while the grid looks that map up once per
+       * DRAWN column. Those two sets coincide only when the range and the
+       * columns are the same days, and the 5-day view is exactly where they
+       * were not: with `weekStartDay: 2` the range ran Tue–Mon while five
+       * columns were drawn, so a Saturday entry was counted into "Range total"
+       * above a grid showing nothing. The same defect class as a header total
+       * belonging to another range, which this branch has shipped once already.
+       *
+       * Saturday and Sunday both carry an entry, so a total that leaked days
+       * without a column cannot pass by being zero.
+       */
+      const { columns, rangeMs, columnTotals } = measureTotals(
+        "2026-08-12",
+        "5day",
+        weekStartDay
+      )
+
+      expect(columns).toHaveLength(5)
+      expect(columnTotals).toEqual(["1:00:00", "2:00:00"])
+      // Tuesday's hour and Thursday's two, and neither weekend entry.
+      expect(rangeMs).toBe("Range total3:00:00")
     })
   })
 

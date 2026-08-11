@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
@@ -10,6 +10,7 @@ import {
   resetPaginatedStore,
   resolvePage,
 } from "@/test-utils/convex-query"
+import { drawnDays } from "@/lib/calendar-events"
 import { expectFilterControlsInBand } from "@/test-utils/filter-band"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
@@ -120,13 +121,26 @@ vi.mock("@/components/calendar/calendar-panel", () => ({
     timeZone: string
     weekStartDay: number
     onEntryClick: (entryId: string) => void
-    onRangeChange: (range: { fromMs: number; toMs: number }) => void
+    onRangeChange: (range: {
+      fromMs: number
+      toMs: number
+      days: Array<string>
+    }) => void
   }) => {
     const { fromMs, toMs } = weekWindow(anchor, timeZone, weekStartDay)
+    // The seven days a week view draws, through the same helper the real panel
+    // reports with — the page sums "Range total" over exactly this list, so a
+    // stub that guessed at it would be asserting its own arithmetic. Memoised
+    // because a fresh array on every render is a fresh effect dependency, and
+    // the effect below sets state in the page.
+    const days = useMemo(
+      () => drawnDays(fromMs, toMs, timeZone, []),
+      [fromMs, toMs, timeZone]
+    )
     useEffect(() => {
       if (calendarStub.silent) return
-      onRangeChange({ fromMs, toMs })
-    }, [fromMs, toMs, onRangeChange])
+      onRangeChange({ fromMs, toMs, days })
+    }, [fromMs, toMs, days, onRangeChange])
 
     return (
       <div data-testid="calendar-panel">
@@ -532,6 +546,40 @@ describe("Timer — clicking a calendar block", () => {
     expect(screen.getByText(/is still running/)).toBeTruthy()
   })
 
+  it("stays on the calendar for a future entry, and does not send them backwards", () => {
+    /*
+     * `logRange.toMs` is the end of TODAY — pinned there so a clock-skewed
+     * entry cannot sit permanently on top of the log — while the calendar's
+     * range is the whole current week. A Friday entry drawn on Wednesday's grid
+     * is therefore outside the list's range by construction, not merely
+     * unpaginated, and "Load earlier entries" walks the wrong way: no amount of
+     * loading earlier reaches a later day. The reachable way to get one is the
+     * `+` dialog's unbounded `<input type="date">`.
+     */
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [makeEntry({ _id: "recent" as unknown as Id<"timeEntries"> })],
+      isDone: false, // pages remain, so the old message would have been offered
+    })
+    renderTimer({
+      thisWeek: [
+        makeEntry({
+          _id: "ahead" as unknown as Id<"timeEntries">,
+          title: "Mistyped month",
+          startedAt: NOW + 2 * 86_400_000,
+          endedAt: NOW + 2 * 86_400_000 + 3_600_000,
+        }),
+      ],
+    })
+
+    fireEvent.click(tab("Calendar"))
+    fireEvent.click(block("Mistyped month"))
+
+    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
+    expect(screen.getByText(/starts after today/)).toBeTruthy()
+    // THE ASSERTION. The advice that cannot work must not be the one given.
+    expect(screen.queryByText(/Load earlier entries/)).toBeNull()
+  })
+
   it("stays on the calendar for an entry outside the loaded pages", () => {
     // The log paginates 50 at a time, newest first; the grid steps to any week.
     // This block is on the grid and its row has simply never been fetched.
@@ -554,6 +602,62 @@ describe("Timer — clicking a calendar block", () => {
     expect(screen.getByTestId("calendar-panel")).toBeTruthy()
     expect(screen.queryByTestId("entry-log")).toBeNull()
     expect(screen.getByText(/has not been loaded into the list yet/)).toBeTruthy()
+  })
+})
+
+/*
+ * WHY THE GRID IS BLANK.
+ *
+ * The `isError` branch already argued this and the argument was applied to one
+ * branch of three: an empty grid and a `0:00:00` range total are
+ * indistinguishable from a week nobody tracked anything in. Two other states
+ * reach exactly the same blank grid, and neither said anything — including the
+ * one List goes furthest out of its way to explain, a filter that matched
+ * nothing. That is the cross-view asymmetry "one filter, both views" exists to
+ * close.
+ */
+describe("Timer — an empty grid says why", () => {
+  const tab = (name: "Calendar" | "List") => screen.getByRole("tab", { name })
+
+  it("says nothing was tracked when the range is genuinely empty", () => {
+    renderTimer()
+    fireEvent.click(tab("Calendar"))
+
+    expect(screen.getByText("Nothing was tracked in this range.")).toBeTruthy()
+  })
+
+  it("blames the filter when a filter is what emptied it", () => {
+    // TWO SENTENCES, NOT ONE. "Nothing was tracked" is flatly false here: the
+    // week holds an entry and the filter is what is hiding it.
+    renderTimer({ thisWeek: [makeEntry({ title: "Client call" })] })
+    fireEvent.click(tab("Calendar"))
+    expect(screen.queryByText(/Nothing was tracked/)).toBeNull()
+
+    fireEvent.change(search(), { target: { value: "zzzz" } })
+
+    expect(
+      screen.getByText("No entries in this range match these filters.")
+    ).toBeTruthy()
+    expect(screen.queryByText(/Nothing was tracked/)).toBeNull()
+  })
+
+  it("says nothing at all while the grid has rows on it", () => {
+    renderTimer({ thisWeek: [makeEntry({ title: "Client call" })] })
+    fireEvent.click(tab("Calendar"))
+
+    expect(screen.queryByText(/Nothing was tracked/)).toBeNull()
+    expect(screen.queryByText(/match these filters/)).toBeNull()
+  })
+
+  it("claims nothing about a range nobody has answered for yet", () => {
+    // Before the first `datesSet` the query is not even enabled, so `data` is
+    // undefined — and "nothing was tracked" would be a claim about a range that
+    // has not been asked about. The error branch owns its own case.
+    calendarStub.silent = true
+    renderTimer()
+    fireEvent.click(tab("Calendar"))
+
+    expect(screen.queryByText(/Nothing was tracked/)).toBeNull()
   })
 })
 
