@@ -10,6 +10,18 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-11-timer-calendar-view-design.md`
 
+## Before Task 3 or Task 6: re-read timer.tsx
+
+**The quoted `timer.tsx` blocks in Tasks 3 and 6 are stale and must be re-derived from the file, not applied as written.**
+
+At the time this plan was written, /timer's totals row was a plain `<div className="flex w-full items-center gap-4 px-4">` holding `TotalsRow` and `ManualEntryDialog`. A sticky-header rework landed after that, and it rewrites exactly that block: the page root gains a `hostRef` and a `--log-sticky-top` custom property, the totals-and-filter region becomes one measured band publishing `--filter-band-height` through `useHeightVar`, and `ManualEntryDialog`'s placement changed with it.
+
+The two changes fit together — the calendar header from Task 5 belongs **inside** the measured band, so it sticks with the totals rather than scrolling away above them — but that is a merge, not a coincidence. Before dispatching either task:
+
+1. Read the current `src/routes/_authed/timer.tsx` in full.
+2. Rewrite that task's quoted block against what is actually there, preserving the `hostRef` / `measuredRef` wiring and the `--log-sticky-top` composition untouched.
+3. Put the `CalendarHeader` inside the element `measuredRef` measures, so `--filter-band-height` accounts for it.
+
 ## Global Constraints
 
 - **FullCalendar v7 only.** `@fullcalendar/react@^7.0.2` plus peer deps `temporal-polyfill@^1.0.1` and `@full-ui/headless-calendar` (installed transitively by `@fullcalendar/react`). The `timeGrid` plugin is the **subpath export** `@fullcalendar/react/timegrid`. **Never install `@fullcalendar/timegrid`** — that standalone package is stranded at 6.1.21 and pins core to v6.
@@ -727,10 +739,9 @@ Make the trigger icon-only at every width:
       />
 ```
 
-- [ ] **Step 4: Verify `size="icon"` exists on Button**
+- [ ] **Step 4: (resolved in pre-flight — no action)**
 
-Run: `grep -n "icon" src/components/ui/button.tsx`
-Expected: an `icon` entry in the size variants. If there is none, drop `size="icon"` and keep only the `className` — the explicit `size-9` is what carries the geometry either way.
+`Button` has `size: "icon"` resolving to `size-9` ([button.tsx:32](../../../src/components/ui/button.tsx)), which is exactly the 36px square this needs. The `size-9` in the `className` above is therefore redundant; keep `rounded-md` and `shrink-0`, which are not in the variant. Verified 2026-08-11.
 
 - [ ] **Step 5: Run the dialog tests**
 
@@ -1439,7 +1450,7 @@ export function CalendarHeader({
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm vitest run src/components/calendar/calendar-header.test.tsx`
-Expected: PASS, 4 tests. If `Button` has no `size="icon"` variant, drop that prop — `size-7` carries the geometry.
+Expected: PASS, 4 tests. `Button` does have a `size="icon"` variant (`size-9`); the `size-7` in `className` deliberately overrides it, because these steppers sit inside a bordered group and a 36px control there makes the group taller than the totals beside it.
 
 - [ ] **Step 5: Commit**
 
@@ -1777,13 +1788,65 @@ Wrap the existing log block. Replace `{status === "LoadingFirstPage" ? … }` an
         )}
 ```
 
-- [ ] **Step 8: Decide the click target honestly**
+- [ ] **Step 8: Make the entry row addressable, and route the click through it**
 
-`onEntryClick` above assumes an entry row carries `data-entry-id` and is focusable. Check:
+Pre-flight confirmed there is **no `data-entry-id` anywhere in the codebase**, so `onEntryClick` as sketched in Step 7 would query for an attribute that does not exist and silently do nothing. Decided 2026-08-11: add the attribute rather than drop the affordance.
 
-Run: `grep -n "data-entry-id" src/components/entries/entry-row.tsx`
+In `src/components/entries/entry-row.tsx`, on the row's outermost element, add:
 
-If there is no such attribute, **do not add DOM-querying glue.** Instead, switch the calendar to the view the user already has for editing: set `view` to `"list"` and leave a follow-up task for opening the row directly. Record which you did in the commit message — a click that silently does nothing is worse than a click that switches views.
+```tsx
+      data-entry-id={entry._id}
+      tabIndex={-1}
+```
+
+`tabIndex={-1}`, not `0`. The row must be **focusable programmatically** so the calendar can hand focus to it, and must **not** join the tab order — a log of 200 rows would otherwise put 200 stops between the filter band and anything below it, and every control inside a row is already reachable on its own.
+
+Then in timer.tsx, replace the `onEntryClick` body from Step 7 with:
+
+```tsx
+              onEntryClick={(entryId) => {
+                /*
+                 * The calendar navigates; it does not edit.
+                 *
+                 * A block is a picture of an entry, and the editing controls
+                 * for that entry already exist on its row — inline title, the
+                 * time popover, the note sheet. Growing a second editor inside
+                 * a popover on the grid would mean two places to fix the same
+                 * mistyped field, which is how they come to disagree.
+                 *
+                 * So: switch to List, then focus the row. The switch has to
+                 * happen first and the focus after paint, because the row is
+                 * not mounted until List renders.
+                 */
+                setView("list")
+                requestAnimationFrame(() => {
+                  const row = document.querySelector<HTMLElement>(
+                    `[data-entry-id="${entryId}"]`
+                  )
+                  row?.scrollIntoView({ block: "center" })
+                  row?.focus()
+                })
+              }}
+```
+
+- [ ] **Step 8a: Test that the row is addressable**
+
+Add to `src/components/entries/day-list.test.tsx` (or `entry-row`'s own test file if one exists):
+
+```tsx
+it("makes each row addressable and focusable without joining the tab order", () => {
+  // The calendar hands focus to a row by id. tabIndex -1 is load-bearing:
+  // at 0, a log of 200 rows puts 200 tab stops between the filter band and
+  // anything beneath it.
+  renderDayList() // use this file's existing helper
+  const row = document.querySelector<HTMLElement>("[data-entry-id]")
+  expect(row).not.toBeNull()
+  expect(row!.tabIndex).toBe(-1)
+})
+```
+
+Run: `pnpm vitest run src/components/entries/day-list.test.tsx`
+Expected: PASS.
 
 - [ ] **Step 9: Mock the panel in the route test**
 
