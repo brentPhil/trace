@@ -1667,77 +1667,93 @@ Immediately after `calendarQuery`:
 
 - [ ] **Step 6: Add the switcher to the totals row**
 
+/timer renders `<Page title="Timer" titleHidden sticky header={<>…</>}>` from `src/components/shell/page.tsx`. Everything below goes **inside that `header` fragment**, at ten spaces of indentation. `Page`'s `header` slot sits inside the element it measures for `--page-header-height`, so anything put there sticks with the totals and is measured for free — do **not** introduce `useHeightVar` here.
+
 Replace the totals-row block from Task 3 with:
 
 ```tsx
-      <div className="flex w-full flex-wrap items-center gap-4 px-4">
-        <TotalsRow
-          className="py-3"
-          todayMs={totals.todayMs}
-          weekMs={totals.weekMs}
-          billableMs={totals.billableMs}
-          display={settings.durationDisplay}
-        />
+          <div className="flex w-full flex-wrap items-center gap-4 px-4">
+            <TotalsRow
+              className="py-3"
+              todayMs={totals.todayMs}
+              weekMs={totals.weekMs}
+              billableMs={totals.billableMs}
+              display={settings.durationDisplay}
+            />
 
-        {/*
-          TABS, NOT TWO ROUTES — reports.tsx settled this argument for Summary
-          and Detailed and it holds here for the same reason: the filter band
-          below is ONE control governing both views. A freelancer narrows to a
-          client and then looks at the shape of the week and at the rows behind
-          the shape; a second page would mean setting the filter twice and
-          would let the two drift apart with nothing on screen to say so.
-        */}
-        <Tabs
-          value={view}
-          onValueChange={(next) => setView(next as "calendar" | "list")}
-          className="ml-auto"
-        >
-          <TabsList variant="line">
-            <TabsTrigger value="calendar">Calendar</TabsTrigger>
-            <TabsTrigger value="list">List</TabsTrigger>
-          </TabsList>
-        </Tabs>
-      </div>
+            {/*
+              TABS, NOT TWO ROUTES — reports.tsx settled this argument for
+              Summary and Detailed and it holds here for the same reason: the
+              filter band below is ONE control governing both views. A
+              freelancer narrows to a client and then looks at the shape of the
+              week and at the rows behind the shape; a second page would mean
+              setting the filter twice and would let the two drift apart with
+              nothing on screen to say so.
+            */}
+            <Tabs
+              value={view}
+              onValueChange={(next) => setView(next as "calendar" | "list")}
+              className="ml-auto"
+            >
+              <TabsList variant="line">
+                <TabsTrigger value="calendar">Calendar</TabsTrigger>
+                <TabsTrigger value="list">List</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
 
-      {view === "calendar" ? (
-        <div className="w-full px-4 pb-3">
-          <CalendarHeader
-            firstDay={
-              size === "day" ? anchor : weekStartOf(anchor, settings.weekStartDay)
-            }
-            lastDay={lastVisibleDay(anchor, size, settings.weekStartDay)}
-            size={size}
-            today={today}
-            rangeMs={calendarTotalMs}
-            display={settings.durationDisplay}
-            onStep={(delta) =>
-              setAnchor((current) => addDays(current, size === "day" ? delta : delta * 7))
-            }
-            onToday={() => setAnchor(today)}
-            onSizeChange={setSize}
-          />
-        </div>
-      ) : null}
+          {view === "calendar" ? (
+            <div className="w-full px-4 pb-3">
+              <CalendarHeader
+                {...visibleDays(anchor, size, settings.weekStartDay)}
+                size={size}
+                today={today}
+                rangeMs={calendarTotalMs}
+                display={settings.durationDisplay}
+                onStep={(delta) =>
+                  setAnchor((current) =>
+                    addDays(current, size === "day" ? delta : delta * 7)
+                  )
+                }
+                onToday={() => setAnchor(today)}
+                onSizeChange={setSize}
+              />
+            </div>
+          ) : null}
 ```
 
-Add `addDays` to the `@shared/day` import, and define the helper at the bottom of the file:
+Then the `<FilterBand>` block already in the file, unchanged.
+
+Add `addDays` and `weekStartOf` to the `@shared/day` import, and define the helper at the bottom of the file:
 
 ```tsx
 /**
- * The last day the grid is showing.
+ * The days the grid is actually showing, as the label needs them.
  *
- * A 5-day range ends on Friday, four days after the week's Monday — NOT on the
- * week's last day, which is the weekend it exists to hide. The label would
- * otherwise say "10–16 Aug" over five columns ending on the 14th.
+ * BOTH ENDS, from one function, because they have to agree — computing the
+ * first here and the last somewhere else is how a label comes to describe a
+ * different span from the grid under it.
+ *
+ * The 5-day case is the one with a trap in it. That range is Monday to Friday
+ * REGARDLESS of `weekStartDay`: it exists to hide the weekend, and the grid
+ * achieves it with `hiddenDays={[0, 6]}`, which trims by day-of-week index
+ * independently of where the week is set to start. So deriving its first day
+ * from the user's own week start would, under `weekStartDay: 0`, label the
+ * range from a Sunday while the grid opened on the Monday after it — the label
+ * and the columns describing two different weeks, on a billing tool.
  */
-function lastVisibleDay(
+function visibleDays(
   anchor: DayString,
   size: CalendarSize,
   weekStartDay: number
-): DayString {
-  if (size === "day") return anchor
-  if (size === "5day") return addDays(weekStartOf(anchor, 1), 4)
-  return addDays(weekStartOf(anchor, weekStartDay), 6)
+): { firstDay: DayString; lastDay: DayString } {
+  if (size === "day") return { firstDay: anchor, lastDay: anchor }
+  if (size === "5day") {
+    const monday = weekStartOf(anchor, 1)
+    return { firstDay: monday, lastDay: addDays(monday, 4) }
+  }
+  const first = weekStartOf(anchor, weekStartDay)
+  return { firstDay: first, lastDay: addDays(first, 6) }
 }
 ```
 
