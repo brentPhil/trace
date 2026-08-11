@@ -1,6 +1,5 @@
 import { InvoiceLines } from "@/components/invoices/invoice-lines"
 import { invoiceMetaRows } from "@/lib/invoice-document"
-import { cn } from "@/lib/utils"
 import { dayOf } from "@shared/day"
 
 type Line = {
@@ -35,15 +34,34 @@ type Invoice = {
  * mean opposite things when a client is disputing a figure over the phone.
  *
  * IT MUST NOT DRIFT FROM THE PDF, which is the same document on paper. Both ask
- * `src/lib/invoice-document.ts` what the document says — which meta rows exist,
+ * `src/lib/invoice-document.ts` what the document SAYS — which meta rows exist,
  * what the totals block contains, how a quantity and a tax rate read — and each
- * keeps only its own presentation. So an unset purchase order is an absent row
- * here exactly as it is on the paper, the dates read in the same format, and the
- * total is a single `invoiceTotals` call neither rendering performs twice.
+ * keeps only its own presentation.
  *
- * The one thing this shows that the paper cannot is nothing at all: no
- * "Currency" row, no page numbers, no "(continued)" heading. Those are
- * properties of paper, not of the document.
+ * THAT FIDELITY NOW EXTENDS TO THE LAYOUT, which is the half a shared module
+ * cannot enforce. The paper draws, in order: the word Invoice, the meta rows,
+ * the two party blocks side by side at the left and middle of the measure, the
+ * line table, the totals stacked under the columns they summarise, and the notes
+ * at the foot (`invoiceDocPages` in src/lib/export/pdf/invoice-doc.ts). This
+ * draws the same six things in the same order, at the same relative weights —
+ * so a freelancer checking the screen against the PDF is checking one document
+ * twice, not comparing two.
+ *
+ * WHERE IT DELIBERATELY DIFFERS, and each difference is a property of the
+ * medium rather than of the document:
+ *
+ *   - The screen is a warm dark ground and the paper is white. Nothing about
+ *     the document changes; `PAPER` (pdf/paper.ts) exists because a `bg-ground`
+ *     PDF is one nobody can print.
+ *   - The paper's column headers are set in caps because at 8pt on paper caps
+ *     are what separates a header from a figure. On screen they are sentence
+ *     case — The Sentence Case Rule, and the header row has a rule under it and
+ *     a muted tone to do that work. See `InvoiceLines`.
+ *   - No page numbers, no "(continued)" heading, no logo placeholder. The first
+ *     two are properties of paper. The third was here and is GONE: a dashed
+ *     `Logo` box on the one screen whose claim is fidelity showed the freelancer
+ *     something the client never receives, and reserving space for an unbuilt
+ *     feature is not worth breaking the claim the whole page rests on.
  *
  * Declared structurally rather than imported from the generated Convex API —
  * the boundary `eslint.config.js` enforces — which also keeps it renderable in a
@@ -75,11 +93,33 @@ export function InvoiceRecord({
   })
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-        {/* A `<dl>` for the same reason the editor's grid is one: this is a
-            document's name/value list, and it is what makes "Due date" read as
-            the name of the value beside it. */}
+    /*
+     * The document as an OBJECT on the page, not as the page's own contents.
+     *
+     * One tonal step up from ground with a single hairline — the frame
+     * DESIGN.md already specifies for the report charts, reused rather than
+     * re-decided, so a panel in this product is one declaration. No shadow: the
+     * document does not float (The Tonal Depth Rule), and this is the whole
+     * reason it can look like a sheet without looking like paper simulation.
+     *
+     * Full width, `p-6` inside its own border — the page's `px-4` gutter is on
+     * the element above, per The One Measure Rule, and this panel adds its own
+     * inset because a document's text should not sit on its own edge.
+     */
+    <article className="flex flex-col gap-8 rounded-lg border border-edge-soft bg-surface p-6">
+      <div className="flex flex-col gap-6">
+        {/*
+          THE MASTHEAD, and it is inside the document rather than above it.
+          The paper opens with the word "Invoice" set large and bold at the top
+          left; the page used to answer that with a `text-sm font-semibold`
+          heading OUTSIDE the record, which read as a section label on an app
+          screen rather than as the first line of a document. It is an `<h1>`
+          because it is this page's subject.
+        */}
+        <h1 className="text-2xl font-medium tracking-[-0.01em]">Invoice</h1>
+
+        {/* A `<dl>`: this is a document's name/value list, and it is what makes
+            "Due date" read as the name of the value beside it. */}
         <dl className="flex flex-col gap-2">
           {metaRows.map((row) => (
             <div key={row.label} className="grid grid-cols-[9rem_1fr] items-baseline gap-3">
@@ -92,10 +132,16 @@ export function InvoiceRecord({
             </div>
           ))}
         </dl>
-        <LogoSlot />
       </div>
 
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
+      {/*
+        TWO EQUAL HALVES, matching the paper exactly: `headOps` draws Billed to
+        at the left margin and Pay to at `LEFT + (RIGHT - LEFT) / 2`. A `grid`
+        rather than two flexed children, because flex-basis would let a long
+        address move the second block and the two documents would then disagree
+        about where the reader's eye goes for "where do I send the money".
+      */}
+      <div className="grid gap-6 sm:grid-cols-2">
         <PartyBlockRecord label="Billed to" value={invoice.billedTo} />
         <PartyBlockRecord label="Pay to" value={invoice.payTo} />
       </div>
@@ -116,7 +162,7 @@ export function InvoiceRecord({
           <PartyBlockRecord label="Notes" value={invoice.notes} />
         </div>
       )}
-    </div>
+    </article>
   )
 }
 
@@ -125,50 +171,28 @@ export function InvoiceRecord({
  *
  * `whitespace-pre-line` is the whole component. `billedTo` is
  * `"Vessel Vanguard LLC\nBonita Springs, FL\n34134, USA"` and those newlines are
- * the address's shape — the same property the textarea in the editor keeps and
- * the same property `blockLines` honours on paper. Rendered into HTML without
- * it, a three-line address collapses onto one line, on the one screen whose
- * claim is that this is what the client got.
+ * the address's shape — the same property the textarea on /invoices/new keeps
+ * and the same property `blockLines` honours on paper. Rendered into HTML
+ * without it, a three-line address collapses onto one line, on the one screen
+ * whose claim is that this is what the client got.
+ *
+ * `leading-relaxed` and full Ink on the value: an address is read as an address,
+ * a line at a time, and the label above it is the only part that is secondary.
  *
  * `<dt>`/`<dd>`, not `<label>`: there is no control here for a label to be
  * attached to, and a `<label>` pointing at nothing is a promise of a control
  * that does not exist.
  *
  * An empty block still prints its heading. `payTo` is empty on every invoice
- * `createFromRange` raises — nothing in a range of time entries says who the
- * freelancer is — and the paper prints the label over the gap for the same
- * reason: a client looking for where to send the money finds the question,
- * rather than a document that never asked it.
+ * raised before /invoices/new existed, and the paper prints the label over the
+ * gap for the same reason: a client looking for where to send the money finds
+ * the question, rather than a document that never asked it.
  */
 function PartyBlockRecord({ label, value }: { label: string; value: string }) {
   return (
-    <dl className="flex min-w-0 flex-1 flex-col gap-1.5">
+    <dl className="flex min-w-0 flex-col gap-1.5">
       <dt className="text-[0.8125rem] font-medium text-muted-foreground">{label}</dt>
-      <dd className="text-sm whitespace-pre-line">{value}</dd>
+      <dd className="text-sm leading-relaxed whitespace-pre-line">{value}</dd>
     </dl>
-  )
-}
-
-/**
- * The logo, as a reserved space and nothing more.
- *
- * Uploading one needs Convex file storage and is deliberately deferred — the
- * plan names it as the natural first follow-up. It renders as a dashed
- * placeholder rather than a `+ Logo` button because a control that cannot do
- * anything is worse than an obvious gap: the gap is honest, the button is a
- * promise. `aria-hidden` for the same reason — there is nothing here to
- * announce and nothing to do.
- */
-function LogoSlot() {
-  return (
-    <div
-      aria-hidden="true"
-      className={cn(
-        "hidden h-20 w-32 shrink-0 items-center justify-center rounded-md",
-        "border border-dashed border-edge-soft text-xs text-muted-foreground sm:flex"
-      )}
-    >
-      Logo
-    </div>
   )
 }

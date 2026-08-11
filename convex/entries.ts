@@ -644,6 +644,26 @@ const projectTotal = v.object({
   projectId: v.union(v.id("projects"), v.null()),
   name: v.string(),
   color: v.string(),
+  /**
+   * The project's OWN rate, absent when it has none — carried so a client can
+   * price this range's invoice lines with the very rate the server priced them
+   * at, rather than looking one up beside this answer.
+   *
+   * /invoices/new draws the lines `invoices.createFromRange` will mint, through
+   * the one derivation both call (convex/lib/invoiceLines.ts). That derivation
+   * needs a rate per bucket, and the only other place the client could get one
+   * is `projects.list` — a SECOND, independently-subscribed query whose idea of
+   * which projects exist can differ from this scan's for a frame, and which
+   * omits soft-deleted rows that `ctx.db.get` here still resolves. A preview
+   * priced from one query and minted from another is exactly the divergence
+   * that derivation exists to make impossible, so the rate travels with the
+   * bucket it belongs to.
+   *
+   * Absent and zero are DIFFERENT, the same distinction `rateOf` above turns
+   * on: no rate at all falls back to the account default, and a rate of zero is
+   * pro bono work somebody priced.
+   */
+  hourlyRateCents: v.optional(v.number()),
   totalMs: v.number(),
   billableMs: v.number(),
   billableCents: v.number(),
@@ -945,6 +965,7 @@ export async function rangeBreakdownImpl(
         projectId: doc?._id ?? null,
         name: doc?.name ?? "",
         color: doc?.color ?? "",
+        hourlyRateCents: doc?.hourlyRateCents,
         totalMs: ledger.totalMs,
         billableMs: ledger.billableMs,
         billableCents: centsOf(ledger),

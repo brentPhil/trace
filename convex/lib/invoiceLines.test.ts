@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { invoiceLineDrafts } from "./invoiceLines"
+import { billableBucketsOf, invoiceLineDrafts } from "./invoiceLines"
 import { NO_PROJECT_LABEL } from "./labels"
-import type { BillableBucket } from "./invoiceLines"
+import type { BillableBucket, BreakdownProject } from "./invoiceLines"
 
 /*
  * The ONE derivation of an invoice line, asserted against LITERALS.
@@ -142,5 +142,90 @@ describe("invoiceLineDrafts", () => {
       null
     )
     expect(lines.map((line) => line.description)).toEqual(["Charlie", "Alpha"])
+  })
+})
+
+/*
+ * The step between the scan and the pricing, which used to happen twice.
+ *
+ * `createFromRangeImpl` assembled its buckets from the project DOCUMENTS it had
+ * fetched, while a preview could only assemble its own from whatever it could
+ * see — a second `projects.list` subscription that omits soft-deleted rows and
+ * can lag this scan by a frame. Both now read the breakdown's own rows, which
+ * is the single answer both sides already hold.
+ */
+describe("billableBucketsOf", () => {
+  function project(over: Partial<BreakdownProject> = {}): BreakdownProject {
+    return {
+      projectId: "p1",
+      name: "Website",
+      hourlyRateCents: 1000,
+      billableMs: HOUR,
+      unratedBillableMs: 0,
+      ...over,
+    }
+  }
+
+  it("carries the rate and the name off the scan's own row", () => {
+    expect(billableBucketsOf([project()])).toEqual([
+      {
+        projectId: "p1",
+        billableMs: HOUR,
+        unratedBillableMs: 0,
+        project: { name: "Website", hourlyRateCents: 1000 },
+      },
+    ])
+  })
+
+  /*
+   * A project with no rate keeps `hourlyRateCents` ABSENT rather than 0. The
+   * two mean opposite things one function along: absent falls through to the
+   * account default, and zero is pro bono work somebody priced. A mapper that
+   * defaulted the field would bill every unrated project at nothing.
+   */
+  it("leaves a rateless project's rate absent rather than zero", () => {
+    const buckets = billableBucketsOf([project({ hourlyRateCents: undefined })])
+    expect(buckets[0]?.project).toEqual({ name: "Website", hourlyRateCents: undefined })
+    // And the consequence one function along: the account default covers it.
+    expect(invoiceLineDrafts(buckets, 2500)[0]?.unitCents).toBe(2500)
+  })
+
+  it("keeps a zero-rate project at zero", () => {
+    expect(
+      invoiceLineDrafts(billableBucketsOf([project({ hourlyRateCents: 0 })]), 2500)[0]
+        ?.unitCents
+    ).toBe(0)
+  })
+
+  /*
+   * `projectId: null` is BOTH the unassigned bucket and a project row the scan
+   * could not resolve — `rangeBreakdownImpl` writes `doc?._id ?? null` and
+   * `doc?.name ?? ""`. A line cannot tell them apart and neither has a name or
+   * a rate, so both must arrive as `project: undefined` and get the shared
+   * label rather than an empty description.
+   */
+  it("hands the unassigned bucket down with no project at all", () => {
+    expect(
+      billableBucketsOf([project({ projectId: null, name: "", hourlyRateCents: undefined })])
+    ).toEqual([
+      { projectId: null, billableMs: HOUR, unratedBillableMs: 0, project: undefined },
+    ])
+    expect(
+      invoiceLineDrafts(
+        billableBucketsOf([project({ projectId: null, name: "", hourlyRateCents: undefined })]),
+        2000
+      )[0]?.description
+    ).toBe(NO_PROJECT_LABEL)
+  })
+
+  /* The scan's order IS the print order and the stored `sortKey`. A mapper that
+   * sorted, grouped or filtered here would renumber the document. */
+  it("preserves the order it was given, one bucket for one row", () => {
+    const buckets = billableBucketsOf([
+      project({ projectId: "c", name: "Charlie" }),
+      project({ projectId: "b", name: "Bravo", billableMs: 0 }),
+      project({ projectId: "a", name: "Alpha" }),
+    ])
+    expect(buckets.map((b) => b.projectId)).toEqual(["c", "b", "a"])
   })
 })

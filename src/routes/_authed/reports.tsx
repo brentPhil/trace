@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilterBar } from "@/components/history/filter-bar"
-import { CreateInvoiceButton } from "@/components/reports/create-invoice-button"
+import { CreateInvoiceLink } from "@/components/reports/create-invoice-link"
 import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
 import { Button } from "@/components/ui/button"
@@ -25,7 +25,7 @@ import {
   exportDisabledReason,
   invoiceDisabledReason,
 } from "@/lib/export/export-disabled-reason"
-import { useCreateInvoice } from "@/hooks/use-invoice-mutations"
+import { invoiceSearchOf } from "@/lib/invoice-search"
 import { dayOf } from "@shared/day"
 import { unpriced } from "@/lib/format-money"
 import { formatMoney } from "@shared/money"
@@ -132,8 +132,6 @@ export const Route = createFileRoute("/_authed/reports")({
 export function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects } = useClassifiers()
-  const { createInvoice } = useCreateInvoice()
-  const navigate = useNavigate()
 
   const today = dayOf(Date.now(), settings.timezone)
   const [filters, setFilters] = useState<Filters>(() =>
@@ -199,39 +197,21 @@ export function Reports() {
             trigger must not follow it down.
           */}
           <div className="flex shrink-0 items-start gap-2">
-            <CreateInvoiceButton
+            {/*
+             * THE RANGE AND THE FILTER OVER IT — what this page is showing, not
+             * merely when it is showing it. Read through the same
+             * `entryFilterOf` that `breakdownArgs` above builds the query key
+             * from, so /invoices/new previews and then bills the very filter
+             * the figures beside this control were drawn with.
+             *
+             * `billableOnly` is left behind on purpose, and `invoiceSearchOf`
+             * has no slot for it: `createFromRange` hard-codes it true, so a
+             * link able to say otherwise could only ever weaken a rule the
+             * document depends on.
+             */}
+            <CreateInvoiceLink
               disabledReason={invoiceReason}
-              onCreate={async () => {
-                /*
-                 * THE RANGE AND THE FILTER OVER IT — what this page is showing,
-                 * not merely when it is showing it. Read through the same
-                 * `entryFilterOf` that `breakdownArgs` above builds the query
-                 * key from, so the invoice is raised from the very filter the
-                 * figures beside this button were drawn with.
-                 *
-                 * `billableOnly` is left behind on purpose: `createFromRange`
-                 * hard-codes it true, so passing the chip's state could only
-                 * ever weaken a rule the document depends on.
-                 */
-                const filter = entryFilterOf(filters)
-                const { invoiceId } = await createInvoice({
-                  fromMs: range.fromMs,
-                  toMs: range.toMs,
-                  timeZone: settings.timezone,
-                  weekStartDay: settings.weekStartDay,
-                  projectId: filter.projectId,
-                  text: filter.text,
-                  presets: [...filter.presets],
-                })
-                // STRAIGHT TO THE DOCUMENT. An invoice raised and left on the
-                // page it was raised from is a number the user has to go
-                // looking for, and the next thing they have to do to it —
-                // fill in `payTo`, set the terms, issue it — is all on that
-                // page. The route file is `invoices_.$invoiceId.tsx`; the
-                // underscore keeps it from nesting under the list and the URL
-                // is unaffected.
-                await navigate({ to: "/invoices/$invoiceId", params: { invoiceId } })
-              }}
+              search={invoiceSearchOf(range, entryFilterOf(filters))}
             />
             <ExportMenu
               breakdown={breakdown ?? EMPTY_BREAKDOWN}

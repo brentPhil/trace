@@ -20,6 +20,7 @@ import {
   MAX_SOURCE_TEXT_LENGTH,
 } from "./invoices"
 import { isTraceError, traceErrorCode } from "./lib/codes"
+import { billableBucketsOf, invoiceLineDrafts } from "./lib/invoiceLines"
 import { parseInvoiceSequence } from "./lib/invoiceNumber"
 import { NO_PROJECT_LABEL } from "./lib/labels"
 import {
@@ -1367,5 +1368,165 @@ describe("invoices.createFromRange — the document it is handed", () => {
     expect(
       await t.run(async (ctx) => (await ctx.db.query("invoiceLines").collect()).length)
     ).toBe(0)
+  })
+})
+
+/*
+ * THE PREVIEW AND THE MUTATION, PROVEN TO BE ONE DERIVATION.
+ *
+ * `/invoices/new` draws the lines this mutation is about to mint, and the whole
+ * value of that screen rests on the two being the same rows — same descriptions,
+ * same floored quantities, same amounts, same ORDER, since the order is the
+ * stored `sortKey`. An invoice is write-once, so a preview that disagreed with
+ * what got stored would be a promise the product breaks in a client's inbox with
+ * no way to correct it.
+ *
+ * WHAT THIS FILE CAN AND CANNOT PROVE. It cannot render the page: convex-test
+ * needs the edge runtime and a React render needs jsdom, and vitest.config.ts
+ * keeps those in separate projects for exactly that reason. What it CAN prove is
+ * the half that actually carries the risk — that the expression the page
+ * evaluates, `invoiceLineDrafts(billableBucketsOf(breakdown.projects), rate)`
+ * over the SAME `entries.rangeBreakdown` answer, reproduces the stored rows
+ * exactly. The other half, that the page really evaluates that expression and
+ * renders it, is pinned against the same literals in -invoice-new.test.tsx.
+ *
+ * The fixture is chosen so the two candidate arithmetics differ. 1h 0m 20s is
+ * 100.55… centihours; floored it is 100 and a preview that rounded would say
+ * 101, and at $61.00/hr the amounts differ by $0.61 on one line. A round hour
+ * would prove nothing.
+ */
+describe("invoices.createFromRange — the preview cannot diverge from it", () => {
+  const BREAKDOWN = { ...RANGE, billableOnly: true, userId: ALICE }
+
+  it("stores exactly the lines the shared derivation produces from the same scan", async () => {
+    const t = setup()
+    const website = await project(t, { name: "Website", hourlyRateCents: 6100 })
+    const unrated = await project(t, { name: "Discovery" })
+    // Zero is a rate somebody CHOSE, and it must not be confused with the
+    // absence of one — one line at $0.00, one bucket left off entirely.
+    const free = await project(t, { name: "Pro bono", hourlyRateCents: 0 })
+    // Descending by total time, which is the order `rangeBreakdownImpl` sorts
+    // in and therefore the order the document prints in.
+    await entry(t, { startedAt: MON + HOUR, durationMs: 4 * HOUR, projectId: website.projectId })
+    await entry(t, {
+      startedAt: MON + 6 * HOUR,
+      durationMs: HOUR + 20_000,
+      projectId: website.projectId,
+    })
+    await entry(t, { startedAt: MON + 9 * HOUR, durationMs: 2 * HOUR, projectId: unrated.projectId })
+    await entry(t, { startedAt: MON + 12 * HOUR, durationMs: HOUR, projectId: free.projectId })
+    // NO account default, which is what leaves "Discovery" genuinely unpriced:
+    // with one set, `rateOf` covers every bucket and nothing is ever excluded.
+
+    // THE PAGE'S OWN EXPRESSION, evaluated here against the very query the page
+    // subscribes to. Not a re-implementation — the same two exported functions.
+    const breakdown = await t.query(internal.entries.rangeBreakdownAs, BREAKDOWN)
+    const previewed = invoiceLineDrafts(billableBucketsOf(breakdown.projects), null)
+
+    const { invoiceId } = await create(t)
+    const stored = await get(t, invoiceId)
+
+    expect(
+      stored.lines.map((line) => ({
+        description: line.description,
+        quantityCentis: line.quantityCentis,
+        unitCents: line.unitCents,
+        amountCents: line.amountCents,
+      }))
+    ).toEqual(
+      previewed.map((line) => ({
+        description: line.description,
+        quantityCentis: line.quantityCentis,
+        unitCents: line.unitCents,
+        amountCents: line.amountCents,
+      }))
+    )
+
+    /*
+     * AND AGAINST LITERALS, because the comparison above is only half a proof:
+     * both sides call one function, so both would move together if that
+     * function's arithmetic changed. These figures are computed by hand.
+     *
+     *   Website   5h 0m 20s -> 500.55… centihours, FLOORED to 500 -> 5.00
+     *             500 x $61.00 = $305.00
+     *   Discovery is UNRATED and absent — 2h this invoice bills to nobody.
+     *   Pro bono  1h -> 100 centihours -> 1.00 x $0.00 = $0.00, and it is a
+     *             LINE, because a chosen zero is a price and an absent rate is
+     *             not.
+     */
+    expect(previewed).toEqual([
+      {
+        description: "Website",
+        quantityCentis: 500,
+        unitCents: 6100,
+        amountCents: 30_500,
+        projectId: website.projectId,
+      },
+      {
+        description: "Pro bono",
+        quantityCentis: 100,
+        unitCents: 0,
+        amountCents: 0,
+        projectId: free.projectId,
+      },
+    ])
+    // The excluded time is stated rather than silent, and it is the figure the
+    // preview's own unpriced note reads.
+    expect(breakdown.unratedBillableMs).toBe(2 * HOUR)
+    expect(stored.unratedMsAtCreation).toBe(2 * HOUR)
+  })
+
+  /*
+   * THE ORDER, on its own, because it is the one property a `toEqual` over a
+   * one-line fixture cannot see and the one the stored `sortKey` freezes. A
+   * preview that sorted its rows by name, or that reversed them, would print a
+   * document whose line order the client never receives.
+   */
+  it("stores the shared derivation's order as sortKey", async () => {
+    const t = setup()
+    const small = await project(t, { name: "Alpha", hourlyRateCents: 1000 })
+    const large = await project(t, { name: "Zulu", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: small.projectId })
+    await entry(t, { startedAt: MON + 3 * HOUR, durationMs: 5 * HOUR, projectId: large.projectId })
+
+    const breakdown = await t.query(internal.entries.rangeBreakdownAs, BREAKDOWN)
+    const previewed = invoiceLineDrafts(billableBucketsOf(breakdown.projects), null)
+
+    const { invoiceId } = await create(t)
+    const stored = await get(t, invoiceId)
+
+    // Longest first, so "Zulu" leads "Alpha" despite the alphabet.
+    expect(previewed.map((line) => line.description)).toEqual(["Zulu", "Alpha"])
+    expect(stored.lines.map((line) => line.description)).toEqual(
+      previewed.map((line) => line.description)
+    )
+    expect(stored.lines.map((line) => line.sortKey)).toEqual([0, 1])
+  })
+
+  /*
+   * THE FILTER, threaded through both. The page previews with the search
+   * params a /reports link carried; the mutation bills with the same ones. A
+   * preview that ignored the narrowing would draw three lines over a document
+   * that gets one.
+   */
+  it("bills the narrowed rows the same derivation previews", async () => {
+    const t = setup()
+    const website = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const other = await project(t, { name: "Other", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId: website.projectId })
+    await entry(t, { startedAt: MON + 3 * HOUR, projectId: other.projectId })
+
+    const filter = { projectId: website.projectId as string }
+    const breakdown = await t.query(internal.entries.rangeBreakdownAs, {
+      ...BREAKDOWN,
+      ...filter,
+    })
+    const previewed = invoiceLineDrafts(billableBucketsOf(breakdown.projects), null)
+
+    const { invoiceId } = await create(t, filter)
+    const stored = await get(t, invoiceId)
+
+    expect(previewed.map((line) => line.description)).toEqual(["Website"])
+    expect(stored.lines.map((line) => line.description)).toEqual(["Website"])
   })
 })

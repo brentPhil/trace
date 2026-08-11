@@ -23,6 +23,22 @@ export type Period = "day" | "week" | "month" | "custom"
 
 export type { Preset, EntryFilter }
 
+/**
+ * What each preset chip is CALLED, in one place.
+ *
+ * Written down because it is now read twice: the chips on /reports' filter bar,
+ * and `/invoices/new`, which has to state the filter a link carried it — there
+ * is no filter bar on that page, so the only way a user can check that the
+ * preview bills what they narrowed to is for the page to name the narrowing.
+ * Two spellings is how a chip labelled "No note" comes to be reported as
+ * "no-note" on the page that decides whether to bill a client.
+ */
+export const PRESET_LABELS: Record<Preset, string> = {
+  "no-project": "No project",
+  "no-note": "No note",
+  "under-a-minute": "Under a minute",
+}
+
 export type Filters = {
   period: Period
   /** Inclusive day bounds, always both set. */

@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Chip, FilterControls } from "@/components/history/filter-controls"
 import { DateRangePicker } from "@/components/history/date-range-picker"
-import { periodFilters, stepPeriod } from "@/lib/history-filters"
+import { PRESET_LABELS, periodFilters, stepPeriod } from "@/lib/history-filters"
 import { cn } from "@/lib/utils"
 import type { Filters, Preset } from "@/lib/history-filters"
 import type { Doc } from "../../../convex/_generated/dataModel"
@@ -103,15 +103,19 @@ export function FilterBar({
         accident" — and each is otherwise a manual scan of a month.
       */}
       <div className="flex flex-wrap items-center gap-2">
-        <PresetChip filters={filters} preset="no-project" onChange={onChange}>
-          No project
-        </PresetChip>
-        <PresetChip filters={filters} preset="no-note" onChange={onChange}>
-          No note
-        </PresetChip>
-        <PresetChip filters={filters} preset="under-a-minute" onChange={onChange}>
-          Under a minute
-        </PresetChip>
+        {/* The labels come from `PRESET_LABELS` rather than being typed here:
+            /invoices/new has to name the same three chips when a link carries
+            them, and that page decides whether to bill a client. */}
+        {(["no-project", "no-note", "under-a-minute"] as const).map((preset) => (
+          <PresetChip
+            key={preset}
+            filters={filters}
+            preset={preset}
+            onChange={onChange}
+          >
+            {PRESET_LABELS[preset]}
+          </PresetChip>
+        ))}
       </div>
     </div>
   )

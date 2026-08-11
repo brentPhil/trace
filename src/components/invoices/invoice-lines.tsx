@@ -11,21 +11,22 @@ type Line = {
 }
 
 /**
- * The lines and what they come to — READ-ONLY, in both the editor and the
- * record.
+ * The lines and what they come to — READ-ONLY, and there is no other kind.
  *
- * Editing them — a RATE column that can be typed into, custom charges, taxes —
- * is Task 6, and none of it is here. What is here is the document's own
- * figures, because an invoice page showing an address and no money is not a
- * document anybody would recognise.
+ * THREE CALLERS, one table. `/invoices/$invoiceId` draws the stored lines,
+ * `to-pdf.ts` prints the same rows on paper through `invoice-document.ts`, and
+ * `/invoices/new` draws the lines that are ABOUT to be stored (`BillPreview`).
+ * That third one is why the column order and the totals block being one
+ * declaration matters most: a preview whose table differed from the record's
+ * would be showing the user a document they are not about to raise.
  *
- * Every number is the STORED one. Nothing here recomputes an amount from a
- * quantity and a rate: the printed figure is a fact about the day the invoice
- * was raised, not a function of today's rounding. The totals come from
- * `invoiceTotalsRows` — the SAME derivation the PDF prints from, which is the
- * point of it existing: the record page's whole claim is that it shows the
- * document the client received, and a screen that summed the lines a second time
- * would be one rounding rule away from making that claim false.
+ * Every number is the one it will be. Nothing here recomputes an amount from a
+ * quantity and a rate: on the record the printed figure is a fact about the day
+ * the invoice was raised, not a function of today's rounding, and on the preview
+ * it is `invoiceLineDrafts`' own arithmetic passed straight through. The totals
+ * come from `invoiceTotalsRows` — the SAME derivation the PDF prints from, and a
+ * screen that summed the lines a second time would be one rounding rule away
+ * from making this page's whole claim false.
  */
 export function InvoiceLines({
   lines,
@@ -39,12 +40,36 @@ export function InvoiceLines({
   const totals = invoiceTotalsRows(lines, taxes)
 
   return (
-    <div className="overflow-x-auto rounded-md border border-edge-soft">
+    /*
+      RULES, NOT A BOX. The paper draws one hairline under the column header and
+      one above the totals and nothing else (`columnHeaderOps` in
+      pdf/invoice-doc.ts) — a table is structured by its rows, and an invoice is
+      the one document where the reader's eye should run straight down the
+      Amount column without a frame around it.
+
+      It used to carry a full `rounded-md border`, which was also a box drawn
+      inside a box the moment the record became a panel — the same objection
+      that keeps the dashed `Empty` frame out of the no-lines cell below.
+
+      `overflow-x-auto` stays: four columns of figures on a phone scroll rather
+      than wrap into unreadable stacks.
+    */
+    <div className="overflow-x-auto">
       <table className="w-full table-fixed border-collapse text-sm">
         <caption className="sr-only">Invoice lines, in the order they print</caption>
+        {/*
+          SENTENCE CASE, where the paper sets these in caps.
+          A deliberate difference and one of only three (see `InvoiceRecord`):
+          at 8pt on paper, caps are what separates a header from a figure, while
+          on screen there is a rule under the row and a muted tone already doing
+          that work — and a tracked-out uppercase eyebrow is the scaffold
+          DESIGN.md rejects by name. The ORDER is identical, which is the part
+          that matters: description, quantity, rate, amount, left to right, the
+          same as `COL` in pdf/invoice-doc.ts.
+        */}
         <thead>
           <tr className="border-b border-edge-soft text-[0.8125rem] font-medium text-muted-foreground">
-            <th scope="col" className="px-3 py-2 text-left">
+            <th scope="col" className="pr-3 py-2 text-left">
               Description
             </th>
             <th scope="col" className="w-24 px-3 py-2 text-right">
@@ -53,7 +78,7 @@ export function InvoiceLines({
             <th scope="col" className="w-32 px-3 py-2 text-right">
               Rate
             </th>
-            <th scope="col" className="w-32 px-3 py-2 text-right">
+            <th scope="col" className="w-32 pl-3 py-2 text-right">
               Amount
             </th>
           </tr>
@@ -76,7 +101,7 @@ export function InvoiceLines({
           */}
           {lines.length === 0 ? (
             <tr>
-              <td colSpan={4} className="px-3 py-4 text-muted-foreground">
+              <td colSpan={4} className="pr-3 py-4 text-muted-foreground">
                 No lines on this invoice. Lines come from the range it was raised
                 from on Reports — billable time on a project with a rate. Time
                 nobody has priced is left off rather than billed at nothing.
@@ -91,7 +116,7 @@ export function InvoiceLines({
               key={`${index}-${line.description}`}
               className="border-b border-edge-soft last:border-b-0"
             >
-              <th scope="row" className="truncate px-3 py-2 text-left font-normal">
+              <th scope="row" className="truncate pr-3 py-2 text-left font-normal">
                 {line.description}
               </th>
               {/* Decimal hours, 2 dp, floored — a QUANTITY, not money, so Ink.
@@ -109,7 +134,7 @@ export function InvoiceLines({
               </td>
               {/* The one brass column: a currency amount, in this invoice's own
                   snapshotted currency. */}
-              <td className="px-3 py-2 text-right font-medium tabular text-brass">
+              <td className="pl-3 py-2 text-right font-medium tabular text-brass">
                 {formatMoney(line.amountCents, currency)}
               </td>
             </tr>
@@ -133,13 +158,23 @@ export function InvoiceLines({
                  one separates a subtotal from a tax. */
               className={row.label === "Subtotal" ? "border-t border-edge" : undefined}
             >
+              {/*
+                THE TOTAL IS A STEP LARGER, not merely bolder — the eye has to
+                land on it without reading the block.
+
+                The paper draws it at `TYPE.strong` (12) over a body of 10, and
+                the screen used to answer that with `text-sm` for both: same
+                size, heavier weight, on the one figure the whole document
+                exists to state. `text-base` over `text-sm` is the same ratio,
+                so the two renderings put their emphasis in the same place.
+              */}
               <th
                 scope="row"
                 colSpan={3}
                 className={
                   row.strong
-                    ? "px-3 py-2 text-right text-sm font-semibold"
-                    : "px-3 py-2 text-right text-[0.8125rem] font-medium text-muted-foreground"
+                    ? "pr-3 pt-3 pb-2 text-right text-base font-semibold"
+                    : "pr-3 py-2 text-right text-[0.8125rem] font-medium text-muted-foreground"
                 }
               >
                 {row.label}
@@ -147,8 +182,8 @@ export function InvoiceLines({
               <td
                 className={
                   row.strong
-                    ? "px-3 py-2 text-right text-sm font-semibold tabular text-brass"
-                    : "px-3 py-2 text-right font-medium tabular text-brass"
+                    ? "pl-3 pt-3 pb-2 text-right text-base font-semibold tabular text-brass"
+                    : "pl-3 py-2 text-right font-medium tabular text-brass"
                 }
               >
                 {formatMoney(row.cents, currency)}

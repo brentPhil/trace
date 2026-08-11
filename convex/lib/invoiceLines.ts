@@ -43,6 +43,51 @@ export type BillableBucket = {
   project: { name: string; hourlyRateCents?: number } | undefined
 }
 
+/**
+ * One project's row of `entries.rangeBreakdown`, narrowed to what a line needs.
+ *
+ * Structural rather than the generated return type: this module is imported by
+ * the Convex mutation AND by `/invoices/new` through `@shared`, and neither
+ * side may drag `_generated` into the other's runtime. `projectId` is a plain
+ * string here for the reason given at the top of this file.
+ */
+export type BreakdownProject = {
+  projectId: string | null
+  name: string
+  hourlyRateCents?: number
+  billableMs: number
+  unratedBillableMs: number
+}
+
+/**
+ * A breakdown's projects, as the buckets `invoiceLineDrafts` prices.
+ *
+ * THE ONE STEP BETWEEN THE SCAN AND THE LINES, and it is shared for the same
+ * reason the pricing below is: `createFromRange` and the preview on
+ * /invoices/new both start from the very same `rangeBreakdownImpl` answer, and
+ * a bucket assembled twice is a place where one of the two can pick a different
+ * rate, a different name, or a different idea of which bucket is the unassigned
+ * one — none of which would show up as a disagreement until a client had the
+ * document.
+ *
+ * `projectId === null` is the unassigned bucket AND a project row the scan
+ * could not resolve; both hand `undefined` down, because a line cannot tell
+ * them apart and neither has a name or a rate of its own.
+ */
+export function billableBucketsOf(
+  projects: ReadonlyArray<BreakdownProject>
+): Array<BillableBucket> {
+  return projects.map((project) => ({
+    projectId: project.projectId,
+    billableMs: project.billableMs,
+    unratedBillableMs: project.unratedBillableMs,
+    project:
+      project.projectId === null
+        ? undefined
+        : { name: project.name, hourlyRateCents: project.hourlyRateCents },
+  }))
+}
+
 /** One line's worth of work, computed but not yet written or drawn. */
 export type InvoiceLineDraft = {
   description: string

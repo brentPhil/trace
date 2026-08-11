@@ -8,8 +8,9 @@ import { rangeBreakdownImpl } from "./entries"
 import { MAX_ADDRESS_LENGTH, MAX_NAME_LENGTH } from "./clients"
 import { isValidCurrency } from "./lib/money"
 import { invoiceTotals } from "./lib/invoiceMath"
-import { invoiceLineDrafts } from "./lib/invoiceLines"
+import { billableBucketsOf, invoiceLineDrafts } from "./lib/invoiceLines"
 import { nextInvoiceNumber } from "./lib/invoiceNumber"
+import { partyBlockOf } from "./lib/party"
 import { invoiceDoc, invoiceLineDoc } from "./lib/docs"
 import {
   INVOICE_LIST_LIMIT,
@@ -17,7 +18,6 @@ import {
   INVOICE_SCAN_LIMIT,
 } from "./lib/scan"
 import { currencyOf, defaultRateCents } from "./settings"
-import type { BillableBucket } from "./lib/invoiceLines"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
@@ -714,12 +714,11 @@ async function createFromRangeImpl(
   // SNAPSHOT text, not a join. Renaming a client afterwards must not rewrite
   // this invoice — `clientId` beside it is what still answers "show me
   // everything billed to Vessel Vanguard".
-  const snapshotBilledTo =
-    client === null
-      ? ""
-      : client.address.trim() === ""
-        ? client.name
-        : `${client.name}\n${client.address}`
+  //
+  // `partyBlockOf` rather than the two lines it replaces: /invoices/new prefills
+  // this exact block into the Billed to box, and a block assembled twice is a
+  // form that shows one address and stores another.
+  const snapshotBilledTo = client === null ? "" : partyBlockOf(client)
   /*
    * A SUPPLIED BLOCK WINS, including an empty one.
    *
@@ -752,14 +751,20 @@ async function createFromRangeImpl(
    * second copy of these rules is a preview that can quietly disagree with what
    * gets stored. See convex/lib/invoiceLines.ts, which is where every rule this
    * used to spell out inline now lives, once.
+   *
+   * The BUCKETS are shared too, and that half is newer. They used to be
+   * assembled here from `projectDocs` — the documents this handler fetched for
+   * `clientId` — while the preview had to assemble its own from whatever it
+   * could see. Two assemblies of one list is a second place for a rate to come
+   * out different, so `billableBucketsOf` reads them off the breakdown's own
+   * rows, which is the single answer both sides already hold. `projectDocs`
+   * stays for the client check below, which is a question about ownership
+   * rather than about money.
    */
-  const buckets: Array<BillableBucket> = breakdown.projects.map((p) => ({
-    projectId: p.projectId,
-    billableMs: p.billableMs,
-    unratedBillableMs: p.unratedBillableMs,
-    project: p.projectId === null ? undefined : projectDocs.get(p.projectId),
-  }))
-  const lines = invoiceLineDrafts(buckets, accountRateCents)
+  const lines = invoiceLineDrafts(
+    billableBucketsOf(breakdown.projects),
+    accountRateCents
+  )
 
   const now = Date.now()
   // Bounded, not `.collect()`: `nextInvoiceNumber` needs the HIGHEST sequence

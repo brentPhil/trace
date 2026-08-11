@@ -45,20 +45,31 @@ export function Invoices() {
               job is to say where that happens — otherwise this screen is a
               dead end with a heading on it.
 
+              THE STATE FIRST, THEN THE ROUTE OUT. It used to run the two
+              together in one paragraph, so the sentence a reader needed —
+              where invoices come from — had to be found inside a sentence
+              telling them something they could already see. The first line is
+              Ink and the instruction is muted beneath it, which is the same
+              two-tone hierarchy every other block on these pages uses.
+
               "BILL EXACTLY WHAT YOU ARE LOOKING AT" was a promise the product
               did not keep for as long as `createFromRange` took a range and
-              ignored the filter beside it; it now does, literally. "One
-              project", not "one client", for the reason `MIXED_CLIENTS` gives
-              in convex/invoices.ts: the picker on that page is by project, and
-              an empty state that sends someone looking for a control that does
-              not exist is worse than one that says less.
+              ignored the filter beside it; it now does, literally, and
+              /invoices/new draws those very lines before anything is minted.
+              "One project", not "one client", for the reason `MIXED_CLIENTS`
+              gives in convex/invoices.ts: the picker on that page is by
+              project, and an empty state that sends someone looking for a
+              control that does not exist is worse than one that says less.
             */}
-            No invoices yet. An invoice is raised from a filtered range on{" "}
+            <span className="mb-1 block font-medium text-foreground">
+              No invoices yet.
+            </span>
+            An invoice is raised from a filtered range on{" "}
             <Link to="/reports" className="underline underline-offset-2">
               Reports
             </Link>
-            : narrow to one project and one period there, then bill exactly what
-            you are looking at.
+            : narrow to one project and one period there, press Create invoice,
+            and you will be shown the exact lines before anything is minted.
           </Empty>
         ) : (
           <div className="flex flex-col gap-2">
@@ -229,39 +240,72 @@ function InvoiceRowItem({
   const billedToName = invoice.billedTo.split("\n")[0]?.trim() ?? ""
 
   return (
-    <tr className="border-b border-edge-soft last:border-b-0">
+    /*
+     * THE WHOLE ROW IS THE TARGET, and it took `relative` plus a stretched
+     * pseudo-element to get there honestly.
+     *
+     * A `<tr>` wrapped in an `<a>` is not valid HTML and no browser keeps the
+     * table layout through it; a row made clickable with an `onClick` alone is
+     * unreachable from a keyboard and invisible to a screen reader's link list.
+     * So the LINK stays on the number — one anchor, correctly named — and its
+     * `::after` is stretched over the row that contains it. What a pointer can
+     * hit becomes the whole row; what the accessibility tree sees is unchanged.
+     *
+     * If a browser ever refuses `position: relative` on a `<tr>` the stretch
+     * collapses to the cell, which is exactly the behaviour this row had
+     * before — a degradation, not a break.
+     *
+     * The hover fill is one tonal step (The Tonal Depth Rule) and is now honest:
+     * it lights the whole row because the whole row is what responds. `has-[a:
+     * focus-visible]` gives the keyboard the same fill the mouse gets, so the
+     * row a tab has reached is as obvious as the row a pointer is over.
+     */
+    <tr
+      className={cn(
+        "relative border-b border-edge-soft last:border-b-0",
+        "transition-colors hover:bg-surface has-[a:focus-visible]:bg-surface",
+        "motion-reduce:transition-none"
+      )}
+    >
       {/*
         Ink, NOT brass. An invoice number is an identifier, not a currency
         amount — the Two Temperatures Rule spends warm on money and nothing
         else. Tabular because it is digits somebody reads down a column.
 
         `scope="row"` because the number is what names this invoice: a screen
-        reader reading the total then announces which invoice it belongs to.
-
-        THE LINK IS ON THE NUMBER, not on the row. A `<tr>` wrapped in an `<a>`
-        is not valid HTML and no browser keeps the table layout through it, and
-        a row made clickable with an onClick alone is unreachable from a
-        keyboard. The number is also the thing that names the invoice, so it is
-        what a screen reader's link list should say — "072726-0013", not "row".
+        reader reading the total then announces which invoice it belongs to,
+        and it is what the link list should say — "072726-0013", not "row".
       */}
       <th scope="row" className="px-3 py-2 text-left font-normal tabular">
         <Link
           to="/invoices/$invoiceId"
           params={{ invoiceId: invoice._id }}
           className={cn(
-            "rounded-sm underline-offset-2 hover:underline",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            // Underlined AT REST, not only on hover. The row leads somewhere
+            // now, and a plain-looking string in a table of plain-looking
+            // strings is a target nobody knows is there — DESIGN.md asks the
+            // interface to be learnable, and a link that only admits to being
+            // one under the pointer is not. Edge at rest, Ink on hover: the
+            // affordance is always present and still has somewhere to go.
+            "rounded-sm underline decoration-edge underline-offset-4",
+            "hover:decoration-foreground",
+            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            "after:absolute after:inset-0 after:content-['']"
           )}
         >
           {invoice.number}
         </Link>
       </th>
 
-      <td className="truncate px-3 py-2">
+      {/* The client is what a person actually scans this list for — "the
+          Vessel Vanguard one" — so it carries the row's weight, while the
+          number beside it is an identifier you look up rather than read. */}
+      <td className="truncate px-3 py-2 font-medium">
         {billedToName === "" ? (
-          // Italic muted, the same treatment `formatRate` gives "No rate set":
-          // an absence stated as an absence, never as a blank cell.
-          <span className="italic text-muted-foreground">No client</span>
+          // Italic muted and NOT medium: the same treatment `formatRate` gives
+          // "No rate set". An absence stated as an absence, never as a blank
+          // cell, and never dressed as a name.
+          <span className="font-normal italic text-muted-foreground">No client</span>
         ) : (
           billedToName
         )}

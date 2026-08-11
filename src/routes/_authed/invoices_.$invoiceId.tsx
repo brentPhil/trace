@@ -174,8 +174,10 @@ export function InvoicePage({ invoiceId }: { invoiceId: Id<"invoices"> }) {
           <ExportPdfButton invoice={invoice} timeZone={settings.timezone} />
         </div>
 
-        <h1 className="text-sm font-semibold">Invoice</h1>
-
+        {/* No heading here. The document carries its own masthead — the word
+            "Invoice", set the way the paper sets it — and a second `<h1>` above
+            the panel would be the app talking over the document it is showing.
+            See `InvoiceRecord`. */}
         <InvoiceRecord invoice={invoice} timeZone={settings.timezone} />
       </div>
     </div>

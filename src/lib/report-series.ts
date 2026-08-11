@@ -50,6 +50,13 @@ export type ProjectTotal = {
   projectId: string | null
   name: string
   color: string
+  /** The project's own rate, absent when it has none — carried on the scan so
+   *  /invoices/new can price its preview from the same answer the mutation
+   *  prices from (see `projectTotal` in convex/entries.ts). Nothing under
+   *  src/components/reports reads it; it is here because this type is the
+   *  structural MIRROR of that return, and a mirror missing a field is one a
+   *  fixture cannot be written against. */
+  hourlyRateCents?: number
   totalMs: number
   billableMs: number
   billableCents: number
