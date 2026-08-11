@@ -112,12 +112,30 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * instead of handed a wrong one, which is the trade this constant already
  * made at 2,000 and the same one `RANGE_TOO_LARGE` makes.
  *
- * The bounds count CHARACTERS and the ceiling counts BYTES, and everything
- * above equates the two. A document written entirely in a non-Latin script
- * costs up to three bytes a character, so the real worst case is larger than
- * this arithmetic and the ~40% headroom is what absorbs the realistic part of
- * it. Anyone raising this number again has to say what happens to the account
- * whose thousand invoices are all CJK addresses.
+ * THE BOUNDS COUNT CHARACTERS AND THE CEILING COUNTS BYTES, and everything
+ * above equates the two — which is only true for ASCII. Being exact about how
+ * far that goes, rather than calling it headroom:
+ *
+ *     1 B/char  1,000 rows ~ 1.8 MB   fits inside the ~3.0 MB above
+ *     2 B/char  1,000 rows ~ 3.3 MB   does NOT fit
+ *     3 B/char  1,000 rows ~ 4.8 MB   does NOT fit
+ *
+ * So the honest statement is not that 1,000 has margin for any account. It is
+ * that 1,000 holds for an account whose invoices are ASCII, and that what makes
+ * it hold for everyone else is that no real party block is anywhere near its
+ * 601-character bound — a name and a postal address run 60-120 characters, not
+ * 601, and the bounds exist to stop a paste accident rather than to describe a
+ * document. An account that genuinely saturated these fields in a three-byte
+ * script would exceed the budget at roughly 600 invoices, and would get the
+ * platform's opaque error rather than this constant's refusal.
+ *
+ * Lowering the number until that case fits is the wrong fix: it would trade a
+ * limit nobody reaches for one many accounts do. The right one is to stop
+ * scanning. `nextInvoiceNumber` reads the whole table only because it needs the
+ * highest sequence ever used and string order does not track sequence order
+ * (see above) — persisting that high-water mark on write removes the scan, this
+ * constant, and this entire comment. That is the change to make before raising
+ * this number, not instead of thinking about it.
  *
  * An invoice deliberately carries NO notes field, which is what would blow the
  * estimate all over again — an invoice is a statement of what is owed, and
