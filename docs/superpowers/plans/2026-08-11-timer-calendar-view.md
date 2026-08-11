@@ -808,34 +808,39 @@ In `src/routes/_authed.tsx`, add to the `<TimerBar>` element:
 In `src/routes/_authed/timer.tsx`:
 
 - Delete the `import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"` line.
-- Replace the totals row block. The existing comment argued this button belongs beside the totals; it is now the wrong answer and is rewritten rather than deleted:
+- The page is built on `<Page title="Timer" titleHidden sticky header={…}>`. Inside that `header` fragment, replace the **first** block — the one currently holding `TotalsRow` and `ManualEntryDialog` — with the following. The comment there argued this button belongs beside the totals; that is now the wrong answer and is rewritten rather than deleted. Note the indentation: this sits inside `header={<>`, at ten spaces.
 
 ```tsx
-      {/*
-        Just the totals now.
+          {/*
+            Just the totals now.
 
-        "+ Add entry" used to sit here, and the comment this replaces argued
-        for it: the numbers to its left are what prompt "I forgot to start the
-        timer", so the control belonged next to them. That was right while the
-        button lived on this page — and the button living on this page was the
-        problem. Noticing a forgotten block happens on /reports at least as
-        often, and the control was not there.
+            "+ Add entry" used to sit here, and the comment this replaces
+            argued for it: the numbers to its left are what prompt "I forgot to
+            start the timer", so the control belonged next to them. That was
+            right while the button lived on this page — and the button living
+            on this page was the problem. Noticing a forgotten block happens on
+            /reports at least as often, and the control was not there.
 
-        It is a `+` beside Play in the timer bar now, which sits in the shell
-        above the outlet and is therefore on every page. Same argument about
-        adjacency, applied to the control it is actually adjacent to: the one
-        that starts and stops the timer you forgot to start.
-      */}
-      <div className="flex w-full items-center gap-4 px-4">
-        <TotalsRow
-          className="py-3"
-          todayMs={totals.todayMs}
-          weekMs={totals.weekMs}
-          billableMs={totals.billableMs}
-          display={settings.durationDisplay}
-        />
-      </div>
+            It is a `+` beside Play in the timer bar now, which sits in the
+            shell above the outlet and is therefore on every page. Same
+            argument about adjacency, applied to the control it is actually
+            adjacent to: the one that starts and stops the timer you forgot to
+            start.
+          */}
+          <div className="flex w-full items-center gap-4 px-4">
+            <TotalsRow
+              className="py-3"
+              todayMs={totals.todayMs}
+              weekMs={totals.weekMs}
+              billableMs={totals.billableMs}
+              display={settings.durationDisplay}
+            />
+          </div>
 ```
+
+Leave the `<FilterBand>` block that follows it untouched. Do not reintroduce `useHeightVar` — `Page` owns the measuring now.
+
+`today` stays in use elsewhere in the file (`weekWindow`, `logRange`, `periodTotals`), so removing the dialog must not remove that binding.
 
 - [ ] **Step 9: Move the route test's mock**
 
