@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
+import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 
 /*
@@ -107,6 +108,59 @@ describe("DayList empty state", () => {
     expect(screen.queryByText("Nothing tracked yet.")).toBeNull()
     expect(screen.queryByText("Nothing here.")).toBeNull()
     expect(screen.getByText("Today")).toBeTruthy()
+  })
+})
+
+/*
+ * How the calendar reaches a row.
+ *
+ * Clicking a block on the grid switches to List and hands focus to that
+ * entry's row, which it finds by `data-entry-id`. Both halves of that are
+ * properties of the row and invisible in a screenshot, so this is the only
+ * thing that can hold them.
+ */
+describe("EntryRow — addressable from the calendar", () => {
+  const group = {
+    day: "2026-08-05",
+    label: "Today",
+    entries: [makeEntry({ title: "Client call" })],
+    notedCount: 0,
+    totalMs: 3_600_000,
+    billableMs: 0,
+    runningCount: 0,
+  }
+
+  function renderOneRow() {
+    render(
+      <DayList
+        groups={[group]}
+        timeZone="UTC"
+        use12Hour
+        weekStartDay={1}
+        projects={[]}
+        tags={[]}
+        actions={noActions}
+      />
+    )
+  }
+
+  it("carries the entry's id, so a block on the grid can find its row", () => {
+    renderOneRow()
+    const row = document.querySelector(`[data-entry-id="${group.entries[0]._id}"]`)
+    expect(row).not.toBeNull()
+  })
+
+  it("is focusable programmatically without joining the tab order", () => {
+    // `tabIndex` is load-bearing at -1: the calendar has to be able to call
+    // `.focus()` on this, and at 0 a log of 200 rows would put 200 tab stops
+    // between the filter band and anything beneath it.
+    renderOneRow()
+    const row = document.querySelector<HTMLElement>("[data-entry-id]")
+    expect(row).not.toBeNull()
+    expect(row!.tabIndex).toBe(-1)
+
+    row!.focus()
+    expect(document.activeElement).toBe(row)
   })
 })
 

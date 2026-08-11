@@ -79,6 +79,21 @@ export function EntryRow({
 
   return (
     <div
+      /*
+       * ADDRESSABLE, so the calendar can hand focus to a row.
+       *
+       * Clicking a block on the grid does not open an editor of its own — the
+       * controls for that entry already exist here, and a second editor is two
+       * places to fix the same mistyped field. The grid switches to List and
+       * hands focus to this element instead, which it finds by this attribute.
+       *
+       * `tabIndex={-1}`, never `0`. The row must be focusable PROGRAMMATICALLY
+       * and must not join the tab order: a log of 200 rows would otherwise put
+       * 200 stops between the filter band and anything below it, and every
+       * control inside a row is already reachable on its own.
+       */
+      data-entry-id={entry._id}
+      tabIndex={-1}
       className={cn(
         "group border-b border-edge-soft/60 last:border-b-0",
         "transition-colors hover:bg-surface/60"

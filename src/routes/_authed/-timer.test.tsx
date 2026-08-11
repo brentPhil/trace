@@ -79,6 +79,18 @@ vi.mock("@/components/entries/entry-log", () => ({
   },
 }))
 
+/*
+ * The grid, stubbed. FullCalendar MEASURES element geometry and jsdom reports
+ * every element as zero-sized, so a real one rendered here would be an
+ * assertion about nothing — and it would never fire `datesSet`, which is what
+ * the panel's own 14 tests exercise (`calendar-panel.test.tsx`). What this file
+ * is for is the branch around it: which view is on screen, and what the filter
+ * band does across the switch.
+ */
+vi.mock("@/components/calendar/calendar-panel", () => ({
+  CalendarPanel: () => <div data-testid="calendar-panel" />,
+}))
+
 /* Reaches for `useConvexMutation`, which needs a real Convex client. Timer
  * only threads these through as props; nothing here presses any of them. */
 vi.mock("@/hooks/use-entry-edit-mutations", () => ({
@@ -122,7 +134,7 @@ function renderTimer() {
     convexKey(api.entries.listRange, { fromMs: week.fromMs, toMs: week.toMs }),
     []
   )
-  render(
+  return render(
     <QueryClientProvider client={queryClient}>
       <Timer />
     </QueryClientProvider>
@@ -164,6 +176,101 @@ describe("Timer — the filter band", () => {
     renderTimer()
 
     expectFilterControlsInBand()
+  })
+})
+
+/*
+ * TABS, NOT TWO ROUTES.
+ *
+ * The whole argument for a tab is that the filter band below it is ONE control
+ * governing both views — so the two assertions that matter here are that the
+ * switch actually swaps what is on screen, and that the band does not go with
+ * it. A control that vanishes when you switch reads as the data having
+ * changed, which is the one impression a billing tool cannot afford.
+ */
+describe("Timer — Calendar and List", () => {
+  const tab = (name: "Calendar" | "List") => screen.getByRole("tab", { name })
+
+  it("opens on the list, not the calendar", () => {
+    renderTimer()
+
+    expect(screen.queryByTestId("calendar-panel")).toBeNull()
+    expect(tab("List").getAttribute("aria-selected")).toBe("true")
+    expect(tab("Calendar").getAttribute("aria-selected")).toBe("false")
+  })
+
+  it("swaps the log for the calendar and back", () => {
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [makeEntry({ title: "Client call" })],
+      isDone: true,
+    })
+    renderTimer()
+
+    expect(screen.getByTestId("entry-log")).toBeTruthy()
+
+    fireEvent.click(tab("Calendar"))
+    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
+    expect(screen.queryByTestId("entry-log")).toBeNull()
+
+    fireEvent.click(tab("List"))
+    expect(screen.queryByTestId("calendar-panel")).toBeNull()
+    expect(screen.getByTestId("entry-log")).toBeTruthy()
+  })
+
+  it("keeps the filter band, and what was typed into it, across both views", () => {
+    renderTimer()
+
+    fireEvent.change(search(), { target: { value: "client" } })
+    fireEvent.click(tab("Calendar"))
+
+    // The band is still on screen, still holding the same text: ONE filter,
+    // narrowing both views. Hiding it with the list would silently drop a
+    // filter the user set.
+    expectFilterControlsInBand()
+    expect(search().value).toBe("client")
+  })
+
+  it("gives the calendar its own range bar, and leaves the page totals alone", () => {
+    renderTimer()
+    fireEvent.click(tab("Calendar"))
+
+    // The stepper and the range total belong to the calendar…
+    expect(screen.getByRole("button", { name: "Previous week" })).toBeTruthy()
+    expect(screen.getByText("Range total")).toBeTruthy()
+
+    // …and `TotalsRow` still says today and this week, which are facts about
+    // the clock rather than about what the grid happens to be showing.
+    expect(screen.getByText("Today")).toBeTruthy()
+    expect(screen.getByText("This week")).toBeTruthy()
+  })
+
+  it("steps the range without touching the page totals", () => {
+    renderTimer()
+    fireEvent.click(tab("Calendar"))
+
+    // NOW is Wednesday 5 August 2026, weekStartDay 1 (Monday) — so the label
+    // opens on this week and one step back leaves it.
+    expect(screen.getByText("This week · 3–9 Aug")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous week" }))
+
+    expect(screen.getByText("27 Jul – 2 Aug")).toBeTruthy()
+    expect(screen.queryByText("This week · 3–9 Aug")).toBeNull()
+  })
+
+  it("puts the whole range bar inside the header Page measures and pins", () => {
+    // Not a detail: the stepper is a control over what scrolls beneath it, so
+    // it has to stick with the totals rather than scroll away with the grid.
+    // `Page` measures its header slot for `--page-header-height`, so being
+    // inside it is what buys that — and nothing about it shows up in a
+    // screenshot.
+    const { container } = renderTimer()
+    fireEvent.click(tab("Calendar"))
+
+    const pinned = container.querySelector(".sticky")
+    expect(pinned).not.toBeNull()
+    expect(pinned!.contains(screen.getByText("Range total"))).toBe(true)
+    expect(pinned!.contains(tab("Calendar"))).toBe(true)
   })
 })
 
