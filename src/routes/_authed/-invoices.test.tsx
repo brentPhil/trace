@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, render, screen, within } from "@testing-library/react"
 import { Invoices } from "@/routes/_authed/invoices"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
@@ -98,11 +98,39 @@ function renderInvoices(invoices: Array<Row>, truncated = false) {
   queryClient.setQueryData(convexKey(api.invoices.list, {}), { invoices, truncated })
   queryClient.setQueryData(convexKey(api.settings.get, {}), SETTINGS)
 
-  render(
+  return render(
     <QueryClientProvider client={queryClient}>
       <Invoices />
     </QueryClientProvider>
   )
+}
+
+/**
+ * The footer, as its own scope.
+ *
+ * The column header and the footer label are BOTH the word "Total" — correctly,
+ * they mean "this invoice's total" and "the total of all of them" — so a
+ * document-wide `getByText("Total")` matches the header and proves nothing
+ * about the footer. Every assertion about the summary has to be made inside it.
+ */
+function footerOf(container: HTMLElement) {
+  const tfoot = container.querySelector("tfoot")
+  if (tfoot === null) throw new Error("no <tfoot> rendered")
+  return within(tfoot)
+}
+
+/**
+ * The rows, as their own scope.
+ *
+ * Same reason as `footerOf`, and it bites hardest on a ONE-invoice fixture:
+ * that invoice's total and the footer's total are then the same string, so an
+ * unscoped `getByText("$988.00")` finds two nodes and throws. Asserting a row
+ * renders a figure has to mean the row.
+ */
+function bodyOf(container: HTMLElement) {
+  const tbody = container.querySelector("tbody")
+  if (tbody === null) throw new Error("no <tbody> rendered")
+  return within(tbody)
 }
 
 describe("Invoices — the empty state", () => {
@@ -119,15 +147,16 @@ describe("Invoices — the empty state", () => {
 
 describe("Invoices — the rows", () => {
   it("renders the number, the client and the total", () => {
-    renderInvoices([
+    const { container } = renderInvoices([
       makeRow({ number: "072726-0013", billedTo: "Vessel Vanguard\nBonita Springs, FL" }),
     ])
 
-    expect(screen.getByText("072726-0013")).toBeTruthy()
+    const body = bodyOf(container)
+    expect(body.getByText("072726-0013")).toBeTruthy()
     // The first line of the `billedTo` SNAPSHOT — the party's name, not the
     // whole address block.
-    expect(screen.getByText("Vessel Vanguard")).toBeTruthy()
-    expect(screen.getByText("$988.00")).toBeTruthy()
+    expect(body.getByText("Vessel Vanguard")).toBeTruthy()
+    expect(body.getByText("$988.00")).toBeTruthy()
   })
 
   /*
@@ -144,12 +173,12 @@ describe("Invoices — the rows", () => {
   })
 
   it("renders each invoice's own currency, not the account's", () => {
-    renderInvoices([
+    const { container } = renderInvoices([
       makeRow({ number: "072726-0013", currency: "EUR", totalCents: 100_000 }),
     ])
     // SETTINGS.currency is USD; the invoice snapshotted EUR at creation and
     // that is what the document is denominated in.
-    expect(screen.getByText("€1,000.00")).toBeTruthy()
+    expect(bodyOf(container).getByText("€1,000.00")).toBeTruthy()
   })
 
   /*
@@ -199,15 +228,85 @@ describe("Invoices — the rows", () => {
    * the moment the table is rewritten as divs.
    */
   it("exposes the columns as a table, not a list", () => {
-    renderInvoices([makeRow({ number: "072726-0013" })])
+    const { container } = renderInvoices([makeRow({ number: "072726-0013" })])
 
     expect(
       screen.getAllByRole("columnheader").map((cell) => cell.textContent)
     ).toEqual(["Number", "Billed to", "Date issued", "Total", "Status"])
-    // The number names its row, so a total read aloud says which invoice it
-    // belongs to.
-    expect(screen.getByRole("rowheader").textContent).toBe("072726-0013")
-    // Header row + one invoice.
-    expect(screen.getAllByRole("row")).toHaveLength(2)
+    // Scoped to the body: the footer carries a rowheader of its own, naming the
+    // total. Both are correct — this asserts the one that names an invoice.
+    const body = container.querySelector("tbody")
+    expect(body).toBeTruthy()
+    expect(within(body as HTMLElement).getByRole("rowheader").textContent).toBe(
+      "072726-0013"
+    )
+    // Header, one invoice, and the total. Three rowgroups, three rows.
+    expect(screen.getAllByRole("row")).toHaveLength(3)
+  })
+})
+
+/*
+ * The footer is the one figure on this page nobody can check by eye — every
+ * other cell is copied from a document, and this one is arithmetic over all of
+ * them. So the two ways it can be wrong are both pinned: adding up incorrectly,
+ * and adding up things that must not be added.
+ */
+describe("Invoices — the total footer", () => {
+  it("totals the invoices listed", () => {
+    const { container } = renderInvoices([
+      makeRow({ number: "072726-0013", totalCents: 98_800 }),
+      makeRow({ number: "072726-0012", totalCents: 1_200 }),
+    ])
+
+    const footer = footerOf(container)
+    expect(footer.getByText("Total")).toBeTruthy()
+    // 98_800 + 1_200. A footer that rendered one row's total, or that summed
+    // the wrong field, lands on a different number.
+    expect(footer.getByText("$1,000.00")).toBeTruthy()
+  })
+
+  /*
+   * An invoice snapshots the currency it was raised in, so a list can hold two.
+   * $2,000 + €1,500 has no honest single value — adding the integers gives
+   * 3,500 of nothing, and a freelancer reading it would be reading a number
+   * wrong in both currencies. Two labelled rows, and no bare "Total", which
+   * would be claiming to cover both.
+   */
+  it("keeps two currencies apart rather than adding them", () => {
+    const { container } = renderInvoices([
+      makeRow({ number: "072726-0013", currency: "USD", totalCents: 200_000 }),
+      makeRow({ number: "072726-0012", currency: "EUR", totalCents: 150_000 }),
+    ])
+
+    const footer = footerOf(container)
+    expect(footer.getByText("Total (USD)")).toBeTruthy()
+    expect(footer.getByText("Total (EUR)")).toBeTruthy()
+    expect(footer.getByText("$2,000.00")).toBeTruthy()
+    expect(footer.getByText("€1,500.00")).toBeTruthy()
+    expect(footer.queryByText("Total", { exact: true })).toBeNull()
+    // The merged number, in either denomination.
+    expect(footer.queryByText("$3,500.00")).toBeNull()
+    expect(footer.queryByText("€3,500.00")).toBeNull()
+  })
+
+  /*
+   * Capped, the figure totals the newest page and not the account. Labelling it
+   * "Total" there is the same lie the cap note below the table exists to
+   * prevent, and a worse one for wearing a currency symbol.
+   */
+  it("says the total covers only the listed invoices when the list is capped", () => {
+    const { container } = renderInvoices(
+      [makeRow({ number: "072726-0013", totalCents: 98_800 })],
+      true
+    )
+
+    const footer = footerOf(container)
+    expect(footer.getByText("Total of those listed")).toBeTruthy()
+    expect(footer.queryByText("Total", { exact: true })).toBeNull()
+  })
+
+  it("shows no footer at all when there are no invoices", () => {
+    const { container } = renderInvoices([])
+    expect(container.querySelector("tfoot")).toBeNull()
   })
 })

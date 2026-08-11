@@ -61,3 +61,31 @@ export function invoiceTotals(
   )
   return { subtotalCents, taxCents, totalCents: subtotalCents + taxCents }
 }
+
+/** The fields `sumByCurrency` reads — an `invoices.list` row satisfies it. */
+type AmountInCurrency = { currency: string; totalCents: number }
+
+/**
+ * A set of invoices totalled, GROUPED BY CURRENCY — never summed into one
+ * number.
+ *
+ * Every invoice snapshots the currency it was raised in, and this product lets
+ * that change between invoices. So a list can hold $2,000 and €1,500, and there
+ * is no honest single figure for it: adding the integers gives 3,500 of nothing,
+ * and converting them would require a rate on a date this product does not hold
+ * and has no business inventing. A freelancer reading one merged number would
+ * be reading a number that is wrong in both currencies.
+ *
+ * Grouped in FIRST-SEEN order rather than sorted, so the currency at the top of
+ * a list is the currency at the top of its total — the reader's eye does not
+ * have to re-find it.
+ */
+export function sumByCurrency(
+  rows: ReadonlyArray<AmountInCurrency>
+): Array<{ currency: string; totalCents: number }> {
+  const byCurrency = new Map<string, number>()
+  for (const row of rows) {
+    byCurrency.set(row.currency, (byCurrency.get(row.currency) ?? 0) + row.totalCents)
+  }
+  return [...byCurrency].map(([currency, totalCents]) => ({ currency, totalCents }))
+}

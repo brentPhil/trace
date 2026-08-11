@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, expect, it } from "vitest"
-import { invoiceTotals, lineAmountCents } from "./invoiceMath"
+import { invoiceTotals, lineAmountCents, sumByCurrency } from "./invoiceMath"
 
 describe("lineAmountCents", () => {
   /* The reference invoice: 98:48:00 -> 98.80 h at $10.00/hr -> $988.00. A
@@ -46,5 +46,51 @@ describe("invoiceTotals", () => {
 
   it("totals an empty invoice as zero rather than NaN", () => {
     expect(invoiceTotals([], [])).toEqual({ subtotalCents: 0, taxCents: 0, totalCents: 0 })
+  })
+})
+
+describe("sumByCurrency", () => {
+  it("adds invoices that share a currency", () => {
+    expect(
+      sumByCurrency([
+        { currency: "USD", totalCents: 98_800 },
+        { currency: "USD", totalCents: 1_200 },
+      ])
+    ).toEqual([{ currency: "USD", totalCents: 100_000 }])
+  })
+
+  /*
+   * THE reason this function exists rather than a `reduce` at the call site.
+   * Two currencies must come back as two figures: added together they would be
+   * 350_000 of nothing, and a freelancer reading that number would be reading
+   * one that is wrong in both currencies. A one-element result here is the
+   * failure this test is for.
+   */
+  it("never merges two currencies into one number", () => {
+    expect(
+      sumByCurrency([
+        { currency: "USD", totalCents: 200_000 },
+        { currency: "EUR", totalCents: 150_000 },
+      ])
+    ).toEqual([
+      { currency: "USD", totalCents: 200_000 },
+      { currency: "EUR", totalCents: 150_000 },
+    ])
+  })
+
+  /* First-seen, not sorted: the currency at the top of the list is the currency
+   * at the top of its total. Alphabetical would put EUR first here. */
+  it("keeps currencies in the order the list shows them", () => {
+    expect(
+      sumByCurrency([
+        { currency: "USD", totalCents: 100 },
+        { currency: "EUR", totalCents: 100 },
+        { currency: "USD", totalCents: 100 },
+      ]).map((row) => row.currency)
+    ).toEqual(["USD", "EUR"])
+  })
+
+  it("totals an empty list as no rows rather than a zero", () => {
+    expect(sumByCurrency([])).toEqual([])
   })
 })

@@ -6,6 +6,7 @@ import { Empty } from "@/components/ui/empty"
 import { format } from "@/lib/report-series"
 import { cn } from "@/lib/utils"
 import { dayOf } from "@shared/day"
+import { sumByCurrency } from "@shared/invoiceMath"
 import { formatMoney } from "@shared/money"
 import { INVOICE_LIST_LIMIT } from "@shared/scan"
 import { api } from "../../../convex/_generated/api"
@@ -22,6 +23,13 @@ export const Route = createFileRoute("/_authed/invoices")({
 export function Invoices() {
   const { data } = useSuspenseQuery(convexQuery(api.invoices.list, {}))
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
+
+  /*
+   * One row per currency, never one number. See `sumByCurrency` — an invoice
+   * carries the currency it was raised in, so a list can hold two and there is
+   * no honest way to add them.
+   */
+  const totals = sumByCurrency(data.invoices)
 
   return (
     <div className="flex flex-col">
@@ -111,6 +119,43 @@ export function Invoices() {
                     />
                   ))}
                 </tbody>
+
+                {/*
+                  The footer is a `<tfoot>`, which is what makes it a total
+                  rather than a row that happens to be last: assistive tech
+                  announces it as the table's summary, and a browser printing a
+                  long table repeats it. It is also why the label is a
+                  `<th scope="row">` — the number the eye lands on needs
+                  something naming it.
+                */}
+                <tfoot>
+                  {totals.map(({ currency, totalCents }) => (
+                    <tr
+                      key={currency}
+                      /* Edge, not Edge Soft. Every other rule in this table
+                         separates one row from the next; this one separates the
+                         rows from what they add up to, and reads as the heavier
+                         boundary it is. */
+                      className="border-t border-edge"
+                    >
+                      <th
+                        scope="row"
+                        colSpan={2}
+                        className="px-3 py-2 text-left text-[0.8125rem] font-medium text-muted-foreground"
+                      >
+                        {totalLabel(currency, totals.length > 1, data.truncated)}
+                      </th>
+                      {/* Carries DATE_COL's own responsive class so this cell
+                          disappears with the column it sits under, rather than
+                          shunting the total one place left on a phone. */}
+                      <td className={DATE_COL} />
+                      <td className="px-3 py-2 text-right font-medium tabular text-brass">
+                        {formatMoney(totalCents, currency)}
+                      </td>
+                      <td />
+                    </tr>
+                  ))}
+                </tfoot>
               </table>
             </div>
 
@@ -134,6 +179,21 @@ export function Invoices() {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * What the footer's figure is a total OF.
+ *
+ * Plain "Total" is only true when the table holds the whole history in one
+ * currency. Capped, it is a total of the newest page and not of the account —
+ * the same lie the cap note below the table exists to prevent, and it would be
+ * a worse one here because this one wears a currency symbol. "Those listed"
+ * rather than a count: trashed rows can leave the page shorter than the cap, so
+ * a number here could disagree with the rows above it.
+ */
+function totalLabel(currency: string, manyCurrencies: boolean, truncated: boolean): string {
+  const what = truncated ? "Total of those listed" : "Total"
+  return manyCurrencies ? `${what} (${currency})` : what
+}
 
 /*
  * The columns. Widths are declared once, on the header cells, and the table
