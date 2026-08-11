@@ -16,18 +16,24 @@ const Close = BasePopover.Close
 function Popup({
   className,
   align = "start",
-  // `side` is passed through rather than left at Base UI's default because a
-  // popover anchored to the SIDEBAR has to open sideways: the rail is 56px
-  // wide when collapsed and pinned to the bottom of the viewport, where
-  // "below" is nowhere. The positioner still flips on its own when the chosen
-  // side has no room.
-  side = "bottom",
+  /* `side` is forwarded, and deliberately has NO default here: Base UI's
+     positioner already defaults to "bottom", and repeating it would mean this
+     wrapper owning a value it is not choosing — the next Base UI default to
+     change would then be silently overridden by a copy of the old one.
+     Forwarded at all because a popover anchored to the SIDEBAR has to open
+     sideways: the rail is 56px wide when collapsed and pinned to the bottom of
+     the viewport, where "below" is nowhere. The positioner still flips on its
+     own when the chosen side has no room. */
+  side,
   sideOffset = 6,
   children,
   ...props
 }: ComponentProps<typeof BasePopover.Popup> & {
   align?: "start" | "center" | "end"
-  side?: "top" | "right" | "bottom" | "left"
+  /* The positioner's own type, not a hand-written union: it also accepts the
+     logical `inline-start`/`inline-end`, which a four-value union quietly
+     took away. */
+  side?: ComponentProps<typeof BasePopover.Positioner>["side"]
   sideOffset?: number
 }) {
   return (

@@ -316,12 +316,13 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
          * pixel is the sidebar's own border, which is sidebar, not page. The
          * width is then whatever the gutter that is already there can hold —
          *   expanded   256px rail, `w-2`   -> x 248→256; nav buttons end at 247
-         *   collapsed   56px rail, `w-1.5` -> x  50→56;  nav buttons end at 49.5
+         *   collapsed   56px rail, `w-1.5` -> x  50→56;  nav buttons end at 50
          * — so nothing is overlapped on either side in either state. The
-         * collapsed width is 6px rather than 8 because a 56px rail carrying a
-         * 44px target has only 5.5px of gutter to spend (see `RAIL_GUTTER` in
-         * app-sidebar.tsx); 8px there would take 1.5px off each nav button,
-         * which is the same defect one level in.
+         * collapsed width is 6px rather than 8 because that is the whole of
+         * the gutter a collapsed rail has: the derivation is stated once, on
+         * `RAIL_GUTTER_COLLAPSED` in app-sidebar.tsx, and taking 8 here would
+         * eat into the nav button's target, which is the same defect one level
+         * in.
          *
          * THE AFFORDANCE STAYS. `SidebarTrigger` is `md:hidden`
          * (app-shell.tsx), so on desktop this rail is the only mouse path back
@@ -574,8 +575,12 @@ const sidebarMenuButtonVariants = cva(
         default: "h-9 text-sm",
         sm: "h-8 text-xs",
         // The collapsed `p-0!` this used to repeat now lives in the base above,
-        // where it applies to every size rather than only this one.
-        lg: "h-12 px-3 text-sm",
+        // where it applies to every size rather than only this one. The height
+        // is upstream's: `size="lg"` has exactly one consumer in this product
+        // and it states the height it wants at its own call site (ProfileMenu,
+        // app-sidebar.tsx), rather than this shared variant carrying an
+        // unargued 48 that a re-vendor would silently put back to 56.
+        lg: "h-14 px-3 text-sm",
       },
     },
     defaultVariants: {

@@ -1,18 +1,22 @@
+import { Link } from "@tanstack/react-router"
 import { useHeightVar } from "@/hooks/use-height-var"
 import { cn } from "@/lib/utils"
+import type { LinkProps } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 
 /**
  * How a page is built in this product. There is one way, and this is it.
  *
- * WHY THIS EXISTS AT ALL. There used to be two. /timer and /reports rendered a
- * `PageStickyHeader` and no `<h1>`; /projects, /invoices, /settings and both
- * invoice routes rendered no header component and a bare
- * `<h1 className="text-sm font-semibold">` somewhere inside their own layout.
- * So the page-title treatment was written down five times, whether a page had a
- * heading at all was decided per file, and whether a header stuck was an
- * accident of which of the two shapes somebody had copied. None of that is
- * visible in a screenshot, which is why it drifted: nothing fails when the
+ * WHY THIS EXISTS AT ALL. There used to be two. /timer and /reports each spelt
+ * out a sticky band of their own — the measured custom property, the host and
+ * measured refs paired by hand, `sticky top-… z-20 bg-ground`, and the calc
+ * that adds the two heights — and neither had an `<h1>` at all; /projects,
+ * /invoices, /settings and both invoice routes rendered no header at all and a
+ * bare `<h1 className="text-sm font-semibold">` somewhere inside their own
+ * layout. So the page-title treatment was written down five times, whether a
+ * page had a heading at all was decided per file, and whether a header stuck
+ * was an accident of which of the two shapes somebody had copied. None of that
+ * is visible in a screenshot, which is why it drifted: nothing fails when the
  * sixth page invents a seventh shape.
  *
  * Every route now renders exactly one `<Page>`. The heading vocabulary, the
@@ -105,15 +109,20 @@ export function Page({
   children: ReactNode
 }) {
   /*
-   * Measured unconditionally, and read only when `sticky`.
+   * Measured only when something reads the number.
    *
-   * Hooks cannot be called conditionally, and the alternative — two components,
-   * one that measures and one that does not — is the two-shapes problem this
-   * file exists to end. The cost of the unread case is one ResizeObserver on an
-   * element that is not moving; the cost of the alternative is that half the
-   * product goes back to being built the other way.
+   * The property is consumed by exactly one thing — the `--log-sticky-top`
+   * calc below — and that is written only when `sticky`. Six of the eight
+   * pages are unpinned, so measuring unconditionally meant six ResizeObservers
+   * running for the life of a page to publish a value nothing resolves, each
+   * write invalidating the inherited custom properties of the subtree under it.
+   *
+   * The hook call stays unconditional (they always are) and the ARGUMENT
+   * carries the decision instead: `null` means "measure nothing" — see
+   * `use-height-var.ts`. One hook, one component, one shape, and no observer
+   * where there is no reader.
    */
-  const { hostRef, measuredRef } = useHeightVar("--filter-band-height")
+  const { hostRef, measuredRef } = useHeightVar(sticky ? "--page-header-height" : null)
 
   const heading =
     title === undefined ? null : (
@@ -137,6 +146,11 @@ export function Page({
    * totals for the sake of a heading nobody can see. The `sr-only` heading is
    * emitted on its own instead — it is out of flow, so it costs no height
    * wherever it lands, and first in the band is where it should be read.
+   *
+   * So the row either renders or it does not, and the heading goes inside it
+   * when it does. There is no third case where a hidden heading is PLACED
+   * differently: `sr-only` is out of flow, so both positions are the same
+   * picture, and steering placement on it read as though one of them mattered.
    */
   const showRow =
     above !== undefined || actions !== undefined || (title !== undefined && !titleHidden)
@@ -160,7 +174,7 @@ export function Page({
          * under it.
          */
         sticky &&
-          "[--log-sticky-top:calc(var(--shell-sticky-top)_+_var(--filter-band-height))]"
+          "[--log-sticky-top:calc(var(--shell-sticky-top)_+_var(--page-header-height))]"
       )}
     >
       <div
@@ -177,8 +191,6 @@ export function Page({
           sticky && "sticky top-(--shell-sticky-top) z-20 bg-ground"
         )}
       >
-        {titleHidden ? heading : null}
-
         {showRow ? (
           <div className="flex w-full items-baseline justify-between gap-3 px-4 pt-6 pb-4">
             {/* The breadcrumb and the heading are ONE column, so `actions`
@@ -186,16 +198,69 @@ export function Page({
                 with the bottom of a two-line stack. */}
             <div className="flex min-w-0 flex-col gap-2">
               {above}
-              {titleHidden ? null : heading}
+              {heading}
             </div>
             {actions}
           </div>
-        ) : null}
+        ) : (
+          heading
+        )}
 
         {header}
       </div>
 
       {children}
     </div>
+  )
+}
+
+/**
+ * What goes in `above`, for the pages that are nested under another.
+ *
+ * Written twice, verbatim, before this — the nav, the list, the parent link,
+ * the decorative separator and the current crumb, ~15 lines of it, in
+ * `/invoices/$invoiceId` and `/invoices/new`. Only the crumb's text ever
+ * differed. A trail whose SEPARATOR is spelt per page is a trail that ends up
+ * with two of them, and the `aria-hidden`/`aria-current` pairing is the part
+ * nobody re-derives correctly on the third copy.
+ *
+ * `parentTo`, not a hard-coded "/invoices": both callers are invoice routes
+ * today, and the moment a third page is nested somewhere else this component
+ * should not be the reason it cannot use it. Two levels only, because that is
+ * the whole depth of this product's routing — a crumb list that can grow
+ * arbitrarily is a different component with a different argument.
+ */
+export function PageBreadcrumb({
+  parentTo,
+  parentLabel,
+  current,
+  currentClassName,
+}: {
+  parentTo: LinkProps["to"]
+  parentLabel: string
+  /** The page you are on. Not a link: `aria-current="page"` is the whole
+   *  point, and a link to here is a control that does nothing. */
+  current: string
+  /** For a crumb that is a NUMBER rather than a name — `tabular` on
+   *  "#1042" — and nothing else. */
+  currentClassName?: string
+}) {
+  return (
+    <nav aria-label="Breadcrumb">
+      <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <li>
+          <Link to={parentTo} className="underline-offset-2 hover:underline">
+            {parentLabel}
+          </Link>
+        </li>
+        {/* Decorative: the list is already ordered and the crumb below already
+            says it is the current page, so a screen reader announcing "rsaquo"
+            between them is noise. */}
+        <li aria-hidden="true">›</li>
+        <li aria-current="page" className={cn("text-foreground", currentClassName)}>
+          {current}
+        </li>
+      </ol>
+    </nav>
   )
 }

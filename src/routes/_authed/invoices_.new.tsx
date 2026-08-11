@@ -4,7 +4,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { BillPreview } from "@/components/invoices/bill-preview"
 import { InvoiceForm } from "@/components/invoices/invoice-form"
-import { Page } from "@/components/shell/page"
+import { Page, PageBreadcrumb } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { useCreateInvoice } from "@/hooks/use-invoice-mutations"
 import { errorMessage } from "@/lib/error-message"
@@ -353,21 +353,7 @@ export function NewInvoicePage({
     <Page
       title="New invoice"
       above={
-        <nav aria-label="Breadcrumb">
-          <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <li>
-              <Link to="/invoices" className="underline-offset-2 hover:underline">
-                Invoices
-              </Link>
-            </li>
-            {/* Decorative: the trail is already ordered, and a screen reader
-                announcing "rsaquo" between the crumbs is noise. */}
-            <li aria-hidden="true">›</li>
-            <li aria-current="page" className="text-foreground">
-              New invoice
-            </li>
-          </ol>
-        </nav>
+        <PageBreadcrumb parentTo="/invoices" parentLabel="Invoices" current="New invoice" />
       }
     >
       {/* Full width and `px-4` on the content element itself, like every other

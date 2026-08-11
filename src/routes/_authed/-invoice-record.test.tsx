@@ -9,6 +9,7 @@ import {
 } from "@/routes/_authed/invoices_.$invoiceId"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
+import { expectPageHeading } from "@/test-utils/page-heading"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
 import type * as RouterModuleType from "@tanstack/react-router"
@@ -151,12 +152,10 @@ describe("the invoice record — the page heading", () => {
   it("takes its ONE h1 from the document, not from the page frame", () => {
     renderRecord()
 
-    const headings = screen.getAllByRole("heading", { level: 1 })
-    expect(headings.length).toBe(1)
-    expect(headings[0].textContent).toBe("Invoice")
+    const heading = expectPageHeading("Invoice")
     // The masthead's own treatment, not the page-title vocabulary — this is the
     // first line of a document, and it is set the way the paper sets it.
-    expect(headings[0].className).toContain("text-2xl")
+    expect(heading.className).toContain("text-2xl")
   })
 })
 

@@ -4,6 +4,7 @@ import { cleanup, render, screen, within } from "@testing-library/react"
 import { Invoices } from "@/routes/_authed/invoices"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
+import { expectPageHeading } from "@/test-utils/page-heading"
 import { INVOICE_LIST_LIMIT } from "@shared/scan"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
@@ -141,9 +142,7 @@ describe("Invoices — the page heading", () => {
   it("has exactly one h1, and it names the page", () => {
     renderInvoices([])
 
-    const headings = screen.getAllByRole("heading", { level: 1 })
-    expect(headings.length).toBe(1)
-    expect(headings[0].textContent).toBe("Invoices")
+    expectPageHeading("Invoices")
   })
 
   /*

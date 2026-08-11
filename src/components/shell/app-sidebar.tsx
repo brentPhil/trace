@@ -64,29 +64,40 @@ export const NAV_ITEMS: Array<{
  * page's own 16px.
  *
  * 8px expanded puts every item in the rail on ONE left edge at 16px, which is
- * also `px-4` — the gutter the timer bar and every page take. 6px collapsed,
- * because a 56px rail carrying a 44px target has 12px to spend and 8px would
- * mean either a smaller target or a wider rail.
+ * also `px-4` — the gutter the timer bar and every page take.
+ *
+ * 6px COLLAPSED, AND THE DERIVATION LIVES HERE, because two files were each
+ * carrying their own arithmetic for it and had arrived at different numbers.
+ * It is not a taste: the collapsed rail is 56px and the nav button inside it
+ * is a 44px target (`size-11!` in the cva, the WCAG 2.5.5 floor), so the
+ * gutter is what is left over, halved —
+ *
+ *     56 - 44 = 12, one gutter each side, so 6px = `p-1.5`
+ *
+ * — and 8px would take 4px off the target or 4px onto the rail. Nothing else
+ * in this file or in sidebar.tsx should re-derive that; they cite this.
  *
  * THE COLLAPSED HALF IS THE CONSTANT because it is the one every region takes
  * on every side, and the one another file reasons about: `SidebarRail` in
- * sidebar.tsx derives its collapsed width from this number by cross-reference.
- * It was spelt out three times for two regions before this while a docblock
- * here claimed there was one of it — three chances for the seam to come back
- * one edit at a time.
+ * sidebar.tsx sizes its collapsed width from what is left over here. It was
+ * spelt out three times for two regions before this while a docblock here
+ * claimed there was one of it — three chances for the seam to come back one
+ * edit at a time.
  */
 const RAIL_GUTTER_COLLAPSED = "group-data-[collapsible=icon]:p-1.5"
 
 /**
- * The same gutter for `SidebarContent`, the one region upstream ships with no
- * padding at all — so it states the expanded 8px itself, and takes the
- * collapsed number from above rather than spelling it a second time.
+ * The same gutter for `SidebarContent` ALONE — the one region upstream ships
+ * with no padding at all, where the header and the footer already come with
+ * `p-2`. So it states the expanded 8px itself, and takes the collapsed number
+ * from above rather than spelling it a second time. Named for its one consumer
+ * because that is what it is: the rail-wide rule is the constant above.
  *
  * `py-0` puts the vertical half back: the nav column's air comes from the
  * header above it and the footer below it, and 6px of its own here would push
  * the first icon off the header's centre line without anything asking it to.
  */
-const RAIL_GUTTER = cn(
+const CONTENT_GUTTER = cn(
   "px-2",
   RAIL_GUTTER_COLLAPSED,
   "group-data-[collapsible=icon]:py-0"
@@ -116,21 +127,22 @@ export function AppSidebar({
 }) {
   return (
     /*
-      `border-edge-soft`, not the `--edge` the vendored sidebar defaults to.
-      The rail is already separated from the page by a step of the neutral ramp
-      (`--sidebar` is Surface, the page is Ground), and The Tonal Depth Rule
-      says to step the ramp OR add an edge — not both. An `--edge` line here is
-      heavier than every other divider in the product, so the one hairline the
-      eye reads first was the one that belonged to no content.
+      THE RAIL TAKES BOTH A RAMP STEP AND A HAIRLINE — the one place in the
+      product that does — and the hairline is `border-edge-soft`, not the
+      `--edge` the vendored sidebar defaults to.
 
-      THE EDGE STAYS, THOUGH, and the comment above was half an argument. That
-      ramp step is Surface 0.22 against Ground 0.18 — about 1.09:1, the very
-      number styles.css cites for why `--muted` was unusable as a loading
-      placeholder. It cannot carry the rail's boundary on its own, so this is
-      the one place the ramp step needs a hairline with it, kept at the same
-      `--edge-soft` every other divider uses so it is not the loudest line on
-      screen. What was actually wrong was never the edge: it was that nothing
-      inside the rail was inset from it. See RAIL_GUTTER.
+      The Tonal Depth Rule is to step the ramp OR add an edge, and the step is
+      already there: `--sidebar` is Surface, the page is Ground. But that step
+      is 0.22 against 0.18 — about 1.09:1, the very ratio styles.css cites for
+      why `--muted` was unusable as a loading placeholder — and it cannot carry
+      the boundary between the navigation and the page on its own. So the edge
+      stays, at `--edge-soft` rather than `--edge`: `--edge` is the weight of a
+      control's own boundary, which would make the one hairline the eye reads
+      first the one belonging to no content.
+
+      What was actually wrong here was never the edge. It was that nothing
+      inside the rail was inset from it — see RAIL_GUTTER_COLLAPSED, and the
+      per-region padding on the three regions below.
     */
     <Sidebar collapsible="icon" className="border-edge-soft">
       {/* The only way to re-expand a collapsed rail with a mouse on desktop —
@@ -152,9 +164,11 @@ export function AppSidebar({
           // The nav button's own geometry, not a second copy of it: the 36px
           // row, the 44px collapsed target and the centring that puts it on
           // the rail's centre line are all decided once, in the cva, and were
-          // being re-derived here down to the pixel. `px-2` because the rail's
-          // one left edge is 16px (RAIL_GUTTER) and the cva's `px-3` is
-          // upstream's; the nav buttons below override it for the same reason.
+          // being re-derived here down to the pixel. `px-2` on top of the
+          // header's own `p-2` is the rail's one 16px left edge (see
+          // RAIL_GUTTER_COLLAPSED's docblock for that edge); the cva's `px-3`
+          // is upstream's, and the nav buttons below override it for the same
+          // reason.
           className={cn(
             sidebarMenuButtonVariants(),
             "px-2 text-base font-medium tracking-tight"
@@ -174,7 +188,7 @@ export function AppSidebar({
         </Link>
       </SidebarHeader>
 
-      <SidebarContent className={RAIL_GUTTER}>
+      <SidebarContent className={CONTENT_GUTTER}>
         {/* The deleted AppHeader provided the `navigation` landmark; nothing
             replaced it when the nav moved into the rail. */}
         <nav aria-label="Main">
@@ -276,10 +290,23 @@ function ProfileMenu({
   name?: string
   onSignOut: () => void
 }) {
-  // The name if there is one, the email if not. Never both in the trigger:
-  // the rail is 240px of usable width and an email is what actually
-  // identifies the account, so it is the fallback rather than the subtitle.
+  /*
+   * WHO YOU ARE, resolved once for both places that show it.
+   *
+   * The name if there is one, the email if not: the rail is 240px of usable
+   * width, and an email is what actually identifies the account, so it is the
+   * headline's fallback rather than a permanent second line under it. The email
+   * is a SUBTITLE only when it is not already the headline — which, since
+   * `_authed.tsx` maps an empty name to `undefined`, is the uncommon case.
+   *
+   * Both the trigger and the popup take these two strings. They used to pick
+   * for themselves and had drifted apart: with no display name the trigger
+   * showed the email as a `text-sm font-medium` headline while the popup showed
+   * the same email as a muted `text-xs` line with no headline above it, and
+   * with neither the popup drew an empty column beside a "?" avatar.
+   */
   const primary = name ?? email ?? "Account"
+  const secondary = name === undefined ? undefined : email
 
   return (
     <Popover.Root>
@@ -287,15 +314,22 @@ function ProfileMenu({
         render={
           <SidebarMenuButton
             size="lg"
-            // `px-2` to sit on RAIL_GUTTER's 16px edge like everything else;
-            // `px-0` collapsed because the button is then exactly the avatar.
-            className="px-2 group-data-[collapsible=icon]:px-0"
-          >
-            <Avatar label={primary} />
-            {/*
-              `sr-only` when collapsed, NOT `hidden`.
+            /* `h-12`, not the `lg` size's own height: the height belongs to
+               this one consumer (see the `lg` variant in sidebar.tsx, which is
+               otherwise upstream's). Two lines of text at 20px and 16px plus
+               the row's padding is 48px; 56px is a menu row in a product with
+               larger type than this one.
 
-              This replaces a bespoke `aria-label` hack that existed because
+               `px-2` sits on the rail's 16px left edge — the footer around
+               this supplies the other 8px with its own `p-2`. `px-0` collapsed
+               because the button is then exactly the avatar. */
+            className="h-12 px-2 group-data-[collapsible=icon]:px-0"
+          >
+            {/*
+              Collapsed, the cva sends this block's last child `sr-only` — NOT
+              `hidden`.
+
+              That replaces a bespoke `aria-label` hack that existed because
               the old footer swapped "Sign out" for a "⎋" glyph with
               `hidden`/`inline`, which left the collapsed control named after
               a symbol — and, because jsdom applies no CSS, named after both
@@ -304,12 +338,7 @@ function ProfileMenu({
               sentence in both states and in both environments, and there is
               no second source of truth to keep in sync with the visible text.
             */}
-            <span className="flex min-w-0 flex-col group-data-[collapsible=icon]:sr-only">
-              <span className="truncate text-sm font-medium text-ink">{primary}</span>
-              {name === undefined || email === undefined ? null : (
-                <span className="truncate text-xs text-ink-muted">{email}</span>
-              )}
-            </span>
+            <Identity label={primary} sublabel={secondary} />
           </SidebarMenuButton>
         }
       />
@@ -322,17 +351,12 @@ function ProfileMenu({
       */}
       <Popover.Popup side="right" align="end" sideOffset={8} className="w-[15rem] p-1">
         {/* The identity, first and largest — this is what the control is FOR.
-            The email used to occupy a permanent line of the rail to say it. */}
+            The email used to occupy a permanent line of the rail to say it.
+            The same block as the trigger's, from the same two strings: a popup
+            that describes the account differently from the control that opened
+            it reads as two accounts. */}
         <div className="flex items-center gap-3 px-2 py-2">
-          <Avatar label={primary} />
-          <div className="flex min-w-0 flex-col">
-            {name === undefined ? null : (
-              <span className="truncate text-sm font-medium text-ink">{name}</span>
-            )}
-            {email === undefined ? null : (
-              <span className="truncate text-xs text-ink-muted">{email}</span>
-            )}
-          </div>
+          <Identity label={primary} sublabel={secondary} />
         </div>
 
         {/* `bg-edge-soft`, not `Separator`'s own `bg-border`: that resolves to
@@ -340,12 +364,14 @@ function ProfileMenu({
             interactive control. A divider between passive content is Edge
             Soft, and this is the only divider in the rail that is not one.
 
-            `h-px` is stated here because the vendored base sets its height
-            under a `data-horizontal:` variant, and this version of Base UI
-            marks orientation with `data-orientation="horizontal"` — so the
-            base's own height never lands. Removing this line makes the
-            divider invisible rather than merely differently styled. */}
-        <Separator className="mx-2 my-1 h-px bg-edge-soft" />
+            No `h-px` here any more. This call site used to carry one because
+            the vendored `Separator`'s height rules were written against a
+            `data-horizontal:` variant Base UI does not emit — so the base had
+            no height and every consumer was invisible unless it said so
+            itself. That is fixed in the component (components/ui/separator.tsx)
+            rather than worked around here, which also un-breaks the two
+            consumers that never knew to work around it. */}
+        <Separator className="mx-2 my-1 bg-edge-soft" />
 
         {/* `Popover.Close` wrapping the button rather than a close call inside
             the handler: Base UI merges its own dismissal with ours, so the
@@ -361,10 +387,9 @@ function ProfileMenu({
                plus a 3px halo at 30% (decoration). A 2px solid ring is the
                halo's weight applied to the indicator's job.
 
-               `Button` is Base UI's own `ButtonPrimitive`, so `Popover.Close`
-               merges its dismissal onto it exactly as `Popover.Trigger` does
-               onto `SidebarMenuButton` above — the popup is gone before the
-               sign-out navigation starts, rather than unmounted underneath it.
+               It composes at all because `Button` is Base UI's own
+               `ButtonPrimitive` — so `Popover.Close` merges onto it exactly as
+               `Popover.Trigger` does onto `SidebarMenuButton` above.
 
                `px-2` over the size's `px-3`: the identity block above sits on
                this popup's 8px gutter and the label has to start on the same
@@ -382,6 +407,32 @@ function ProfileMenu({
         />
       </Popover.Popup>
     </Popover.Root>
+  )
+}
+
+/**
+ * The account, said once: an avatar and one or two lines beside it.
+ *
+ * A FRAGMENT rather than a wrapper, because the two places that show it space
+ * it differently — the trigger is the cva's flex row at `gap-2`, the popup's
+ * own row is `gap-3` — and a wrapper would have to take a className to say so,
+ * which is the seam this closes reopened one prop wider.
+ *
+ * Spans, not divs: the trigger is a `<button>`, whose content model is phrasing
+ * content. The text column being the LAST child is also load-bearing there —
+ * that is what the cva's collapsed `sr-only` rule selects.
+ */
+function Identity({ label, sublabel }: { label: string; sublabel?: string }) {
+  return (
+    <>
+      <Avatar label={label} />
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate text-sm font-medium text-ink">{label}</span>
+        {sublabel === undefined ? null : (
+          <span className="truncate text-xs text-ink-muted">{sublabel}</span>
+        )}
+      </span>
+    </>
   )
 }
 

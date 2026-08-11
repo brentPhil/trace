@@ -5,6 +5,7 @@ import { Toast, ToastViewport } from "@/components/ui/toast"
 import { Projects } from "@/routes/_authed/projects"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
+import { expectPageHeading } from "@/test-utils/page-heading"
 import { api } from "../../../convex/_generated/api"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -117,9 +118,7 @@ describe("Projects — the page heading", () => {
   it("has exactly one h1, and it names the page", () => {
     renderProjects([makeProject({ name: "Acme" })])
 
-    const headings = screen.getAllByRole("heading", { level: 1 })
-    expect(headings.length).toBe(1)
-    expect(headings[0].textContent).toBe("Projects")
+    expectPageHeading("Projects")
   })
 
   it("keeps the section headings BELOW it, so the outline is h1 then h2", () => {

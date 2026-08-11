@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { ExportPdfButton } from "@/components/invoices/export-pdf-button"
 import { InvoiceRecord } from "@/components/invoices/invoice-record"
-import { Page } from "@/components/shell/page"
+import { Page, PageBreadcrumb } from "@/components/shell/page"
 import { Empty } from "@/components/ui/empty"
 import { traceErrorCode } from "@shared/codes"
 import { api } from "../../../convex/_generated/api"
@@ -170,22 +170,15 @@ export function InvoicePage({ invoiceId }: { invoiceId: Id<"invoices"> }) {
     */
     <Page
       above={
-        <nav aria-label="Breadcrumb">
-          <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <li>
-              <Link to="/invoices" className="underline-offset-2 hover:underline">
-                Invoices
-              </Link>
-            </li>
-            {/* Decorative: the list above and the page below are already
-                ordered, and a screen reader announcing "rsaquo" between them
-                is noise. */}
-            <li aria-hidden="true">›</li>
-            <li aria-current="page" className="tabular text-foreground">
-              #{invoice.number}
-            </li>
-          </ol>
-        </nav>
+        <PageBreadcrumb
+          parentTo="/invoices"
+          parentLabel="Invoices"
+          // `tabular`, because this crumb is a number: the digits have to sit
+          // on the same widths as the same number does in the table you came
+          // from.
+          current={`#${invoice.number}`}
+          currentClassName="tabular"
+        />
       }
       /*
         Top-right, opposite the breadcrumb: the one thing you do to a finished

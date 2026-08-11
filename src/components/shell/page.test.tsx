@@ -140,7 +140,7 @@ describe("Page — the pinning rule", () => {
     // The sum is composed in CSS over two MEASURED heights — see
     // `use-height-var.ts`. A constant here is right in exactly one state.
     expect(container.innerHTML).toContain("--log-sticky-top:calc(")
-    expect(container.innerHTML).toContain("--filter-band-height")
+    expect(container.innerHTML).toContain("--page-header-height")
   })
 
   /*

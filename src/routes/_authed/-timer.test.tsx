@@ -10,6 +10,7 @@ import {
   resolvePage,
 } from "@/test-utils/convex-query"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
+import { expectPageHeading } from "@/test-utils/page-heading"
 import { dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
@@ -148,13 +149,8 @@ describe("Timer — the page heading", () => {
   it("has exactly one h1, named for the page, and does not paint it", () => {
     renderTimer()
 
-    const headings = screen.getAllByRole("heading", { level: 1 })
-    expect(headings.length).toBe(1)
-    expect(headings[0].textContent).toBe("Timer")
-    // `sr-only` — in the tree, out of sight. jsdom applies no CSS, so the class
-    // is what carries the decision here; the point of the assertion above is
-    // that hiding it never became deleting it.
-    expect(headings[0].className).toContain("sr-only")
+    // `sr-only` — in the tree, out of sight.
+    expectPageHeading("Timer", { hidden: true })
   })
 })
 

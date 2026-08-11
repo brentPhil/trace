@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { NewInvoicePage, Route } from "@/routes/_authed/invoices_.new"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
+import { expectPageHeading } from "@/test-utils/page-heading"
 import { defaultFilters, rangeOf } from "@/lib/history-filters"
 import { SET_A_RATE_NOTE, UNPRICED_NOTE } from "@/lib/export/report-rows"
 import { EMPTY_BREAKDOWN } from "@/lib/report-series"
@@ -272,9 +273,7 @@ describe("/invoices/new — the page heading", () => {
   it("has exactly one h1, and the preview's own heading stays subordinate to it", () => {
     renderNew()
 
-    const headings = screen.getAllByRole("heading", { level: 1 })
-    expect(headings.length).toBe(1)
-    expect(headings[0].textContent).toBe("New invoice")
+    expectPageHeading("New invoice")
     // `BillPreview` names itself with an `<h2>`. The page heading is what makes
     // that an h2 OF something rather than the first heading on the page.
     expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(0)

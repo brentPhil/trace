@@ -24,9 +24,19 @@ import { useEffect, useRef } from "react"
  * reserves space for it — so a value that lands one frame late cannot move
  * anything. That is also why there is no load jump: a page opens at scroll 0,
  * where `top` has no effect at all.
+ *
+ * A NULL NAME MEASURES NOTHING. Every caller renders this hook unconditionally
+ * — hooks always do — but not every caller has a reader for the number. `Page`
+ * publishes only when it pins, and six of its eight call sites do not: without
+ * this, each of them built a ResizeObserver for the life of the page to write a
+ * property nobody resolves, and every real change invalidated the inherited
+ * custom properties of the whole subtree under it. Passing `null` keeps ONE
+ * hook call and ONE component shape while the observer only exists where the
+ * value is read. The refs are still returned, so the JSX does not branch
+ * either.
  */
 export function useHeightVar<THost extends HTMLElement = HTMLDivElement>(
-  name: string
+  name: string | null
 ) {
   const hostRef = useRef<THost | null>(null)
   /* Concretely a `<div>` rather than a second type parameter. Only the HOST
@@ -37,6 +47,7 @@ export function useHeightVar<THost extends HTMLElement = HTMLDivElement>(
   const measuredRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
+    if (name === null) return
     const host = hostRef.current
     const measured = measuredRef.current
     if (host === null || measured === null) return
@@ -60,12 +71,21 @@ export function useHeightVar<THost extends HTMLElement = HTMLDivElement>(
      * On /timer that subtree is the log, where every mounted day heading now
      * resolves its `top` from a calc over this value. A compare is the whole
      * fix.
+     *
+     * ROUNDED BEFORE THE COMPARE, or the gate leaks. The two sources below —
+     * the entry's `blockSize` and `getBoundingClientRect().height` — are both
+     * sub-pixel and need not agree in the last decimal for the same box, so a
+     * raw `===` misses on a height that has not changed and writes anyway,
+     * which is the invalidation the gate exists to stop. An integer is also
+     * what the reader wants: this is published as a sticky `top`, and no
+     * offset is improved by a fraction of a device pixel.
      */
     let published = -1
     const publish = (height: number) => {
-      if (height === published) return
-      published = height
-      host.style.setProperty(name, `${height}px`)
+      const px = Math.round(height)
+      if (px === published) return
+      published = px
+      host.style.setProperty(name, `${px}px`)
     }
 
     // One observer covers both kinds of change: the viewport resizing (the bar

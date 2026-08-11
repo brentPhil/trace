@@ -115,7 +115,10 @@ export function DayList({
           </header>
 
           {/*
-            `pb-3` — the one deliberately generous gap in the log.
+            `--day-group-gap` — the one deliberately generous gap in the log,
+            and a token rather than a literal because the loading skeleton
+            below has to reserve exactly it (see `LogSkeleton`, and
+            `--entry-row-height` for the same treatment of the row).
 
             Two rows are the same kind of thing and stay 13px apart
             (`entry-row.tsx`); a day and the next day are not, and that break
@@ -130,7 +133,7 @@ export function DayList({
             pixel of that scroll; the heading keeps `py-2` for that reason, and
             takes its breathing room from the space above it instead.
           */}
-          <div className="flex flex-col pb-3">
+          <div className="flex flex-col pb-(--day-group-gap)">
             {group.entries.map((entry) => (
               <EntryRow
                 key={entry._id}
@@ -229,12 +232,12 @@ export function LogSkeleton() {
                 <Skeleton className="h-4 w-14" />
               </div>
             </div>
-            {/* `pb-3` and the row height token, tracking the real row and the
-                real group gap above — a placeholder that reserves the wrong
-                height moves the page under the reader the moment the answer
-                arrives, which is why the height is shared rather than copied
-                (see `entry-row.tsx`). */}
-            <div className="flex flex-col pb-3">
+            {/* Both tokens, tracking the real row and the real group gap
+                above — a placeholder that reserves the wrong height moves the
+                page under the reader the moment the answer arrives, which is
+                why each of these is shared rather than copied (see
+                `entry-row.tsx` and the group above). */}
+            <div className="flex flex-col pb-(--day-group-gap)">
               {[0, 1, 2].map((row) => (
                 <div key={row} className="border-b border-edge-soft">
                   <div className="flex h-(--entry-row-height) w-full items-center gap-3 px-4">

@@ -16,6 +16,7 @@ import {
   resolvePage,
 } from "@/test-utils/convex-query"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
+import { expectPageHeading } from "@/test-utils/page-heading"
 import { dayOf } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
 import { EMPTY_BREAKDOWN } from "@/lib/report-series"
@@ -304,10 +305,7 @@ describe("Reports — the page heading", () => {
   it("has exactly one h1, named for the page, and does not paint it", () => {
     renderReports(() => {}, "summary")
 
-    const headings = screen.getAllByRole("heading", { level: 1 })
-    expect(headings.length).toBe(1)
-    expect(headings[0].textContent).toBe("Reports")
-    expect(headings[0].className).toContain("sr-only")
+    expectPageHeading("Reports", { hidden: true })
   })
 })
 

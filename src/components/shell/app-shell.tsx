@@ -66,13 +66,23 @@ export function AppShell({
 
               `--log-sticky-top` starts EQUAL to it, so a page that renders a
               log without a sticky band of its own still puts its day headers
-              below the bar rather than under it — the `0px` in styles.css is
-              a substitution guard, not a sensible default anywhere inside
-              this shell. A page that does have a band overrides this on its
-              own root (see `Page`, and its `sticky`), which is nearer the log and
-              therefore wins.
+              below the bar rather than under it — the `0px` on the derived
+              properties in styles.css is a substitution guard, not a sensible
+              default anywhere inside this shell. A page that does have a band
+              overrides this on its own root (see `Page`, and its `sticky`),
+              which is nearer the log and therefore wins.
+
+              THE `,0px` FALLBACK IS THIS CONSUMER'S OWN GUARD, and is why the
+              measurement itself carries no global default. It covers the frame
+              between mount and the first write, and zero is the right answer
+              for an OFFSET in that frame — a page opens at scroll 0, where
+              `top` does nothing. It is the wrong answer for the spacer at the
+              foot of this file, which reads the same measurement to reserve a
+              HEIGHT and wants the bar's resting height instead. One global
+              default could only have suited one of them, and it suited the
+              wrong one.
             */
-            "[--shell-sticky-top:0px] md:[--shell-sticky-top:var(--timer-bar-height)]",
+            "[--shell-sticky-top:0px] md:[--shell-sticky-top:var(--timer-bar-height,0px)]",
             "[--log-sticky-top:var(--shell-sticky-top)]"
           )}
         >
@@ -151,20 +161,29 @@ export function AppShell({
             Reserves the fixed bar's height so the last row of a log can
             always be scrolled clear of it.
 
-            The 6.5rem is now a FLOOR rather than the whole answer. It was
-            noted here as a known limitation that a fixed spacer cannot chase
-            `RunawayBanner`, which adds a further line to the same fixed
-            container once a timer overruns — so recording AND overrunning
-            could put the banner over the last log row. This file now measures
-            that container for the sticky offset above, so the spacer takes
-            whichever is larger: the number keeps the spacer at its present
-            height through first paint (no jump from zero, which is what a
-            bare `var()` would give), and the measurement takes over the
-            moment the bar is taller than it.
+            THE MEASUREMENT, WITH 6.5rem AS ITS FALLBACK — not a `max()` of
+            the two. It was noted here as a known limitation that a fixed
+            spacer cannot chase `RunawayBanner`, which adds a further line to
+            the same fixed container once a timer overruns, so recording AND
+            overrunning could put the banner over the last log row. This file
+            measures that container for the sticky offset above, so the answer
+            is simply that measurement.
+
+            `max()` was how the constant survived first paint, back when
+            `--timer-bar-height` had a global `0px` default and a bare `var()`
+            would therefore have resolved to a zero-height spacer rather than
+            to the fallback. But `max()` is permanent, not a first-paint
+            device, and it leaves the constant only two possible jobs in steady
+            state: either it exceeds the measured bar and sizes the spacer
+            itself — dead ground under every mobile log, for as long as that
+            holds — or it never does and was no floor at all. Neither is what
+            the comment here claimed. With the global default gone (styles.css)
+            the fallback in the `var()` does the first-paint job exactly, and
+            only until the observer answers.
           */}
           <div
             aria-hidden="true"
-            className="h-[max(6.5rem,var(--timer-bar-height))] shrink-0 md:hidden"
+            className="h-(--timer-bar-height,6.5rem) shrink-0 md:hidden"
           />
         </SidebarInset>
       </SidebarProvider>
