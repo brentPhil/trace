@@ -211,7 +211,24 @@ function totalLabel(currency: string, manyCurrencies: boolean, truncated: boolea
  * `sm:table-cell`, not `sm:block`: a `<td>` set to `display: block` leaves the
  * table layout and stops aligning with its column.
  */
-const NUMBER_COL = "w-28"
+
+/*
+ * Wide enough for the number, and `whitespace-nowrap` so it cannot wrap even
+ * if it is not.
+ *
+ * `MMDDYY-NNNN` at the body size is ~92pt of tabular digits, and `w-28` (112px)
+ * minus `px-3` on both sides leaves 88 — four short. The hyphen is a break
+ * opportunity, so the cell took it and rendered `081126-` above `0002`: an
+ * identifier split across two lines, which reads as two things and is the one
+ * value on this row a person copies by eye.
+ *
+ * BOTH halves, deliberately. The width is what makes it fit today; the
+ * nowrap is what keeps it one token when the sequence passes 9,999 and the
+ * number grows a digit, or when a future zone stamps a longer date. A column
+ * sized exactly to its content is a column that wraps the first time the
+ * content changes.
+ */
+const NUMBER_COL = "w-36 whitespace-nowrap"
 /** Deliberately widthless: under `table-fixed` the unsized column takes what
  *  the others leave, which is what makes the client name the thing that gives
  *  way when the viewport narrows. */
@@ -276,7 +293,15 @@ function InvoiceRowItem({
         reader reading the total then announces which invoice it belongs to,
         and it is what the link list should say — "072726-0013", not "row".
       */}
-      <th scope="row" className="px-3 py-2 text-left font-normal tabular">
+      {/* `whitespace-nowrap` again rather than inherited from NUMBER_COL:
+          `white-space` is an inherited property, but a header cell is this
+          cell's SIBLING, not its ancestor — `table-fixed` carries the column's
+          width down and nothing else. Declaring it only on the header is
+          exactly how the number came to wrap while the header did not. */}
+      <th
+        scope="row"
+        className="px-3 py-2 text-left font-normal whitespace-nowrap tabular"
+      >
         <Link
           to="/invoices/$invoiceId"
           params={{ invoiceId: invoice._id }}
