@@ -6,19 +6,31 @@ import type { Doc } from "../../convex/_generated/dataModel"
 /**
  * Time entries, in the shape FullCalendar takes.
  *
- * Pure and separately tested, for a reason worth stating: FullCalendar measures
- * element geometry to lay a grid out and jsdom reports every element as
- * zero-sized, so nothing about the rendered calendar can be asserted in a unit
- * test. Everything that CAN be asserted therefore lives here, on this side of
- * the boundary.
+ * Pure and separately tested, because a mapping is cheaper to pin down as a
+ * function than through a grid. What CANNOT be asserted in jsdom is element
+ * GEOMETRY — FullCalendar measures column widths and row heights and jsdom
+ * reports every element as zero-sized. Everything else about the rendered
+ * calendar can be and is: see `calendar-panel.test.tsx`, which asserts the hour
+ * rail, the block times, the midnight segmentation and the day totals.
  */
 
-/** The typed half of `extendedProps`, read by the panel's class-name props. */
+/** The typed half of `extendedProps`, read by the panel's render hooks. */
 export type CalendarEventProps = {
   entryId: string
   projectId: string | undefined
   billable: boolean
-  running: boolean
+  /*
+   * The STORED instants, carried through untouched.
+   *
+   * The panel prints a block's time with `formatTimeRange`, the same function
+   * the entry's row in the log uses, so the two cannot disagree — and that
+   * takes the raw `startedAt`/`endedAt`, not the `Date`s below (whose `end` is
+   * `nowMs` while running, and which arrive back from FullCalendar as
+   * nullable). `endedAt === null` is also what "running" means everywhere else
+   * in the product, so there is no second boolean here saying it again.
+   */
+  startedAt: number
+  endedAt: number | null
 }
 
 export type CalendarEvent = EventInput & { extendedProps: CalendarEventProps }
@@ -31,7 +43,6 @@ export function calendarEvents(
   nowMs: number
 ): Array<CalendarEvent> {
   return entries.map((entry) => {
-    const running = entry.endedAt === null
     const ended = entry.endedAt ?? nowMs
 
     return {
@@ -58,7 +69,8 @@ export function calendarEvents(
         entryId: entry._id,
         projectId: entry.projectId,
         billable: entry.billable,
-        running,
+        startedAt: entry.startedAt,
+        endedAt: entry.endedAt,
       },
     }
   })

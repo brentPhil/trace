@@ -1,5 +1,5 @@
-import { useMemo, useRef } from "react"
-import Calendar from "@fullcalendar/react"
+import { useEffect, useMemo, useRef } from "react"
+import Calendar, { useCalendarController } from "@fullcalendar/react"
 import timeGridPlugin from "@fullcalendar/react/timegrid"
 import { ProjectDot } from "@/components/classifiers/project-dot"
 import {
@@ -7,13 +7,16 @@ import {
   dayTotals,
   earliestHour,
 } from "@/lib/calendar-events"
+import { formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
 import { dayOf } from "@shared/day"
 import { formatClock } from "@shared/duration"
+import type { CalendarEventProps } from "@/lib/calendar-events"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayString } from "@shared/day"
+import type { EventApi } from "@fullcalendar/react"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 // Structure only. No theme is imported: every visible surface here is set
@@ -23,6 +26,28 @@ import type { Doc } from "../../../convex/_generated/dataModel"
 import "@fullcalendar/react/skeleton.css"
 
 const PLUGINS = [timeGridPlugin]
+
+/*
+ * The two hidden-day sets, hoisted to module scope.
+ *
+ * NOT an inline `size === "5day" ? [0, 6] : []`. `hiddenDays` is refined by
+ * `identity` and is absent from FullCalendar's `COMPLEX_OPTION_COMPARATORS`, so
+ * it is compared by REFERENCE: a fresh array rebuilds the dateProfileGenerator,
+ * which rebuilds the dateProfile, which re-fires `datesSet` and calls
+ * `resetScroll()`. `nowMs` ticks every second, so an inline array snapped the
+ * grid back to `scrollTime` about once a second and made it unscrollable.
+ *
+ * With the controller below wired up it is worse than a nuisance: the
+ * `datesSet` it provokes re-renders this component, which allocates another new
+ * array, which rebuilds the dateProfile again — an unbounded loop that React
+ * ends with "Maximum update depth exceeded". `calendar-panel.test.tsx`'s
+ * re-render test is what holds this shut.
+ */
+const NO_HIDDEN_DAYS: Array<number> = []
+/** `[0, 6]` hides Saturday and Sunday whatever `firstDay` is, which is exactly
+ *  "Monday to Friday regardless of weekStartDay". A 5-day range therefore also
+ *  steps by a whole week for free, because it IS the week. */
+const WEEKEND_HIDDEN = [0, 6]
 
 /** 48px an hour, the density every shipping calendar has converged on. */
 const SLOT_MIN_HEIGHT = 48
@@ -91,14 +116,45 @@ export function CalendarPanel({
    */
   const lastRange = useRef<string>("")
 
+  /*
+   * NAVIGATION. `initialDate` alone does not move the calendar.
+   *
+   * FullCalendar reads `getInitialDate` once, at init, and the React wrapper's
+   * every subsequent render dispatches `IDLE` — only `CHANGE_DATE`/`PREV`/`NEXT`
+   * move the date. So a changed `initialDate` prop is inert: the header's arrows
+   * would move their own label and nothing else, and since `datesSet` would
+   * never re-fire, the Convex query and the range total would stay on the old
+   * week too.
+   *
+   * v7's answer is `useCalendarController` + the `controller` option, which is
+   * how the calendar's api reaches this side (the manager calls the
+   * controller's `_setApi` when it drains its first action queue).
+   * `gotoDate(anchor)` dispatches the `CHANGE_DATE` that `initialDate` cannot.
+   *
+   * A DayString is a wall-clock date with no offset, and `gotoDate` resolves it
+   * through the calendar's own `dateEnv` — so it lands on the same midnight
+   * `convex/lib/day.ts` would compute, in the user's stored zone.
+   *
+   * NOT `key={anchor}`: remounting the grid on every step would throw away the
+   * scroll position and refetch, which is the thing navigation must preserve.
+   */
+  const controller = useCalendarController()
+  useEffect(() => {
+    controller.gotoDate(anchor)
+  }, [controller, anchor])
+
   return (
     <Calendar
       plugins={PLUGINS}
+      controller={controller}
       // `key` on the view, not `changeView` through a ref. The size is a prop
       // here, and remounting on a change is both simpler and correct — there
       // is no imperative state in this component worth preserving across it.
       key={size}
       initialView={size === "day" ? "timeGridDay" : "timeGridWeek"}
+      // Where the FIRST render opens. Every move after that is the effect
+      // above; this is what keeps the first paint from being today's week
+      // followed by a visible jump to the anchor's.
       initialDate={anchor}
       // The user's STORED zone, never the browser's. This is the whole reason
       // v7 is usable here: it resolves an IANA name through temporal-polyfill,
@@ -106,10 +162,7 @@ export function CalendarPanel({
       // instant.
       timeZone={timeZone}
       firstDay={weekStartDay}
-      // `[0, 6]` hides Saturday and Sunday whatever `firstDay` is, which is
-      // exactly "Monday to Friday regardless of weekStartDay". A 5-day range
-      // therefore also steps by a whole week for free, because it IS the week.
-      hiddenDays={size === "5day" ? [0, 6] : []}
+      hiddenDays={size === "5day" ? WEEKEND_HIDDEN : NO_HIDDEN_DAYS}
       headerToolbar={false}
       // Nothing here is all-day. An entry is a span of a working day, and an
       // empty all-day rail above every column is a band of nothing.
@@ -140,8 +193,7 @@ export function CalendarPanel({
       }}
       eventClick={(info) => {
         info.jsEvent.preventDefault()
-        const { entryId } = info.event.extendedProps as { entryId: string }
-        onEntryClick(entryId)
+        onEntryClick(propsOf(info.event).entryId)
       }}
       // ---- Styling. One prop per element; no stylesheet override anywhere. --
       className="text-sm"
@@ -185,7 +237,7 @@ export function CalendarPanel({
       nowIndicatorLineClass="border-t border-muted-foreground"
       nowIndicatorDotClass="bg-muted-foreground"
       columnEventClass={(info) => {
-        const running = Boolean(info.event.extendedProps.running)
+        const running = propsOf(info.event).endedAt === null
         return cn(
           // No transition anywhere: the running block's height changes with
           // the clock, and an eased height change is continuous motion with no
@@ -204,10 +256,7 @@ export function CalendarPanel({
         )
       }}
       eventContent={(info) => {
-        const running = Boolean(info.event.extendedProps.running)
-        const projectId = info.event.extendedProps.projectId as
-          | string
-          | undefined
+        const { projectId, startedAt, endedAt } = propsOf(info.event)
         const project =
           projectId === undefined ? null : (projectsById.get(projectId) ?? null)
 
@@ -227,10 +276,27 @@ export function CalendarPanel({
             <span className="truncate text-xs font-medium">
               {info.event.title.trim() === "" ? "Untitled" : info.event.title}
             </span>
+            {/*
+             * `formatTimeRange`, never FullCalendar's `timeText`.
+             *
+             * timegrid's default event format is
+             * `{hour:'numeric', minute:'2-digit', meridiem:false}`, and
+             * `meridiem:false` DELETES the am/pm string rather than switching
+             * to a 24-hour cycle — so a 09:30 entry and a 21:30 entry both
+             * rendered "9:30 – 10:30" and `use12Hour` was ignored entirely.
+             * Going through the app's own formatter is also what makes a block
+             * read identically to the same entry's row in the log: one
+             * spelling of a time, everywhere.
+             *
+             * A running entry shows its elapsed clock instead, because that is
+             * the number that is still moving. Both instants come from
+             * `extendedProps`, so this is the STORED start, not a `Date` that
+             * has been through FullCalendar's own parsing.
+             */}
             <span className="tabular truncate text-[0.6875rem] text-muted-foreground">
-              {running
-                ? formatClock(nowMs - (info.event.start?.getTime() ?? nowMs))
-                : info.timeText}
+              {endedAt === null
+                ? formatClock(nowMs - startedAt)
+                : formatTimeRange(startedAt, endedAt, timeZone, use12Hour)}
             </span>
             <ProjectDot project={project} className="text-[0.6875rem]" />
           </div>
@@ -238,6 +304,11 @@ export function CalendarPanel({
       }}
     />
   )
+}
+
+/** The typed half of an event, which FullCalendar hands back as a `Dictionary`. */
+function propsOf(event: EventApi): CalendarEventProps {
+  return event.extendedProps as CalendarEventProps
 }
 
 /*

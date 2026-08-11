@@ -5,10 +5,10 @@ import type { Doc } from "../../convex/_generated/dataModel"
 /*
  * The mapping into FullCalendar, and the day totals beside it.
  *
- * Pure and tested here rather than through the grid, because FullCalendar
- * measures element geometry to lay itself out and jsdom reports every element
- * as zero-sized — a rendered assertion about this file would be a rendered
- * assertion about nothing.
+ * Tested here rather than through the grid because a pure function is the
+ * cheaper place to pin a mapping down, NOT because the grid is untestable:
+ * `calendar-panel.test.tsx` renders it in jsdom and asserts what it draws. Only
+ * element geometry is genuinely out of reach there.
  */
 
 const UTC = "UTC"
@@ -48,7 +48,10 @@ describe("calendarEvents", () => {
   it("ends a running entry at now", () => {
     const [event] = calendarEvents([entry({ endedAt: null })], NOW)
     expect((event.end as Date).getTime()).toBe(NOW)
-    expect(event.extendedProps.running).toBe(true)
+    // The drawn `end` moves with the clock; the CARRIED one stays null, which
+    // is what tells the panel the entry is running and what makes its block
+    // print an elapsed clock rather than a closing time it does not have.
+    expect(event.extendedProps.endedAt).toBeNull()
   })
 
   it("floors a zero-length entry to one minute", () => {
@@ -66,7 +69,8 @@ describe("calendarEvents", () => {
     )
     expect(event.extendedProps.projectId).toBe("p1")
     expect(event.extendedProps.billable).toBe(true)
-    expect(event.extendedProps.running).toBe(false)
+    expect(event.extendedProps.startedAt).toBe(Date.UTC(2026, 7, 10, 9, 0))
+    expect(event.extendedProps.endedAt).toBe(Date.UTC(2026, 7, 10, 10, 0))
     expect(event.id).toBe("e1")
   })
 })
