@@ -1,5 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react"
-import { errorMessage } from "@/lib/error-message"
+import { useId } from "react"
 import { cn } from "@/lib/utils"
 
 /**
@@ -11,19 +10,33 @@ import { cn } from "@/lib/utils"
  * because a party block is `"Vessel Vanguard LLC\nBonita Springs, FL\n34134,
  * USA"` and those newlines are the address's shape — the same property
  * `clients.address` is stored verbatim for, carried through to the document
- * that prints it. So this is a `<textarea>`, and blur is the only commit.
+ * that prints it. So this is a `<textarea>`.
  *
- * Everything else follows InlineEdit's rules deliberately, because a user
- * should not have to learn two editing behaviours in one product: blur saves,
- * Escape reverts, an unchanged value writes nothing, and a refusal keeps the
- * typed text on screen with the reason beside it rather than silently
- * restoring what the server still holds.
+ * IT NO LONGER SAVES ON BLUR, and it is the only field in this product that
+ * does not. It is CONTROLLED — the invoice editor owns the value, buffers it,
+ * and writes the whole head when Save is pressed. See that route's comment for
+ * the argument; the short version is that a document you send to a client is
+ * not a settings row, and the user asked to choose when it is written.
+ *
+ * The consequence for this component is that it holds no state at all, which
+ * also removed the subtlest thing in it: a `useEffect` that re-seeded from the
+ * server only while the field was unfocused, because a live query delivering
+ * someone else's edit mid-sentence would otherwise delete what was being typed.
+ * That problem did not go away, it MOVED — a buffered form has the same race
+ * across eight fields at once, and the route answers it there, once, rather
+ * than eight times with a focus check.
+ *
+ * Escape still reverts, because a user should not have to learn two editing
+ * behaviours in one product. What it reverts TO is now the stored value rather
+ * than the last committed one, which is the same sentence it always was.
  */
 export function PartyBlock({
   label,
   value,
   placeholder,
-  onCommit,
+  error,
+  onChange,
+  onRevert,
 }: {
   label: string
   value: string
@@ -32,68 +45,39 @@ export function PartyBlock({
    *  ALWAYS editable — nothing in this product freezes an invoice — so there is
    *  no read-only state for an absence to be stated in. */
   placeholder?: string
-  /** Passed in, never reached for — see the component/Convex boundary in
-   *  eslint.config.js. */
-  onCommit: (next: string) => Promise<void>
+  /** The server's refusal for THIS field, from the last Save. Passed in rather
+   *  than caught here: one Save can be refused for one of eight fields, and only
+   *  the caller that sent them knows which. */
+  error?: string | null
+  onChange: (next: string) => void
+  /** Escape. Puts the stored value back in this one field, leaving the rest of
+   *  the form's unsaved edits alone. */
+  onRevert?: () => void
 }) {
-  const [raw, setRaw] = useState(value)
-  const [error, setError] = useState<string | null>(null)
-  const ref = useRef<HTMLTextAreaElement>(null)
   // `useId`, not the label: "Billed to" has a space in it, and an id with
   // whitespace is not one.
   const fieldId = useId()
   const errorId = useId()
-
-  /*
-   * The server's value wins between edits, but never while the field has
-   * focus. Convex queries are live: an edit committed in another tab arrives
-   * as a new `value` mid-sentence, and re-seeding then would delete what is
-   * being typed. Blur is the only commit, so "not focused" is exactly "not
-   * mid-edit".
-   */
-  useEffect(() => {
-    if (document.activeElement !== ref.current) setRaw(value)
-  }, [value])
-
-  const commit = async () => {
-    const trimmed = raw.trim()
-    // Unchanged is not an edit — the same rule InlineEdit follows, and for the
-    // same reason: blurring off a field nobody touched must never write, and
-    // must never raise.
-    if (trimmed === value.trim()) {
-      setRaw(value)
-      return
-    }
-    try {
-      await onCommit(trimmed)
-      setError(null)
-    } catch (thrown) {
-      setError(errorMessage(thrown))
-    }
-  }
+  const refused = error !== null && error !== undefined
 
   return (
     <Labelled label={label} htmlFor={fieldId}>
       <textarea
         id={fieldId}
-        ref={ref}
         rows={4}
-        value={raw}
+        value={value}
         placeholder={placeholder}
         aria-label={label}
-        aria-invalid={error !== null}
-        aria-describedby={error === null ? undefined : errorId}
-        onChange={(event) => {
-          setRaw(event.target.value)
-          if (error !== null) setError(null)
-        }}
-        onBlur={() => void commit()}
+        aria-invalid={refused}
+        aria-describedby={refused ? errorId : undefined}
+        onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault()
+            // Stops the key reaching a dialog or popover above this one. The
+            // innermost thing a person is editing is the thing Escape means.
             event.stopPropagation()
-            setRaw(value)
-            setError(null)
+            onRevert?.()
           }
         }}
         className={cn(
@@ -101,15 +85,15 @@ export function PartyBlock({
           // its border, never by a fill tint.
           "w-full resize-y rounded-md border bg-ground px-2 py-1.5 text-sm",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          error === null ? "border-edge" : "border-alarm"
+          refused ? "border-alarm" : "border-edge"
         )}
       />
       {/* The colour is never the only carrier — DESIGN.md on error states. */}
-      {error === null ? null : (
+      {refused ? (
         <p id={errorId} role="alert" className="text-xs text-alarm">
           {error}
         </p>
-      )}
+      ) : null}
     </Labelled>
   )
 }
@@ -126,8 +110,9 @@ function Labelled({
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
       {/* Sentence case, no tracked-out eyebrow — The Sentence Case Rule. A real
-          `<label>`, always: there is no longer a read-only rendering of this
-          block for the name beside it to be a bare `<span>` in. */}
+          `<label>`, always: this component is only ever an editor. The document
+          as the client received it is drawn by `InvoiceRecord`, where the same
+          name is a `<dt>` because there is no control for it to label. */}
       <label htmlFor={htmlFor} className="text-[0.8125rem] font-medium text-muted-foreground">
         {label}
       </label>

@@ -640,17 +640,49 @@ export const MAX_PAYMENT_TERMS_LENGTH = 200
 export const MAX_NOTES_LENGTH = 600
 
 /**
+ * WHICH FIELD A REFUSAL IS ABOUT, as data rather than as a sentence.
+ *
+ * The editor saves the whole head in one mutation, so a refusal has to be shown
+ * beside the field that caused it or the user is left rereading eight controls
+ * for the one that is too long. The message already NAMES the field in prose
+ * ("Keep the pay-to block under 601 characters"), and a client matching on that
+ * prose is a client that breaks the day somebody improves the wording — so the
+ * name travels in `meta.field` instead, spelled exactly as the argument is.
+ *
+ * `meta` is already part of `TraceErrorData` (convex/lib/codes.ts) and is
+ * additive: a caller that ignores it still gets the same code and the same
+ * sentence it always did.
+ */
+type HeadField =
+  | "billedTo"
+  | "payTo"
+  | "currency"
+  | "issuedAt"
+  | "dueAt"
+  | "purchaseOrder"
+  | "paymentTerms"
+  | "notes"
+
+/**
  * Trimmed at the ends, NEVER collapsed inside.
  *
  * The same rule and the same reason as `checkAddress` in clients.ts: a party
  * block is rendered verbatim on a document, so its internal newlines are the
  * block's shape, and a normaliser that tidied them would print a three-line
  * address on one line.
+ *
+ * `field` is absent for the two provenance strings `createFromRange` bounds:
+ * those arrive from /reports' filter bar rather than from a control on the
+ * document, so there is nothing on the editor for a refusal to point at.
  */
-function checkText(raw: string, what: string, max: number): string {
+function checkText(raw: string, what: string, max: number, field?: HeadField): string {
   const trimmed = raw.trim()
   if (trimmed.length > max) {
-    traceError("TOO_LONG", `Keep the ${what} under ${max} characters.`)
+    traceError(
+      "TOO_LONG",
+      `Keep the ${what} under ${max} characters.`,
+      field === undefined ? undefined : { field }
+    )
   }
   return trimmed
 }
@@ -663,15 +695,19 @@ function checkText(raw: string, what: string, max: number): string {
  * "Invalid Date" on the document, and is invisible until a client is holding
  * the PDF.
  */
-function checkInstant(value: number, what: string): number {
+function checkInstant(value: number, what: string, field: HeadField): number {
   if (!Number.isFinite(value)) {
-    traceError("INVALID_DATE", `That ${what} is not a date I can read.`)
+    traceError("INVALID_DATE", `That ${what} is not a date I can read.`, { field })
   }
   return value
 }
 
 /**
- * The fields a human types into the document head, patched one at a time.
+ * The fields a human types into the document head.
+ *
+ * Every one is optional, so this stays a PATCH: the editor sends only what
+ * changed since its last Save, and a field absent from the args is a field
+ * nobody touched rather than a field being cleared.
  *
  * WHAT IS DELIBERATELY ABSENT, since a patch validator is a list of permissions:
  *
@@ -679,7 +715,8 @@ function checkInstant(value: number, what: string): number {
  *     write, which is the bounded full-table scan `createFromRange` performs
  *     for exactly that reason (see `INVOICE_NUMBER_SCAN_LIMIT`). That decision
  *     belongs beside that scan, not smuggled into a field patch — and an
- *     invoice quietly renumbered by a blur is two documents claiming one id.
+ *     invoice renumbered as a side effect of editing its address is two
+ *     documents claiming one id.
  *   - `taxes`, and every line. Task 6.
  *   - `sourceFromMs`, `sourceToMs`, `unratedMsAtCreation`, `clientId`,
  *     `clientKey`. These record where the figures came from. THE SNAPSHOT RULE
@@ -729,10 +766,10 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   const patch: Partial<Doc<"invoices">> = { updatedAt: Date.now() }
 
   if (args.billedTo !== undefined) {
-    patch.billedTo = checkText(args.billedTo, "billed-to block", MAX_PARTY_LENGTH)
+    patch.billedTo = checkText(args.billedTo, "billed-to block", MAX_PARTY_LENGTH, "billedTo")
   }
   if (args.payTo !== undefined) {
-    patch.payTo = checkText(args.payTo, "pay-to block", MAX_PARTY_LENGTH)
+    patch.payTo = checkText(args.payTo, "pay-to block", MAX_PARTY_LENGTH, "payTo")
   }
   if (args.currency !== undefined) {
     if (!isValidCurrency(args.currency)) {
@@ -741,7 +778,8 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
       // narrowed to the ones whose minor unit really is a hundredth.
       traceError(
         "INVALID_CURRENCY",
-        `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`
+        `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`,
+        { field: "currency" }
       )
     }
     patch.currency = args.currency
@@ -749,23 +787,26 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   /*
    * The two dates are checked independently and NOT against each other.
    *
-   * A due date before an issue date is odd, and refusing it here would still
-   * be wrong: this editor autosaves one field per blur, so an ordering rule
-   * makes moving an invoice a month forward refuse or succeed depending on
-   * which of the two the user happens to blur first.
+   * A due date before an issue date is odd, and refusing it here would still be
+   * wrong. This is a PATCH: a caller may send either date alone, so an ordering
+   * rule would compare what was sent against what happens to be stored — and
+   * moving an invoice a month forward would refuse or succeed depending on which
+   * of the two the user got to first. (That used to be a per-blur autosave and
+   * is now a Save button sending both together, which changes nothing about the
+   * argument: the validator still cannot assume it was handed a pair.)
    *
    * Not refusing is not the same as saying nothing, and for a while it was.
-   * `InvoiceMeta` now draws a non-blocking advisory under the due date whenever
-   * it precedes the issue date — recomputed every render, so it is
-   * order-independent in the way a write-time rule cannot be, and free
-   * server-side. That is what makes the claim below true: the mistake IS
-   * visible on the document, because something on the document names it.
+   * `InvoiceMeta` draws a non-blocking advisory under the due date whenever it
+   * precedes the issue date — recomputed every render from the values on screen,
+   * so it is order-independent in the way a write-time rule cannot be, and free
+   * server-side. That is what makes the claim below true: the mistake IS visible
+   * on the document, because something on the document names it.
    */
   if (args.issuedAt !== undefined) {
-    patch.issuedAt = checkInstant(args.issuedAt, "invoice date")
+    patch.issuedAt = checkInstant(args.issuedAt, "invoice date", "issuedAt")
   }
   if (args.dueAt !== undefined) {
-    patch.dueAt = checkInstant(args.dueAt, "due date")
+    patch.dueAt = checkInstant(args.dueAt, "due date", "dueAt")
   }
   /*
    * Emptied means ABSENT, not "". Both optional fields print as "—" when unset,
@@ -775,11 +816,21 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
    * its schema type includes null; these two are plain `v.optional`.)
    */
   if (args.purchaseOrder !== undefined) {
-    const po = checkText(args.purchaseOrder, "purchase order", MAX_PURCHASE_ORDER_LENGTH)
+    const po = checkText(
+      args.purchaseOrder,
+      "purchase order",
+      MAX_PURCHASE_ORDER_LENGTH,
+      "purchaseOrder"
+    )
     patch.purchaseOrder = po === "" ? undefined : po
   }
   if (args.paymentTerms !== undefined) {
-    const terms = checkText(args.paymentTerms, "payment terms", MAX_PAYMENT_TERMS_LENGTH)
+    const terms = checkText(
+      args.paymentTerms,
+      "payment terms",
+      MAX_PAYMENT_TERMS_LENGTH,
+      "paymentTerms"
+    )
     patch.paymentTerms = terms === "" ? undefined : terms
   }
   /*
@@ -790,7 +841,7 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
    * code as one run-on line on a document a client has to read a number off.
    */
   if (args.notes !== undefined) {
-    const notes = checkText(args.notes, "notes", MAX_NOTES_LENGTH)
+    const notes = checkText(args.notes, "notes", MAX_NOTES_LENGTH, "notes")
     patch.notes = notes === "" ? undefined : notes
   }
 

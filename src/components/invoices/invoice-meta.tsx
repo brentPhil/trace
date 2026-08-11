@@ -1,6 +1,5 @@
-import { useId, useState } from "react"
+import { useId } from "react"
 import { InlineEdit } from "@/components/entries/inline-edit"
-import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
 import { dayOf, startOfDay } from "@shared/day"
 
@@ -11,6 +10,12 @@ import { dayOf, startOfDay } from "@shared/day"
  * browser's. A freelancer who invoices from an airport must not find the
  * document dated a day either side of what they raised it on, and `dayOf` /
  * `startOfDay` are the one place that decision lives.
+ *
+ * BUFFERED. `onChange` updates the editor's draft and writes nothing — the
+ * whole head goes to the server when Save is pressed. So it is synchronous, it
+ * cannot be refused, and there is no per-field save state left in here; a
+ * refusal arrives later, from the one Save that sent all eight fields, and it
+ * arrives as `errors` keyed by the field it is about.
  */
 export function InvoiceMeta({
   number,
@@ -19,22 +24,31 @@ export function InvoiceMeta({
   purchaseOrder,
   paymentTerms,
   timeZone,
+  errors,
   onChange,
 }: {
   number: string
   issuedAt: number
   dueAt: number
-  purchaseOrder: string | undefined
-  paymentTerms: string | undefined
+  purchaseOrder: string
+  paymentTerms: string
   timeZone: string
+  /** The last Save's refusals, by field. Empty on a form that has not been
+   *  refused, which is every form until somebody presses Save. */
+  errors?: {
+    issuedAt?: string
+    dueAt?: string
+    purchaseOrder?: string
+    paymentTerms?: string
+  }
   /** Passed in, never reached for — see the component/Convex boundary in
-   *  eslint.config.js. A patch, so one blur is one write. */
+   *  eslint.config.js. A patch into the editor's draft, not a write. */
   onChange: (patch: {
     issuedAt?: number
     dueAt?: number
     purchaseOrder?: string
     paymentTerms?: string
-  }) => Promise<void>
+  }) => void
 }) {
   return (
     <dl className="flex flex-col gap-2">
@@ -42,7 +56,7 @@ export function InvoiceMeta({
         The number is READ-ONLY here, and not because the editor is unfinished.
         It is the invoice's identity, minted one past the highest sequence ever
         used against a bounded uniqueness scan (see INVOICE_NUMBER_SCAN_LIMIT),
-        and letting a blur renumber a document is how two invoices come to
+        and letting an edit renumber a document is how two invoices come to
         claim the same id. Ink, never brass: an identifier is not money.
       */}
       <Row label="Invoice number">
@@ -54,7 +68,8 @@ export function InvoiceMeta({
           label="Invoice date"
           instant={issuedAt}
           timeZone={timeZone}
-          onPick={async (next) => await onChange({ issuedAt: next })}
+          error={errors?.issuedAt}
+          onPick={(next) => onChange({ issuedAt: next })}
         />
       </Row>
 
@@ -63,20 +78,21 @@ export function InvoiceMeta({
           label="Due date"
           instant={dueAt}
           timeZone={timeZone}
-          onPick={async (next) => await onChange({ dueAt: next })}
+          error={errors?.dueAt}
+          onPick={(next) => onChange({ dueAt: next })}
         />
         {/*
           ADVISORY, NOT A REFUSAL — and the two are different acts here.
           `invoices.update` deliberately does not check one date against the
-          other, because autosave commits one field per blur and an ordering
-          rule would refuse or accept the same edit depending on which date was
-          blurred first (see that function's comment). Saying nothing was the
-          other half of that decision going wrong: nothing on the document drew
-          the relationship, so the mistake was only "visible" to a reader who
-          already knew to look.
+          other, because it is a patch and may be handed either date alone (see
+          that function's comment). Saying nothing was the other half of that
+          decision going wrong: nothing on the document drew the relationship, so
+          the mistake was only "visible" to a reader who already knew to look.
 
-          This recomputes every render from the two values as they stand, so it
-          is order-independent by construction and costs nothing server-side.
+          This recomputes every render from the two values AS TYPED — the draft,
+          not the stored pair — so it answers before a Save rather than after
+          one, which is the whole point of a form that buffers. It is
+          order-independent by construction and costs nothing server-side.
           Compared as DAYS rather than instants: an invoice raised at 14:00 has
           an `issuedAt` mid-afternoon while a picked due date is midnight, so an
           instant comparison would warn about a due date on the same day.
@@ -96,7 +112,8 @@ export function InvoiceMeta({
         <TextField
           label="Purchase order"
           value={purchaseOrder}
-          onCommit={async (next) => await onChange({ purchaseOrder: next })}
+          error={errors?.purchaseOrder}
+          onCommit={(next) => onChange({ purchaseOrder: next })}
         />
       </Row>
 
@@ -104,7 +121,8 @@ export function InvoiceMeta({
         <TextField
           label="Payment terms"
           value={paymentTerms}
-          onCommit={async (next) => await onChange({ paymentTerms: next })}
+          error={errors?.paymentTerms}
+          onCommit={(next) => onChange({ paymentTerms: next })}
         />
       </Row>
     </dl>
@@ -137,35 +155,29 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * takes, so there is no locale parsing between the picker and the domain — and
  * the platform's own calendar and keyboard come with it.
  *
- * Saved on CHANGE rather than on blur, unlike the text beside it. A picker
- * commits a whole date at once, so there is no half-typed state to protect;
- * the selects on /settings save the same way, and for the same reason.
- *
- * THE PICK SURVIVES A REFUSAL. Controlled straight off `instant`, a rejected
- * save left React re-rendering the previous value, so the date the user chose
- * vanished at the same moment the message beside it said the date on screen was
- * the thing to fix — the one autosave path in the product that discarded input,
- * where `PartyBlock` and `InlineEdit` both keep it. `pending` holds the chosen
- * day until the write lands, and only the write clears it.
+ * THE PICK SURVIVES A REFUSAL, and it now does so for free. It used to need a
+ * `pending` day held here, because the input was controlled straight off the
+ * STORED instant and a rejected write re-rendered the previous value — the date
+ * the user chose vanished at the same moment the message beside it said the date
+ * on screen was the thing to fix. Buffering deleted that machinery rather than
+ * fixing it: the instant handed in IS the draft, so a refused Save leaves the
+ * picked date exactly where it was and this component has no state at all.
  */
 function DateField({
   label,
   instant,
   timeZone,
+  error,
   onPick,
 }: {
   label: string
   instant: number
   timeZone: string
-  onPick: (instant: number) => Promise<void>
+  error?: string
+  onPick: (instant: number) => void
 }) {
   const id = useId()
   const errorId = useId()
-  const [error, setError] = useState<string | null>(null)
-  /** The day the user picked, held only until the write that would make it the
-   *  stored one either lands or is refused. */
-  const [pending, setPending] = useState<string | null>(null)
-  const day = dayOf(instant, timeZone)
 
   return (
     <div className="flex flex-col gap-1">
@@ -173,40 +185,27 @@ function DateField({
         id={id}
         type="date"
         aria-label={label}
-        aria-invalid={error !== null}
-        aria-describedby={error === null ? undefined : errorId}
-        value={pending ?? day}
+        aria-invalid={error !== undefined}
+        aria-describedby={error === undefined ? undefined : errorId}
+        value={dayOf(instant, timeZone)}
         onChange={(event) => {
           const picked = event.target.value
           // An emptied date input is the browser saying "mid-typing", not
-          // "this invoice has no date". Ignored rather than written: a
+          // "this invoice has no date". Ignored rather than recorded: a
           // document always carries both.
           if (picked === "") return
-          setPending(picked)
           // No cast: `DayString` is a documented alias for `string`, and the
           // input's own value is already YYYY-MM-DD, which is the whole reason
           // this is a date input rather than a parsed text field.
-          void onPick(startOfDay(picked, timeZone)).then(
-            () => {
-              // Cleared only if this pick is still the one on screen. A second
-              // pick made while the first was in flight would otherwise be
-              // replaced by the first one's now-stored value.
-              setPending((current) => (current === picked ? null : current))
-              setError(null)
-            },
-            // A refusal is shown BESIDE the field it came from rather than as
-            // a toast: the date is still on screen and is the thing to fix —
-            // which is only true because `pending` is NOT cleared here.
-            (thrown: unknown) => setError(errorMessage(thrown))
-          )
+          onPick(startOfDay(picked, timeZone))
         }}
         className={cn(
           "rounded-md border bg-ground px-2 py-1 text-sm tabular",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          error === null ? "border-edge" : "border-alarm"
+          error === undefined ? "border-edge" : "border-alarm"
         )}
       />
-      {error === null ? null : (
+      {error === undefined ? null : (
         <p id={errorId} role="alert" className="text-xs text-alarm">
           {error}
         </p>
@@ -222,38 +221,54 @@ function DateField({
  * unset and an empty box beside "Purchase order" on a document reads as a
  * missing value rather than as an absent one. "Not set" is the same "state the
  * absence" treatment `formatRate` gives a project with no rate — and it says
- * "not set" rather than an em dash because there is no longer a frozen invoice
- * for which the absence would be permanent: this one is an invitation.
+ * "not set" rather than an em dash because there is no frozen invoice for which
+ * the absence would be permanent: this one is an invitation.
+ *
+ * `InlineEdit` IS UNCHANGED, and that matters: it still commits on blur and on
+ * Enter, exactly as it does on every entry row in the product. What changed is
+ * what "commit" reaches — the editor's draft rather than the server — so this
+ * field learns nothing new and the rest of the app keeps the behaviour it has.
+ * The refusal is therefore drawn OUTSIDE it, under the closed field, because by
+ * the time a Save is refused this control has long since committed and closed.
  */
 function TextField({
   label,
   value,
+  error,
   onCommit,
 }: {
   label: string
-  value: string | undefined
-  onCommit: (next: string) => Promise<void>
+  value: string
+  error?: string
+  onCommit: (next: string) => void
 }) {
-  const set = value !== undefined && value !== ""
+  const errorId = useId()
+  const set = value !== ""
   return (
-    <InlineEdit<string>
-      display={
-        <span className={cn("text-sm", !set && "italic text-muted-foreground")}>
-          {set ? value : "Not set"}
-        </span>
-      }
-      initialInput={value ?? ""}
-      ariaLabel={label}
-      placeholder="Optional"
-      className="-mx-1 px-1 py-0.5 text-sm"
-      inputClassName="w-56 text-sm"
-      // Anything is a legal reference, including nothing: clearing the field is
-      // how it is unset, and the server turns an empty string into an absent
-      // column rather than storing two spellings of "not set". Length is
-      // refused server-side, and that refusal reopens the field with the text
-      // still in it.
-      parse={(raw) => ({ ok: true, value: raw })}
-      onCommit={onCommit}
-    />
+    <div className="flex flex-col gap-1">
+      <InlineEdit<string>
+        display={
+          <span className={cn("text-sm", !set && "italic text-muted-foreground")}>
+            {set ? value : "Not set"}
+          </span>
+        }
+        initialInput={value}
+        ariaLabel={label}
+        placeholder="Optional"
+        className="-mx-1 px-1 py-0.5 text-sm"
+        inputClassName="w-56 text-sm"
+        // Anything is a legal reference, including nothing: clearing the field is
+        // how it is unset, and the server turns an empty string into an absent
+        // column rather than storing two spellings of "not set". Length is
+        // refused server-side, on Save, and that refusal is drawn below.
+        parse={(raw) => ({ ok: true, value: raw })}
+        onCommit={onCommit}
+      />
+      {error === undefined ? null : (
+        <p id={errorId} role="alert" className="text-xs text-alarm">
+          {error}
+        </p>
+      )}
+    </div>
   )
 }

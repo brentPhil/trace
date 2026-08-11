@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
-import { InvoiceEditor, InvoiceUnreachable, Route } from "@/routes/_authed/invoices_.$invoiceId"
+import { InvoiceEditor, Route } from "@/routes/_authed/invoices_.$invoiceId_.edit"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { api } from "../../../convex/_generated/api"
@@ -12,17 +12,27 @@ import type * as RouterModuleType from "@tanstack/react-router"
 type RouterModule = typeof RouterModuleType
 
 /*
- * What can go wrong on this page without anything looking wrong:
+ * THE BUFFERED EDITOR — the one surface in this product that does not save on
+ * blur.
  *
- *   - Autosave. There is no Save button, so a field that stopped calling the
- *     mutation on blur would still accept typing, still look edited, and lose
- *     the edit on the next paint. That is the one failure this page's whole
- *     shape depends on not happening.
+ * What can go wrong here without anything looking wrong:
+ *
+ *   - A field that writes as soon as it is blurred. The page looks identical;
+ *     the user simply no longer decides when their document changes, which is
+ *     the entire thing they asked for. Every autosave test this file used to
+ *     hold is now inverted into an assertion that nothing is written until Save.
+ *   - A Save button enabled on a clean form. It teaches people to press it out
+ *     of superstition, and a button pressed out of superstition is one nobody
+ *     reads the state of — which is the signal the unsaved-changes guard is
+ *     built on.
+ *   - A refusal that loses the text it refused. The whole point of buffering is
+ *     that the typed values are the only copy; a save that clears them on the
+ *     way to reporting a problem destroys the thing it is complaining about.
+ *   - An Export that runs before the save it depends on, or after one that
+ *     failed. Either way a client ends up holding a PDF the freelancer's own
+ *     record contradicts.
  *   - The newlines. `billedTo` is a snapshot block and its line breaks are the
- *     address's shape; a control that collapsed them would print a three-line
- *     address on one line, on a document sent to a client. `notes` is the same
- *     property one document lower down: an account number, an IBAN and a SWIFT
- *     code run together is a block a client cannot read a figure off.
+ *     address's shape; `notes` is the same property one document lower down.
  *
  * There is NO freeze and no status to test. An invoice is a document you edit
  * and export — always editable — which is why every field below is asserted
@@ -35,17 +45,30 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
     ...actual,
     Link: ({
       to,
+      params,
       children,
       ...rest
     }: {
       to: string
+      params?: Record<string, string>
       children: React.ReactNode
       className?: string
-    }) => (
-      <a href={to} {...rest}>
-        {children}
-      </a>
-    ),
+    }) => {
+      let href = to
+      for (const [key, value] of Object.entries(params ?? {})) {
+        href = href.replace(`$${key}`, value)
+      }
+      return (
+        <a href={href} {...rest}>
+          {children}
+        </a>
+      )
+    },
+    /* The guard needs a router; these tests deliberately have none. Idle is the
+     * honest stand-in for "no navigation has been attempted" — the guard's own
+     * behaviour, including what it renders once it HAS blocked, is asserted in
+     * `src/components/invoices/unsaved-changes-guard.test.tsx`. */
+    useBlocker: () => ({ status: "idle" as const }),
   }
 })
 
@@ -175,62 +198,65 @@ function asInput(el: HTMLElement): HTMLInputElement {
   return el
 }
 
-describe("the invoice editor — autosave", () => {
-  /*
-   * THE HEADLINE. No Save button exists, so blur is the only thing that can
-   * write. If this stops calling the mutation the page still looks like it
-   * works, right up until the edit vanishes.
-   */
-  it("saves a party block on blur, with no Save button anywhere", async () => {
-    renderEditor()
+function saveButton(): HTMLButtonElement {
+  const el = screen.getByRole("button", { name: /^save/i })
+  if (!(el instanceof HTMLButtonElement)) throw new Error("expected a button")
+  return el
+}
 
-    expect(screen.queryByRole("button", { name: /save/i })).toBeNull()
+describe("the invoice editor — nothing is written until Save", () => {
+  /*
+   * THE HEADLINE, and the inverse of the one this file used to open with. A
+   * field that commits on blur looks identical on screen; what it takes away is
+   * the user's decision about when their document changes.
+   */
+  it("writes nothing when a field is typed into and blurred", () => {
+    renderEditor()
 
     const field = asTextarea(screen.getByLabelText("Billed to"))
     fireEvent.change(field, { target: { value: "Acme Corp\n1 Way" } })
     fireEvent.blur(field)
 
+    expect(mutations.updateInvoice).not.toHaveBeenCalled()
+    // Still on screen — the draft is the only copy of it now.
+    expect(asTextarea(screen.getByLabelText("Billed to")).value).toBe("Acme Corp\n1 Way")
+  })
+
+  it("writes the whole head, once, when Save is pressed", async () => {
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Billed to"), {
+      target: { value: "Acme Corp\n1 Way" },
+    })
+    fireEvent.change(screen.getByLabelText("Notes"), {
+      target: { value: "Bank transfer to Acme" },
+    })
+    fireEvent.click(saveButton())
+
     await waitFor(() => {
       expect(mutations.updateInvoice).toHaveBeenCalledWith({
         invoiceId: INVOICE_ID,
         billedTo: "Acme Corp\n1 Way",
+        notes: "Bank transfer to Acme",
       })
     })
+    expect(mutations.updateInvoice).toHaveBeenCalledTimes(1)
   })
 
-  /* The newlines are the address's shape. A control that sent one line, or a
-   * page that rendered three lines as one, is a wrong document. */
-  it("keeps the line breaks of a block it was given and a block it sends", () => {
+  /* ONLY the changed fields. An invoice raised before a bound tightened would
+   * otherwise have every Save refused over an address nobody was editing. */
+  it("sends only what changed", async () => {
     renderEditor()
 
-    const field = asTextarea(screen.getByLabelText("Billed to"))
-    expect(field.value).toBe("Vessel Vanguard\nBonita Springs, FL\n34134, USA")
-  })
-
-  it("writes nothing when a field is blurred untouched", () => {
-    renderEditor()
-
-    fireEvent.blur(screen.getByLabelText("Billed to"))
-    expect(mutations.updateInvoice).not.toHaveBeenCalled()
-  })
-
-  /* A refusal keeps the typed text on screen with the reason beside it. The
-   * alternative — silently restoring the server's value — reads as the edit
-   * being ignored, and the user retypes it. */
-  it("shows a refusal beside the field that was refused", async () => {
-    mutations.updateInvoice.mockRejectedValue({
-      data: { code: "TOO_LONG", message: "Keep the billed-to block under 601 characters." },
-    })
-    renderEditor()
-
-    const field = asTextarea(screen.getByLabelText("Billed to"))
-    fireEvent.change(field, { target: { value: "far too long" } })
-    fireEvent.blur(field)
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Thanks!" } })
+    fireEvent.click(saveButton())
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("601 characters")
+      expect(mutations.updateInvoice).toHaveBeenCalledWith({
+        invoiceId: INVOICE_ID,
+        notes: "Thanks!",
+      })
     })
-    expect(asTextarea(screen.getByLabelText("Billed to")).value).toBe("far too long")
   })
 
   it("saves a purchase order typed into the meta grid", async () => {
@@ -241,6 +267,10 @@ describe("the invoice editor — autosave", () => {
     fireEvent.change(input, { target: { value: "PO-4471" } })
     fireEvent.blur(input)
 
+    // The inline field committed to the DRAFT, not to the server.
+    expect(mutations.updateInvoice).not.toHaveBeenCalled()
+
+    fireEvent.click(saveButton())
     await waitFor(() => {
       expect(mutations.updateInvoice).toHaveBeenCalledWith({
         invoiceId: INVOICE_ID,
@@ -260,7 +290,9 @@ describe("the invoice editor — autosave", () => {
     fireEvent.change(screen.getByLabelText("Due date"), {
       target: { value: "2026-10-01" },
     })
+    expect(mutations.updateInvoice).not.toHaveBeenCalled()
 
+    fireEvent.click(saveButton())
     await waitFor(() => {
       expect(mutations.updateInvoice).toHaveBeenCalledWith({
         invoiceId: INVOICE_ID,
@@ -268,40 +300,14 @@ describe("the invoice editor — autosave", () => {
       })
     })
   })
-})
 
-/*
- * THE NOTES BLOCK — the message to the client at the foot of the document.
- *
- * It is `PartyBlock`, deliberately, so it inherits one editing behaviour rather
- * than inventing a second: blur saves, the newlines survive, and a refusal keeps
- * the typed text with the reason beside it. What is asserted here is that it is
- * WIRED — a block that rendered but never called the mutation would look
- * identical until a reload.
- */
-describe("the invoice editor — notes", () => {
-  it("saves the notes on blur", async () => {
+  /* The newlines are the address's shape. A control that sent one line, or a
+   * page that rendered three lines as one, is a wrong document. */
+  it("keeps the line breaks of a block it was given", () => {
     renderEditor()
-
-    const field = asTextarea(screen.getByLabelText("Notes"))
-    fireEvent.change(field, { target: { value: "Bank transfer to Acme" } })
-    fireEvent.blur(field)
-
-    await waitFor(() => {
-      expect(mutations.updateInvoice).toHaveBeenCalledWith({
-        invoiceId: INVOICE_ID,
-        notes: "Bank transfer to Acme",
-      })
-    })
-  })
-
-  /* The bank block's line breaks are its shape — an account number, an IBAN and
-   * a SWIFT code run together is a block a client cannot read a figure off. */
-  it("keeps the line breaks of a stored notes block", () => {
-    const block = "Bank transfer to:\nAccount 1234-5678\n\nThank you!"
-    renderEditor({ notes: block })
-
-    expect(asTextarea(screen.getByLabelText("Notes")).value).toBe(block)
+    expect(asTextarea(screen.getByLabelText("Billed to")).value).toBe(
+      "Vessel Vanguard\nBonita Springs, FL\n34134, USA"
+    )
   })
 
   /* The column is ABSENT when unset — `invoices.update` clears it rather than
@@ -310,21 +316,196 @@ describe("the invoice editor — notes", () => {
     renderEditor()
     expect(asTextarea(screen.getByLabelText("Notes")).value).toBe("")
   })
+})
 
-  it("shows a refusal beside the notes field rather than as a toast", async () => {
-    mutations.updateInvoice.mockRejectedValue({
-      data: { code: "TOO_LONG", message: "Keep the notes under 600 characters." },
-    })
+describe("the invoice editor — the Save button", () => {
+  it("is disabled on a form nobody has touched", () => {
+    renderEditor()
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  it("wakes up on the first real change", () => {
+    renderEditor()
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Thanks!" } })
+    expect(saveButton().disabled).toBe(false)
+  })
+
+  /*
+   * DIRTINESS IS A COMPARISON, not a touched flag. Typing over a value and
+   * typing it back has changed nothing — and a form that called that dirty would
+   * light this button and then warn, on the way out, about losing an edit that
+   * does not exist. That warning is the one people learn to click through.
+   */
+  it("goes back to sleep when a value is typed back to its original", () => {
     renderEditor()
 
-    const field = asTextarea(screen.getByLabelText("Notes"))
-    fireEvent.change(field, { target: { value: "far too long" } })
-    fireEvent.blur(field)
+    const field = asTextarea(screen.getByLabelText("Billed to"))
+    fireEvent.change(field, { target: { value: "Acme" } })
+    expect(saveButton().disabled).toBe(false)
+
+    fireEvent.change(field, {
+      target: { value: "Vessel Vanguard\nBonita Springs, FL\n34134, USA" },
+    })
+    expect(saveButton().disabled).toBe(true)
+  })
+
+  it("goes quiet again once the save lands", async () => {
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Thanks!" } })
+    fireEvent.click(saveButton())
+
+    // The Convex subscription has not redelivered the row — the seeded query
+    // still holds the old document — and the form must still know it is saved.
+    await waitFor(() => expect(saveButton().disabled).toBe(true))
+  })
+})
+
+/*
+ * A REFUSED SAVE KEEPS EVERY TYPED VALUE, and says which field it was about.
+ *
+ * One Save carries eight fields, so "that didn't save" as a toast would leave
+ * somebody rereading the whole document for the sentence that is too long.
+ * `invoices.update` names the field in `meta.field` for exactly this.
+ */
+describe("the invoice editor — a refused save", () => {
+  function refuse(code: string, message: string, field: string) {
+    mutations.updateInvoice.mockRejectedValue({ data: { code, message, meta: { field } } })
+  }
+
+  it("shows the refusal beside the field it names, with the text still in it", async () => {
+    refuse("TOO_LONG", "Keep the billed-to block under 601 characters.", "billedTo")
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Billed to"), {
+      target: { value: "far too long" },
+    })
+    fireEvent.click(saveButton())
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("601 characters")
+    })
+    expect(asTextarea(screen.getByLabelText("Billed to")).value).toBe("far too long")
+    // The billed-to textarea itself, not some banner elsewhere on the page.
+    expect(screen.getByLabelText("Billed to").getAttribute("aria-invalid")).toBe("true")
+    // And still dirty, so pressing Save again after the fix sends the same set.
+    expect(saveButton().disabled).toBe(false)
+  })
+
+  it("keeps the notes text and points at the notes field", async () => {
+    refuse("TOO_LONG", "Keep the notes under 600 characters.", "notes")
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "far too long" } })
+    fireEvent.click(saveButton())
 
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("600 characters")
     })
     expect(asTextarea(screen.getByLabelText("Notes")).value).toBe("far too long")
+    expect(screen.getByLabelText("Notes").getAttribute("aria-invalid")).toBe("true")
+  })
+
+  /*
+   * A date pick used to be the ONE path that discarded the user's input on a
+   * refusal: the input was controlled straight off the stored instant, so a
+   * rejected save re-rendered the previous value and the picked date vanished at
+   * the same moment the message beside it said the date on screen was the thing
+   * to fix. Buffering removed the machinery that fixed it rather than
+   * reintroducing the bug — the draft IS the picked date.
+   */
+  it("keeps a refused date on screen beside its refusal", async () => {
+    refuse("INVALID_DATE", "That due date is not a date I can read.", "dueAt")
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Due date"), { target: { value: "2026-10-01" } })
+    fireEvent.click(saveButton())
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("not a date I can read")
+    })
+    expect(asInput(screen.getByLabelText("Due date")).value).toBe("2026-10-01")
+  })
+
+  /* Editing the field is the answer to its refusal — the same rule `InlineEdit`
+   * and `PartyBlock` follow, so a message never points at text already fixed. */
+  it("clears the refusal as soon as the field is edited again", async () => {
+    refuse("TOO_LONG", "Keep the notes under 600 characters.", "notes")
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "far too long" } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy())
+
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "short" } })
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  /* A refusal naming no field — a network failure, or a code this build does
+   * not know — has nowhere to sit but above the document. It must still be
+   * announced rather than swallowed. */
+  it("reports a refusal that names no field, without losing the draft", async () => {
+    mutations.updateInvoice.mockRejectedValue(new Error("offline"))
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Thanks!" } })
+    fireEvent.click(saveButton())
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("didn't save")
+    })
+    expect(asTextarea(screen.getByLabelText("Notes")).value).toBe("Thanks!")
+  })
+})
+
+describe("the invoice editor — the document", () => {
+  it("links back to the list and to the record it is editing", () => {
+    renderEditor()
+
+    expect(screen.getByRole("link", { name: "Invoices" }).getAttribute("href")).toBe(
+      "/invoices"
+    )
+    expect(screen.getByRole("link", { name: "#072726-0013" }).getAttribute("href")).toBe(
+      "/invoices/inv-1"
+    )
+  })
+
+  /* Read-only, and the numbers are the STORED ones: nothing here recomputes an
+   * amount from a quantity and a rate. Editing them is Task 6. */
+  it("prints the lines it has, and offers no way to edit them", () => {
+    renderEditor({ lines: [makeLine({ description: "Website", quantityCentis: 9880 })] })
+
+    expect(
+      screen.getAllByRole("columnheader").map((cell) => cell.textContent)
+    ).toEqual(["Description", "Quantity", "Rate", "Amount"])
+    expect(screen.getByText("98.80")).toBeTruthy()
+    expect(screen.getByText("$10.00/hr")).toBeTruthy()
+    // Once as the line's amount, once as the subtotal, once as the total.
+    expect(screen.getAllByText("$988.00")).toHaveLength(3)
+    expect(screen.queryByLabelText("Description")).toBeNull()
+  })
+
+  it("renders the invoice's own currency, not the account's", () => {
+    renderEditor({
+      currency: "EUR",
+      lines: [makeLine({ description: "Website", amountCents: 100_000 })],
+    })
+    // SETTINGS.currency is USD; this document was snapshotted in EUR.
+    expect(screen.getAllByText("€1,000.00").length).toBeGreaterThan(0)
+  })
+
+  /* An empty state teaches the interface rather than stating a void. */
+  it("says where lines come from when there are none", () => {
+    renderEditor({ lines: [] })
+    expect(screen.getByText(/Lines come from the range/)).toBeTruthy()
+  })
+
+  /* Both optional fields, because an absence stated as an absence is the rule
+   * here — the same treatment `formatRate` gives a project with no rate, and
+   * never a blank box beside a label on a document. */
+  it("states an absent purchase order and terms rather than leaving them blank", () => {
+    renderEditor()
+    expect(screen.getAllByText("Not set")).toHaveLength(2)
   })
 })
 
@@ -356,87 +537,12 @@ describe("the invoice editor — no status workflow", () => {
   })
 })
 
-describe("the invoice editor — the document", () => {
-  it("names the invoice and links back to the list", () => {
-    renderEditor()
-
-    expect(screen.getByText("#072726-0013")).toBeTruthy()
-    expect(screen.getByRole("link", { name: "Invoices" }).getAttribute("href")).toBe(
-      "/invoices"
-    )
-  })
-
-  /* Read-only, and the numbers are the STORED ones: nothing here recomputes an
-   * amount from a quantity and a rate. Editing them is Task 6. */
-  it("prints the lines it has, and offers no way to edit them", () => {
-    renderEditor({
-      lines: [makeLine({ description: "Website", quantityCentis: 9880 })],
-    })
-
-    expect(
-      screen.getAllByRole("columnheader").map((cell) => cell.textContent)
-    ).toEqual(["Description", "Quantity", "Rate", "Amount"])
-    expect(screen.getByText("98.80")).toBeTruthy()
-    expect(screen.getByText("$10.00/hr")).toBeTruthy()
-    expect(screen.getByText("$988.00")).toBeTruthy()
-    expect(screen.queryByLabelText("Description")).toBeNull()
-  })
-
-  it("renders the invoice's own currency, not the account's", () => {
-    renderEditor({
-      currency: "EUR",
-      lines: [makeLine({ description: "Website", amountCents: 100_000 })],
-    })
-    // SETTINGS.currency is USD; this document was snapshotted in EUR.
-    expect(screen.getByText("€1,000.00")).toBeTruthy()
-  })
-
-  /* An empty state teaches the interface rather than stating a void. */
-  it("says where lines come from when there are none", () => {
-    renderEditor({ lines: [] })
-    expect(screen.getByText(/Lines come from the range/)).toBeTruthy()
-  })
-
-  /* Both optional fields, because an absence stated as an absence is the rule
-   * here — the same treatment `formatRate` gives a project with no rate, and
-   * never a blank box beside a label on a document. */
-  it("states an absent purchase order and terms rather than leaving them blank", () => {
-    renderEditor()
-    expect(screen.getAllByText("Not set")).toHaveLength(2)
-  })
-})
-
-/*
- * A date pick is the ONE autosave path that used to discard the user's input
- * on a refusal: the input was controlled straight off `instant`, so a rejected
- * save re-rendered the previous value and the picked date vanished at the same
- * moment the message beside it said the date on screen was the thing to fix.
- * `PartyBlock` and `InlineEdit` both keep the typed value; this now does too.
- */
-describe("the invoice editor — a refused date", () => {
-  it("keeps the picked date on screen beside the refusal", async () => {
-    mutations.updateInvoice.mockRejectedValue({
-      data: { code: "INVALID_DATE", message: "That due date is not a date I can read." },
-    })
-    renderEditor()
-
-    fireEvent.change(screen.getByLabelText("Due date"), {
-      target: { value: "2026-10-01" },
-    })
-
-    await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("not a date I can read")
-    })
-    expect(asInput(screen.getByLabelText("Due date")).value).toBe("2026-10-01")
-  })
-})
-
 /*
  * `invoices.update` deliberately does NOT refuse a due date before its issue
- * date — autosave commits one field per blur, so an ordering rule would accept
- * or refuse the same edit depending on which date was blurred first. The other
- * half of that decision is that something has to draw the relationship, or the
- * mistake is only "visible on the document" to a reader who knew to look.
+ * date — it is a patch and may be handed either date alone. The other half of
+ * that decision is that something has to draw the relationship, or the mistake
+ * is only "visible on the document" to a reader who knew to look. Here it is
+ * drawn from the DRAFT, so it answers before a Save rather than after one.
  */
 describe("the invoice editor — the date advisory", () => {
   it("says when the due date precedes the invoice date, and blocks nothing", () => {
@@ -447,6 +553,18 @@ describe("the invoice editor — the date advisory", () => {
     // error state on it.
     expect(screen.getByLabelText("Due date")).toBeTruthy()
     expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  /* It answers the TYPED date, not the stored one — which is the whole benefit
+   * of buffering here: the warning arrives while the picker is still under the
+   * user's hand, not after a write. */
+  it("appears as soon as a bad date is picked, before any save", () => {
+    renderEditor()
+    expect(screen.queryByRole("status")).toBeNull()
+
+    fireEvent.change(screen.getByLabelText("Due date"), { target: { value: "2026-08-01" } })
+    expect(screen.getByRole("status").textContent).toContain("before the invoice date")
+    expect(mutations.updateInvoice).not.toHaveBeenCalled()
   })
 
   /*
@@ -467,56 +585,17 @@ describe("the invoice editor — the date advisory", () => {
   })
 })
 
-/*
- * The route's own two decisions, tested through the route rather than the
- * editor component: which title the tab gets, and what `/invoices/anything`
- * renders. Before this, a stale bookmark or another account's id put the user
- * on TanStack's built-in error screen with a raw serialised ConvexError and no
- * link back — on what, with `Create invoice` on /reports, is now the app's
- * most-shared URL shape.
- */
-describe("the invoice route", () => {
-  it("names the invoice in the tab title, so two open invoices differ", () => {
+describe("the invoice edit route", () => {
+  it("names the invoice in the tab title, and says it is the editor", () => {
     const head = Route.options.head as (ctx: {
       loaderData?: { number: string }
     }) => { meta: Array<{ title: string }> }
 
     expect(head({ loaderData: { number: "072726-0013" } }).meta[0]?.title).toBe(
-      "Invoice #072726-0013 — Trace"
+      "Edit invoice #072726-0013 — Trace"
     )
     // Still in flight, so there is no number to name yet.
-    expect(head({}).meta[0]?.title).toBe("Invoice — Trace")
-  })
-
-  it("answers a missing invoice with a way back rather than a raw error", () => {
-    // The route's OWN boundary, so it catches both failures this URL has: a
-    // `NOT_FOUND` from `getOwned`, and `/invoices/whatever` failing the
-    // `v.id()` argument validator — which carries no Trace code at all, and
-    // which a layout boundary narrowing on a code would rethrow.
-    expect(Route.options.errorComponent).toBe(InvoiceUnreachable)
-
-    for (const error of [
-      { data: { code: "NOT_FOUND", message: "Not found." } } as unknown as Error,
-      new Error("ArgumentValidationError: Value does not match validator"),
-    ]) {
-      render(<InvoiceUnreachable error={error} />)
-      expect(screen.getByText(/no invoice at this address/)).toBeTruthy()
-      expect(
-        screen.getByRole("link", { name: "Back to invoices" }).getAttribute("href")
-      ).toBe("/invoices")
-      cleanup()
-    }
-  })
-
-  /* An expired session is the LAYOUT boundary's job — it answers with a sign-in
-   * link, which "no such invoice" would replace with a dead end. Rethrowing is
-   * how it gets there, the same device `AuthedErrorBoundary` itself uses. */
-  it("hands an expired session up to the layout boundary instead", () => {
-    const expired = {
-      data: { code: "UNAUTHENTICATED", message: "Not signed in." },
-    } as unknown as Error
-
-    expect(() => render(<InvoiceUnreachable error={expired} />)).toThrow()
+    expect(head({}).meta[0]?.title).toBe("Edit invoice — Trace")
   })
 })
 
@@ -524,11 +603,10 @@ describe("the invoice route", () => {
  * EXPORT PDF — the whole reason the feature exists. "I wanted to be able to
  * export or download the invoice in PDF".
  *
- * What is asserted here is the page's own half of that: the button exists, the
- * document handed to the renderer is THIS invoice, its dates are resolved to
- * days in the user's STORED zone, and the file is saved under a name a client
- * can be told over the phone. The layout of the pages themselves is pure and is
- * asserted directly in `src/lib/export/pdf/invoice-doc.test.ts`.
+ * With a buffered editor it grew a second job: COMMIT FIRST. A PDF built from
+ * what is on screen while the database still holds this morning's values is a
+ * document the freelancer's own record contradicts, and neither party would
+ * know until a payment dispute.
  */
 describe("the invoice editor — Export PDF", () => {
   /** jsdom implements neither half of the object-URL dance `downloadBlob`
@@ -569,6 +647,55 @@ describe("the invoice editor — Export PDF", () => {
     click.mockRestore()
   })
 
+  /* THE ONE THAT MATTERS. The PDF and the stored record are the same document,
+   * and a buffered editor is exactly the machine for making them differ. */
+  it("saves the pending edits before it renders, and prints what it just saved", async () => {
+    const click = stubDownload()
+    const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
+    vi.mocked(invoicePdfBlob).mockResolvedValue(new Blob(["%PDF-"]))
+
+    renderEditor()
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Thanks!" } })
+    fireEvent.click(screen.getByRole("button", { name: /export pdf/i }))
+
+    await waitFor(() => expect(click).toHaveBeenCalled())
+
+    expect(mutations.updateInvoice).toHaveBeenCalledWith({
+      invoiceId: INVOICE_ID,
+      notes: "Thanks!",
+    })
+    // The edit is in the paper too — not the pre-edit value the query still
+    // holds until Convex redelivers the row.
+    expect(vi.mocked(invoicePdfBlob).mock.calls[0][0]).toMatchObject({ notes: "Thanks!" })
+  })
+
+  /* A PDF that does not match the record is the one outcome worse than no PDF. */
+  it("does not export when the save is refused, and says why beside the field", async () => {
+    const click = stubDownload()
+    const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
+    mutations.updateInvoice.mockRejectedValue({
+      data: {
+        code: "TOO_LONG",
+        message: "Keep the notes under 600 characters.",
+        meta: { field: "notes" },
+      },
+    })
+
+    renderEditor()
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "far too long" } })
+    fireEvent.click(screen.getByRole("button", { name: /export pdf/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("600 characters")
+    })
+    expect(vi.mocked(invoicePdfBlob)).not.toHaveBeenCalled()
+    expect(click).not.toHaveBeenCalled()
+    // And no second, vaguer complaint on top of the one that names the field.
+    expect(screen.queryByText("PDF export failed.")).toBeNull()
+
+    click.mockRestore()
+  })
+
   /*
    * The document prints DAYS, and a day only exists once a zone has been
    * chosen. It is the user's STORED zone — never the browser's, never UTC by
@@ -599,7 +726,7 @@ describe("the invoice editor — Export PDF", () => {
   /* A failed export must never be silent: before the report's export menu grew
    * its own catch, a rejection was unhandled and the button simply went back to
    * looking ready, having done nothing. */
-  it("says so when the export fails, and un-sticks the button", async () => {
+  it("says so when the export itself fails, and un-sticks the button", async () => {
     const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
     vi.mocked(invoicePdfBlob).mockRejectedValueOnce(new Error("boom"))
 

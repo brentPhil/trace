@@ -1,10 +1,14 @@
-import { invoiceTotals, taxLineCents } from "@shared/invoiceMath"
 import { formatMoney } from "@shared/money"
 import { formatRate } from "@/lib/format-money"
+import {
+  invoiceMetaRows,
+  invoiceTotalsRows,
+  quantityText,
+} from "@/lib/invoice-document"
 import { rect, text, textWidth, wrapToWidth } from "./ops"
 import { PAGE, PAPER, TYPE } from "./paper"
-import { usDate } from "./report-doc"
 import type { PdfOp, PdfPage } from "./ops"
+import type { InvoiceDoc, InvoiceDocLine } from "@/lib/invoice-document"
 
 /**
  * The invoice, as pages of ops.
@@ -15,9 +19,16 @@ import type { PdfOp, PdfPage } from "./ops"
  * geometry are the parts of a document that break, and they are asserted here
  * against plain objects rather than by extracting text back out of a binary.
  *
- * Layout is the editor's paper area at print fidelity: the head, the two party
- * blocks, the line table, the totals, and the notes at the foot. No chart — an
- * invoice is a demand for money, not an analysis of a fortnight.
+ * GEOMETRY ONLY. What the document SAYS — which meta rows exist, what the
+ * totals block contains, how a quantity or a tax rate reads — moved to
+ * `src/lib/invoice-document.ts` when `/invoices/$invoiceId` became a read-only
+ * record of the same document. Two renderings that each decided those for
+ * themselves would agree on the day they were written and not for long, and the
+ * disagreement would only ever be visible with a client holding the PDF.
+ *
+ * Layout is the record page at print fidelity: the head, the two party blocks,
+ * the line table, the totals, and the notes at the foot. No chart — an invoice
+ * is a demand for money, not an analysis of a fortnight.
  */
 
 const LEFT = PAGE.margin
@@ -25,47 +36,9 @@ const RIGHT = PAGE.width - PAGE.margin
 const TOP = PAGE.height - PAGE.margin
 const BOTTOM = PAGE.margin
 
-/**
- * A line as the document needs it — no Convex ids, no `userId`, no `sortKey`.
- * The caller hands over lines already in print order, which is what
- * `invoices.get` returns.
- */
-export type InvoiceDocLine = {
-  kind: "time" | "custom"
-  description: string
-  /** Hundredths of an hour, the stored unit. 9880 prints as `98.80`. */
-  quantityCentis: number
-  unitCents: number
-  /** STORED, never recomputed from quantity × rate — see the schema comment
-   *  and `invoiceTotals`. This file prints it; it does not derive it. */
-  amountCents: number
-}
-
-/**
- * Everything printed, and nothing else.
- *
- * `issuedOn` / `dueOn` are DAY STRINGS, not instants, and that is the one place
- * this type is deliberately not the stored shape. A day is only a day once a
- * zone has been chosen, the zone is the user's STORED one (never the browser's,
- * never the server's), and resolving it here would make a pure page builder a
- * second reader of settings. The caller — which already holds the zone to render
- * the editor's own date fields — resolves both with `dayOf` and passes the
- * answer, so this file has no clock in it and a test can pin a date without
- * pinning a timezone database.
- */
-export type InvoiceDoc = {
-  number: string
-  billedTo: string
-  payTo: string
-  currency: string
-  issuedOn: string
-  dueOn: string
-  purchaseOrder?: string
-  paymentTerms?: string
-  notes?: string
-  taxes: ReadonlyArray<{ label: string; basisPoints: number }>
-  lines: ReadonlyArray<InvoiceDocLine>
-}
+/* Re-exported from the shape they now live in, so `to-pdf.ts` and the export
+ * button keep importing the document's type from the module that prints it. */
+export type { InvoiceDoc, InvoiceDocLine } from "@/lib/invoice-document"
 
 /**
  * Where the line table's columns sit. Right-aligned columns give their right
@@ -178,18 +151,6 @@ const META_ROW_HEIGHT = 16
 const PARTY_WIDTH = (RIGHT - LEFT) / 2 - GUTTER
 
 /**
- * `825` basis points as `8.25%`, `2000` as `20%`.
- *
- * Trailing zeros dropped, because a tax line reads as a rate a human quoted
- * ("plus 20% VAT"), not as a fixed-precision figure — and `20.00%` beside a
- * label somebody typed is the document looking machine-generated at the one
- * place a client checks arithmetic by hand.
- */
-function percentOfBasisPoints(basisPoints: number): string {
-  return `${String(Number((basisPoints / 100).toFixed(2)))}%`
-}
-
-/**
  * The document head: the title, the meta grid, and the two party blocks —
  * everything above the line table, on the FIRST page only.
  *
@@ -204,37 +165,11 @@ function headOps(invoice: InvoiceDoc): { ops: Array<PdfOp>; tableTop: number } {
     text({ x: LEFT, y: TOP, text: "Invoice", size: TYPE.title, bold: true }),
   ]
 
-  /*
-   * An UNSET optional field is an absent row, never a printed "Not set".
-   *
-   * The editor says "Not set" because there it is an invitation — a control to
-   * click. On paper there is nothing to click, and a line reading `Purchase
-   * order  Not set` on a document sent to a client is the product talking about
-   * its own form fields on someone else's invoice.
-   */
-  /*
-   * No Currency row. Every amount below it is already written by `formatMoney`
-   * in the invoice's own currency, symbol and all, so a row spelling out "USD"
-   * restates what `$530.30` has said four times by the time the reader reaches
-   * the total. The currency is still SNAPSHOT on the document and still what
-   * the figures are formatted from — it just is not a fact the paper has to
-   * state twice. It remains on the editor, where it is a control rather than a
-   * restatement.
-   */
-  const metaRows: Array<[string, string]> = [
-    ["Invoice number", invoice.number],
-    ["Invoice date", usDate(invoice.issuedOn)],
-    ["Due date", usDate(invoice.dueOn)],
-  ]
-  if (invoice.purchaseOrder !== undefined && invoice.purchaseOrder !== "") {
-    metaRows.push(["Purchase order", invoice.purchaseOrder])
-  }
-  if (invoice.paymentTerms !== undefined && invoice.paymentTerms !== "") {
-    metaRows.push(["Payment terms", invoice.paymentTerms])
-  }
-
+  /* Which rows exist, and what they say, is the DOCUMENT's decision and lives
+   * in `invoice-document.ts` — the record page draws the same list. What is
+   * decided here is only where they sit on the paper. */
   let y = TOP - 34
-  for (const [label, value] of metaRows) {
+  for (const { label, value } of invoiceMetaRows(invoice)) {
     ops.push(
       text({ x: LEFT, y, text: label, size: TYPE.tick, color: PAPER.inkMuted }),
       text({ x: LEFT + META_LABEL_WIDTH, y, text: value, size: TYPE.body })
@@ -282,13 +217,6 @@ function columnHeaderOps(y: number): Array<PdfOp> {
     label(COL.amount, "AMOUNT", "right"),
     rect({ x: LEFT, y: y - 7, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
   ]
-}
-
-/** `9880` as `98.80` — hundredths of an hour, printed as the decimal hours the
- *  client multiplies by the rate. The editor's own expression, character for
- *  character, so the screen and the paper cannot round differently. */
-function quantityText(quantityCentis: number): string {
-  return (quantityCentis / 100).toFixed(2)
 }
 
 /** A line's RATE cell. `formatRate` for tracked time (`$10.00/hr` — the
@@ -466,8 +394,19 @@ export function invoiceDocPages(invoice: InvoiceDoc): Array<PdfPage> {
    * Both are sized from their own real content (one row per tax, one line per
    * wrapped note line), never a constant that stops being true.
    */
-  const totalsRows = 2 + invoice.taxes.length // Subtotal, each tax, Total
-  const totalsHeight = TOTALS_GAP + totalsRows * rowSlotHeight(1)
+  /*
+   * The totals block, derived ONCE for both the reservation and the drawing —
+   * and by the same `invoiceTotalsRows` the record page reads. `invoiceTotals`
+   * is called in there, over the STORED `amountCents`, so a printed document
+   * stays a fact about the day it was raised rather than a function of today's
+   * rounding, and the screen and the paper cannot disagree by a cent.
+   *
+   * The height follows the rows rather than a `2 + taxes.length` written out
+   * beside them: a totals block that grows a row and a reserve that does not is
+   * the total printed off the bottom of the page.
+   */
+  const totals = invoiceTotalsRows(invoice.lines, invoice.taxes)
+  const totalsHeight = TOTALS_GAP + totals.length * rowSlotHeight(1)
 
   const noteLines = blockLines(invoice.notes ?? "", RIGHT - LEFT)
   const notesHeight =
@@ -559,40 +498,18 @@ export function invoiceDocPages(invoice: InvoiceDoc): Array<PdfPage> {
     }
 
     if (isLast) {
-      /*
-       * `invoiceTotals` over the STORED `amountCents`, the same function the
-       * list and the editor total with — never quantity × rate recomputed here.
-       * A printed document is a fact about the day it was raised, not a
-       * function of today's rounding rules, and a PDF that disagreed by a cent
-       * with the figure on screen is the one disagreement this feature cannot
-       * afford. Each tax ROW is drawn with `taxLineCents`, the very function
-       * `invoiceTotals` sums, so the rows and the total cannot round apart.
-       */
-      const { subtotalCents, totalCents } = invoiceTotals(invoice.lines, invoice.taxes)
-      const taxRows = invoice.taxes.map((tax) => ({
-        // The rate, appended to whatever the user called the tax: a client
-        // checking `$988.00 + 20%` by hand needs the multiplier on the
-        // document, and a label alone ("VAT") does not carry it. A label that
-        // already spells out its own percent will read it twice, which is worth
-        // less than a tax line nobody can verify.
-        label: `${tax.label} ${percentOfBasisPoints(tax.basisPoints)}`,
-        cents: taxLineCents(subtotalCents, tax.basisPoints),
-      }))
-
       ops.push(
         rect({ x: LEFT, y: cursor - 2, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule })
       )
       cursor -= TOTALS_GAP
-      ops.push(...totalsRowOps(cursor - LINE_HEIGHT, "Subtotal", subtotalCents, currency))
-      cursor -= rowSlotHeight(1)
-      for (const row of taxRows) {
-        ops.push(...totalsRowOps(cursor - LINE_HEIGHT, row.label, row.cents, currency))
+      for (const row of totals) {
+        ops.push(
+          ...totalsRowOps(cursor - LINE_HEIGHT, row.label, row.cents, currency, {
+            strong: row.strong,
+          })
+        )
         cursor -= rowSlotHeight(1)
       }
-      ops.push(
-        ...totalsRowOps(cursor - LINE_HEIGHT, "Total", totalCents, currency, { strong: true })
-      )
-      cursor -= rowSlotHeight(1)
 
       /*
        * THE NOTES, at the foot, on the last page, under the total.

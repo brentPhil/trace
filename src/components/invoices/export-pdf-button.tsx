@@ -47,9 +47,33 @@ type InvoiceForExport = {
 export function ExportPdfButton({
   invoice,
   timeZone,
+  beforeExport,
 }: {
   invoice: InvoiceForExport
   timeZone: string
+  /**
+   * Run first; a `false` cancels the export.
+   *
+   * The editor passes its Save here, because a buffered editor makes exporting
+   * and storing two different acts and lets them disagree — a PDF built from
+   * what is on screen while the database still holds what was there this
+   * morning. The client would be holding a document the freelancer's own record
+   * contradicts, and neither of them would know.
+   *
+   * A `false` means the save was REFUSED, and then nothing is exported and
+   * nothing is said here: the refusal is already on screen beside the field it
+   * came from, and a toast on top of it would only take the eye away from the
+   * text that needs correcting. A PDF that does not match the record is the one
+   * outcome worse than no PDF.
+   *
+   * The record page passes nothing: there is no pending edit there to commit,
+   * because there is nothing to edit.
+   *
+   * It must REPORT a refusal, not throw one — a rejection here would land in the
+   * catch below and be reported as "PDF export failed", which is a sentence
+   * about the wrong half of what just happened.
+   */
+  beforeExport?: () => Promise<boolean>
 }) {
   const [busy, setBusy] = useState(false)
   const toasts = Toast.useToastManager()
@@ -57,6 +81,8 @@ export function ExportPdfButton({
   async function run() {
     setBusy(true)
     try {
+      if (beforeExport !== undefined && !(await beforeExport())) return
+
       const issuedOn = dayOf(invoice.issuedAt, timeZone)
       const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
       const blob = await invoicePdfBlob({

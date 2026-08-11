@@ -1,17 +1,13 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
+import { Pencil } from "lucide-react"
 import { ExportPdfButton } from "@/components/invoices/export-pdf-button"
-import { InvoiceMeta } from "@/components/invoices/invoice-meta"
-import { PartyBlock } from "@/components/invoices/party-block"
+import { InvoiceRecord } from "@/components/invoices/invoice-record"
+import { buttonVariants } from "@/components/ui/button"
 import { Empty } from "@/components/ui/empty"
-import { Toast } from "@/components/ui/toast"
-import { useInvoiceMutations } from "@/hooks/use-invoice-mutations"
-import { errorMessage } from "@/lib/error-message"
-import { formatRate } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
 import { traceErrorCode } from "@shared/codes"
-import { formatMoney, supportedCurrencies } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
 
@@ -19,14 +15,19 @@ import type { Id } from "../../../convex/_generated/dataModel"
  * `invoices_.$invoiceId`, with the underscore — and the URL is still
  * `/invoices/$invoiceId`.
  *
- * The plan names this file `invoices.$invoiceId.tsx`. Written that way,
- * TanStack's flat routing makes it a CHILD of `/_authed/invoices`, so
- * `/invoices/072726-0013` renders the LIST and this page appears only inside
- * an `<Outlet />` that a list of invoices has no reason to carry. The trailing
- * underscore is the router's own escape hatch for exactly this case: same
- * path, no nesting. The alternative was splitting the list into
- * `invoices.index.tsx` beneath an `invoices.tsx` layout — three files and a
- * moved component to say "these are two pages, not one inside another".
+ * Written as `invoices.$invoiceId.tsx`, TanStack's flat routing makes this a
+ * CHILD of `/_authed/invoices`, so `/invoices/072726-0013` renders the LIST and
+ * this page appears only inside an `<Outlet />` that a list of invoices has no
+ * reason to carry. The trailing underscore is the router's own escape hatch for
+ * exactly this case: same path, no nesting. The alternative was splitting the
+ * list into `invoices.index.tsx` beneath an `invoices.tsx` layout — three files
+ * and a moved component to say "these are two pages, not one inside another".
+ *
+ * The editor beside it (`invoices_.$invoiceId_.edit.tsx`) needs the escape a
+ * SECOND time, on the `$invoiceId` segment, for the same reason one level down.
+ * Check `src/routeTree.gen.ts` after touching either: both must parent to
+ * `AuthedRoute`, and a route that has quietly become a child of the other
+ * renders the wrong component at a URL that still looks right.
  */
 export const Route = createFileRoute("/_authed/invoices_/$invoiceId")({
   /*
@@ -90,6 +91,10 @@ export const Route = createFileRoute("/_authed/invoices_/$invoiceId")({
  * words and its own way back, and a `NOT_FOUND` arm on the layout would give
  * every one of them the same ones.
  *
+ * Exported and shared with the editor route beside it, which has exactly the
+ * same two failures at exactly the same id — a second copy would be a second
+ * sentence for one fact.
+ *
  * `UNAUTHENTICATED` is rethrown deliberately: an expired session is the layout
  * boundary's job and it answers with a sign-in link, which "no such invoice"
  * would replace with a dead end.
@@ -114,38 +119,36 @@ export function InvoiceUnreachable({ error }: { error: Error }) {
 
 function InvoiceRoute() {
   const { invoiceId } = Route.useParams()
-  return <InvoiceEditor invoiceId={invoiceId as Id<"invoices">} />
+  return <InvoicePage invoiceId={invoiceId as Id<"invoices">} />
 }
 
 /**
- * The invoice document's head, editable in place.
+ * The invoice, as the client received it.
+ *
+ * THE RECORD, NOT THE EDITOR — and that swap is the reason this page exists in
+ * this shape. `/invoices/$invoiceId` is what the list links to and what gets
+ * pasted into a message, and the question asked at it is "what did I send
+ * them?". A form with the values already in its boxes cannot answer that: an
+ * input looks identical whether its contents were sent last month or typed
+ * thirty seconds ago and abandoned, and the two mean opposite things when a
+ * client is disputing a figure. Editing moved one segment down, to
+ * `/invoices/$invoiceId/edit`, where a control means what a control means.
+ *
+ * It is the same document the PDF prints, drawn from the same derivations —
+ * see `InvoiceRecord` and `src/lib/invoice-document.ts`.
+ *
+ * STILL NO STATUS. There is no draft/issued/paid, nothing freezes, and there is
+ * nothing to unlock: read-only here is a rendering, not a state the invoice is
+ * in. `Edit` is always available, and `invoices.update` still refuses nothing on
+ * state.
  *
  * Exported and taking its id as a prop — the same split every route test in
  * this directory relies on, so the page can be rendered against a seeded query
  * client with no router context.
- *
- * NO SAVE BUTTON. Every field autosaves on blur, as every other editable
- * surface in this app does.
- *
- * AND NO STATUS, which is the shape of this page rather than a missing part of
- * it. There is no draft/issued/paid, nothing freezes, and there is nothing to
- * unlock: an invoice is a document you edit and export, editable for as long as
- * it exists, and `invoices.update` enforces exactly that by refusing nothing on
- * state. Export PDF sits top-right, and is the only thing that does.
- *
- * The lines, taxes and totals are Task 6; they render here read-only so the
- * page is a document rather than a form with the money missing.
  */
-export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
+export function InvoicePage({ invoiceId }: { invoiceId: Id<"invoices"> }) {
   const { data: invoice } = useSuspenseQuery(convexQuery(api.invoices.get, { invoiceId }))
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
-  const { updateInvoice } = useInvoiceMutations()
-  const toasts = Toast.useToastManager()
-
-  /** Rethrows on purpose: each field shows its own refusal, beside itself. */
-  const save = async (patch: Omit<Parameters<typeof updateInvoice>[0], "invoiceId">) => {
-    await updateInvoice({ ...patch, invoiceId })
-  }
 
   return (
     <div className="flex flex-col">
@@ -169,236 +172,35 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
               </li>
             </ol>
           </nav>
+
           {/*
-            Top-right, opposite the breadcrumb: the one thing this page is FOR.
-            Every field here autosaves, so there is no Save for it to be
-            confused with — it is the document leaving the app, not a commit.
+            Top-right, opposite the breadcrumb: the two things you do to a
+            finished document. Export is the one this feature exists for, so it
+            keeps the outline; Edit is the quieter of the two because arriving
+            here to change something is the rarer errand.
           */}
-          <ExportPdfButton invoice={invoice} timeZone={settings.timezone} />
+          <div className="flex items-center gap-2">
+            {/* A `<Link>` wearing the button's own classes, the idiom
+                `routes/index.tsx` already uses: navigation is an anchor, and an
+                anchor is what gives it a middle-click, a right-click menu and a
+                real href in the status bar. A `<button>` that navigates has
+                none of those. */}
+            <Link
+              to="/invoices/$invoiceId/edit"
+              params={{ invoiceId }}
+              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+            >
+              <Pencil className="size-4" />
+              Edit
+            </Link>
+            <ExportPdfButton invoice={invoice} timeZone={settings.timezone} />
+          </div>
         </div>
 
         <h1 className="text-sm font-semibold">Invoice</h1>
 
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-          <InvoiceMeta
-            number={invoice.number}
-            issuedAt={invoice.issuedAt}
-            dueAt={invoice.dueAt}
-            purchaseOrder={invoice.purchaseOrder}
-            paymentTerms={invoice.paymentTerms}
-            timeZone={settings.timezone}
-            onChange={save}
-          />
-          <LogoSlot />
-        </div>
-
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-          <PartyBlock
-            label="Billed to"
-            value={invoice.billedTo}
-            placeholder={"Client name\nStreet\nCity, country"}
-            onCommit={async (billedTo) => await save({ billedTo })}
-          />
-          <PartyBlock
-            label="Pay to"
-            value={invoice.payTo}
-            placeholder={"Your name\nStreet\nCity, country"}
-            onCommit={async (payTo) => await save({ payTo })}
-          />
-          <CurrencyBlock
-            currency={invoice.currency}
-            onChange={(currency) => {
-              void save({ currency }).catch((thrown: unknown) => {
-                toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
-              })
-            }}
-          />
-        </div>
-
-        <Lines lines={invoice.lines} currency={invoice.currency} />
-
-        {/*
-          THE FOOT OF THE DOCUMENT, and that is why it is here rather than in
-          the meta grid at the top. This is a message to the client — where to
-          send the money, a thank-you, the terms the one-line `Payment terms`
-          field is too short to hold — and it is read after the total, not
-          beside the invoice date.
-
-          `PartyBlock` itself rather than a second multiline editor: it already
-          keeps its newlines, saves on blur, reverts on Escape, and keeps the
-          typed text on screen when the server refuses it with the reason
-          beside it. A user should not have to learn two editing behaviours in
-          one product, and this is prose printed verbatim exactly as an address
-          block is.
-
-          `?? ""` because the column is ABSENT when unset — `invoices.update`
-          clears it rather than storing "", so there is one spelling of "no
-          notes" — while a textarea's value is always a string.
-        */}
-        <div className="max-w-prose">
-          <PartyBlock
-            label="Notes"
-            value={invoice.notes ?? ""}
-            placeholder={"Bank transfer to …\nAccount 1234-5678\n\nThank you!"}
-            onCommit={async (notes) => await save({ notes })}
-          />
-        </div>
+        <InvoiceRecord invoice={invoice} timeZone={settings.timezone} />
       </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-
-/**
- * The logo, as a reserved space and nothing more.
- *
- * Uploading one needs Convex file storage and is deliberately deferred — the
- * plan names it as the natural first follow-up. It renders as a dashed
- * placeholder rather than a `+ Logo` button because a control that cannot do
- * anything is worse than an obvious gap: the gap is honest, the button is a
- * promise. `aria-hidden` for the same reason — there is nothing here to
- * announce and nothing to do.
- */
-function LogoSlot() {
-  return (
-    <div
-      aria-hidden="true"
-      className={cn(
-        "hidden h-20 w-32 shrink-0 items-center justify-center rounded-md",
-        "border border-dashed border-edge-soft text-xs text-muted-foreground sm:flex"
-      )}
-    >
-      Logo
-    </div>
-  )
-}
-
-/**
- * The invoice's own currency, which is a SNAPSHOT rather than the account's.
- *
- * `userSettings.currency` may change; this document may not follow it. The
- * list on /settings is narrowed to currencies whose minor unit really is a
- * hundredth (see `supportedCurrencies`), and `invoices.update` checks the same
- * list server-side, so the picker and the validator cannot disagree.
- */
-function CurrencyBlock({
-  currency,
-  onChange,
-}: {
-  currency: string
-  onChange: (currency: string) => void
-}) {
-  const supported = supportedCurrencies()
-  const codes = supported.length > 0 ? supported : [currency, "USD"]
-  // A stored code outside the list is still shown, so a value already saved is
-  // never silently swapped for something else under the user — the same
-  // fallback /settings' own field makes.
-  const options = codes.includes(currency) ? codes : [currency, ...codes]
-
-  return (
-    <div className="flex shrink-0 flex-col gap-1.5">
-      <span className="text-[0.8125rem] font-medium text-muted-foreground">Currency</span>
-      <select
-        aria-label="Currency"
-        value={currency}
-        onChange={(event) => onChange(event.target.value)}
-        className={cn(
-          "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        )}
-      >
-        {options.map((code) => (
-          <option key={code} value={code}>
-            {code}
-          </option>
-        ))}
-      </select>
-    </div>
-  )
-}
-
-type Line = {
-  _id: Id<"invoiceLines">
-  kind: "time" | "custom"
-  description: string
-  quantityCentis: number
-  unitCents: number
-  amountCents: number
-}
-
-/**
- * The lines, READ-ONLY.
- *
- * Editing them — a RATE column that can be typed into, custom charges, taxes,
- * the totals and the `AMOUNT` info affordance that states the derivation — is
- * Task 6, and none of it is here. What is here is the document's own figures,
- * because an invoice page showing an address and no money is not a document
- * anybody would recognise.
- *
- * Every number is the STORED one. Nothing on this page recomputes an amount
- * from a quantity and a rate: the printed figure is a fact about the day the
- * invoice was raised, not a function of today's rounding.
- */
-function Lines({ lines, currency }: { lines: Array<Line>; currency: string }) {
-  if (lines.length === 0) {
-    return (
-      <Empty>
-        No lines on this invoice. Lines come from the range it was raised from on
-        Reports — billable time on a project with a rate. Time nobody has priced
-        is left off rather than billed at nothing.
-      </Empty>
-    )
-  }
-
-  return (
-    <div className="overflow-x-auto rounded-md border border-edge-soft">
-      <table className="w-full table-fixed border-collapse text-sm">
-        <caption className="sr-only">Invoice lines, in the order they print</caption>
-        <thead>
-          <tr className="border-b border-edge-soft text-[0.8125rem] font-medium text-muted-foreground">
-            <th scope="col" className="px-3 py-2 text-left">
-              Description
-            </th>
-            <th scope="col" className="w-24 px-3 py-2 text-right">
-              Quantity
-            </th>
-            <th scope="col" className="w-32 px-3 py-2 text-right">
-              Rate
-            </th>
-            <th scope="col" className="w-32 px-3 py-2 text-right">
-              Amount
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line) => (
-            <tr key={line._id} className="border-b border-edge-soft last:border-b-0">
-              <th scope="row" className="truncate px-3 py-2 text-left font-normal">
-                {line.description}
-              </th>
-              {/* Decimal hours, 2 dp, floored — a QUANTITY, not money, so Ink.
-                  A billable duration is time that will become money and renders
-                  like every other duration (The Two Temperatures Rule). */}
-              <td className="px-3 py-2 text-right tabular">
-                {(line.quantityCentis / 100).toFixed(2)}
-              </td>
-              {/* Muted, the same treatment /projects gives a project's rate:
-                  it is the multiplier beside the figure, not the figure. */}
-              <td className="px-3 py-2 text-right tabular text-muted-foreground">
-                {line.kind === "time"
-                  ? formatRate(line.unitCents, currency)
-                  : formatMoney(line.unitCents, currency)}
-              </td>
-              {/* The one brass column: a currency amount, in this invoice's own
-                  snapshotted currency. */}
-              <td className="px-3 py-2 text-right font-medium tabular text-brass">
-                {formatMoney(line.amountCents, currency)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   )
 }
