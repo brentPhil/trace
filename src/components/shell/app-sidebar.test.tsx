@@ -19,10 +19,11 @@ function mount(path: string, onSignOut = vi.fn()) {
 }
 
 describe("AppSidebar", () => {
-  it("lists exactly the four destinations", () => {
+  it("lists exactly the five destinations, in the order of the work", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Timer",
       "Reports",
+      "Invoices",
       "Projects",
       "Settings",
     ])

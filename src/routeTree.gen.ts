@@ -15,6 +15,7 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as AuthedInvoicesRouteImport } from './routes/_authed/invoices'
 import { Route as AuthedProjectsRouteImport } from './routes/_authed/projects'
 import { Route as AuthedReportsRouteImport } from './routes/_authed/reports'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
@@ -50,6 +51,11 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthedInvoicesRoute = AuthedInvoicesRouteImport.update({
+  id: '/invoices',
+  path: '/invoices',
+  getParentRoute: () => AuthedRoute,
+} as any)
 const AuthedProjectsRoute = AuthedProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/invoices': typeof AuthedInvoicesRoute
   '/projects': typeof AuthedProjectsRoute
   '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/invoices': typeof AuthedInvoicesRoute
   '/projects': typeof AuthedProjectsRoute
   '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
@@ -108,6 +116,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/_authed/invoices': typeof AuthedInvoicesRoute
   '/_authed/projects': typeof AuthedProjectsRoute
   '/_authed/reports': typeof AuthedReportsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
+    | '/invoices'
     | '/projects'
     | '/reports'
     | '/settings'
@@ -134,6 +144,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
+    | '/invoices'
     | '/projects'
     | '/reports'
     | '/settings'
@@ -147,6 +158,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/reset-password'
     | '/signup'
+    | '/_authed/invoices'
     | '/_authed/projects'
     | '/_authed/reports'
     | '/_authed/settings'
@@ -208,6 +220,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authed/invoices': {
+      id: '/_authed/invoices'
+      path: '/invoices'
+      fullPath: '/invoices'
+      preLoaderRoute: typeof AuthedInvoicesRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/projects': {
       id: '/_authed/projects'
       path: '/projects'
@@ -247,6 +266,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedRouteChildren {
+  AuthedInvoicesRoute: typeof AuthedInvoicesRoute
   AuthedProjectsRoute: typeof AuthedProjectsRoute
   AuthedReportsRoute: typeof AuthedReportsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
@@ -254,6 +274,7 @@ interface AuthedRouteChildren {
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
+  AuthedInvoicesRoute: AuthedInvoicesRoute,
   AuthedProjectsRoute: AuthedProjectsRoute,
   AuthedReportsRoute: AuthedReportsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,

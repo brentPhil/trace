@@ -8,11 +8,15 @@
 import { convexTest } from "convex-test"
 import { describe, expect, it, vi } from "vitest"
 import schema from "./schema"
-import { internal } from "./_generated/api"
+import { api, internal } from "./_generated/api"
 import { traceErrorCode } from "./lib/codes"
 import { parseInvoiceSequence } from "./lib/invoiceNumber"
 import { NO_PROJECT_LABEL } from "./lib/labels"
-import { INVOICE_NUMBER_SCAN_LIMIT, INVOICE_SCAN_LIMIT } from "./lib/scan"
+import {
+  INVOICE_LIST_LIMIT,
+  INVOICE_NUMBER_SCAN_LIMIT,
+  INVOICE_SCAN_LIMIT,
+} from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
 
 const modules = import.meta.glob("./**/*.*s")
@@ -20,6 +24,7 @@ const modules = import.meta.glob("./**/*.*s")
 const setup = () => convexTest(schema, modules)
 
 const ALICE = "user_alice"
+const BOB = "user_bob"
 const HOUR = 3_600_000
 
 const MON = Date.parse("2026-08-03T00:00:00Z")
@@ -513,5 +518,203 @@ describe("invoices.createFromRange", () => {
 
     expect(invoice.lines.map((l) => l.description)).toEqual(["Charlie", "Bravo", "Alpha"])
     expect(invoice.lines.map((l) => l.sortKey)).toEqual([0, 1, 2])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// list
+// ---------------------------------------------------------------------------
+
+/*
+ * Rows are inserted directly rather than raised through `createFromRange`,
+ * because every property this list has is a property of the ROWS — the order
+ * they come back in, whose they are, whether they are in the trash, and how
+ * many of them there are. Going through the mutation would mean stamping
+ * `issuedAt` from a mocked clock and seeding a range of entries per invoice to
+ * assert an ordering that has nothing to do with either.
+ */
+type InvoiceOver = {
+  number: string
+  issuedAt: number
+  userId?: string
+  status?: "draft" | "issued" | "paid"
+  billedTo?: string
+  currency?: string
+  taxes?: Array<{ label: string; basisPoints: number }>
+  deletedAt?: number | null
+}
+
+async function seedInvoice(
+  t: ReturnType<typeof setup>,
+  over: InvoiceOver
+): Promise<Id<"invoices">> {
+  return await t.run(async (ctx) => {
+    return await ctx.db.insert("invoices", {
+      userId: over.userId ?? ALICE,
+      clientKey: `seed-${over.userId ?? ALICE}-${over.number}`,
+      number: over.number,
+      status: over.status ?? "draft",
+      clientId: null,
+      billedTo: over.billedTo ?? "Acme Corp\n1 Way, Springfield",
+      payTo: "",
+      currency: over.currency ?? "USD",
+      issuedAt: over.issuedAt,
+      dueAt: over.issuedAt + 30 * 24 * HOUR,
+      taxes: over.taxes ?? [],
+      sourceFromMs: null,
+      sourceToMs: null,
+      unratedMsAtCreation: 0,
+      updatedAt: over.issuedAt,
+      deletedAt: over.deletedAt ?? null,
+    })
+  })
+}
+
+async function seedLine(
+  t: ReturnType<typeof setup>,
+  invoiceId: Id<"invoices">,
+  over: { amountCents: number; sortKey?: number; userId?: string }
+) {
+  await t.run(async (ctx) => {
+    await ctx.db.insert("invoiceLines", {
+      userId: over.userId ?? ALICE,
+      invoiceId,
+      kind: "time",
+      description: "Work",
+      quantityCentis: 100,
+      unitCents: over.amountCents,
+      amountCents: over.amountCents,
+      sortKey: over.sortKey ?? 0,
+      deletedAt: null,
+    })
+  })
+}
+
+const listAs = async (t: ReturnType<typeof setup>, userId = ALICE) =>
+  await t.query(internal.invoices.listAs, { userId })
+
+describe("invoices.list", () => {
+  it("rejects an anonymous caller", async () => {
+    const t = setup()
+    await expectCode(t.query(api.invoices.list, {}), "UNAUTHENTICATED")
+  })
+
+  /*
+   * Descending `by_user_issued`, not insertion order — the two are seeded
+   * apart here on purpose. A list ordered by `_creationTime` would pass an
+   * ascending-vs-descending check and still put a back-dated invoice in the
+   * wrong place, which is exactly what a freelancer raising last month's
+   * invoice today produces.
+   */
+  it("returns the newest issued invoice first", async () => {
+    const t = setup()
+    await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await seedInvoice(t, { number: "020126-0002", issuedAt: MON + 5 * 24 * HOUR })
+    await seedInvoice(t, { number: "030126-0003", issuedAt: MON + 2 * 24 * HOUR })
+
+    const { invoices } = await listAs(t)
+    expect(invoices.map((row) => row.number)).toEqual([
+      "020126-0002",
+      "030126-0003",
+      "010126-0001",
+    ])
+  })
+
+  it("totals the stored line amounts and this invoice's own taxes", async () => {
+    const t = setup()
+    const invoiceId = await seedInvoice(t, {
+      number: "010126-0001",
+      issuedAt: MON,
+      taxes: [
+        { label: "GST", basisPoints: 500 },
+        { label: "PST", basisPoints: 500 },
+      ],
+    })
+    await seedLine(t, invoiceId, { amountCents: 98_800, sortKey: 0 })
+    await seedLine(t, invoiceId, { amountCents: 1_200, sortKey: 1 })
+
+    const { invoices } = await listAs(t)
+    // The literals, not `invoiceTotals(...)` — asserting against the same
+    // function the query calls would prove nothing about either. $1,000.00 of
+    // lines, then two 5% taxes applied to that SUBTOTAL rather than compounded.
+    expect(invoices).toHaveLength(1)
+    expect(invoices[0]?.totalCents).toBe(110_000)
+  })
+
+  /*
+   * A total is an N+1 read, so the one thing that can silently go wrong is a
+   * line query keyed on the wrong invoice — which no single-invoice fixture
+   * can catch, because with one invoice every line belongs to it.
+   */
+  it("totals each invoice from its own lines", async () => {
+    const t = setup()
+    const first = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    const second = await seedInvoice(t, {
+      number: "010126-0002",
+      issuedAt: MON + HOUR,
+    })
+    await seedLine(t, first, { amountCents: 500 })
+    await seedLine(t, second, { amountCents: 25_000 })
+
+    const { invoices } = await listAs(t)
+    expect(invoices.map((row) => [row.number, row.totalCents])).toEqual([
+      ["010126-0002", 25_000],
+      ["010126-0001", 500],
+    ])
+  })
+
+  it("never returns another user's invoices", async () => {
+    const t = setup()
+    const bobInvoice = await seedInvoice(t, {
+      userId: BOB,
+      number: "010126-0001",
+      issuedAt: MON,
+    })
+    await seedLine(t, bobInvoice, { userId: BOB, amountCents: 99_999 })
+
+    expect(await listAs(t, ALICE)).toEqual({ invoices: [], truncated: false })
+    expect((await listAs(t, BOB)).invoices).toHaveLength(1)
+  })
+
+  it("excludes a soft-deleted invoice", async () => {
+    const t = setup()
+    await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await seedInvoice(t, {
+      number: "010126-0002",
+      issuedAt: MON + HOUR,
+      deletedAt: MON + 2 * HOUR,
+    })
+
+    const { invoices } = await listAs(t)
+    expect(invoices.map((row) => row.number)).toEqual(["010126-0001"])
+  })
+
+  /*
+   * The v1 trade: the newest page, no "load older", and `truncated` so the
+   * screen can SAY the history goes further back. A list that stopped at the
+   * cap with nothing to mark it would read as "this account has 50 invoices".
+   */
+  it("caps the page and reports that older invoices exist", async () => {
+    const t = setup()
+    for (let i = 0; i <= INVOICE_LIST_LIMIT; i += 1) {
+      await seedInvoice(t, {
+        number: `010126-${String(i).padStart(4, "0")}`,
+        issuedAt: MON + i * HOUR,
+      })
+    }
+
+    const { invoices, truncated } = await listAs(t)
+    expect(invoices).toHaveLength(INVOICE_LIST_LIMIT)
+    expect(truncated).toBe(true)
+    // Newest first, so the ONE dropped invoice is the oldest — never the one
+    // just raised.
+    expect(invoices[0]?.number).toBe(`010126-${String(INVOICE_LIST_LIMIT).padStart(4, "0")}`)
+  })
+
+  it("reports no truncation when the whole history fits", async () => {
+    const t = setup()
+    await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+
+    expect((await listAs(t)).truncated).toBe(false)
   })
 })

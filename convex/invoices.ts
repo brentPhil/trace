@@ -5,11 +5,15 @@ import { getOwned } from "./owned"
 import { traceError } from "./errors"
 import { rangeBreakdownImpl } from "./entries"
 import { centiHours } from "./lib/duration"
-import { lineAmountCents } from "./lib/invoiceMath"
+import { invoiceTotals, lineAmountCents } from "./lib/invoiceMath"
 import { nextInvoiceNumber } from "./lib/invoiceNumber"
 import { invoiceDoc, invoiceLineDoc } from "./lib/docs"
 import { NO_PROJECT_LABEL } from "./lib/labels"
-import { INVOICE_NUMBER_SCAN_LIMIT, INVOICE_SCAN_LIMIT } from "./lib/scan"
+import {
+  INVOICE_LIST_LIMIT,
+  INVOICE_NUMBER_SCAN_LIMIT,
+  INVOICE_SCAN_LIMIT,
+} from "./lib/scan"
 import { currencyOf, defaultRateCents } from "./settings"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
@@ -63,6 +67,107 @@ export const getAs = internalQuery({
   args: { ...getArgs, userId: v.string() },
   returns: invoiceWithLines,
   handler: async (ctx, args) => await getImpl(ctx, args.userId, args.invoiceId),
+})
+
+// ---------------------------------------------------------------------------
+// list
+// ---------------------------------------------------------------------------
+
+/**
+ * A row of /invoices: the fields the list prints, plus the one figure that is
+ * NOT on the invoice document — its total, which lives in the lines.
+ *
+ * `.pick`/`.extend` off `invoiceDoc` rather than a second hand-written object,
+ * for the reason convex/lib/docs.ts gives: a return validator written out again
+ * drifts from the schema and then rejects correct documents at runtime.
+ */
+const invoiceListRow = invoiceDoc
+  .pick("_id", "number", "status", "billedTo", "currency", "issuedAt")
+  .extend({ totalCents: v.number() })
+
+const listReturns = v.object({
+  invoices: v.array(invoiceListRow),
+  /** True when invoices older than this page exist. The list must say so —
+   *  see INVOICE_LIST_LIMIT in convex/lib/scan.ts for why there is a cap and
+   *  why silently stopping at it would be a lie. */
+  truncated: v.boolean(),
+})
+
+type InvoiceListRow = {
+  _id: Id<"invoices">
+  number: string
+  status: Doc<"invoices">["status"]
+  billedTo: string
+  currency: string
+  issuedAt: number
+  totalCents: number
+}
+
+/**
+ * The newest invoices, each totalled.
+ *
+ * DESCENDING `by_user_issued`, because "the one I raised last week" is the
+ * question a list of invoices gets asked, and it is answered at the top.
+ *
+ * The total is an N+1 read — one `invoiceLines` query per row — which is what
+ * `INVOICE_LIST_LIMIT` exists to bound; see that constant for the byte
+ * arithmetic. One row past the limit is read so `truncated` can distinguish
+ * "this is all of them" from "this is the newest 50", which the list has to
+ * state rather than leave the reader to assume.
+ */
+async function listImpl(
+  ctx: QueryCtx,
+  userId: string
+): Promise<{ invoices: Array<InvoiceListRow>; truncated: boolean }> {
+  const page = await ctx.db
+    .query("invoices")
+    .withIndex("by_user_issued", (q) => q.eq("userId", userId))
+    .order("desc")
+    .take(INVOICE_LIST_LIMIT + 1)
+
+  // Trashed rows are dropped AFTER the take, so they cost a slot on the page —
+  // the same trade `clients.listImpl` makes. `deletedAt` is not in this index's
+  // key, and a second index for a column that is null in every account which
+  // has not been deleting invoices is not worth its write cost.
+  const shown = page
+    .slice(0, INVOICE_LIST_LIMIT)
+    .filter((row) => row.deletedAt === null)
+
+  const invoices: Array<InvoiceListRow> = []
+  for (const invoice of shown) {
+    const lines = await ctx.db
+      .query("invoiceLines")
+      .withIndex("by_user_invoice", (q) =>
+        q.eq("userId", userId).eq("invoiceId", invoice._id)
+      )
+      .collect()
+    invoices.push({
+      _id: invoice._id,
+      number: invoice.number,
+      status: invoice.status,
+      billedTo: invoice.billedTo,
+      currency: invoice.currency,
+      issuedAt: invoice.issuedAt,
+      // The SAME `invoiceTotals` the document and the editor print, over the
+      // STORED line amounts and this invoice's own taxes — so the figure in
+      // the list and the figure on the invoice cannot come out different.
+      totalCents: invoiceTotals(lines, invoice.taxes).totalCents,
+    })
+  }
+
+  return { invoices, truncated: page.length > INVOICE_LIST_LIMIT }
+}
+
+export const list = query({
+  args: {},
+  returns: listReturns,
+  handler: async (ctx) => await listImpl(ctx, await requireUserId(ctx)),
+})
+
+export const listAs = internalQuery({
+  args: { userId: v.string() },
+  returns: listReturns,
+  handler: async (ctx, args) => await listImpl(ctx, args.userId),
 })
 
 // ---------------------------------------------------------------------------

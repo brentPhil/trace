@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { Clock, FolderKanban, Settings, Table2 } from "lucide-react"
+import { Clock, FileText, FolderKanban, Settings, Table2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Sidebar,
@@ -14,20 +14,31 @@ import {
 import type { LucideIcon } from "lucide-react"
 
 /**
- * The four destinations, as data.
+ * The five destinations, as data.
  *
  * Exported so a test can assert the set without rendering, and so the count is
- * checkable at a glance: four, and adding a fifth should be an argument, not an
+ * checkable at a glance: five, and adding a sixth should be an argument, not an
  * edit. Toggl's web app has a two-level nav with a dozen entries and the tracker
  * itself is one of them.
+ *
+ * THE ARGUMENT FOR THE FIFTH, since this list stood at four and said so. An
+ * invoice is not a view of a report. /reports answers "where did this period
+ * go" and every control on it narrows a range; an invoice is a document that
+ * outlives the range it was raised from, is numbered, is sent, and is later
+ * looked up by its number rather than by its dates. Filing it as a mode of
+ * Reports would mean the only way back to last quarter's invoice is
+ * reconstructing the filter that produced it. It goes BETWEEN Reports and
+ * Projects because that is the order of the work: track, review, bill, and the
+ * two settings-shaped destinations stay at the end.
  */
 export const NAV_ITEMS: Array<{
-  to: "/timer" | "/reports" | "/projects" | "/settings"
+  to: "/timer" | "/reports" | "/invoices" | "/projects" | "/settings"
   label: string
   icon: LucideIcon
 }> = [
   { to: "/timer", label: "Timer", icon: Clock },
   { to: "/reports", label: "Reports", icon: Table2 },
+  { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/settings", label: "Settings", icon: Settings },
 ]

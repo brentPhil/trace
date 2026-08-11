@@ -111,6 +111,43 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
 export const INVOICE_NUMBER_SCAN_LIMIT = 2_000
 
 /**
+ * How many `invoices` rows `invoices.list` hands back, newest first.
+ *
+ * Unlike the number scan above, this one runs in its OWN query rather than
+ * inside `createFromRange`'s mutation, so it has the whole 8 MiB transaction to
+ * spend rather than what an entry scan left behind. It still does not spend it,
+ * because the invoice rows are not what costs: the list prints a per-invoice
+ * TOTAL, a total is `invoiceTotals` over that invoice's stored `invoiceLines`,
+ * and so the read is a page of invoices PLUS every line of every one of them.
+ *
+ * The arithmetic, on the same per-row accounting `INVOICE_NUMBER_SCAN_LIMIT`
+ * above uses. An `invoices` row is ~800 B (`billedTo` bounded by clients.ts's
+ * `MAX_NAME_LENGTH` + `MAX_ADDRESS_LENGTH`, beside ids and numbers). An
+ * `invoiceLines` row is a description, four numbers and two ids — call it
+ * ~400 B. So this page's worst case is 50 x (800 + M x 400) bytes for M lines
+ * an invoice: at M = 200 that is ~4.0 MB, half the ceiling, across 50 x 201 =
+ * 10,050 documents against the 16,384-document limit.
+ *
+ * WHAT BOUNDS M: nothing, honestly. `createFromRange` writes one line per
+ * project with billable time in the range, which is bounded only by how many
+ * projects an account has, and the editor adds custom charges with no cap at
+ * all. M = 200 above is a working figure for an invoice a human raises and
+ * prints, not a proof — and the page size IS the margin bought for it. 50
+ * rather than the ~200 the byte budget would nominally allow, so an account
+ * whose invoices run four times longer than that figure still fits.
+ *
+ * Returning the newest page and offering no "load older" is the accepted v1
+ * trade, and the UI has to SAY so: a list that silently stops at 50 invoices
+ * is a list that lies about how many exist. `invoices.list` reads one row past
+ * this to learn whether older ones exist, and /invoices interpolates this same
+ * constant into the sentence naming the cap — the same device `TITLE_CAP_NOTE`
+ * (src/lib/export/report-rows.ts) uses for `TITLE_ROW_LIMIT` below, and for
+ * the same reason: a constant here and a hand-typed number in a sentence stop
+ * agreeing the day only one of them changes.
+ */
+export const INVOICE_LIST_LIMIT = 50
+
+/**
  * How many `(week, project, description)` ROWS a breakdown will keep — NOT
  * how many distinct descriptions.
  *

@@ -17,7 +17,7 @@ import type { ReactNode } from "react"
  */
 export function renderWithRouter(ui: ReactNode, { path }: { path: string }) {
   const rootRoute = createRootRoute({ component: () => <>{ui}</> })
-  const children = ["/timer", "/reports", "/projects", "/settings"].map((p) =>
+  const children = ["/timer", "/reports", "/invoices", "/projects", "/settings"].map((p) =>
     createRoute({ getParentRoute: () => rootRoute, path: p, component: () => null })
   )
   rootRoute.addChildren(children)
