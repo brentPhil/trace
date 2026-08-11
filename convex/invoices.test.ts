@@ -17,7 +17,7 @@ import {
   MAX_PURCHASE_ORDER_LENGTH,
   MAX_SOURCE_TEXT_LENGTH,
 } from "./invoices"
-import { traceErrorCode } from "./lib/codes"
+import { isTraceError, traceErrorCode } from "./lib/codes"
 import { parseInvoiceSequence } from "./lib/invoiceNumber"
 import { NO_PROJECT_LABEL } from "./lib/labels"
 import {
@@ -38,11 +38,29 @@ const HOUR = 3_600_000
 const MON = Date.parse("2026-08-03T00:00:00Z")
 const RANGE = { fromMs: MON, toMs: MON + 7 * 24 * HOUR, timeZone: "UTC", weekStartDay: 1 }
 
-async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
+/**
+ * A refusal, by its code and — when one is named — by the FIELD it is about.
+ *
+ * The field half is not decoration. `update` puts the argument's own name in
+ * `meta.field` so the editor can put the sentence beside the box that earned it
+ * (see `refusedHeadField`), and nothing on this side used to check it: deleting
+ * the `"billedTo"` argument from a `checkText` call left every test here green
+ * while the client silently regressed to a general banner over the document.
+ * That is exactly the failure the mechanism exists to prevent, so the contract
+ * is asserted at the end that promises it.
+ */
+async function expectCode(
+  promise: Promise<unknown>,
+  code: string,
+  field?: string
+): Promise<void> {
   try {
     await promise
   } catch (error) {
     expect(traceErrorCode(error) ?? String(error)).toBe(code)
+    if (field !== undefined) {
+      expect(isTraceError(error) ? error.data.meta?.field : undefined).toBe(field)
+    }
     return
   }
   throw new Error(`expected rejection with code ${code}, but it resolved`)
@@ -1110,13 +1128,18 @@ describe("invoices.update", () => {
     const t = setup()
     const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
 
+    // Each names its OWN field: one Save carries eight of them, and a refusal
+    // that pointed at the wrong box would send somebody rewriting an address
+    // that was never too long.
     await expectCode(
       updateAs(t, invoiceId, { billedTo: "b".repeat(MAX_PARTY_LENGTH + 1) }),
-      "TOO_LONG"
+      "TOO_LONG",
+      "billedTo"
     )
     await expectCode(
       updateAs(t, invoiceId, { payTo: "p".repeat(MAX_PARTY_LENGTH + 1) }),
-      "TOO_LONG"
+      "TOO_LONG",
+      "payTo"
     )
 
     await updateAs(t, invoiceId, { billedTo: "b".repeat(MAX_PARTY_LENGTH) })
@@ -1161,7 +1184,8 @@ describe("invoices.update", () => {
       updateAs(t, invoiceId, {
         purchaseOrder: "P".repeat(MAX_PURCHASE_ORDER_LENGTH + 1),
       }),
-      "TOO_LONG"
+      "TOO_LONG",
+      "purchaseOrder"
     )
     await updateAs(t, invoiceId, { purchaseOrder: "P".repeat(MAX_PURCHASE_ORDER_LENGTH) })
     expect((await row(t, invoiceId))?.purchaseOrder).toHaveLength(MAX_PURCHASE_ORDER_LENGTH)
@@ -1178,7 +1202,8 @@ describe("invoices.update", () => {
       updateAs(t, invoiceId, {
         paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH + 1),
       }),
-      "TOO_LONG"
+      "TOO_LONG",
+      "paymentTerms"
     )
     await updateAs(t, invoiceId, { paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH) })
     expect((await row(t, invoiceId))?.paymentTerms).toHaveLength(MAX_PAYMENT_TERMS_LENGTH)
@@ -1204,7 +1229,8 @@ describe("invoices.update", () => {
 
     await expectCode(
       updateAs(t, invoiceId, { notes: "n".repeat(MAX_NOTES_LENGTH + 1) }),
-      "TOO_LONG"
+      "TOO_LONG",
+      "notes"
     )
     expect((await row(t, invoiceId))?.notes).toBeUndefined()
 
@@ -1263,8 +1289,8 @@ describe("invoices.update", () => {
     // JPY is a real code whose minor unit is not a hundredth — see
     // money.supportedCurrencies. `formatMoney` would silently round the stored
     // hundredths away on a document.
-    await expectCode(updateAs(t, invoiceId, { currency: "JPY" }), "INVALID_CURRENCY")
-    await expectCode(updateAs(t, invoiceId, { currency: "ZZZ" }), "INVALID_CURRENCY")
+    await expectCode(updateAs(t, invoiceId, { currency: "JPY" }), "INVALID_CURRENCY", "currency")
+    await expectCode(updateAs(t, invoiceId, { currency: "ZZZ" }), "INVALID_CURRENCY", "currency")
 
     await updateAs(t, invoiceId, { currency: "EUR" })
     expect((await row(t, invoiceId))?.currency).toBe("EUR")
@@ -1277,8 +1303,16 @@ describe("invoices.update", () => {
     const t = setup()
     const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
 
-    await expectCode(updateAs(t, invoiceId, { issuedAt: Number.NaN }), "INVALID_DATE")
-    await expectCode(updateAs(t, invoiceId, { dueAt: Number.POSITIVE_INFINITY }), "INVALID_DATE")
+    await expectCode(
+      updateAs(t, invoiceId, { issuedAt: Number.NaN }),
+      "INVALID_DATE",
+      "issuedAt"
+    )
+    await expectCode(
+      updateAs(t, invoiceId, { dueAt: Number.POSITIVE_INFINITY }),
+      "INVALID_DATE",
+      "dueAt"
+    )
     expect((await row(t, invoiceId))?.issuedAt).toBe(MON)
   })
 

@@ -216,6 +216,31 @@ export function seedHeadForm(server: InvoiceHead): InvoiceHeadForm {
   return { draft: server, committed: server, seen: server, collided: [] }
 }
 
+/**
+ * A keystroke — and the one piece of bookkeeping that has to happen on it.
+ *
+ * `collided` is a record of what the SERVER did, so nothing the user types can
+ * add to it. But a collision can be SETTLED by typing: the field disagreed,
+ * the user typed their copy back into agreement with what arrived, and there is
+ * no longer a disagreement for the banner to be about. Leaving the entry in
+ * place made that banner resurface on the next keystroke into that field — a
+ * warning about a push that happened minutes ago and was already answered, with
+ * nothing having arrived since. A warning that reappears for no reason is the
+ * one people learn to ignore.
+ *
+ * Dropped HERE rather than filtered at read time, because "has this field ever
+ * agreed since it collided?" is history, and only the transition that makes it
+ * true can see it.
+ */
+export function editHeadForm(
+  form: InvoiceHeadForm,
+  patch: Partial<InvoiceHead>
+): InvoiceHeadForm {
+  const draft = { ...form.draft, ...patch }
+  const dirty = new Set(changedHeadFields(draft, form.committed))
+  return { ...form, draft, collided: form.collided.filter((field) => dirty.has(field)) }
+}
+
 /** Copies one field across, split by field because a `Partial<InvoiceHead>`
  *  indexed by a union key accepts only `string & number`. */
 function copyField(into: InvoiceHead, from: InvoiceHead, field: InvoiceHeadField): void {
@@ -305,6 +330,31 @@ export function commitHeadForm(
 export function liveCollisions(form: InvoiceHeadForm): Array<InvoiceHeadField> {
   const dirty = new Set(changedHeadFields(form.draft, form.committed))
   return form.collided.filter((field) => dirty.has(field))
+}
+
+/**
+ * "Use the newer version" — and it discards EXACTLY what the banner named.
+ *
+ * The obvious spelling is `draft = committed`, and it is wrong in a way nothing
+ * on screen reveals. `committed` is the whole head, so that assignment reverts
+ * all eight fields; the banner beside the button names only the collided ones.
+ * A user who had typed into Billed to and into Notes, and is told that Billed to
+ * moved elsewhere, loses the Notes paragraph too — unnamed, unrecoverable, and
+ * with the form now CLEAN, so the unsaved-changes guard says nothing on the way
+ * out either. On the one page built around "an edit can be lost, so protect it",
+ * the single button that discards must discard only what it advertised.
+ *
+ * `liveCollisions` rather than `collided`, so this drops exactly the set the
+ * banner listed: a collision the user already typed back into agreement is not
+ * named there and has nothing left to take.
+ *
+ * `collided` is emptied outright. The offer was answered — the entries that were
+ * still live have just been reverted, and any that were not were already settled.
+ */
+export function takeNewerHeadForm(form: InvoiceHeadForm): InvoiceHeadForm {
+  const draft = { ...form.draft }
+  for (const field of liveCollisions(form)) copyField(draft, form.committed, field)
+  return { ...form, draft, collided: [] }
 }
 
 /**

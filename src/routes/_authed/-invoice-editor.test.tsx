@@ -39,6 +39,29 @@ type RouterModule = typeof RouterModuleType
  * without a state to put the document in first.
  */
 
+/*
+ * The guard needs a router; these tests deliberately have none. Idle is the
+ * honest stand-in for "no navigation has been attempted" — what the guard does
+ * once it HAS blocked is asserted in
+ * `src/components/invoices/unsaved-changes-guard.test.tsx`.
+ *
+ * TYPED BY ITS ARGUMENT, and that is the whole point of it. The options object
+ * is what this page tells the router, and a stub written `() => ({ status })`
+ * silently throws it away: `when={dirty.length > 0}` could be changed to
+ * `when={false}` — the editor's headline safety property, deleted — and every
+ * test in this file would still pass. The same shape the guard's own test uses,
+ * for the same reason.
+ */
+const { useBlocker } = vi.hoisted(() => ({
+  useBlocker: vi.fn(
+    (_opts: {
+      disabled: boolean
+      withResolver: boolean
+      enableBeforeUnload: boolean
+    }) => ({ status: "idle" as const })
+  ),
+}))
+
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<RouterModule>()
   return {
@@ -64,11 +87,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
         </a>
       )
     },
-    /* The guard needs a router; these tests deliberately have none. Idle is the
-     * honest stand-in for "no navigation has been attempted" — the guard's own
-     * behaviour, including what it renders once it HAS blocked, is asserted in
-     * `src/components/invoices/unsaved-changes-guard.test.tsx`. */
-    useBlocker: () => ({ status: "idle" as const }),
+    useBlocker,
   }
 })
 
@@ -136,9 +155,9 @@ type Invoice = {
   lines: Array<Line>
 }
 
-function renderEditor(over: Partial<Invoice> = {}, settings = SETTINGS) {
-  const invoice = {
-    _id: INVOICE_ID,
+function invoiceFixture(over: Partial<Invoice> = {}, id: Id<"invoices"> = INVOICE_ID) {
+  return {
+    _id: id,
     _creationTime: NOW,
     userId: "user-1",
     clientKey: "k1",
@@ -158,7 +177,12 @@ function renderEditor(over: Partial<Invoice> = {}, settings = SETTINGS) {
     lines: [makeLine({ description: "Website" })],
     ...over,
   }
+}
 
+function seededClient(
+  invoices: ReadonlyArray<ReturnType<typeof invoiceFixture>>,
+  settings = SETTINGS
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -170,14 +194,21 @@ function renderEditor(over: Partial<Invoice> = {}, settings = SETTINGS) {
       },
     },
   })
-  queryClient.setQueryData(
-    convexKey(api.invoices.get, { invoiceId: INVOICE_ID }),
-    invoice
-  )
+  for (const invoice of invoices) {
+    queryClient.setQueryData(
+      convexKey(api.invoices.get, { invoiceId: invoice._id }),
+      invoice
+    )
+  }
   queryClient.setQueryData(convexKey(api.settings.get, {}), settings)
+  return queryClient
+}
+
+function renderEditor(over: Partial<Invoice> = {}, settings = SETTINGS) {
+  const invoice = invoiceFixture(over)
 
   render(
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={seededClient([invoice], settings)}>
       <Toast.Provider>
         <InvoiceEditor invoiceId={INVOICE_ID} />
         <ToastViewport />
@@ -362,6 +393,50 @@ describe("the invoice editor — the Save button", () => {
 })
 
 /*
+ * THE GUARD, ARMED FROM THIS PAGE.
+ *
+ * `UnsavedChangesGuard` has its own test file, and it proves the component
+ * honours `when`. Nothing proved the editor ever passes a true one. That is the
+ * feature's headline safety property — the trade the buffered editor accepted
+ * was "an edit can now be lost", and this is the whole of what was done about
+ * it — so it is asserted here, against the same registration the router sees.
+ */
+describe("the invoice editor — the unsaved-changes guard", () => {
+  /** What the page last told the router. `disabled` is the guard's real switch:
+   *  `shouldBlockFn` always answers yes, so this is the condition. */
+  function guardDisabled(): boolean {
+    const call = useBlocker.mock.calls.at(-1)
+    if (call === undefined) throw new Error("the editor never armed a blocker")
+    return call[0].disabled
+  }
+
+  it("stays out of the way of a form nobody has touched", () => {
+    renderEditor()
+    expect(guardDisabled()).toBe(true)
+  })
+
+  /* One keystroke is enough. Everything typed since the last Save is the only
+   * copy of it, from the first character. */
+  it("arms on the first real change", () => {
+    renderEditor()
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Thanks!" } })
+    expect(guardDisabled()).toBe(false)
+  })
+
+  /* And stands down once the write lands — before the subscription has
+   * redelivered the row. A guard that fires on a saved document is a dialog
+   * nobody can explain, and people learn to click through it. */
+  it("stands down again once the save lands", async () => {
+    renderEditor()
+    fireEvent.change(screen.getByLabelText("Notes"), { target: { value: "Thanks!" } })
+    expect(guardDisabled()).toBe(false)
+
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(guardDisabled()).toBe(true))
+  })
+})
+
+/*
  * A REFUSED SAVE KEEPS EVERY TYPED VALUE, and says which field it was about.
  *
  * One Save carries eight fields, so "that didn't save" as a toast would leave
@@ -494,10 +569,15 @@ describe("the invoice editor — the document", () => {
     expect(screen.getAllByText("€1,000.00").length).toBeGreaterThan(0)
   })
 
-  /* An empty state teaches the interface rather than stating a void. */
-  it("says where lines come from when there are none", () => {
+  /* An empty state teaches the interface rather than stating a void — and the
+   * totals still print beneath it, because a zero-line invoice is a real
+   * document and the PDF of it prints `Total $0.00`. */
+  it("says where lines come from when there are none, and still totals them", () => {
     renderEditor({ lines: [] })
+
     expect(screen.getByText(/Lines come from the range/)).toBeTruthy()
+    expect(screen.getByText("Total")).toBeTruthy()
+    expect(screen.getAllByText("$0.00")).toHaveLength(2)
   })
 
   /* Both optional fields, because an absence stated as an absence is the rule
@@ -596,6 +676,61 @@ describe("the invoice edit route", () => {
     )
     // Still in flight, so there is no number to name yet.
     expect(head({}).meta[0]?.title).toBe("Edit invoice — Trace")
+  })
+
+  /*
+   * A DIFFERENT INVOICE IS A DIFFERENT FORM, and only the `key` says so.
+   *
+   * `InvoiceEditor` seeds its draft in a `useState` initialiser, which runs once
+   * per MOUNT. A params-only navigation re-renders this route rather than
+   * remounting it (no route in `src/` sets `remountDeps`), so without the key the
+   * previous invoice's typed text stays in the boxes, reconciliation reads the
+   * new document as a server push against it, and Save writes one invoice's
+   * address onto another. The path is ordinary: edit A, Back to a B editor
+   * already in history, answer Discard changes.
+   *
+   * Driven through the ROUTE component rather than through a keyed render of my
+   * own, because the key is what is under test and a test that supplies it is a
+   * test of nothing.
+   */
+  it("starts a fresh form when the id changes, rather than carrying the last draft", () => {
+    const OTHER_ID = "inv-2" as unknown as Id<"invoices">
+    const client = seededClient([
+      invoiceFixture(),
+      invoiceFixture({ number: "072726-0014", billedTo: "Globex Inc\nSpringfield" }, OTHER_ID),
+    ])
+    const params = vi
+      .spyOn(Route, "useParams")
+      .mockReturnValue({ invoiceId: INVOICE_ID })
+    const RouteComponent = Route.options.component as unknown as () => React.ReactElement
+
+    // A FRESH element each time. React bails out of re-rendering a subtree it is
+    // handed the identical element object for, so reusing one here would prove
+    // only that nothing rendered.
+    const tree = () => (
+      <QueryClientProvider client={client}>
+        <Toast.Provider>
+          <RouteComponent />
+          <ToastViewport />
+        </Toast.Provider>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(tree())
+
+    fireEvent.change(screen.getByLabelText("Billed to"), {
+      target: { value: "Acme Corp\n1 Way" },
+    })
+
+    params.mockReturnValue({ invoiceId: OTHER_ID })
+    rerender(tree())
+
+    expect(asTextarea(screen.getByLabelText("Billed to")).value).toBe(
+      "Globex Inc\nSpringfield"
+    )
+    // Clean, so Save cannot write the first invoice's address onto the second.
+    expect(saveButton().disabled).toBe(true)
+
+    params.mockRestore()
   })
 })
 

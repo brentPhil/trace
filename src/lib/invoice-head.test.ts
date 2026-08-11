@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   changedHeadFields,
   commitHeadForm,
+  editHeadForm,
   headOf,
   headPatch,
   liveCollisions,
@@ -9,6 +10,7 @@ import {
   reconcileHeadForm,
   refusedHeadField,
   seedHeadForm,
+  takeNewerHeadForm,
 } from "@/lib/invoice-head"
 import type { InvoiceHead } from "@/lib/invoice-head"
 
@@ -225,6 +227,95 @@ describe("commitHeadForm", () => {
       collided: ["notes" as const],
     }
     expect(commitHeadForm(collided, ["notes"]).collided).toEqual([])
+  })
+})
+
+/*
+ * THE ONE BUTTON ON THIS PAGE THAT DISCARDS, and the reason it is a named
+ * function rather than three lines inside a `<Button onClick>`.
+ *
+ * Written inline it was `draft = committed`, which reverts the whole head while
+ * the sentence beside it names only the collided fields. Nothing on screen says
+ * a word about the difference, the form goes clean so the unsaved-changes guard
+ * stays quiet too, and there is no undo. That is a silent loss of typed work on
+ * the page whose entire premise is that typed work can be lost.
+ */
+describe("takeNewerHeadForm", () => {
+  /* THE TRACE. Two fields edited, ONE of them moved by another device — so the
+   * banner names one, and exactly one may be reverted. */
+  it("takes the server's value for the collided field and leaves the other edit alone", () => {
+    const stored = head({ billedTo: "V", notes: "N" })
+    const typing = {
+      ...seedHeadForm(stored),
+      draft: head({ billedTo: "MINE-B", notes: "MINE-N" }),
+    }
+
+    // Another device changed only `billedTo`.
+    const collided = reconcileHeadForm(typing, head({ billedTo: "THEIRS-B", notes: "N" }))
+    expect(collided.collided).toEqual(["billedTo"])
+
+    const taken = takeNewerHeadForm(collided)
+
+    expect(taken.draft.billedTo).toBe("THEIRS-B")
+    // The edit nobody warned about, and nobody asked to drop.
+    expect(taken.draft.notes).toBe("MINE-N")
+    // Still dirty on Notes, so Save can still write it and the guard still
+    // fires on the way out — the two things a whole-head revert also took away.
+    expect(changedHeadFields(taken.draft, taken.committed)).toEqual(["notes"])
+    expect(taken.collided).toEqual([])
+  })
+
+  it("clears the banner it answers", () => {
+    const typing = { ...seedHeadForm(head()), draft: head({ notes: "mine" }) }
+    const collided = reconcileHeadForm(typing, head({ notes: "theirs" }))
+
+    const taken = takeNewerHeadForm(collided)
+    expect(taken.draft.notes).toBe("theirs")
+    expect(liveCollisions(taken)).toEqual([])
+    expect(changedHeadFields(taken.draft, taken.committed)).toEqual([])
+  })
+})
+
+/*
+ * A SETTLED COLLISION MUST NOT COME BACK. `collided` records what the server
+ * did, and only a commit or the banner's own button used to clear it — so a
+ * field that collided, was typed back into agreement, and was then edited again
+ * raised the banner a second time with nothing having arrived in between. A
+ * warning that reappears for no reason is the one people learn to click past.
+ */
+describe("editHeadForm", () => {
+  it("does not re-raise a collision the user already settled by typing", () => {
+    const typing = { ...seedHeadForm(head()), draft: head({ notes: "mine" }) }
+    const collided = reconcileHeadForm(typing, head({ notes: "theirs" }))
+    expect(liveCollisions(collided)).toEqual(["notes"])
+
+    // Typed into agreement with what arrived: nothing left to warn about.
+    const settled = editHeadForm(collided, { notes: "theirs" })
+    expect(settled.collided).toEqual([])
+
+    // And editing on from there is an ordinary unsaved change, not a collision.
+    const again = editHeadForm(settled, { notes: "theirs, plus a line" })
+    expect(liveCollisions(again)).toEqual([])
+    expect(changedHeadFields(again.draft, again.committed)).toEqual(["notes"])
+  })
+
+  /* An edit ELSEWHERE settles nothing. The collided field still disagrees, and
+   * dropping it because some other box was typed into would silence a warning
+   * the user never answered. */
+  it("keeps a live collision while a different field is typed into", () => {
+    const typing = { ...seedHeadForm(head()), draft: head({ notes: "mine" }) }
+    const collided = reconcileHeadForm(typing, head({ notes: "theirs" }))
+
+    expect(editHeadForm(collided, { payTo: "Me" }).collided).toEqual(["notes"])
+  })
+
+  it("applies the patch and leaves the rest of the draft alone", () => {
+    const form = seedHeadForm(head())
+    const edited = editHeadForm(form, { notes: "Thanks!" })
+
+    expect(edited.draft.notes).toBe("Thanks!")
+    expect(edited.draft.billedTo).toBe(form.draft.billedTo)
+    expect(edited.committed).toBe(form.committed)
   })
 })
 

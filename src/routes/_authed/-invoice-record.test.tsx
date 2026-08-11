@@ -292,9 +292,33 @@ describe("the invoice record — the totals", () => {
     expect(screen.getAllByText("€1,000.00").length).toBeGreaterThan(0)
   })
 
-  it("says where lines come from when there are none", () => {
+  /*
+   * A ZERO-LINE INVOICE IS REACHABLE — `createFromRange` over a range where
+   * every project was unrated bills nothing — and the PDF prints the absence AND
+   * the totals block (asserted in `invoice-doc.test.ts`). The screen must do the
+   * same. It did not: the empty state returned before the totals were derived,
+   * so the client's paper said `Total $0.00` while the freelancer's own record
+   * of the same document said nothing about money at all. That is the drift
+   * `invoice-document.ts` exists to prevent, on the one page whose entire claim
+   * is that it shows what the client received.
+   */
+  it("says where lines come from when there are none, and still totals them", () => {
     renderRecord({ lines: [] })
+
     expect(screen.getByText(/Lines come from the range/)).toBeTruthy()
+    expect(screen.getByText("Subtotal")).toBeTruthy()
+    expect(screen.getByText("Total")).toBeTruthy()
+    // Subtotal and Total, the same two rows the paper prints.
+    expect(screen.getAllByText("$0.00")).toHaveLength(2)
+  })
+
+  /* Taxes on nothing are still stated: a document that lists a VAT line on its
+   * paper and omits it on screen is two documents. */
+  it("draws the tax rows of an empty invoice too", () => {
+    renderRecord({ lines: [], taxes: [{ label: "VAT", basisPoints: 2000 }] })
+
+    expect(screen.getByText("VAT 20%")).toBeTruthy()
+    expect(screen.getAllByText("$0.00")).toHaveLength(3)
   })
 })
 

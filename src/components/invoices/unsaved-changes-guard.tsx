@@ -36,6 +36,28 @@ import { Dialog } from "@/components/ui/dialog"
  * might be read as always-on. It is also directly assertable, which the
  * router's internal registration is not.
  */
+/**
+ * Hoisted so it has ONE identity for the life of the module.
+ *
+ * `useBlocker` lists `shouldBlockFn` in its effect's dependency array (checked
+ * in the installed 1.170.22). Written inline it would be a new function every
+ * render, so every render of this component would tear the registration down
+ * and put an identical one back — including the renders caused by the hook's
+ * own `setResolver` when a navigation is blocked, which is precisely when the
+ * registration is load-bearing.
+ *
+ * Nothing observably broke that way: `reset` and `proceed` close over the
+ * promise rather than the registration, and the dialog dismisses correctly with
+ * the inline version. This is a stability fix, not a bug fix — the reason to
+ * make it is that "re-register the router blocker on every keystroke" is a
+ * behaviour nobody chose, sitting one dependency-array change away from being a
+ * real one.
+ *
+ * `disabled` is what turns the guard on and off; this only ever answers "yes,
+ * block" when it is consulted at all.
+ */
+const ALWAYS_BLOCK = () => true
+
 export function UnsavedChangesGuard({
   when,
   what,
@@ -53,7 +75,9 @@ export function UnsavedChangesGuard({
     // per navigation and would answer from whatever `when` was captured when the
     // effect last ran; `disabled` is in the hook's dependency list, so toggling
     // it tears the registration down and puts it back with the current value.
-    shouldBlockFn: () => true,
+    // It is also why this must be `ALWAYS_BLOCK` and never an inline arrow —
+    // see that constant.
+    shouldBlockFn: ALWAYS_BLOCK,
     disabled: !when,
     withResolver: true,
     enableBeforeUnload: false,
@@ -67,8 +91,16 @@ export function UnsavedChangesGuard({
       // a page that sets only one of them silently fails to prompt on some
       // browsers — which is the failure nobody notices until they have lost
       // something.
+      //
+      // NON-EMPTY, and that is the whole of why there is a string here. The
+      // legacy condition is `defaultPrevented || returnValue !== ""`, so `""` —
+      // the property's own default — is precisely the value that asks for NO
+      // prompt: setting it would have made this line decoration while claiming
+      // to be the fallback. The text itself is never shown; every browser draws
+      // its own generic sentence, which is the platform's answer to pages that
+      // begged.
       event.preventDefault()
-      event.returnValue = ""
+      event.returnValue = "This invoice has unsaved changes."
     }
     window.addEventListener("beforeunload", onBeforeUnload)
     return () => window.removeEventListener("beforeunload", onBeforeUnload)

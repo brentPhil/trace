@@ -1,4 +1,3 @@
-import { Empty } from "@/components/ui/empty"
 import { formatRate } from "@/lib/format-money"
 import { invoiceTotalsRows, quantityText } from "@/lib/invoice-document"
 import { formatMoney } from "@shared/money"
@@ -37,16 +36,6 @@ export function InvoiceLines({
   currency: string
   taxes: ReadonlyArray<{ label: string; basisPoints: number }>
 }) {
-  if (lines.length === 0) {
-    return (
-      <Empty>
-        No lines on this invoice. Lines come from the range it was raised from on
-        Reports — billable time on a project with a rate. Time nobody has priced
-        is left off rather than billed at nothing.
-      </Empty>
-    )
-  }
-
   const totals = invoiceTotalsRows(lines, taxes)
 
   return (
@@ -70,6 +59,30 @@ export function InvoiceLines({
           </tr>
         </thead>
         <tbody>
+          {/*
+            NO LINES IS A DOCUMENT, not a missing one — a range where every
+            project was unrated bills nothing, because time nobody priced is
+            left off rather than charged at zero (see `createFromRange`).
+
+            So the sentence stands where the rows would be and the totals below
+            still print, which is precisely what the PDF does. This used to
+            return an `Empty` before it reached `invoiceTotalsRows`, so the
+            client's paper said `Total $0.00` and the freelancer's screen said
+            nothing at all — the drift `invoice-document.ts` exists to prevent,
+            arriving at the one place that module was not asked.
+
+            Not the shared `Empty` frame: its dashed border inside the table's
+            own border is a box drawn around a box. The table is the frame here.
+          */}
+          {lines.length === 0 ? (
+            <tr>
+              <td colSpan={4} className="px-3 py-4 text-muted-foreground">
+                No lines on this invoice. Lines come from the range it was raised
+                from on Reports — billable time on a project with a rate. Time
+                nobody has priced is left off rather than billed at nothing.
+              </td>
+            </tr>
+          ) : null}
           {lines.map((line, index) => (
             <tr
               // The description is not unique — two custom charges may share

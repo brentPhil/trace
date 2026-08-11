@@ -15,6 +15,7 @@ import {
   INVOICE_HEAD_FIELDS,
   changedHeadFields,
   commitHeadForm,
+  editHeadForm,
   headOf,
   headPatch,
   liveCollisions,
@@ -22,6 +23,7 @@ import {
   reconcileHeadForm,
   refusedHeadField,
   seedHeadForm,
+  takeNewerHeadForm,
 } from "@/lib/invoice-head"
 import { cn } from "@/lib/utils"
 import { supportedCurrencies } from "@shared/money"
@@ -73,7 +75,24 @@ export const Route = createFileRoute("/_authed/invoices_/$invoiceId_/edit")({
 
 function InvoiceEditRoute() {
   const { invoiceId } = Route.useParams()
-  return <InvoiceEditor invoiceId={invoiceId as Id<"invoices">} />
+  /*
+   * KEYED, and the buffered draft is why.
+   *
+   * `InvoiceEditor` seeds its form once, in a `useState` initialiser. A change
+   * of `$invoiceId` alone re-renders this route rather than remounting it — no
+   * route in this app sets `remountDeps`, and TanStack's default keeps the
+   * component across a params-only navigation — so without a key the initialiser
+   * never runs again and the draft from the PREVIOUS invoice stays in the boxes.
+   * Reconciliation then reads the new document as a server push against that
+   * draft, keeps the old text as the user's unsaved edit, and Save writes one
+   * invoice's address onto another. The path is ordinary: edit A, Back to a B
+   * editor already in history, answer Discard changes.
+   *
+   * The key says what is actually true — a different invoice is a different
+   * form — and it is the only thing that says it, because `useState` has no
+   * "these props are for a different subject" of its own.
+   */
+  return <InvoiceEditor key={invoiceId} invoiceId={invoiceId as Id<"invoices">} />
 }
 
 /**
@@ -145,7 +164,7 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
    *  rule `InlineEdit` and `PartyBlock` follow, and it stops a message pointing
    *  at text that has since been fixed. */
   const edit = (patch: Partial<InvoiceHead>) => {
-    setForm((current) => ({ ...current, draft: { ...current.draft, ...patch } }))
+    setForm((current) => editHeadForm(current, patch))
     setErrors((current) => {
       const next = { ...current }
       for (const field of Object.keys(patch)) delete next[field as InvoiceHeadField]
@@ -311,17 +330,11 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
               {nameFields(collisions)}. Your unsaved text is still here — saving
               will replace what arrived.
             </p>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() =>
-                setForm((current) => ({
-                  ...current,
-                  draft: current.committed,
-                  collided: [],
-                }))
-              }
-            >
+            {/* The transition lives in `invoice-head.ts` with the rest of the
+                state machine, not inline here. It reverts only the fields the
+                sentence above just named — which is a rule worth a unit test,
+                and inline in this JSX it had neither one nor a home. */}
+            <Button variant="ghost" size="sm" onClick={() => setForm(takeNewerHeadForm)}>
               Use the newer version
             </Button>
           </div>

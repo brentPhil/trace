@@ -1,6 +1,6 @@
 import { formatClock, formatDecimalHours } from "@shared/duration"
 import { formatMoney } from "@shared/money"
-import { parseDayString } from "@shared/day"
+import { usDate } from "../../us-date"
 import { TITLE_CAP_NOTE, UNPRICED_NOTE } from "../report-rows"
 import {
   axisTickIndices,
@@ -84,19 +84,6 @@ function rowSlotHeight(lineCount: number): number {
 }
 
 const HEADER_GAP = 33
-
-/**
- * `2026-07-13` as `07/13/2026`, the reference report's own format.
- *
- * Exported, and imported by `invoice-doc.ts` rather than restated there: the
- * two documents this product prints are read side by side by the same client,
- * and a report dated `07/13/2026` beside an invoice dated `13/07/2026` is a
- * pair of documents nobody can tell apart on a July 13th.
- */
-export function usDate(day: string): string {
-  const { year, month, day: date } = parseDayString(day)
-  return `${String(month).padStart(2, "0")}/${String(date).padStart(2, "0")}/${year}`
-}
 
 function moneyOr(cents: number, currency: string, unpriced: boolean): string {
   return unpriced ? "—" : formatMoney(cents, currency)

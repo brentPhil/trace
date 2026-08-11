@@ -1,5 +1,5 @@
 import { invoiceTotals, taxLineCents } from "@shared/invoiceMath"
-import { usDate } from "./export/pdf/report-doc"
+import { usDate } from "./us-date"
 
 /**
  * ONE document, two renderings.
