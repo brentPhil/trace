@@ -18,14 +18,15 @@ type RouterModule = typeof RouterModuleType
  *     mutation on blur would still accept typing, still look edited, and lose
  *     the edit on the next paint. That is the one failure this page's whole
  *     shape depends on not happening.
- *   - The freeze. `invoices.update` refuses an issued invoice server-side and
- *     convex/invoices.test.ts proves it — what is proven HERE is the other
- *     half: that a locked invoice offers no field to type into in the first
- *     place, and that the way back is an explicit unlock rather than a status
- *     menu entry beside "mark it paid".
  *   - The newlines. `billedTo` is a snapshot block and its line breaks are the
  *     address's shape; a control that collapsed them would print a three-line
- *     address on one line, on a document sent to a client.
+ *     address on one line, on a document sent to a client. `notes` is the same
+ *     property one document lower down: an account number, an IBAN and a SWIFT
+ *     code run together is a block a client cannot read a figure off.
+ *
+ * There is NO freeze and no status to test. An invoice is a document you edit
+ * and export — always editable — which is why every field below is asserted
+ * without a state to put the document in first.
  */
 
 vi.mock("@tanstack/react-router", async (importOriginal) => {
@@ -51,7 +52,6 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 const { mutations } = vi.hoisted(() => ({
   mutations: {
     updateInvoice: vi.fn(async () => null),
-    setInvoiceStatus: vi.fn(async () => null),
   },
 }))
 
@@ -63,7 +63,6 @@ afterEach(() => {
   cleanup()
   for (const fn of Object.values(mutations)) fn.mockReset()
   mutations.updateInvoice.mockResolvedValue(null)
-  mutations.setInvoiceStatus.mockResolvedValue(null)
 })
 
 const INVOICE_ID = "inv-1" as unknown as Id<"invoices">
@@ -89,7 +88,6 @@ function makeLine(over: Partial<Line> & { description: string }): Line {
 }
 
 type Invoice = {
-  status: "draft" | "issued" | "paid"
   number: string
   billedTo: string
   payTo: string
@@ -98,6 +96,7 @@ type Invoice = {
   dueAt: number
   purchaseOrder?: string
   paymentTerms?: string
+  notes?: string
   lines: Array<Line>
 }
 
@@ -108,7 +107,6 @@ function renderEditor(over: Partial<Invoice> = {}) {
     userId: "user-1",
     clientKey: "k1",
     number: "072726-0013",
-    status: "draft" as const,
     clientId: null,
     billedTo: "Vessel Vanguard\nBonita Springs, FL\n34134, USA",
     payTo: "",
@@ -259,62 +257,89 @@ describe("the invoice editor — autosave", () => {
   })
 })
 
-describe("the invoice editor — the freeze", () => {
-  it("offers no field to type into once the invoice is issued", () => {
-    renderEditor({ status: "issued" })
-
-    // No editors at all: the blocks, the dates and the currency are all text.
-    expect(screen.queryByLabelText("Billed to")).toBeNull()
-    expect(screen.queryByLabelText("Due date")).toBeNull()
-    expect(screen.queryByLabelText("Currency")).toBeNull()
-    // ...and the block is still readable, newlines and all.
-    expect(screen.getByText(/Bonita Springs/).textContent).toBe(
-      "Vessel Vanguard\nBonita Springs, FL\n34134, USA"
-    )
-  })
-
-  /* The status is stated in a WORD, never by colour alone — DESIGN.md. */
-  it("says why it is locked, in words", () => {
-    renderEditor({ status: "issued" })
-    expect(screen.getByText(/Issued\./)).toBeTruthy()
-  })
-
-  /*
-   * The unlock is a BUTTON, and the status menu deliberately does not offer
-   * Draft: unlocking a document somebody has been sent is the one deliberate
-   * act on a page where everything else saves itself on blur.
-   */
-  it("unlocks through an explicit button rather than the status menu", async () => {
-    renderEditor({ status: "issued" })
-
-    const status = screen.getByLabelText("Status")
-    expect(
-      Array.from(status.querySelectorAll("option")).map((o) => o.textContent)
-    ).toEqual(["Issued", "Paid"])
-
-    fireEvent.click(screen.getByRole("button", { name: /Unlock to edit/ }))
-    await waitFor(() => {
-      expect(mutations.setInvoiceStatus).toHaveBeenCalledWith(INVOICE_ID, "draft")
-    })
-  })
-
-  /* A paid invoice is un-paid before it is unlocked — the server walks the
-   * line one step at a time, and the page names the step instead of offering a
-   * button that would be refused. */
-  it("sends a paid invoice back through Issued rather than straight to draft", () => {
-    renderEditor({ status: "paid" })
-
-    expect(screen.queryByRole("button", { name: /Unlock to edit/ })).toBeNull()
-    expect(screen.getByText(/un-paid before it is unlocked/)).toBeTruthy()
-  })
-
-  it("moves the status when the control is used", async () => {
+/*
+ * THE NOTES BLOCK — the message to the client at the foot of the document.
+ *
+ * It is `PartyBlock`, deliberately, so it inherits one editing behaviour rather
+ * than inventing a second: blur saves, the newlines survive, and a refusal keeps
+ * the typed text with the reason beside it. What is asserted here is that it is
+ * WIRED — a block that rendered but never called the mutation would look
+ * identical until a reload.
+ */
+describe("the invoice editor — notes", () => {
+  it("saves the notes on blur", async () => {
     renderEditor()
 
-    fireEvent.change(screen.getByLabelText("Status"), { target: { value: "issued" } })
+    const field = asTextarea(screen.getByLabelText("Notes"))
+    fireEvent.change(field, { target: { value: "Bank transfer to Acme" } })
+    fireEvent.blur(field)
+
     await waitFor(() => {
-      expect(mutations.setInvoiceStatus).toHaveBeenCalledWith(INVOICE_ID, "issued")
+      expect(mutations.updateInvoice).toHaveBeenCalledWith({
+        invoiceId: INVOICE_ID,
+        notes: "Bank transfer to Acme",
+      })
     })
+  })
+
+  /* The bank block's line breaks are its shape — an account number, an IBAN and
+   * a SWIFT code run together is a block a client cannot read a figure off. */
+  it("keeps the line breaks of a stored notes block", () => {
+    const block = "Bank transfer to:\nAccount 1234-5678\n\nThank you!"
+    renderEditor({ notes: block })
+
+    expect(asTextarea(screen.getByLabelText("Notes")).value).toBe(block)
+  })
+
+  /* The column is ABSENT when unset — `invoices.update` clears it rather than
+   * storing "" — and a textarea's value is always a string. */
+  it("renders an unset notes field as empty rather than as undefined", () => {
+    renderEditor()
+    expect(asTextarea(screen.getByLabelText("Notes")).value).toBe("")
+  })
+
+  it("shows a refusal beside the notes field rather than as a toast", async () => {
+    mutations.updateInvoice.mockRejectedValue({
+      data: { code: "TOO_LONG", message: "Keep the notes under 600 characters." },
+    })
+    renderEditor()
+
+    const field = asTextarea(screen.getByLabelText("Notes"))
+    fireEvent.change(field, { target: { value: "far too long" } })
+    fireEvent.blur(field)
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("600 characters")
+    })
+    expect(asTextarea(screen.getByLabelText("Notes")).value).toBe("far too long")
+  })
+})
+
+/*
+ * NOTHING FREEZES. There is no draft/issued/paid, so there is no locked state,
+ * no unlock button and no status control — an invoice is a document you edit
+ * and export, and it stays editable for as long as it exists.
+ *
+ * Asserted rather than merely deleted, because the failure this guards against
+ * is a workflow creeping back in one control at a time.
+ */
+describe("the invoice editor — no status workflow", () => {
+  it("offers no status control and nothing to unlock", () => {
+    renderEditor()
+
+    expect(screen.queryByLabelText("Status")).toBeNull()
+    expect(screen.queryByRole("button", { name: /unlock/i })).toBeNull()
+    expect(screen.queryByText(/Draft|Issued|Paid/)).toBeNull()
+  })
+
+  it("leaves every field editable, with no state that takes them away", () => {
+    renderEditor()
+
+    expect(screen.getByLabelText("Billed to")).toBeTruthy()
+    expect(screen.getByLabelText("Pay to")).toBeTruthy()
+    expect(screen.getByLabelText("Notes")).toBeTruthy()
+    expect(screen.getByLabelText("Due date")).toBeTruthy()
+    expect(screen.getByLabelText("Currency")).toBeTruthy()
   })
 })
 

@@ -1,11 +1,8 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
-import { LockKeyholeOpen } from "lucide-react"
 import { InvoiceMeta } from "@/components/invoices/invoice-meta"
 import { PartyBlock } from "@/components/invoices/party-block"
-import { STATUS_LABEL, StatusControl } from "@/components/invoices/status-control"
-import { Button } from "@/components/ui/button"
 import { Empty } from "@/components/ui/empty"
 import { Toast } from "@/components/ui/toast"
 import { useInvoiceMutations } from "@/hooks/use-invoice-mutations"
@@ -127,37 +124,26 @@ function InvoiceRoute() {
  * client with no router context.
  *
  * NO SAVE BUTTON. Every field autosaves on blur, as every other editable
- * surface in this app does, and the top-right control is the invoice's STATUS
- * instead. The lines, taxes and totals are Task 6; they render here read-only
- * so the page is a document rather than a form with the money missing.
+ * surface in this app does.
+ *
+ * AND NO STATUS, which is the shape of this page rather than a missing part of
+ * it. There is no draft/issued/paid, nothing freezes, and there is nothing to
+ * unlock: an invoice is a document you edit and export, editable for as long as
+ * it exists, and `invoices.update` enforces exactly that by refusing nothing on
+ * state. What belongs top-right is Export PDF, which is the next task.
+ *
+ * The lines, taxes and totals are Task 6; they render here read-only so the
+ * page is a document rather than a form with the money missing.
  */
 export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
   const { data: invoice } = useSuspenseQuery(convexQuery(api.invoices.get, { invoiceId }))
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
-  const { updateInvoice, setInvoiceStatus } = useInvoiceMutations()
+  const { updateInvoice } = useInvoiceMutations()
   const toasts = Toast.useToastManager()
-
-  /*
-   * A draft is editable and everything else is not.
-   *
-   * This is a CONVENIENCE, not the rule — `invoices.update` refuses the same
-   * edit server-side with INVOICE_LOCKED, which is what actually keeps the
-   * copy in a client's inbox and the copy in this table saying the same thing.
-   * Disabling the fields is how a person finds that out before typing a
-   * paragraph rather than after.
-   */
-  const locked = invoice.status !== "draft"
 
   /** Rethrows on purpose: each field shows its own refusal, beside itself. */
   const save = async (patch: Omit<Parameters<typeof updateInvoice>[0], "invoiceId">) => {
     await updateInvoice({ ...patch, invoiceId })
-  }
-
-  const move = (status: "draft" | "issued" | "paid") => {
-    // A status change has no field to fail into, so this one is a toast.
-    void setInvoiceStatus(invoiceId, status).catch((thrown: unknown) => {
-      toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
-    })
   }
 
   return (
@@ -166,6 +152,8 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
           page — see The One Measure Rule. */}
       <div className="flex flex-1 flex-col gap-6 px-4 py-6">
         <div className="flex items-start justify-between gap-3">
+          {/* Alone on its row for now: Export PDF lands beside it, which is
+              what the space on the right is being held for. */}
           <nav aria-label="Breadcrumb">
             <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <li>
@@ -182,61 +170,7 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
               </li>
             </ol>
           </nav>
-
-          <StatusControl status={invoice.status} onChange={move} />
         </div>
-
-        {locked ? (
-          <div
-            className={cn(
-              "flex flex-wrap items-center gap-3 rounded-md border border-edge-soft",
-              "bg-surface px-3 py-2"
-            )}
-          >
-            {/*
-              The word, then the reason, then the way out — never a colour and
-              an assumption. `STATUS_LABEL` rather than the raw status, so the
-              sentence and the control above it use one vocabulary.
-            */}
-            <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {STATUS_LABEL[invoice.status]}. This document has been sent, so its
-              details are locked — the copy in your client&apos;s inbox and the copy
-              here have to keep saying the same thing.
-            </p>
-            {/*
-              THE UNLOCK, and the reason it is a button rather than an entry in
-              the status menu: it is the one deliberate act in this editor.
-              Everything else here saves itself the moment you look away.
-
-              A PAID invoice does not get one. The server walks the line a step
-              at a time (`invoices.setStatus`), so un-paying comes first — and
-              rather than a disabled button, which states a rule without
-              teaching it, the sentence names the step.
-            */}
-            {invoice.status === "issued" ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => move("draft")}
-                // `border-edge-raised`, not the outline variant's own
-                // `border-edge`: this button has no fill in dark mode and sits
-                // on the `bg-surface` band, where Edge measures 2.90:1 and is
-                // under the 3:1 floor. The Adjacent Colour Rule — a border's
-                // contrast is a property of the layer it lands on, not of the
-                // token.
-                className="border-edge-raised"
-              >
-                <LockKeyholeOpen data-icon="inline-start" />
-                Unlock to edit
-              </Button>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                Set the status back to Issued first — a paid invoice is un-paid
-                before it is unlocked.
-              </p>
-            )}
-          </div>
-        ) : null}
 
         <h1 className="text-sm font-semibold">Invoice</h1>
 
@@ -248,7 +182,6 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
             purchaseOrder={invoice.purchaseOrder}
             paymentTerms={invoice.paymentTerms}
             timeZone={settings.timezone}
-            readOnly={locked}
             onChange={save}
           />
           <LogoSlot />
@@ -259,21 +192,16 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
             label="Billed to"
             value={invoice.billedTo}
             placeholder={"Client name\nStreet\nCity, country"}
-            emptyText="No client on this invoice."
-            readOnly={locked}
             onCommit={async (billedTo) => await save({ billedTo })}
           />
           <PartyBlock
             label="Pay to"
             value={invoice.payTo}
             placeholder={"Your name\nStreet\nCity, country"}
-            emptyText="Nobody to pay yet."
-            readOnly={locked}
             onCommit={async (payTo) => await save({ payTo })}
           />
           <CurrencyBlock
             currency={invoice.currency}
-            readOnly={locked}
             onChange={(currency) => {
               void save({ currency }).catch((thrown: unknown) => {
                 toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
@@ -283,6 +211,33 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
         </div>
 
         <Lines lines={invoice.lines} currency={invoice.currency} />
+
+        {/*
+          THE FOOT OF THE DOCUMENT, and that is why it is here rather than in
+          the meta grid at the top. This is a message to the client — where to
+          send the money, a thank-you, the terms the one-line `Payment terms`
+          field is too short to hold — and it is read after the total, not
+          beside the invoice date.
+
+          `PartyBlock` itself rather than a second multiline editor: it already
+          keeps its newlines, saves on blur, reverts on Escape, and keeps the
+          typed text on screen when the server refuses it with the reason
+          beside it. A user should not have to learn two editing behaviours in
+          one product, and this is prose printed verbatim exactly as an address
+          block is.
+
+          `?? ""` because the column is ABSENT when unset — `invoices.update`
+          clears it rather than storing "", so there is one spelling of "no
+          notes" — while a textarea's value is always a string.
+        */}
+        <div className="max-w-prose">
+          <PartyBlock
+            label="Notes"
+            value={invoice.notes ?? ""}
+            placeholder={"Bank transfer to …\nAccount 1234-5678\n\nThank you!"}
+            onCommit={async (notes) => await save({ notes })}
+          />
+        </div>
       </div>
     </div>
   )
@@ -324,11 +279,9 @@ function LogoSlot() {
  */
 function CurrencyBlock({
   currency,
-  readOnly,
   onChange,
 }: {
   currency: string
-  readOnly: boolean
   onChange: (currency: string) => void
 }) {
   const supported = supportedCurrencies()
@@ -341,25 +294,21 @@ function CurrencyBlock({
   return (
     <div className="flex shrink-0 flex-col gap-1.5">
       <span className="text-[0.8125rem] font-medium text-muted-foreground">Currency</span>
-      {readOnly ? (
-        <p className="text-sm tabular">{currency}</p>
-      ) : (
-        <select
-          aria-label="Currency"
-          value={currency}
-          onChange={(event) => onChange(event.target.value)}
-          className={cn(
-            "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          )}
-        >
-          {options.map((code) => (
-            <option key={code} value={code}>
-              {code}
-            </option>
-          ))}
-        </select>
-      )}
+      <select
+        aria-label="Currency"
+        value={currency}
+        onChange={(event) => onChange(event.target.value)}
+        className={cn(
+          "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        )}
+      >
+        {options.map((code) => (
+          <option key={code} value={code}>
+            {code}
+          </option>
+        ))}
+      </select>
     </div>
   )
 }

@@ -11,6 +11,7 @@ import schema from "./schema"
 import { api, internal } from "./_generated/api"
 import { MAX_ADDRESS_LENGTH, MAX_NAME_LENGTH } from "./clients"
 import {
+  MAX_NOTES_LENGTH,
   MAX_PARTY_LENGTH,
   MAX_PAYMENT_TERMS_LENGTH,
   MAX_PURCHASE_ORDER_LENGTH,
@@ -571,7 +572,7 @@ describe("invoices.createFromRange", () => {
     expect(second.unratedMs).toBe(2 * HOUR)
   })
 
-  it("stamps number, currency, dueAt and status on creation", async () => {
+  it("stamps number, currency and dueAt on creation, and no status", async () => {
     const t = setup()
     await t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "EUR" })
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
@@ -601,7 +602,11 @@ describe("invoices.createFromRange", () => {
     }
     const invoice = await get(t, invoiceId)
 
-    expect(invoice.status).toBe("draft")
+    // The column is GONE, not defaulted. `status` is still in the schema as a
+    // `v.optional` for one commit — see the TODO on it — and this asserts the
+    // mutation stopped writing it, which is what `migrations.clearInvoiceStatus`
+    // then does for the rows raised before this change.
+    expect(invoice.status).toBeUndefined()
     // settings.currencyOf is otherwise unexercised anywhere in this suite —
     // without this, a currency snapshot that silently fell back to "USD"
     // regardless of the account's own setting would pass every other test.
@@ -656,14 +661,18 @@ describe("invoices.createFromRange", () => {
    * `INVOICE_HISTORY_TOO_LARGE` exists to replace — so raising one has to break
    * a test here rather than pass quietly.
    *
-   * The sum has already moved once for exactly that reason: `createFromRange`
-   * now records the FILTER that built an invoice as well as its dates, and the
-   * two free strings that takes (`sourceText`, `sourceProjectId`) are 200 more
-   * characters on the row. The division was redone — the estimate went from
-   * ~1.8 KB to ~2.1 KB and 1,000 rows from ~1.8 MB to ~2.1 MB of the ~3.0 MB
-   * available, so the LIMIT holds where a term-and-forget would have left it
-   * merely looking as though it did. Task 6's line editor is the next thing to
-   * add free text to these rows.
+   * The sum has moved TWICE for exactly that reason. First `createFromRange`
+   * began recording the FILTER that built an invoice as well as its dates, and
+   * the two free strings that takes (`sourceText`, `sourceProjectId`) put 200
+   * more characters on the row. Then `notes` came back — the message to the
+   * client at the foot of the document — for 600 more, which makes it the
+   * largest single term in this sum.
+   *
+   * The division was redone both times rather than re-asserted. It now reads
+   * ~3.0 MB / ~2.7 KB a row = ~1,110 rows, so 1,000 still fits, with ~300 B a
+   * row to spare — see convex/lib/scan.ts, where that margin is what says how
+   * far these bounds can be widened before the LIMIT has to move instead. Task
+   * 6's line editor is the next thing to add free text to these rows.
    */
   it("keeps INVOICE_NUMBER_SCAN_LIMIT and the row estimate it is divided from", () => {
     expect(INVOICE_NUMBER_SCAN_LIMIT).toBe(1_000)
@@ -671,8 +680,9 @@ describe("invoices.createFromRange", () => {
       2 * MAX_PARTY_LENGTH +
         MAX_PURCHASE_ORDER_LENGTH +
         MAX_PAYMENT_TERMS_LENGTH +
-        2 * MAX_SOURCE_TEXT_LENGTH
-    ).toBe(1_702)
+        2 * MAX_SOURCE_TEXT_LENGTH +
+        MAX_NOTES_LENGTH
+    ).toBe(2_302)
   })
 
   it("refuses to mint a number once the invoice history is too large to scan safely", async () => {
@@ -690,7 +700,6 @@ describe("invoices.createFromRange", () => {
             userId: ALICE,
             clientKey: `hist-${i}`,
             number: `010100-${String(i).padStart(4, "0")}`,
-            status: "draft",
             clientId: null,
             billedTo: "",
             payTo: "",
@@ -746,7 +755,6 @@ type InvoiceOver = {
   number: string
   issuedAt: number
   userId?: string
-  status?: "draft" | "issued" | "paid"
   billedTo?: string
   currency?: string
   taxes?: Array<{ label: string; basisPoints: number }>
@@ -762,7 +770,6 @@ async function seedInvoice(
       userId: over.userId ?? ALICE,
       clientKey: `seed-${over.userId ?? ALICE}-${over.number}`,
       number: over.number,
-      status: over.status ?? "draft",
       clientId: null,
       billedTo: over.billedTo ?? "Acme Corp\n1 Way, Springfield",
       payTo: "",
@@ -1066,60 +1073,19 @@ describe("invoices.update", () => {
   })
 
   /*
-   * THE FREEZE, AND IT IS A SERVER RULE.
-   *
-   * The editor disables its fields once an invoice leaves draft; that is a
-   * convenience. This is the rule, asserted where a stale tab or a hand-written
-   * mutation cannot get past it — and asserted on the STORED row, so a refusal
-   * that threw after writing would still fail here.
-   */
-  it("refuses every edit to an issued invoice, and leaves it exactly as it was", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, {
-      number: "010126-0001",
-      issuedAt: MON,
-      status: "issued",
-      billedTo: "Vessel Vanguard",
-    })
-
-    await expectCode(updateAs(t, invoiceId, { billedTo: "Someone Else" }), "INVOICE_LOCKED")
-    await expectCode(updateAs(t, invoiceId, { currency: "EUR" }), "INVOICE_LOCKED")
-    await expectCode(updateAs(t, invoiceId, { issuedAt: MON + HOUR }), "INVOICE_LOCKED")
-
-    const after = await row(t, invoiceId)
-    expect(after?.billedTo).toBe("Vessel Vanguard")
-    expect(after?.currency).toBe("USD")
-    expect(after?.issuedAt).toBe(MON)
-  })
-
-  it("refuses an edit to a paid invoice too", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, {
-      number: "010126-0001",
-      issuedAt: MON,
-      status: "paid",
-    })
-    await expectCode(updateAs(t, invoiceId, { payTo: "Me" }), "INVOICE_LOCKED")
-  })
-
-  /*
    * A patch validator is a list of permissions, so the things NOT on it are
    * worth a test of their own. `number` is the invoice's identity and is minted
-   * against a bounded uniqueness scan; `status` is a rule rather than a value.
-   * Neither may ride in on a field patch — and the row is re-read afterwards,
-   * because a validator that quietly ignored an unknown field would look
-   * identical from the caller's side.
+   * against a bounded uniqueness scan, so it may not ride in on a field patch —
+   * and the row is re-read afterwards, because a validator that quietly ignored
+   * an unknown field would look identical from the caller's side.
    */
-  it("cannot change the invoice number or the status", async () => {
+  it("cannot change the invoice number", async () => {
     const t = setup()
     const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
 
     await expect(updateAs(t, invoiceId, { number: "999999-9999" })).rejects.toThrow()
-    await expect(updateAs(t, invoiceId, { status: "paid" })).rejects.toThrow()
 
-    const after = await row(t, invoiceId)
-    expect(after?.number).toBe("010126-0001")
-    expect(after?.status).toBe("draft")
+    expect((await row(t, invoiceId))?.number).toBe("010126-0001")
   })
 
   it("cannot rewrite where the figures came from", async () => {
@@ -1201,8 +1167,9 @@ describe("invoices.update", () => {
     expect((await row(t, invoiceId))?.purchaseOrder).toHaveLength(MAX_PURCHASE_ORDER_LENGTH)
   })
 
-  /* Bounded so it cannot become the notes field an invoice deliberately does
-   * not have — which is the argument INVOICE_NUMBER_SCAN_LIMIT rests on. */
+  /* Bounded because it is a name/value row of the document HEAD, beside the
+   * dates — a paragraph in a `<dl>` is a layout that has stopped working. The
+   * paragraph belongs in `notes`, bounded below. */
   it("refuses payment terms past their bound", async () => {
     const t = setup()
     const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
@@ -1215,6 +1182,64 @@ describe("invoices.update", () => {
     )
     await updateAs(t, invoiceId, { paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH) })
     expect((await row(t, invoiceId))?.paymentTerms).toHaveLength(MAX_PAYMENT_TERMS_LENGTH)
+  })
+
+  /*
+   * THE BOUND ON `notes`, and it is the load-bearing one on this row.
+   *
+   * A textarea at the foot of a document is exactly where somebody pastes a
+   * contract, and this field is the LARGEST term in the per-row byte estimate
+   * `INVOICE_NUMBER_SCAN_LIMIT` and `INVOICE_LIST_LIMIT` are divided from
+   * (convex/lib/scan.ts). Unbounded, the invoice-number scan reads more bytes
+   * than the transaction has and fails as the platform's opaque error — which
+   * is the failure `INVOICE_HISTORY_TOO_LARGE` exists to replace.
+   *
+   * Both sides of the boundary, like every other bound here: one character past
+   * refuses, exactly at it is accepted. An off-by-one that refused a legal value
+   * would pass a refusal-only test.
+   */
+  it("refuses notes past their bound and accepts notes exactly at it", async () => {
+    const t = setup()
+    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+
+    await expectCode(
+      updateAs(t, invoiceId, { notes: "n".repeat(MAX_NOTES_LENGTH + 1) }),
+      "TOO_LONG"
+    )
+    expect((await row(t, invoiceId))?.notes).toBeUndefined()
+
+    await updateAs(t, invoiceId, { notes: "n".repeat(MAX_NOTES_LENGTH) })
+    expect((await row(t, invoiceId))?.notes).toHaveLength(MAX_NOTES_LENGTH)
+  })
+
+  /*
+   * The bank block's newlines are its shape, exactly as a party block's are —
+   * an account number, an IBAN and a SWIFT code printed as one run-on line is a
+   * document a client cannot read a figure off. Same `checkText`, so this is
+   * the second writer of that rule rather than a second rule.
+   */
+  it("keeps the newlines inside notes and trims only their ends", async () => {
+    const t = setup()
+    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    const block = "Bank transfer to:\nAccount 1234-5678\n\nThank you!"
+
+    await updateAs(t, invoiceId, { notes: `\n  ${block}  \n` })
+
+    expect((await row(t, invoiceId))?.notes).toBe(block)
+  })
+
+  /* Emptied is ABSENT, the same rule the purchase order follows — the document
+   * has nothing to print either way, and two spellings of one fact is how a
+   * later `!== undefined` check quietly stops working. */
+  it("clears notes rather than storing an empty string", async () => {
+    const t = setup()
+    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+
+    await updateAs(t, invoiceId, { notes: "Pay me" })
+    expect((await row(t, invoiceId))?.notes).toBe("Pay me")
+
+    await updateAs(t, invoiceId, { notes: "   " })
+    expect((await row(t, invoiceId))?.notes).toBeUndefined()
   })
 
   /* An emptied optional field is ABSENT, not "". The document prints "—" for
@@ -1266,151 +1291,5 @@ describe("invoices.update", () => {
 
     await updateAs(t, invoiceId, { dueAt: MON - 24 * HOUR })
     expect((await row(t, invoiceId))?.dueAt).toBe(MON - 24 * HOUR)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// setStatus
-// ---------------------------------------------------------------------------
-
-const setStatusAs = async (
-  t: ReturnType<typeof setup>,
-  invoiceId: Id<"invoices">,
-  status: "draft" | "issued" | "paid",
-  userId = ALICE
-) => await t.mutation(internal.invoices.setStatusAs, { userId, invoiceId, status })
-
-describe("invoices.setStatus", () => {
-  it("rejects an anonymous caller", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-    await expectCode(
-      t.mutation(api.invoices.setStatus, { invoiceId, status: "issued" }),
-      "UNAUTHENTICATED"
-    )
-  })
-
-  it("refuses to move an invoice belonging to someone else", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, {
-      userId: BOB,
-      number: "010126-0001",
-      issuedAt: MON,
-    })
-
-    await expectCode(setStatusAs(t, invoiceId, "issued"), "NOT_FOUND")
-    expect((await row(t, invoiceId))?.status).toBe("draft")
-  })
-
-  it("walks the line forwards and back", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-
-    await setStatusAs(t, invoiceId, "issued")
-    expect((await row(t, invoiceId))?.status).toBe("issued")
-    await setStatusAs(t, invoiceId, "paid")
-    expect((await row(t, invoiceId))?.status).toBe("paid")
-    // Un-paying is a correction, not an unlock.
-    await setStatusAs(t, invoiceId, "issued")
-    expect((await row(t, invoiceId))?.status).toBe("issued")
-  })
-
-  /*
-   * THE UNLOCK the plan asks for, end to end: this is what makes the freeze
-   * above affordable. An invoice sent with a wrong address is fixable in one
-   * deliberate act rather than by raising a second document.
-   */
-  it("unlocks an issued invoice by setting it back to draft", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, {
-      number: "010126-0001",
-      issuedAt: MON,
-      status: "issued",
-    })
-
-    await expectCode(updateAs(t, invoiceId, { billedTo: "Corrected" }), "INVOICE_LOCKED")
-
-    await setStatusAs(t, invoiceId, "draft")
-    await updateAs(t, invoiceId, { billedTo: "Corrected" })
-
-    expect((await row(t, invoiceId))?.billedTo).toBe("Corrected")
-  })
-
-  it("refuses the two moves that skip Issued", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-
-    // A draft is a document nobody has been sent, so it cannot have been paid —
-    // and this path would also be the one way to reach a frozen invoice that
-    // was never frozen at the moment it was raised.
-    await expectCode(setStatusAs(t, invoiceId, "paid"), "INVALID_STATUS_CHANGE")
-    expect((await row(t, invoiceId))?.status).toBe("draft")
-
-    await setStatusAs(t, invoiceId, "issued")
-    await setStatusAs(t, invoiceId, "paid")
-    await expectCode(setStatusAs(t, invoiceId, "draft"), "INVALID_STATUS_CHANGE")
-    expect((await row(t, invoiceId))?.status).toBe("paid")
-  })
-
-  /*
-   * ALL THREE self-transitions, not just `paid -> paid`. A double-fired click
-   * or a retried mutation must not raise an error at somebody about a state
-   * they are already in, and that has to hold from wherever the invoice is.
-   *
-   * `issued -> issued` is the one the design comment reasons about and the one
-   * that was never covered: it is the only self-transition that touches a
-   * FROZEN document, and a no-op that quietly thawed it would be a laundering
-   * path — re-issue, edit, and the copy in the client's inbox and the copy in
-   * this table stop agreeing with nobody having unlocked anything. So it is
-   * asserted to leave the freeze exactly where it was.
-   */
-  it("treats setting the status it already has as a no-op, from any of the three", async () => {
-    const t = setup()
-    for (const [index, status] of (["draft", "issued", "paid"] as const).entries()) {
-      const invoiceId = await seedInvoice(t, {
-        number: `010126-000${index + 1}`,
-        issuedAt: MON,
-        status,
-      })
-
-      await setStatusAs(t, invoiceId, status)
-      expect((await row(t, invoiceId))?.status, status).toBe(status)
-    }
-  })
-
-  it("leaves an issued invoice locked after it is re-issued", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, {
-      number: "010126-0001",
-      issuedAt: MON,
-      status: "issued",
-      billedTo: "Acme Corp",
-    })
-
-    await setStatusAs(t, invoiceId, "issued")
-
-    await expectCode(updateAs(t, invoiceId, { billedTo: "Laundered" }), "INVOICE_LOCKED")
-    expect((await row(t, invoiceId))?.billedTo).toBe("Acme Corp")
-  })
-
-  /*
-   * The no-op returns BEFORE the patch rather than writing the same status
-   * back. `updatedAt` is what an audit reads to ask when an issued invoice was
-   * last touched, and a retried click is not a touch — asserting the field
-   * rather than the status is the only way to tell the two implementations
-   * apart, since both leave `status` exactly where it was.
-   */
-  it("does not restamp updatedAt for a status it is already in", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, {
-      number: "010126-0001",
-      issuedAt: MON,
-      status: "issued",
-    })
-    const before = (await row(t, invoiceId))?.updatedAt
-
-    await setStatusAs(t, invoiceId, "issued")
-
-    expect((await row(t, invoiceId))?.updatedAt).toBe(before)
   })
 })

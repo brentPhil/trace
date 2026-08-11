@@ -96,35 +96,47 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * (`INVOICE_SCAN_LIMIT` rows at up to ~2.7 KB each, or ~5.4 MB), not the full
  * 8 MiB. Call what is left ~3.0 MB.
  *
- * WHAT AN `invoices` ROW COSTS — redone a second time, because a second writer
- * of free text arrived. `invoices.update` is where a human types into one of
- * these rows, and `invoices.createFromRange` now records the FILTER that built
- * it as well as the range; every bound either one enforces is a term here:
+ * WHAT AN `invoices` ROW COSTS — redone a THIRD time, because the document
+ * grew a message to the client at its foot. Every bound `invoices.update` or
+ * `invoices.createFromRange` enforces is a term here:
  * `billedTo` and `payTo` at `MAX_PARTY_LENGTH` (601 each, which is clients.ts's
  * `MAX_NAME_LENGTH` + a newline + `MAX_ADDRESS_LENGTH`, so a block
  * `createFromRange` snapshots always fits the editor that has to save it back),
- * `purchaseOrder` at 100, `paymentTerms` at 200, and `sourceText` and
- * `sourceProjectId` at `MAX_SOURCE_TEXT_LENGTH` (100 each). That is 1,702
- * characters — ~1.7 KB of text beside a handful of ids and numbers and a
- * `sourcePresets` array deduplication bounds at three short literals. Call the
- * row ~2.1 KB, where this comment said ~1.8 KB before the filter was stored and
- * ~800 B before there was an editor at all.
+ * `purchaseOrder` at 100, `paymentTerms` at 200, `sourceText` and
+ * `sourceProjectId` at `MAX_SOURCE_TEXT_LENGTH` (100 each), and `notes` at
+ * `MAX_NOTES_LENGTH` (600 — the payment block and the thank-you, and now the
+ * largest single term in this sum). That is 2,302 characters — ~2.3 KB of text
+ * beside a handful of ids and numbers and a `sourcePresets` array deduplication
+ * bounds at three short literals. Call the row ~2.7 KB, where this comment said
+ * ~2.1 KB before `notes`, ~1.8 KB before the filter was stored, and ~800 B
+ * before there was an editor at all.
  *
- * The LIMIT does NOT move for this one, and that is a result rather than an
- * omission: 1,000 rows is ~2.1 MB of the ~3.0 MB available, up from ~1.8 MB and
- * still inside it. (The halving to 1,000 happened when the editor landed — the
- * old 2,000 would be ~4.2 MB at today's row and would not fit, as it already
- * did not at ~1.8 KB.) An account past 1,000 invoices is refused a new number
+ * The LIMIT does NOT move for this one either, and that is a result of doing
+ * the division rather than an omission:
+ *
+ *     ~3.0 MB / ~2.7 KB a row  =  ~1,110 rows   >  1,000
+ *
+ * So 1,000 rows is ~2.7 MB of the ~3.0 MB available, up from ~2.1 MB and still
+ * inside it. (The halving to 1,000 happened when the editor landed — the old
+ * 2,000 would be ~5.4 MB at today's row and would not fit, as it already did
+ * not at ~1.8 KB.) An account past 1,000 invoices is refused a new number
  * instead of handed a wrong one, which is the trade this constant already
  * made at 2,000 and the same one `RANGE_TOO_LARGE` makes.
+ *
+ * WHERE THE NEXT CLIFF IS, since 1,110 is no longer comfortably clear of 1,000:
+ * ~300 B a row is what is left, so the free-text bounds above have ~300 more
+ * characters between them before this constant has to move — `MAX_NOTES_LENGTH`
+ * alone could reach about 900. Past that the honest change is to LOWER the
+ * limit or to stop scanning (see the bottom of this comment), never to leave
+ * the estimate as it reads today.
  *
  * THE BOUNDS COUNT CHARACTERS AND THE CEILING COUNTS BYTES, and everything
  * above equates the two — which is only true for ASCII. Being exact about how
  * far that goes, rather than calling it headroom:
  *
- *     1 B/char  1,000 rows ~ 2.1 MB   fits inside the ~3.0 MB above
- *     2 B/char  1,000 rows ~ 3.8 MB   does NOT fit
- *     3 B/char  1,000 rows ~ 5.5 MB   does NOT fit
+ *     1 B/char  1,000 rows ~ 2.7 MB   fits inside the ~3.0 MB above
+ *     2 B/char  1,000 rows ~ 5.0 MB   does NOT fit
+ *     3 B/char  1,000 rows ~ 7.3 MB   does NOT fit
  *
  * So the honest statement is not that 1,000 has margin for any account. It is
  * that 1,000 holds for an account whose invoices are ASCII, and that what makes
@@ -132,23 +144,23 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * 601-character bound — a name and a postal address run 60-120 characters, not
  * 601, and the bounds exist to stop a paste accident rather than to describe a
  * document. An account that genuinely saturated these fields in a three-byte
- * script would exceed the budget at roughly 550 invoices — 600 before the
- * filter joined the row — and would get the platform's opaque error rather than
- * this constant's refusal.
+ * script would exceed the budget at roughly 410 invoices — 550 before `notes`
+ * joined the row, 600 before the filter did — and would get the platform's
+ * opaque error rather than this constant's refusal.
  *
  * Lowering the number until that case fits is the wrong fix: it would trade a
  * limit nobody reaches for one many accounts do.
  *
  * NAMING THE TENSION IN THAT SENTENCE, because it is the shape of the halving
  * this comment once defended. The paragraph above says a real party block runs
- * 60-120 characters, and a real search filter is a word or two, which makes a
- * real `invoices` row ~400 B rather than the
- * ~2.1 KB the division uses — and at ~400 B even 2,000 rows would be ~0.8 MB,
- * comfortably inside the ~3.0 MB budget. So 1,000 is set by a paste-accident
- * guard nobody approaches, while 2,000 was a limit no account would reach and
- * 1,000 is one a decade of monthly multi-client invoicing does. The argument
- * against lowering further applies, in weaker form, to the lowering that
- * happened here.
+ * 60-120 characters, a real search filter is a word or two, and a real `notes`
+ * is a bank block and a thank-you at 200-300 — which makes a real `invoices`
+ * row ~700 B rather than the ~2.7 KB the division uses, and at ~700 B even
+ * 2,000 rows would be ~1.4 MB, comfortably inside the ~3.0 MB budget. So 1,000
+ * is set by a paste-accident guard nobody approaches, while 2,000 was a limit
+ * no account would reach and 1,000 is one a decade of monthly multi-client
+ * invoicing does. The argument against lowering further applies, in weaker
+ * form, to the lowering that happened here.
  *
  * It stands anyway, and deliberately: every bound in this file is derived from
  * a PROVABLE worst case rather than from an expected one, because a limit sized
@@ -165,13 +177,18 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * comment. That is the change to make before raising this number, not instead
  * of thinking about it.
  *
- * An invoice deliberately carries NO notes field, which is what would blow the
- * estimate all over again — an invoice is a statement of what is owed, and
- * free-form commentary belongs on the time entries the lines were built from.
- * `paymentTerms` is bounded at 200 for precisely that reason: it is the field
- * a notes field would come back as. `sourceText` is bounded at 100 for the
- * narrower version of it — a needle a user typed into a search box arrives here
- * as free text, and the box itself has no length attribute to lean on.
+ * AN INVOICE DOES CARRY A NOTES FIELD, and this comment used to argue at length
+ * that it never would — that free-form commentary belonged on the time entries
+ * the lines were built from, and that `paymentTerms` at 200 was the shape it
+ * would otherwise come back in. The argument is gone because the field is back:
+ * an invoice is a document sent to a person, and where to send the money is not
+ * commentary, it is half of what the document is FOR. What survives of that
+ * argument is only its mechanism — a free-text field on this row is a term in
+ * the division above, so `notes` arrived with `MAX_NOTES_LENGTH` and the
+ * division was redone rather than re-asserted. `sourceText` is bounded at 100
+ * for the narrower version of the same thing: a needle a user typed into a
+ * search box arrives here as free text, and the box itself has no length
+ * attribute to lean on.
  */
 export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
 
@@ -186,12 +203,12 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
  * and so the read is a page of invoices PLUS every line of every one of them.
  *
  * The arithmetic, on the same per-row accounting `INVOICE_NUMBER_SCAN_LIMIT`
- * above uses. An `invoices` row is ~2.1 KB once every bound written into one is
+ * above uses. An `invoices` row is ~2.7 KB once every bound written into one is
  * summed (see that constant — `billedTo` and `payTo` at 601 each,
  * `purchaseOrder` at 100, `paymentTerms` at 200, `sourceText` and
- * `sourceProjectId` at 100 each, beside ids and numbers). An
+ * `sourceProjectId` at 100 each, `notes` at 600, beside ids and numbers). An
  * `invoiceLines` row is a description, four numbers and two ids — call it
- * ~400 B. For M lines an invoice, a page of 50 costs 50 x (2,100 + M x 400)
+ * ~400 B. For M lines an invoice, a page of 50 costs 50 x (2,700 + M x 400)
  * bytes and 50 x (1 + M) documents.
  *
  * That ~400 B assumes a bound `invoiceLines.description` does not actually
@@ -207,17 +224,23 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
  * DOCUMENTS BIND, NOT BYTES, and it is worth saying plainly because the
  * accounting above is all in bytes and the byte ceiling is the LOOSER of the
  * two here. At a page of 50 the document limit is reached at M = 327 and the
- * byte limit not until M = 415, so the real headroom is:
+ * byte limit not until M = 413, so the real headroom is:
  *
  *     M <= 326 fits. M = 200 -> 10,050 docs (61% of 16,384) and ~4.1 MB (49%).
  *
- * Those three figures are UNCHANGED by the row growing from ~1.8 KB to ~2.1 KB,
- * and the division was redone rather than assumed: the invoice rows are 105 KB
- * of a page instead of 90 KB, which leaves the byte failure point exactly where
- * it was, at M = 415 (50 x (2,100 + 414 x 400) = 8,380,000 B, under the
- * 8,388,608 ceiling; one more line is 8,400,000 and over it). Lines dominate, so the
- * head of the row barely registers — which is the same fact that makes M, not
- * this constant, the number to worry about.
+ * Those three figures are UNCHANGED by the row growing from ~2.1 KB to ~2.7 KB
+ * — the document limit does not know about bytes at all, and at M = 200 the
+ * extra 600 characters a row are 30 KB of a 4.1 MB page — but the byte failure
+ * point DID move, from M = 415 to M = 413, and the division was redone rather
+ * than assumed to find that out:
+ *
+ *     50 x (2,700 + 412 x 400) = 8,375,000 B   under the 8,388,608 ceiling
+ *     50 x (2,700 + 413 x 400) = 8,395,000 B   over it
+ *
+ * Lines still dominate, so the head of the row barely registers — which is the
+ * same fact that makes M, not this constant, the number to worry about, and the
+ * reason a 29% larger invoice row costs two lines of headroom rather than
+ * fifty.
  *
  * WHAT BOUNDS M: nothing, honestly. `createFromRange` writes one line per
  * project with billable time in the range, which is bounded only by how many

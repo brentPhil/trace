@@ -1,7 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
-import { STATUS_LABEL } from "@/components/invoices/status-control"
 import { Empty } from "@/components/ui/empty"
 import { format } from "@/lib/report-series"
 import { cn } from "@/lib/utils"
@@ -95,18 +94,14 @@ export function Invoices() {
                     <th scope="col" className={cn(CLIENT_COL, "px-3 py-2 text-left")}>
                       Billed to
                     </th>
-                    {/* "Date issued", not "Issued" — the status column three
-                        cells along prints the word "Issued" as a value, and a
-                        header that is also a value in another column is read
-                        as one. */}
+                    {/* "Date issued", not "Issued": the bare participle reads
+                        as a state an invoice is IN, and this product tracks no
+                        such state. It is the date on the document. */}
                     <th scope="col" className={cn(DATE_COL, "px-3 py-2 text-left")}>
                       Date issued
                     </th>
                     <th scope="col" className={cn(TOTAL_COL, "px-3 py-2 text-right")}>
                       Total
-                    </th>
-                    <th scope="col" className={cn(STATUS_COL, "px-3 py-2 text-right")}>
-                      Status
                     </th>
                   </tr>
                 </thead>
@@ -152,7 +147,6 @@ export function Invoices() {
                       <td className="px-3 py-2 text-right font-medium tabular text-brass">
                         {formatMoney(totalCents, currency)}
                       </td>
-                      <td />
                     </tr>
                   ))}
                 </tfoot>
@@ -213,16 +207,12 @@ const NUMBER_COL = "w-28"
 const CLIENT_COL = ""
 const DATE_COL = "hidden w-32 sm:table-cell"
 const TOTAL_COL = "w-28"
-const STATUS_COL = "w-20"
 
 /*
- * The status is a WORD (see `STATUS_LABEL`, which the editor shares so the two
- * screens cannot spell "Issued" two ways), and the only reinforcement it gets
- * here is a step of the neutral ramp: an issued or paid invoice is a fact
- * about the outside world and sits at Ink, a draft is still only yours and
- * sits at Ink Muted. No dot, no hue — meaning is never carried by colour
- * alone, and there is no colour that could carry this one: cold means running
- * and warm means money, and a draft invoice is neither.
+ * THERE IS NO STATUS COLUMN, and its absence is deliberate rather than pending.
+ * An invoice here is a document you edit and export, not a row in a receivables
+ * ledger — nothing in this product observes whether one has been sent or paid,
+ * so a column claiming to would be a field the app has no way of keeping true.
  */
 
 function InvoiceRowItem({
@@ -297,15 +287,6 @@ function InvoiceRowItem({
       */}
       <td className="px-3 py-2 text-right font-medium tabular text-brass">
         {formatMoney(invoice.totalCents, invoice.currency)}
-      </td>
-
-      <td
-        className={cn(
-          "px-3 py-2 text-right text-xs",
-          invoice.status === "draft" ? "text-muted-foreground" : "text-foreground"
-        )}
-      >
-        {STATUS_LABEL[invoice.status]}
       </td>
     </tr>
   )

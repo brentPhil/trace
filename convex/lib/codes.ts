@@ -72,16 +72,6 @@ export type TraceErrorCode =
    *  Refused rather than merged: silently combining them bills one company
    *  for another company's work, on one document, with one total. */
   | "MIXED_CLIENTS"
-  /** An edit to an invoice that has left draft. The freeze is a server rule,
-   *  not a disabled input: an issued invoice is a document somebody has been
-   *  sent, and the copy in their inbox and the copy in this table have to keep
-   *  saying the same thing. The message names the way back — setting it to
-   *  Draft, which is the unlock `invoices.setStatus` performs. */
-  | "INVOICE_LOCKED"
-  /** A status move that skips Issued — `draft -> paid` or `paid -> draft`.
-   *  Distinct from INVOICE_LOCKED because nothing is locked: the request is
-   *  legal in one more step, and the message says which one. */
-  | "INVALID_STATUS_CHANGE"
   /** A date that is not a finite instant. Its own code for the reason
    *  INVALID_RATE has one: `v.number()` round-trips NaN, and one NaN
    *  `issuedAt` sorts nowhere in `by_user_issued` and prints as "Invalid Date"

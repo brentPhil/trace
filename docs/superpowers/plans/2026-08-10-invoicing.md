@@ -379,7 +379,9 @@ export const invoiceFields = {
    *  response must not mint a second invoice number. */
   clientKey: v.string(),
   number: v.string(),
-  status: v.union(v.literal("draft"), v.literal("issued"), v.literal("paid")),
+  // AMENDED 2026-08-11: there is no `status`. See the Task 5 amendment — it
+  // shipped, it made this a place to track invoices rather than write them, and
+  // it is being removed from the schema in three steps.
   clientId: v.union(v.id("clients"), v.null()),
   /** SNAPSHOT of the client's block at creation, not a join. Renaming a client
    *  must not rewrite last year's invoices; `clientId` beside it is what still
@@ -470,7 +472,7 @@ This is the task the feature exists for. Everything else is a form.
 
 **Interfaces:**
 - Produces: `lineAmountCents(quantityCentis, unitCents): number`, `invoiceTotals(lines, taxes): { subtotalCents, taxCents, totalCents }` from `@shared/invoiceMath`.
-- Produces: `invoices.createFromRange`, `get`, `list`, `update`, `setStatus`, `remove`, `addLine`, `updateLine`, `removeLine`.
+- Produces: `invoices.createFromRange`, `get`, `list`, `update`, `remove`, `addLine`, `updateLine`, `removeLine`. (`setStatus` was built and then removed — see the amendment under Task 5.)
 
 - [ ] **Step 1: Write the failing arithmetic test**
 
@@ -667,7 +669,10 @@ Widen the `to` union to include `"/invoices"`. `src/components/shell/app-sidebar
 
 - [ ] **Step 2: Build the list**
 
-Columns: number, client, issued date, total, status. Empty state teaches the interface (DESIGN.md forbids a bare "nothing here"): point at `/reports` as where an invoice comes from. Amounts in brass, dates and counts in ink.
+Columns: number, client, issued date, total. Empty state teaches the interface (DESIGN.md forbids a bare "nothing here"): point at `/reports` as where an invoice comes from. Amounts in brass, dates and counts in ink.
+
+**AMENDED 2026-08-11 — there is no status column.** It shipped with one and it
+has been removed; see the amendment under Task 5 for the whole argument.
 
 - [ ] **Step 3: Test, then commit** — a `dom` test asserting the empty state names the route to visit, and that rows render number/client/total.
 
@@ -679,7 +684,7 @@ Columns: number, client, issued date, total, status. Empty state teaches the int
 - Create: `src/routes/_authed/invoices.$invoiceId.tsx`
 - Create: `src/components/invoices/invoice-meta.tsx`, `src/components/invoices/party-block.tsx`
 - Modify: `src/routes/_authed/reports.tsx` — the `Create invoice` button (see below)
-- Modify: `convex/invoices.ts` — `update` and `setStatus`, which no task has built yet
+- Modify: `convex/invoices.ts` — `update`, which no task has built yet
 
 **AMENDED 2026-08-11 — two things this task must absorb, because nothing else does.**
 
@@ -696,25 +701,49 @@ to go to. Both of the spec's refusals ship with it, or it is not done: refuse
 when the range is `truncated`, and refuse when the range spans two clients,
 naming both.
 
-**Second: `update`/`setStatus` do not exist either.** Task 3's file list
-promised them and shipped only `createFromRange`/`get`. Task 6 makes the same
+**Second: `update` does not exist either.** Task 3's file list
+promised it and shipped only `createFromRange`/`get`. Task 6 makes the same
 promise about the line mutations — check before starting it rather than
 discovering it mid-task, which is what happened to `invoices.list` in Task 4.
 
-Layout follows the reference screenshot: breadcrumb `Invoices › #072726-0013`, a status control and `Export PDF` top-right, then `Invoice` heading, the meta grid (ID, invoice date, due date, purchase order, payment terms), a logo slot, `Billed to` / `Pay to` blocks, and the currency selector.
+Layout follows the reference screenshot: breadcrumb `Invoices › #072726-0013`, `Export PDF` top-right, then `Invoice` heading, the meta grid (ID, invoice date, due date, purchase order, payment terms), a logo slot, `Billed to` / `Pay to` blocks, the currency selector, and the notes block at the foot.
 
-**Three deliberate divergences from the reference, each argued in the spec:**
-- **No Save button.** Fields autosave on blur, as every other editable surface in this app does. The top-right control is `status` instead: `Draft → Issued → Paid`.
-- **Marking Issued freezes the lines**; editing then needs an explicit unlock. That is the act that deserves a deliberate button, not typing an address.
+**Two deliberate divergences from the reference, each argued in the spec:**
+- **No Save button.** Fields autosave on blur, as every other editable surface in this app does. What sits top-right is `Export PDF`, and nothing else.
 - Payer defaults come from settings, but are snapshot onto the invoice at creation.
 
-**No notes field.** An invoice states what is owed; free-form commentary belongs on
-the time entries the lines were built from, where it already lives. This is also
-what keeps `INVOICE_NUMBER_SCAN_LIMIT`'s ~800 B/row estimate honest — so
-`update` must bound `purchaseOrder` and `paymentTerms`, the only free text left,
-the way `clients.ts` bounds names and addresses.
+**AMENDED 2026-08-11 — THE STATUS WORKFLOW IS GONE, AND `notes` IS BACK.**
+This task shipped a third divergence — a `draft → issued → paid` status control,
+a freeze on leaving draft, and an explicit unlock to thaw it — and it was wrong.
+The ask was to raise an invoice from a filtered range, edit it, and **export it
+as a PDF**. A status column, a transition rule and a freeze make this app a
+place to TRACK invoices, which nobody asked for and which the app cannot even
+keep honest: nothing here observes whether a document was sent or paid, so every
+value in that column was a claim on trust. It is removed root and branch —
+`setStatus`, `status-control.tsx`, the freeze in `update`, the `INVOICE_LOCKED`
+and `INVALID_STATUS_CHANGE` codes, the Status column, and every `readOnly` prop
+that existed only to render a frozen document. An invoice is a document you edit
+and export, editable for as long as it exists.
 
-- [ ] Steps: build `party-block.tsx` (a labelled multiline field preserving newlines), `invoice-meta.tsx` (the field grid), wire autosave-on-blur through `invoices.update`, `dom` tests for autosave and for the frozen-when-issued rule, then commit.
+`notes` came back with it — a message to the client at the FOOT of the document
+(payment details, thanks, terms), on screen and on the exported PDF. It reuses
+`PartyBlock`, so it saves on blur and keeps its newlines like every other block.
+The earlier "no notes field" argument — that an invoice states what is owed and
+commentary belongs on the time entries — is void: where to send the money is not
+commentary, it is half of what the document is for. What survives of it is only
+the mechanism: free text on an `invoices` row is a term in
+`INVOICE_NUMBER_SCAN_LIMIT`'s per-row byte estimate, so `notes` arrived with
+`MAX_NOTES_LENGTH` (600) and the division in `convex/lib/scan.ts` was REDONE
+rather than re-asserted — ~3.0 MB / ~2.7 KB a row = ~1,110, so the 1,000 limit
+holds. `update` bounds `purchaseOrder`, `paymentTerms` and `notes` for the same
+reason, the way `clients.ts` bounds names and addresses.
+
+`status` is removed from the database in three steps, because Convex validates
+every existing document on push: make the field `v.optional` (done),
+run `migrations.clearInvoiceStatus` to clear the column, then delete the field
+in a follow-up commit.
+
+- [ ] Steps: build `party-block.tsx` (a labelled multiline field preserving newlines), `invoice-meta.tsx` (the field grid), wire autosave-on-blur through `invoices.update`, `dom` tests for autosave and for the notes block, then commit.
 
 ---
 
@@ -751,7 +780,7 @@ Layout is the editor's paper area at print fidelity: same blocks, same numbers, 
 
 ## Self-review
 
-**Spec coverage.** §1's three tables → Tasks 1–2. §1's snapshot rule → Task 3's headline test. §1's numbering and dates → Task 2. §1's penny problem → Task 3's `lineAmountCents` and Task 6's info affordance. §2's `createFromRange` and its two refusals → Task 3. §4's routes and Clients tab → Task 4 (nav/list) with the Clients tab folded into Task 1's surface. §5's editor and three divergences → Tasks 5–6. §6's invoice PDF → Task 7.
+**Spec coverage.** §1's three tables → Tasks 1–2. §1's snapshot rule → Task 3's headline test. §1's numbering and dates → Task 2. §1's penny problem → Task 3's `lineAmountCents` and Task 6's info affordance. §2's `createFromRange` and its two refusals → Task 3. §4's routes and Clients tab → Task 4 (nav/list) with the Clients tab folded into Task 1's surface. §5's editor and its divergences → Tasks 5–6, minus the status workflow the Task 5 amendment removes. §6's invoice PDF → Task 7.
 
 **Deliberately deferred, and why:** the logo slot renders as an empty affordance in Task 5 but uploading an image needs Convex file storage and is not required to raise an invoice — it is the natural first follow-up.
 

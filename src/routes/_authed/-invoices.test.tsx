@@ -64,7 +64,6 @@ afterEach(cleanup)
 type Row = {
   _id: Id<"invoices">
   number: string
-  status: "draft" | "issued" | "paid"
   billedTo: string
   currency: string
   issuedAt: number
@@ -74,7 +73,6 @@ type Row = {
 function makeRow(over: Partial<Row> & { number: string }): Row {
   return {
     _id: over.number as unknown as Id<"invoices">,
-    status: "draft",
     billedTo: "Acme Corp\n1 Way, Springfield",
     currency: "USD",
     issuedAt: NOW,
@@ -182,20 +180,22 @@ describe("Invoices — the rows", () => {
   })
 
   /*
-   * The status is a WORD, never a colour alone (DESIGN.md). This asserts the
-   * word is on screen at all — a treatment that lost it would still look like
-   * a designed row.
+   * NO STATUS ANYWHERE, and it is worth an assertion rather than an absence in
+   * the fixture. This product does not track whether an invoice has been sent
+   * or paid — an invoice is a document you edit and export — so a column, a
+   * badge or a word reappearing here would be the app claiming to know
+   * something it cannot observe. The three words are asserted individually
+   * because a re-added column would print one of them per row, not all three.
    */
-  it("states the status in words", () => {
+  it("says nothing about draft, issued or paid", () => {
     renderInvoices([
-      makeRow({ number: "072726-0011", status: "draft" }),
-      makeRow({ number: "072726-0012", status: "issued" }),
-      makeRow({ number: "072726-0013", status: "paid" }),
+      makeRow({ number: "072726-0011" }),
+      makeRow({ number: "072726-0012" }),
     ])
 
-    expect(screen.getByText("Draft")).toBeTruthy()
-    expect(screen.getByText("Issued")).toBeTruthy()
-    expect(screen.getByText("Paid")).toBeTruthy()
+    expect(screen.queryByText("Draft")).toBeNull()
+    expect(screen.queryByText("Issued")).toBeNull()
+    expect(screen.queryByText("Paid")).toBeNull()
   })
 
   it("says an invoice with no client has none, rather than leaving the cell blank", () => {
@@ -221,7 +221,7 @@ describe("Invoices — the rows", () => {
   })
 
   /*
-   * Five aligned columns under a header row is a table, and it has to BE one.
+   * Four aligned columns under a header row is a table, and it has to BE one.
    * Rendered as a <ul> the header is announced as the first of N list items
    * and no cell is ever tied to the column it sits under. These roles come
    * from the markup — there is no ARIA on this page — so the assertion fails
@@ -232,7 +232,7 @@ describe("Invoices — the rows", () => {
 
     expect(
       screen.getAllByRole("columnheader").map((cell) => cell.textContent)
-    ).toEqual(["Number", "Billed to", "Date issued", "Total", "Status"])
+    ).toEqual(["Number", "Billed to", "Date issued", "Total"])
     // Scoped to the body: the footer carries a rowheader of its own, naming the
     // total. Both are correct — this asserts the one that names an invoice.
     const body = container.querySelector("tbody")

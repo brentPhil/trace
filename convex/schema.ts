@@ -111,7 +111,24 @@ export const invoiceFields = {
    *  response must not mint a second invoice number. */
   clientKey: v.string(),
   number: v.string(),
-  status: v.union(v.literal("draft"), v.literal("issued"), v.literal("paid")),
+  /*
+   * TODO: DELETE THIS FIELD once `migrations.clearInvoiceStatus` has run.
+   *
+   * There is no draft/issued/paid workflow any more, and nothing reads or
+   * writes this. An invoice is a document you edit and export, always editable
+   * — a status column made this app a place to TRACK invoices, which is not
+   * what it was asked to be.
+   *
+   * It is optional rather than gone because Convex validates every EXISTING
+   * document against the schema on push, and rows raised before this change
+   * still carry the field: deleting it here would fail the deploy rather than
+   * the data. The three steps are optional (this commit), clear the column
+   * (the migration), delete the field (a follow-up commit) — and only the last
+   * one may remove this comment.
+   */
+  status: v.optional(
+    v.union(v.literal("draft"), v.literal("issued"), v.literal("paid"))
+  ),
   clientId: v.union(v.id("clients"), v.null()),
   /** SNAPSHOT of the client's block at creation, not a join. Renaming a client
    *  must not rewrite last year's invoices; `clientId` beside it is what still
@@ -124,6 +141,15 @@ export const invoiceFields = {
   dueAt: v.number(),
   purchaseOrder: v.optional(v.string()),
   paymentTerms: v.optional(v.string()),
+  /** The message to the client at the FOOT of the document: where to send the
+   *  money, a thank-you, anything the terms line above is too short to hold.
+   *  Rendered verbatim, newlines and all, like a party block — it is prose a
+   *  human wrote to another human, not a field.
+   *
+   *  Bounded by `MAX_NOTES_LENGTH` on write, which is not housekeeping: it is
+   *  the largest term in `INVOICE_NUMBER_SCAN_LIMIT`'s per-row byte estimate
+   *  (convex/lib/scan.ts) and widening it means redoing that division. */
+  notes: v.optional(v.string()),
   /** Ordered, applied to the subtotal in order. `basisPoints` rather than a
    *  percentage float: 8.25% is 825, and no tax line is ever the result of
    *  0.1 + 0.2. */

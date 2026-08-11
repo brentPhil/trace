@@ -3,8 +3,8 @@ import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
 
 /**
- * A labelled block of a document — `Billed to`, `Pay to` — that keeps its
- * newlines.
+ * A labelled block of a document — `Billed to`, `Pay to`, `Notes` — that keeps
+ * its newlines.
  *
  * NOT `InlineEdit`. That component is the right answer everywhere a value is
  * one line, and it is an `<input>`: Enter commits. Here Enter is a line break,
@@ -23,18 +23,15 @@ export function PartyBlock({
   label,
   value,
   placeholder,
-  emptyText,
-  readOnly = false,
   onCommit,
 }: {
   label: string
   value: string
+  /** What the empty field shows instead of a blank rectangle. It is the
+   *  placeholder rather than a rendered sentence because these blocks are
+   *  ALWAYS editable — nothing in this product freezes an invoice — so there is
+   *  no read-only state for an absence to be stated in. */
   placeholder?: string
-  /** What the block says when it is empty and cannot be typed into. An absence
-   *  stated as an absence — never a blank rectangle, which reads as a
-   *  rendering fault on a document. */
-  emptyText: string
-  readOnly?: boolean
   /** Passed in, never reached for — see the component/Convex boundary in
    *  eslint.config.js. */
   onCommit: (next: string) => Promise<void>
@@ -57,20 +54,6 @@ export function PartyBlock({
   useEffect(() => {
     if (document.activeElement !== ref.current) setRaw(value)
   }, [value])
-
-  if (readOnly) {
-    return (
-      <Labelled label={label}>
-        {value.trim() === "" ? (
-          <p className="text-sm italic text-muted-foreground">{emptyText}</p>
-        ) : (
-          // `whitespace-pre-wrap` is the whole point: this is the block as the
-          // document prints it, line breaks and all.
-          <p className="text-sm whitespace-pre-wrap">{value}</p>
-        )}
-      </Labelled>
-    )
-  }
 
   const commit = async () => {
     const trimmed = raw.trim()
@@ -137,22 +120,17 @@ function Labelled({
   children,
 }: {
   label: string
-  htmlFor?: string
+  htmlFor: string
   children: React.ReactNode
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-      {/* Sentence case, no tracked-out eyebrow — The Sentence Case Rule. */}
-      {htmlFor === undefined ? (
-        <span className="text-[0.8125rem] font-medium text-muted-foreground">{label}</span>
-      ) : (
-        <label
-          htmlFor={htmlFor}
-          className="text-[0.8125rem] font-medium text-muted-foreground"
-        >
-          {label}
-        </label>
-      )}
+      {/* Sentence case, no tracked-out eyebrow — The Sentence Case Rule. A real
+          `<label>`, always: there is no longer a read-only rendering of this
+          block for the name beside it to be a bare `<span>` in. */}
+      <label htmlFor={htmlFor} className="text-[0.8125rem] font-medium text-muted-foreground">
+        {label}
+      </label>
       {children}
     </div>
   )

@@ -1,7 +1,6 @@
 import { useId, useState } from "react"
 import { InlineEdit } from "@/components/entries/inline-edit"
 import { errorMessage } from "@/lib/error-message"
-import { format } from "@/lib/report-series"
 import { cn } from "@/lib/utils"
 import { dayOf, startOfDay } from "@shared/day"
 
@@ -20,7 +19,6 @@ export function InvoiceMeta({
   purchaseOrder,
   paymentTerms,
   timeZone,
-  readOnly = false,
   onChange,
 }: {
   number: string
@@ -29,7 +27,6 @@ export function InvoiceMeta({
   purchaseOrder: string | undefined
   paymentTerms: string | undefined
   timeZone: string
-  readOnly?: boolean
   /** Passed in, never reached for — see the component/Convex boundary in
    *  eslint.config.js. A patch, so one blur is one write. */
   onChange: (patch: {
@@ -57,7 +54,6 @@ export function InvoiceMeta({
           label="Invoice date"
           instant={issuedAt}
           timeZone={timeZone}
-          readOnly={readOnly}
           onPick={async (next) => await onChange({ issuedAt: next })}
         />
       </Row>
@@ -67,7 +63,6 @@ export function InvoiceMeta({
           label="Due date"
           instant={dueAt}
           timeZone={timeZone}
-          readOnly={readOnly}
           onPick={async (next) => await onChange({ dueAt: next })}
         />
         {/*
@@ -101,7 +96,6 @@ export function InvoiceMeta({
         <TextField
           label="Purchase order"
           value={purchaseOrder}
-          readOnly={readOnly}
           onCommit={async (next) => await onChange({ purchaseOrder: next })}
         />
       </Row>
@@ -110,7 +104,6 @@ export function InvoiceMeta({
         <TextField
           label="Payment terms"
           value={paymentTerms}
-          readOnly={readOnly}
           onCommit={async (next) => await onChange({ paymentTerms: next })}
         />
       </Row>
@@ -159,13 +152,11 @@ function DateField({
   label,
   instant,
   timeZone,
-  readOnly,
   onPick,
 }: {
   label: string
   instant: number
   timeZone: string
-  readOnly: boolean
   onPick: (instant: number) => Promise<void>
 }) {
   const id = useId()
@@ -175,14 +166,6 @@ function DateField({
    *  stored one either lands or is refused. */
   const [pending, setPending] = useState<string | null>(null)
   const day = dayOf(instant, timeZone)
-
-  if (readOnly) {
-    return (
-      <span className="text-sm tabular">
-        {format(day, { day: "numeric", month: "short", year: "numeric" })}
-      </span>
-    )
-  }
 
   return (
     <div className="flex flex-col gap-1">
@@ -237,18 +220,18 @@ function DateField({
  *
  * `InlineEdit` rather than a permanent input, because these two are usually
  * unset and an empty box beside "Purchase order" on a document reads as a
- * missing value rather than as an absent one. The em dash is the same "state
- * the absence" treatment `formatRate` gives a project with no rate.
+ * missing value rather than as an absent one. "Not set" is the same "state the
+ * absence" treatment `formatRate` gives a project with no rate — and it says
+ * "not set" rather than an em dash because there is no longer a frozen invoice
+ * for which the absence would be permanent: this one is an invitation.
  */
 function TextField({
   label,
   value,
-  readOnly,
   onCommit,
 }: {
   label: string
   value: string | undefined
-  readOnly: boolean
   onCommit: (next: string) => Promise<void>
 }) {
   const set = value !== undefined && value !== ""
@@ -256,13 +239,12 @@ function TextField({
     <InlineEdit<string>
       display={
         <span className={cn("text-sm", !set && "italic text-muted-foreground")}>
-          {set ? value : readOnly ? "—" : "Not set"}
+          {set ? value : "Not set"}
         </span>
       }
       initialInput={value ?? ""}
       ariaLabel={label}
       placeholder="Optional"
-      disabled={readOnly}
       className="-mx-1 px-1 py-0.5 text-sm"
       inputClassName="w-56 text-sm"
       // Anything is a legal reference, including nothing: clearing the field is

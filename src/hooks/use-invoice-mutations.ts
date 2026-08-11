@@ -14,13 +14,12 @@ import type { Id } from "../../convex/_generated/dataModel"
  * enforces, and what lets those components be rendered against fixtures with
  * no backend at all.
  *
- * Neither of these swallows a refusal. `invoices.update` refuses an issued
- * invoice, an over-long block and an unreadable currency, and the field that
- * sent the value is where the user needs to read about it.
+ * It does not swallow a refusal. `invoices.update` refuses an over-long block,
+ * an unreadable currency and a date that is not one, and the field that sent
+ * the value is where the user needs to read about it.
  */
 export function useInvoiceMutations() {
   const updateMutation = useLatest(useConvexMutation(api.invoices.update))
-  const setStatusMutation = useLatest(useConvexMutation(api.invoices.setStatus))
 
   const updateInvoice = useCallback(
     async (input: {
@@ -32,17 +31,12 @@ export function useInvoiceMutations() {
       dueAt?: number
       purchaseOrder?: string
       paymentTerms?: string
+      notes?: string
     }) => await updateMutation(input),
     [updateMutation]
   )
 
-  const setInvoiceStatus = useCallback(
-    async (invoiceId: Id<"invoices">, status: "draft" | "issued" | "paid") =>
-      await setStatusMutation({ invoiceId, status }),
-    [setStatusMutation]
-  )
-
-  return { updateInvoice, setInvoiceStatus }
+  return { updateInvoice }
 }
 
 /**

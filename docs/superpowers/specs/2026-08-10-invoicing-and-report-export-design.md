@@ -97,7 +97,7 @@ invoices: {
   /** "072726-0013" — MMDDYY-NNNN, matching the reference. Auto-generated,
    *  user-editable, unique per user. */
   number: v.string(),
-  status: v.union(v.literal("draft"), v.literal("issued"), v.literal("paid")),
+  // AMENDED 2026-08-11: no `status`. It shipped and was removed — see §5.
   /** Ordered, and applied to the subtotal in order. `basisPoints` rather than a
    *  percentage float: 8.25% is 825, and no tax line is ever the result of
    *  0.1 + 0.2. Kept on the document rather than in a fourth table — there are
@@ -115,6 +115,10 @@ invoices: {
   dueAt: v.number(),
   purchaseOrder: v.optional(v.string()),
   paymentTerms: v.optional(v.string()),
+  /** The message at the FOOT of the document — payment details, thanks, terms.
+   *  Printed verbatim, newlines and all. Bounded on write, like every other
+   *  free string on this row. */
+  notes: v.optional(v.string()),
   /** Provenance: which range built this. Never read to recompute anything —
    *  it exists so a human can ask "where did this come from". */
   sourceFromMs: v.union(v.number(), v.null()),
@@ -228,7 +232,7 @@ retitled **Project and description breakdown** and grouped by project.
 ### New function files
 
 `convex/clients.ts` — list, create, update, archive. `convex/invoices.ts` —
-`createFromRange`, get, list, update, `setStatus`, remove, plus line mutations.
+`createFromRange`, get, list, update, remove, plus line mutations.
 Both follow `owned.ts` and lead every index with `userId`, so ownership stays a
 key prefix rather than a filter someone can forget.
 
@@ -301,7 +305,7 @@ carries meaning by colour alone — every series is labelled.
 | Route | What it is |
 |---|---|
 | `/reports` | unchanged, plus the two controls above |
-| `/invoices` | list — number, client, issued date, total, status |
+| `/invoices` | list — number, client, issued date, total |
 | `/invoices/$invoiceId` | the editor |
 | `/projects` | gains a **Clients** tab |
 
@@ -319,7 +323,7 @@ already carries.
 ## 5. The invoice editor
 
 ```
-Invoices › #072726-0013                          [Draft ▾]   [ Export PDF ]
+Invoices › #072726-0013                                      [ Export PDF ]
 ───────────────────────────────────────────────────────────────────────────
 Invoice                                                      ┌───────────┐
   Invoice ID:      #072726-0013                              │  + Logo   │
@@ -342,10 +346,11 @@ Invoice                                                      ┌─────�
   + Add tax
                                    TOTAL      988.00 USD
 
+  Notes:
   [ custom message or payment details… ]
 ```
 
-Three deliberate divergences from the reference.
+Two deliberate divergences from the reference.
 
 **A RATE column.** The reference prints `98.8` and `988.00` with the rate
 invisible, which works only because there is exactly one rate. With one line per
@@ -354,10 +359,30 @@ cannot check the line. Reconcilable by hand is the point of the whole document.
 
 **No Save button; fields autosave on blur.** Every other editable surface in
 this app saves on blur, and "Never lose time" does not stop applying because the
-noun changed to an invoice. The top-right control is **status** instead:
-`Draft → Issued → Paid`. Marking an invoice Issued freezes its lines, and
-editing then requires an explicit unlock. That is the act that deserves a
-deliberate button — not typing an address.
+noun changed to an invoice. What sits top-right is `Export PDF`, and nothing
+else.
+
+**AMENDED 2026-08-11 — a third divergence was specified here, was built, and has
+been removed.** It made the top-right control a **status** — `Draft → Issued →
+Paid` — with Issued freezing the document and an explicit unlock to thaw it.
+The argument was that the freeze is the act deserving a deliberate button rather
+than typing an address, and that argument was answering the wrong question. The
+goal is to raise an invoice from a filtered range, edit it, and **export it as a
+PDF**; draft/issued/paid is invoice TRACKING, which nobody asked for and which
+this app cannot keep honest — nothing here observes whether a document was sent
+or paid, so every value in that column was a claim on trust. An invoice is a
+document you edit and export, editable for as long as it exists, and the
+top-right slot it occupied belongs to `Export PDF`.
+
+**The notes block is part of the document, on screen and in the PDF.** The
+reference's `[ custom message or payment details… ]` is a real field: `notes`,
+at the FOOT of the document rather than in the meta grid, because it is read
+after the total and not beside the invoice date. It is where the money is sent —
+a bank block, a reference, a thank-you — which is why it is prose printed
+verbatim, newlines and all, rather than a one-line value. Bounded on write like
+every other free string on an `invoices` row, for the reason §2's scan limits
+give: those bounds are the terms of a per-row byte estimate, and a field nobody
+capped is a division that silently stopped holding.
 
 **The `AMOUNT` info affordance states the derivation.** `98:48:00 → 98.80 h
 (2 dp, floor) × $10.00 = $988.00`, and the gap against Reports when there is
