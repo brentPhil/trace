@@ -97,11 +97,13 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * 8 MiB. Call what is left ~3.0 MB.
  *
  * WHAT AN `invoices` ROW COSTS — redone a THIRD time, because the document
- * grew a message to the client at its foot. Every bound `invoices.update` or
- * `invoices.createFromRange` enforces is a term here:
+ * grew a message to the client at its foot. Every bound `invoices.createFromRange`
+ * enforces is a term here — and it is the only writer, since an invoice is
+ * write-once and there is no `update`:
  * `billedTo` and `payTo` at `MAX_PARTY_LENGTH` (601 each, which is clients.ts's
  * `MAX_NAME_LENGTH` + a newline + `MAX_ADDRESS_LENGTH`, so a block
- * `createFromRange` snapshots always fits the editor that has to save it back),
+ * `createFromRange` snapshots always fits the box on /invoices/new that offers
+ * it back before it is stored),
  * `purchaseOrder` at 100, `paymentTerms` at 200, `sourceText` and
  * `sourceProjectId` at `MAX_SOURCE_TEXT_LENGTH` (100 each), and `notes` at
  * `MAX_NOTES_LENGTH` (600 — the payment block and the thank-you, and now the
@@ -217,9 +219,11 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
  * projects.ts) or `NO_PROJECT_LABEL` in it. A line editor writing free text
  * breaks the per-row figure the same way an unbounded `purchaseOrder` would
  * have broken `INVOICE_NUMBER_SCAN_LIMIT`'s — so it gets the same warning, and
- * `invoices.update` is the worked example of answering it: whichever editor
- * first lets a human type a description must bound its length, and then redo
- * the division below.
+ * `createFromRange`'s own `checkText` calls are the worked example of answering
+ * it: `notes`, `purchaseOrder`, `paymentTerms` and the party blocks are all free
+ * text a human types, and each is bounded at the single place that writes it.
+ * Whichever surface first lets a human type a line DESCRIPTION must do the same,
+ * and then redo the division below.
  *
  * DOCUMENTS BIND, NOT BYTES, and it is worth saying plainly because the
  * accounting above is all in bytes and the byte ceiling is the LOOSER of the

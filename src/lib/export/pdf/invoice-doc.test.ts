@@ -97,11 +97,11 @@ describe("invoiceDocPages — the head", () => {
   })
 
   /*
-   * An unset optional field is an ABSENT row, never a printed "Not set". The
-   * editor says "Not set" because there it is an invitation to click; on paper
-   * there is nothing to click, and the product talking about its own empty form
-   * fields on a client's invoice is noise on a document that has to be signed
-   * off.
+   * An unset optional field is an ABSENT row, never a printed "Not set". A form
+   * can say "Not set" because there it is an invitation to fill the box in; on
+   * paper there is nothing to fill in, and the product talking about its own
+   * empty form fields on a client's invoice is noise on a document that has to
+   * be signed off.
    */
   it("omits an unset purchase order and payment terms rather than printing a placeholder", () => {
     const strings = textOf(invoiceDocPages(makeInvoice())[0])

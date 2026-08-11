@@ -211,9 +211,10 @@ describe("the invoice record — the document", () => {
 
   /*
    * An unset optional field is an ABSENT ROW, exactly as on paper — never a
-   * printed "Not set". The editor says "Not set" because there it is an
-   * invitation to click; here there is nothing to click, and the product would
-   * be talking about its own form fields on someone else's invoice.
+   * printed "Not set". A form can say "Not set" because there it is an
+   * invitation to fill the box in; on a finished document there is nothing to
+   * fill in, and the product would be talking about its own form fields on
+   * someone else's invoice.
    */
   it("omits an unset optional row rather than stating it", () => {
     renderRecord()

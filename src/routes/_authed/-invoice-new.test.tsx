@@ -5,7 +5,7 @@ import { NewInvoicePage, Route } from "@/routes/_authed/invoices_.new"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { defaultFilters, rangeOf } from "@/lib/history-filters"
-import { UNPRICED_NOTE } from "@/lib/export/report-rows"
+import { SET_A_RATE_NOTE, UNPRICED_NOTE } from "@/lib/export/report-rows"
 import { EMPTY_BREAKDOWN } from "@/lib/report-series"
 import { dayOf } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
@@ -330,9 +330,17 @@ describe("/invoices/new — the preview is what will be billed", () => {
     dateSpy.mockRestore()
   })
 
-  /* An empty range still draws a document: `createFromRange` over a range where
-   * every project is unrated mints an invoice with no lines and a $0.00 total,
-   * and the preview has to show that rather than hiding the table. */
+  /*
+   * A range that prices nothing still draws its empty table, and the reason is
+   * that the table is the EVIDENCE for the refusal beside the button.
+   *
+   * `createFromRange` will not mint this document — `NO_PRICED_TIME` refuses a
+   * range with no priced lines, because an invoice is write-once and a numbered
+   * $0.00 shell could never be deleted. So the preview's job here is not to
+   * promise a document; it is to show the user the thing the refusal is talking
+   * about. Hiding the table would leave "this would have no lines" as an
+   * assertion with nothing on screen to check it against.
+   */
   it("draws a zero-line document rather than nothing", () => {
     const { dateSpy } = renderNew({
       breakdown: { ...BREAKDOWN, projects: [PROJECTS[1]], unratedBillableMs: 2 * HOUR },
@@ -660,11 +668,53 @@ describe("/invoices/new — refusals", () => {
   })
 
   /*
+   * THE RANGE THAT WOULD MINT AN EMPTY DOCUMENT — billable hours that no rate
+   * covers — and the refusal a hand-typed URL has to meet.
+   *
+   * /reports disables its own control for this state, but that control is a
+   * LINK and this route is reachable without it, so the page checks it again.
+   * `createFromRange` checks it a third time (`NO_PRICED_TIME`), which is what
+   * makes it a rule rather than a convenience; this is the half that says so
+   * before the click, on the screen that has already priced the lines and can
+   * therefore show the empty table the sentence is about.
+   */
+  it("refuses a range that would price no lines, and names where to set a rate", () => {
+    const { dateSpy } = renderNew({
+      breakdown: {
+        ...EMPTY_BREAKDOWN,
+        totalMs: 2 * HOUR,
+        billableMs: 2 * HOUR,
+        count: 1,
+        unratedBillableMs: 2 * HOUR,
+        projects: [PROJECTS[1]],
+      },
+    })
+
+    const button = screen.getByRole("button", { name: "Create invoice" })
+    expect(button.hasAttribute("disabled")).toBe(true)
+    // `SET_A_RATE_NOTE`, the same sentence the note under the preview carries —
+    // the button and the note are one fix, so they name one screen.
+    expect(
+      document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent
+    ).toContain(SET_A_RATE_NOTE)
+
+    // And pressing it anyway mints nothing: `disabled` is the appearance, the
+    // guard inside `create()` is what makes it true.
+    fireEvent.click(button)
+    expect(createInvoice).not.toHaveBeenCalled()
+
+    dateSpy.mockRestore()
+  })
+
+  /*
    * AND THE PREVIEW SAYS SO TOO, rather than drawing a zero-line document.
-   * "No lines on this invoice" over a $0.00 total is a real, reachable state —
-   * a range where every project is unrated bills exactly that — so showing it
-   * while the scan is still running would assert something unchecked on the one
-   * screen where a user decides whether to bill a client.
+   * "No lines on this invoice" over a $0.00 total is what a range where every
+   * project is unrated PREVIEWS as — no such invoice can be minted, since
+   * `NO_PRICED_TIME` refuses it, but the empty table is the evidence for that
+   * refusal. Drawing it while the scan is still running would put that evidence
+   * on screen for a range nothing has checked: it reads as "there is nothing
+   * here" when the truth is "we do not know yet", on the one screen where a user
+   * decides whether to bill a client.
    */
   it("refuses a range that has not finished totalling, and draws no document for it", () => {
     const { dateSpy } = renderNew({ breakdown: null })

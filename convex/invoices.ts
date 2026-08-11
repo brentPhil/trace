@@ -160,7 +160,7 @@ async function listImpl(
       billedTo: invoice.billedTo,
       currency: invoice.currency,
       issuedAt: invoice.issuedAt,
-      // The SAME `invoiceTotals` the document and the editor print, over the
+      // The SAME `invoiceTotals` the record page and the PDF print, over the
       // STORED line amounts and this invoice's own taxes — so the figure in
       // the list and the figure on the invoice cannot come out different.
       totalCents: invoiceTotals(lines, invoice.taxes).totalCents,
@@ -465,8 +465,10 @@ const createFromRangeReturns = v.object({
   invoiceId: v.id("invoices"),
   /** How much billable time in the range had no rate at all and so is on
    *  NEITHER this invoice nor any line of it — see `unratedBillableMs` on
-   *  `entries.rangeBreakdownImpl`. The editor (Task 6) names this so the
-   *  figure is never silently short. Read from the invoice's own
+   *  `entries.rangeBreakdownImpl`. `BillPreview` on /invoices/new names this
+   *  figure under the table, BEFORE the button is pressed — which is the only
+   *  moment it can still be acted on, since an invoice is write-once. Read from
+   *  the invoice's own
    *  `unratedMsAtCreation` on a replay — NEVER recomputed by re-scanning — so
    *  a retry reports the same figure the original response did. */
   unratedMs: v.number(),

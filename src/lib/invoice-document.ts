@@ -7,7 +7,7 @@ import { usDate } from "./us-date"
  * `/invoices/$invoiceId` shows the invoice as the client received it and
  * `to-pdf.ts` prints the same thing onto paper. Those are two renderings of one
  * document, and the failure they invite is drift: a subtotal computed twice, a
- * `Purchase order` row the screen states as "Not set" and the paper omits, a tax
+ * `Purchase order` row one of the two prints and the other omits, a tax
  * shown as `20%` in one place and `20.00%` in the other. None of that is
  * visible in a diff — it is only visible when a client holds the PDF and the
  * freelancer is looking at the screen.
@@ -78,19 +78,22 @@ export function percentOfBasisPoints(basisPoints: number): string {
 /**
  * The head's name/value rows, in printed order.
  *
- * An UNSET optional field is an ABSENT ROW, never a printed "Not set". The
- * editor says "Not set" because there it is an invitation — a control to click.
- * On a finished document there is nothing to click, and a line reading
+ * An UNSET optional field is an ABSENT ROW, never a printed "Not set". A form
+ * can say "Not set" because there it is an invitation — a box still to fill in.
+ * On a finished document there is nothing to fill in, and a line reading
  * `Purchase order  Not set` is the product talking about its own form fields on
- * someone else's invoice.
+ * someone else's invoice. (/invoices/new labels its empty boxes as boxes rather
+ * than with that affordance — see `InvoiceForm` — because an invoice is
+ * write-once and "set it later" is not on offer.)
  *
  * No Currency row. Every amount below is already written by `formatMoney` in
  * the invoice's own currency, symbol and all, so a row spelling out "USD"
  * restates what `$530.30` has said four times by the time the reader reaches
  * the total. The currency remains a SNAPSHOT on the document and remains what
  * the figures are formatted from — it just is not a fact the paper has to state
- * twice. It stays on the editor, where it is a control rather than a
- * restatement.
+ * twice. It stays on the CREATE form, where it is a picker rather than a
+ * restatement: /invoices/new is the one moment the currency can be chosen, and
+ * there is no editor afterwards to change it.
  *
  * `usDate` on both, which is the reason this is shared rather than reimplemented
  * beside each renderer: the record page's whole claim is that it shows the

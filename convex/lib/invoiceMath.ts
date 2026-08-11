@@ -1,7 +1,8 @@
 /**
- * Invoice arithmetic. Pure — no Convex imports, no DOM — so a client-side
- * editor (Task 6) can preview a total with the exact rule that will be stored,
- * rather than guessing at it.
+ * Invoice arithmetic. Pure — no Convex imports, no DOM — so `BillPreview` on
+ * /invoices/new can draw a total with the exact rule the mutation will store,
+ * rather than guessing at it. An invoice is write-once, so a preview that
+ * guessed would be a promise with no way to correct it.
  */
 
 /**

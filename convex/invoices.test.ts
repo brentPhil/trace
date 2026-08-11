@@ -440,14 +440,26 @@ describe("invoices.createFromRange", () => {
   it("records the filter beside the range, as provenance", async () => {
     const t = setup()
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
-    await entry(t, { startedAt: MON + HOUR, projectId, title: "Schema migration" })
+    // 45s, and that is not arbitrary: the chips below have to be ones this
+    // entry actually SURVIVES. `no-project` was here once, ANDed against a
+    // `projectId` filter — a pair nothing can satisfy, which left the range
+    // pricing no lines, which `NO_PRICED_TIME` now refuses outright. The
+    // assertions are about what gets RECORDED, so they need an invoice to exist;
+    // `under-a-minute` is a second chip the same row passes.
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: 45_000,
+      projectId,
+      title: "Schema migration",
+    })
 
     const { invoiceId } = await create(t, {
       projectId,
       text: "  migration  ",
       // Sent twice, and out of order: deduplication is what BOUNDS this field,
-      // and the byte estimate in convex/lib/scan.ts rests on it.
-      presets: ["no-note", "no-project", "no-note"],
+      // and the byte estimate in convex/lib/scan.ts rests on it. Sorting is
+      // visible here too — `no-note` is stored first despite being sent second.
+      presets: ["under-a-minute", "no-note", "under-a-minute"],
     })
     const invoice = await get(t, invoiceId)
 
@@ -457,7 +469,7 @@ describe("invoices.createFromRange", () => {
     // Trimmed, exactly as the predicate trims the needle before matching — so
     // what is recorded is what was billed, character for character.
     expect(invoice.sourceText).toBe("migration")
-    expect(invoice.sourcePresets).toEqual(["no-note", "no-project"])
+    expect(invoice.sourcePresets).toEqual(["no-note", "under-a-minute"])
   })
 
   it("records the unfiltered defaults rather than leaving the fields absent", async () => {
@@ -488,15 +500,91 @@ describe("invoices.createFromRange", () => {
     expect(await countInvoices(t)).toBe(0)
   })
 
+  /*
+   * A MIXED range, and it has to be one. The exclusion used to be shown over a
+   * range whose ONLY project was unrated — zero lines, and the assertion was
+   * that zero lines were stored. `NO_PRICED_TIME` refuses that range now, so the
+   * only state where "excluded, and reported" is still observable is a range
+   * that prices something ELSE: the rated hour lands on a line, the unrated two
+   * do not, and `unratedMs` says how much went missing.
+   *
+   * Which is also the more honest fixture: the exclusion matters precisely
+   * because the document it is missing from still gets sent.
+   */
   it("excludes billable time that has no rate, and reports how much", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Unrated" })
-    await entry(t, { startedAt: MON + HOUR, durationMs: 2 * HOUR, projectId })
+    const { projectId: rated } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId: unrated } = await project(t, { name: "Unrated" })
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: rated })
+    await entry(t, { startedAt: MON + 4 * HOUR, durationMs: 2 * HOUR, projectId: unrated })
 
     const { invoiceId, unratedMs } = await create(t)
     const invoice = await get(t, invoiceId)
 
-    expect(invoice.lines).toHaveLength(0)
+    // ONE line, from the rated project only — the unrated bucket is not a $0.00
+    // line, it is no line at all.
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.description).toBe("Website")
+    expect(invoice.lines[0]?.amountCents).toBe(1_000)
+    expect(unratedMs).toBe(2 * HOUR)
+  })
+
+  /*
+   * NO LINES IS NOT A DOCUMENT, and this is the range that gets there: hours
+   * tracked, all billable, and no rate anywhere — no project rate and no account
+   * default. The most likely FIRST run of this feature rather than an edge.
+   *
+   * `invoiceLineDrafts` skips every bucket, so without this refusal the account
+   * gets a numbered invoice with zero lines and a $0.00 total. An invoice is
+   * write-once — no `remove`, nothing sets `deletedAt` — so it is permanent and
+   * un-deletable, which is why the assertion is not merely that it throws but
+   * that NOTHING was written and NO number was spent: the harm the rule exists
+   * to prevent is the row, not the exception.
+   */
+  it("refuses a range with billable hours but no rate anywhere", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Unrated" })
+    await entry(t, { startedAt: MON + HOUR, durationMs: 2 * HOUR, projectId })
+
+    await expectCode(create(t), "NO_PRICED_TIME")
+    expect(await countInvoices(t)).toBe(0)
+
+    // AND THE NUMBER SURVIVED IT. Set the rate the refusal asked for, and the
+    // first invoice this account raises is still sequence 1 — a refusal that
+    // burned a number would leave a permanent gap the user could never explain.
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      defaultHourlyRateCents: 1500,
+    })
+    const { invoiceId } = await create(t)
+    expect(parseInvoiceSequence((await get(t, invoiceId)).number)).toBe(1)
+  })
+
+  /*
+   * ONE PRICED BUCKET IS ENOUGH, which is the other half of the rule and the
+   * half a too-eager guard would break: a range containing unpriced time is
+   * billed short ON PURPOSE, and says so under the preview.
+   *
+   * The priced bucket here is a PRO BONO project, so the document's total is
+   * $0.00 and it is still perfectly valid. That is the distinction the guard
+   * turns on and the one a "refuse a $0.00 invoice" rewrite would lose: what
+   * cannot be minted is a document with no LINES on it, not a document that adds
+   * up to nothing. A line reading `1.00 x $0.00/hr` is a statement of work done
+   * and not charged for; an empty table is a statement of nothing.
+   */
+  it("does not refuse a mixed range, where only some of the time is priced", async () => {
+    const t = setup()
+    const { projectId: free } = await project(t, { name: "Pro bono", hourlyRateCents: 0 })
+    const { projectId: unrated } = await project(t, { name: "Unrated" })
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: free })
+    await entry(t, { startedAt: MON + 4 * HOUR, durationMs: 2 * HOUR, projectId: unrated })
+
+    const { invoiceId, unratedMs } = await create(t)
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.description).toBe("Pro bono")
+    expect(invoice.lines[0]?.amountCents).toBe(0)
     expect(unratedMs).toBe(2 * HOUR)
   })
 
@@ -544,15 +632,36 @@ describe("invoices.createFromRange", () => {
     expect(invoice.lines[0]?.projectId).toBeUndefined()
   })
 
+  /*
+   * MIXED for the same reason as the unrated case above: a range of nothing but
+   * non-billable time prices no lines, and `NO_PRICED_TIME` refuses it. So the
+   * exclusion is shown where it can still be SEEN — one billable hour beside
+   * five non-billable ones on the same rated project, billed as one hour.
+   *
+   * Non-billable time is excluded before pricing rather than after, so it must
+   * not land in `unratedMs` either: that field is for billable work nobody has
+   * priced, and inflating it would tell the user to go and set a rate that would
+   * change nothing.
+   */
   it("excludes non-billable time entirely", async () => {
     const t = setup()
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
-    await entry(t, { startedAt: MON + HOUR, projectId, billable: false })
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId })
+    await entry(t, {
+      startedAt: MON + 4 * HOUR,
+      durationMs: 5 * HOUR,
+      projectId,
+      billable: false,
+    })
 
     const { invoiceId, unratedMs } = await create(t)
     const invoice = await get(t, invoiceId)
 
-    expect(invoice.lines).toHaveLength(0)
+    expect(invoice.lines).toHaveLength(1)
+    // One hour, not six: the five non-billable ones are on no line and in no
+    // total.
+    expect(invoice.lines[0]?.quantityCentis).toBe(100)
+    expect(invoice.lines[0]?.amountCents).toBe(1_000)
     expect(unratedMs).toBe(0)
   })
 
@@ -600,8 +709,15 @@ describe("invoices.createFromRange", () => {
    */
   it("returns the stored unratedMs on a replay, not zero", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Unrated" })
-    await entry(t, { startedAt: MON + HOUR, durationMs: 2 * HOUR, projectId })
+    // MIXED, so there is an invoice to replay at all: the rated hour is what
+    // makes the range mintable past `NO_PRICED_TIME`, and the unrated two hours
+    // are the thing whose SNAPSHOT is under test. This is the only coverage
+    // anywhere for `unratedMsAtCreation` being read back on the replay branch,
+    // so it is the fixture that had to change rather than the assertions.
+    const { projectId: rated } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId: unrated } = await project(t, { name: "Unrated" })
+    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: rated })
+    await entry(t, { startedAt: MON + 4 * HOUR, durationMs: 2 * HOUR, projectId: unrated })
 
     const first = await create(t, { clientKey: "replay-unrated" })
     expect(first.unratedMs).toBe(2 * HOUR)
@@ -609,6 +725,8 @@ describe("invoices.createFromRange", () => {
     const second = await create(t, { clientKey: "replay-unrated" })
     expect(second.replayed).toBe(true)
     expect(second.invoiceId).toBe(first.invoiceId)
+    // The stored snapshot, not a recount — and NOT zero, which is what a replay
+    // returned before `unratedMsAtCreation` was persisted.
     expect(second.unratedMs).toBe(2 * HOUR)
   })
 

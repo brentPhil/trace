@@ -40,12 +40,15 @@ export function BillPreview({
    * different range.
    *
    * Drawn as a SENTENCE rather than as a zero-line document, and that is not a
-   * nicety: `InvoiceLines` renders "No lines on this invoice" over a $0.00
-   * total, which is a real and reachable state — a range where every project is
-   * unrated bills exactly that — so a page showing it while still counting
-   * would be asserting something it has not finished checking, in the one place
-   * a user decides whether to bill a client. The words are the button's own
-   * refusal, verbatim, because they are the same fact.
+   * nicety. `InvoiceLines` renders "No lines on this invoice" over a $0.00
+   * total, and while `NO_PRICED_TIME` means no such invoice can ever be MINTED,
+   * that drawing is still exactly what a range where every project is unrated
+   * previews as — it is the evidence for the refusal beside the button. Showing
+   * it while the scan is still running would put that evidence on screen for a
+   * range nothing has finished checking, in the one place a user decides whether
+   * to bill a client: an empty table reads as "there is nothing here", when the
+   * truth is "we do not know yet". The words are the button's own refusal,
+   * verbatim, because they are the same fact.
    */
   pending: boolean
   lines: ReadonlyArray<InvoiceLineDraft>

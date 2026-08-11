@@ -3,11 +3,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { defaultParseSearch } from "@tanstack/react-router"
 import { getFunctionName } from "convex/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Reports, breakdownArgs } from "@/routes/_authed/reports"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import { defaultFilters, rangeOf, stepPeriod } from "@/lib/history-filters"
 import { parseInvoiceSearch } from "@/lib/invoice-search"
+import { SET_A_RATE_NOTE } from "@/lib/export/report-rows"
 import {
   convexKey,
   paginatedKey,
@@ -776,7 +777,17 @@ describe("Reports — the Summary tab", () => {
       })
     }, "summary")
 
-    expect(screen.queryByText(/\$/)).toBeNull()
+    /*
+     * SCOPED TO THE TAB PANEL — the figures — rather than to the document.
+     *
+     * `Create invoice` sits in the header strip above the tabs and is disabled
+     * for this very range (`invoiceDisabledReason` refuses one that would price
+     * no lines), and its sr-only reason quotes the "$0.00 total" the refusal
+     * exists to prevent. That is the rule working, not a stray amount, and a
+     * document-wide assertion would read it as one.
+     */
+    const figures = within(screen.getByRole("tabpanel"))
+    expect(figures.queryByText(/\$/)).toBeNull()
     // Names where to fix it, now that a rate can come from a project OR the
     // account default in Settings.
     expect(screen.getByText("no rate set — see Settings")).toBeTruthy()
@@ -883,14 +894,49 @@ describe("Reports — Create invoice", () => {
   const filters = defaultFilters(today, SETTINGS.weekStartDay)
   const range = rangeOf(filters, SETTINGS.timezone)
 
+  /**
+   * A range this control will actually act on: an hour of billable time in a
+   * project that has a rate.
+   *
+   * IT HAS TO PRICE A LINE. The fixture here used to be `totalMs` and `count`
+   * alone — `billableMs: 0` and no projects — which is a range that prices
+   * nothing, and `invoiceDisabledReason` now refuses exactly that (see
+   * `NO_PRICED_TIME`: an unpriced range would mint a permanent, numbered, $0.00
+   * document with no lines). Every test below that is about where the LINK goes
+   * needs a range the link exists for, or it is asserting against a disabled
+   * button that has no href at all.
+   *
+   * The rate is on the PROJECT rather than in `SETTINGS`, because
+   * `settings.defaultHourlyRateCents` is absent from that fixture and /reports
+   * prices its line count with `?? null`.
+   */
+  const PRICED: Partial<Breakdown> = {
+    totalMs: 3_600_000,
+    billableMs: 3_600_000,
+    billableCents: 5_000,
+    count: 4,
+    projects: [
+      {
+        projectId: "p-web",
+        name: "Website",
+        color: "slate",
+        hourlyRateCents: 5_000,
+        totalMs: 3_600_000,
+        billableMs: 3_600_000,
+        billableCents: 5_000,
+        unratedBillableMs: 0,
+        count: 4,
+      },
+    ],
+  }
+
   /** The Summary tab, over one seeded breakdown for the default range. */
   function renderWith(over: Partial<Breakdown>) {
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
     renderReports((queryClient) => {
       seedBreakdown(queryClient, filters, {
         ...EMPTY_BREAKDOWN,
-        totalMs: 3_600_000,
-        count: 4,
+        ...PRICED,
         ...over,
       })
     }, "summary")
@@ -958,6 +1004,80 @@ describe("Reports — Create invoice", () => {
     dateSpy.mockRestore()
   })
 
+  /*
+   * THE RANGE THAT WOULD MINT AN EMPTY DOCUMENT, refused before the navigation.
+   *
+   * Billable hours, no rate on the project and no account default, so
+   * `invoiceLineDrafts` prices nothing and `createFromRange` would insert a
+   * numbered invoice with no lines and a $0.00 total — permanent, since an
+   * invoice is write-once. The server refuses it as `NO_PRICED_TIME`; this is
+   * the half that says so before the click, and it has to be a disabled BUTTON
+   * rather than a link, or the browser will follow it anyway.
+   */
+  it("refuses a range whose billable time no rate covers, and names where to set one", () => {
+    const dateSpy = renderWith({
+      billableCents: 0,
+      unratedBillableMs: 3_600_000,
+      projects: [
+        {
+          projectId: "p-unrated",
+          name: "Unrated",
+          color: "slate",
+          totalMs: 3_600_000,
+          billableMs: 3_600_000,
+          billableCents: 0,
+          unratedBillableMs: 3_600_000,
+          count: 4,
+        },
+      ],
+    })
+
+    expect(refused().hasAttribute("disabled")).toBe(true)
+    // `SET_A_RATE_NOTE`, the same sentence `BillPreview` prints under a
+    // partly-unpriced range — one fix, so one phrasing of where to apply it.
+    expect(reasonOf(refused())).toContain(SET_A_RATE_NOTE)
+    expect(screen.queryByRole("link", { name: "Create invoice" })).toBeNull()
+
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * THE GAP THIS PAGE ALONE HAS. /invoices/new scans `billableOnly: true`, so a
+   * range of purely non-billable entries reaches it as `count === 0` and is
+   * refused as empty. Here the chip decides, so the same range arrives with
+   * `count > 0` — past the empty check — and the link would have led to a page
+   * that then refuses. `billableMs` is what closes it, in the words true here.
+   */
+  it("refuses a range whose tracked time is all non-billable", () => {
+    const dateSpy = renderWith({
+      billableMs: 0,
+      billableCents: 0,
+      projects: [
+        {
+          projectId: "p-web",
+          name: "Website",
+          color: "slate",
+          hourlyRateCents: 5_000,
+          totalMs: 3_600_000,
+          billableMs: 0,
+          billableCents: 0,
+          unratedBillableMs: 0,
+          count: 4,
+        },
+      ],
+    })
+
+    expect(refused().hasAttribute("disabled")).toBe(true)
+    // The BILLABLE rule, not a rate — the project here has one, and a second
+    // rate would not put non-billable time on a document.
+    expect(reasonOf(refused())).toBe(
+      "Nothing in this period is billable, and an invoice bills billable time only."
+    )
+    expect(screen.queryByRole("link", { name: "Create invoice" })).toBeNull()
+
+    dateSpy.mockRestore()
+  })
+
   it("refuses a range with nothing tracked in it", () => {
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
     // No breakdown seeded beyond `renderReports`' own `EMPTY_BREAKDOWN`.
@@ -997,7 +1117,7 @@ describe("Reports — Create invoice", () => {
   it("stays live once a filter narrows the page, and carries that narrowing", async () => {
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
     const narrowed = { ...filters, presets: ["no-project" as const] }
-    const settled = { ...EMPTY_BREAKDOWN, totalMs: 3_600_000, count: 4 }
+    const settled = { ...EMPTY_BREAKDOWN, ...PRICED }
 
     renderReports((client) => {
       seedBreakdown(client, filters, settled)
@@ -1030,7 +1150,7 @@ describe("Reports — Create invoice", () => {
   it("carries the search text and the project picker's choice", async () => {
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
     const searched = { ...filters, text: "audit & review" }
-    const settled = { ...EMPTY_BREAKDOWN, totalMs: 3_600_000, count: 4 }
+    const settled = { ...EMPTY_BREAKDOWN, ...PRICED }
 
     renderReports((client) => {
       seedBreakdown(client, filters, settled)
