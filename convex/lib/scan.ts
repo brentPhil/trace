@@ -99,9 +99,14 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * `clients.ts`'s own `MAX_NAME_LENGTH` (100) plus `MAX_ADDRESS_LENGTH` (500)
  * — beside a handful of ids and numbers, call it ~800 bytes. 2,000 such rows
  * is ~1.6 MB, leaving real headroom inside the ~2.6 MB the entry scan's worst
- * case leaves behind. If a future editor (Task 6) adds unbounded free text to
- * an invoice — notes, purchase orders — this row-size estimate needs
- * revisiting alongside it.
+ * case leaves behind.
+ *
+ * An invoice deliberately carries NO notes field, which is what would otherwise
+ * blow this estimate — an invoice is a statement of what is owed, and free-form
+ * commentary belongs on the time entries the lines were built from. The two
+ * free-text fields that remain (`purchaseOrder`, `paymentTerms`) are short by
+ * nature, but nothing yet enforces that: the editor that first WRITES them must
+ * bound their length, or this estimate stops holding.
  */
 export const INVOICE_NUMBER_SCAN_LIMIT = 2_000
 

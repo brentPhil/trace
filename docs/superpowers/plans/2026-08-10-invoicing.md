@@ -392,7 +392,6 @@ export const invoiceFields = {
   dueAt: v.number(),
   purchaseOrder: v.optional(v.string()),
   paymentTerms: v.optional(v.string()),
-  notes: v.optional(v.string()),
   /** Ordered, applied to the subtotal in order. `basisPoints` rather than a
    *  percentage float: 8.25% is 825, and no tax line is ever the result of
    *  0.1 + 0.2. */
@@ -686,6 +685,12 @@ Layout follows the reference screenshot: breadcrumb `Invoices › #072726-0013`,
 - **No Save button.** Fields autosave on blur, as every other editable surface in this app does. The top-right control is `status` instead: `Draft → Issued → Paid`.
 - **Marking Issued freezes the lines**; editing then needs an explicit unlock. That is the act that deserves a deliberate button, not typing an address.
 - Payer defaults come from settings, but are snapshot onto the invoice at creation.
+
+**No notes field.** An invoice states what is owed; free-form commentary belongs on
+the time entries the lines were built from, where it already lives. This is also
+what keeps `INVOICE_NUMBER_SCAN_LIMIT`'s ~800 B/row estimate honest — so
+`update` must bound `purchaseOrder` and `paymentTerms`, the only free text left,
+the way `clients.ts` bounds names and addresses.
 
 - [ ] Steps: build `party-block.tsx` (a labelled multiline field preserving newlines), `invoice-meta.tsx` (the field grid), wire autosave-on-blur through `invoices.update`, `dom` tests for autosave and for the frozen-when-issued rule, then commit.
 

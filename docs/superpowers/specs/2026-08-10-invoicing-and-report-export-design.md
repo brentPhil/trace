@@ -115,7 +115,6 @@ invoices: {
   dueAt: v.number(),
   purchaseOrder: v.optional(v.string()),
   paymentTerms: v.optional(v.string()),
-  notes: v.optional(v.string()),
   /** Provenance: which range built this. Never read to recompute anything —
    *  it exists so a human can ask "where did this come from". */
   sourceFromMs: v.union(v.number(), v.null()),

@@ -124,7 +124,6 @@ export const invoiceFields = {
   dueAt: v.number(),
   purchaseOrder: v.optional(v.string()),
   paymentTerms: v.optional(v.string()),
-  notes: v.optional(v.string()),
   /** Ordered, applied to the subtotal in order. `basisPoints` rather than a
    *  percentage float: 8.25% is 825, and no tax line is ever the result of
    *  0.1 + 0.2. */
