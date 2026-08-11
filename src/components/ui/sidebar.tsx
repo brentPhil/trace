@@ -430,7 +430,21 @@ function SidebarSeparator({
     <Separator
       data-slot="sidebar-separator"
       data-sidebar="separator"
-      className={cn("mx-2 w-auto bg-sidebar-border", className)}
+      /*
+       * `data-[orientation=horizontal]:w-auto`, not a bare `w-auto`.
+       *
+       * The base's width rule is `data-[orientation=horizontal]:w-full`, and an
+       * attribute selector outranks a plain class however the two are ordered —
+       * so an unprefixed `w-auto` loses and the `mx-2` beside it overflows its
+       * parent by 16px. It read as correct only while the base's rules were
+       * inert (they were written against a `data-horizontal:` variant Base UI
+       * does not emit); fixing the base is what made this reachable, and this
+       * component has no consumer yet to have shown it.
+       */
+      className={cn(
+        "mx-2 data-[orientation=horizontal]:w-auto bg-sidebar-border",
+        className
+      )}
       {...props}
     />
   )
