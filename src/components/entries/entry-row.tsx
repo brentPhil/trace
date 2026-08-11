@@ -98,7 +98,10 @@ export function EntryRow({
         band of page to the right of every row, which reads worse.
 
         6 + 20 + 2 + 20 + 6 = 54, so `min-h` is a floor the content sits exactly
-        on rather than a number it fights.
+        on rather than a number it fights. It is `--entry-row-height` and not a
+        literal because the log's loading skeleton has to stand exactly as tall
+        as this or the page shifts when the real rows land — one number, so
+        that argument cannot be won here and lost there.
 
         IT WAS 4 + 20 + 2 + 20 + 4 = 50, and the answer to that argument is that
         4px was never a spacing decision — it is what was left over after two
@@ -116,7 +119,7 @@ export function EntryRow({
         the written note does not — left to size themselves, a day of mixed rows
         would ripple by two pixels down the whole column.
       */}
-      <div className="flex min-h-[54px] w-full items-center gap-2 px-4">
+      <div className="flex min-h-(--entry-row-height) w-full items-center gap-2 px-4">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <EditableTitle

@@ -112,6 +112,17 @@
   --shell-sticky-top: 0px;
   --log-sticky-top: 0px;
 
+  /* THE ENTRY ROW'S HEIGHT, in one place.
+   *
+   * The row states it as a floor and the log's loading skeleton has to stand
+   * exactly as tall, or the page shifts under the reader the moment the real
+   * rows arrive — two literals that were only equal by inspection. The 54 is
+   * derived, not chosen: see `src/components/entries/entry-row.tsx`, which
+   * argues it out and is where it stays argued. Anything that needs to fit
+   * inside a row without growing it (`.touch-target` below) is measured
+   * against this. */
+  --entry-row-height: 54px;
+
   /* THERE IS NO PAGE MEASURE. Every page takes the full width.
    *
    * The log surfaces — the timer bar, /timer's totals and filter band, the day
@@ -336,9 +347,11 @@
 /* WCAG 2.2 AA, 2.5.8 Target Size (Minimum): 24x24 CSS pixels.
  *
  * Some controls sit in a row whose height is load-bearing — the entry row is
- * 54px so a working day fits on one screen, which leaves the note slot 20px.
- * Padding the control would push the row past 54; this grows the TARGET without
- * growing the box, by hanging an invisible pseudo-element off it.
+ * `--entry-row-height`, which is a floor its content sits exactly on rather
+ * than a number picked to fit a screenful (`entry-row.tsx` derives it, and
+ * rejects that older derivation by name). Padding the control would push the
+ * row past it; this grows the TARGET without growing the box, by hanging an
+ * invisible pseudo-element off it.
  *
  * `inset-inline: 0` rather than a fixed inset, so the target tracks the
  * control's own width however long its label is. */

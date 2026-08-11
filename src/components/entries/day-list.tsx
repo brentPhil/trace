@@ -60,13 +60,14 @@ export function DayList({
       {groups.map((group) => (
         <section key={group.day} aria-label={group.label} className="flex flex-col">
           {/*
-            `top-(--log-sticky-top)`, not `top-0`. The pages that own a sticky
-            band of their own set that variable to the height of everything
-            above them (see src/hooks/use-height-var.ts); it defaults to `0px`
-            in styles.css, which is exactly the old behaviour, so a log
-            rendered anywhere else still sticks to the top of the viewport.
-            The variable must always resolve to a length — an unset one makes
-            `top` compute to `auto` and the header quietly stops sticking.
+            `top-(--log-sticky-top)`, not `top-0`. A page that owns a sticky
+            band sets that variable to the height of everything above this
+            (see `PageStickyHeader`); inside the shell and without one, it is
+            the timer bar's height alone (see `app-shell.tsx`), so a log on
+            any other page still clears the bar rather than sliding under it.
+            The `0px` in styles.css is the last resort: the variable must
+            always resolve to a length, because an unset one makes `top`
+            compute to `auto` and the header quietly stops sticking.
           */}
           <header
             className={cn(
@@ -228,13 +229,15 @@ export function LogSkeleton() {
                 <Skeleton className="h-4 w-14" />
               </div>
             </div>
-            {/* `pb-3` and `h-[54px]`, tracking the real row and the real group
-                gap above — a placeholder that reserves the wrong height moves
-                the page under the reader the moment the answer arrives. */}
+            {/* `pb-3` and the row height token, tracking the real row and the
+                real group gap above — a placeholder that reserves the wrong
+                height moves the page under the reader the moment the answer
+                arrives, which is why the height is shared rather than copied
+                (see `entry-row.tsx`). */}
             <div className="flex flex-col pb-3">
               {[0, 1, 2].map((row) => (
                 <div key={row} className="border-b border-edge-soft">
-                  <div className="flex h-[54px] w-full items-center gap-3 px-4">
+                  <div className="flex h-(--entry-row-height) w-full items-center gap-3 px-4">
                     <Skeleton className="h-4 flex-1 max-w-64" />
                     <Skeleton className="h-4 w-16 shrink-0" />
                   </div>

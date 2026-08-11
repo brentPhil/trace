@@ -1,6 +1,8 @@
 import { Link } from "@tanstack/react-router"
 import { Clock, FileText, FolderKanban, LogOut, Settings, Table2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Popover } from "@/components/ui/popover"
+import { Separator } from "@/components/ui/separator"
 import {
   Sidebar,
   SidebarContent,
@@ -10,6 +12,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  sidebarMenuButtonVariants,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
@@ -45,7 +48,7 @@ export const NAV_ITEMS: Array<{
 ]
 
 /**
- * ONE GUTTER FOR THE WHOLE RAIL, expanded and collapsed.
+ * THE COLLAPSED RAIL'S GUTTER — 6px, on every region of it, written once.
  *
  * This is the fix for the seam. `SidebarHeader` and `SidebarFooter` ship with
  * `p-2`; `SidebarContent` ships with none, and neither `SidebarMenu` nor
@@ -64,8 +67,30 @@ export const NAV_ITEMS: Array<{
  * also `px-4` — the gutter the timer bar and every page take. 6px collapsed,
  * because a 56px rail carrying a 44px target has 12px to spend and 8px would
  * mean either a smaller target or a wider rail.
+ *
+ * THE COLLAPSED HALF IS THE CONSTANT because it is the one every region takes
+ * on every side, and the one another file reasons about: `SidebarRail` in
+ * sidebar.tsx derives its collapsed width from this number by cross-reference.
+ * It was spelt out three times for two regions before this while a docblock
+ * here claimed there was one of it — three chances for the seam to come back
+ * one edit at a time.
  */
-const RAIL_GUTTER = "px-2 group-data-[collapsible=icon]:px-1.5"
+const RAIL_GUTTER_COLLAPSED = "group-data-[collapsible=icon]:p-1.5"
+
+/**
+ * The same gutter for `SidebarContent`, the one region upstream ships with no
+ * padding at all — so it states the expanded 8px itself, and takes the
+ * collapsed number from above rather than spelling it a second time.
+ *
+ * `py-0` puts the vertical half back: the nav column's air comes from the
+ * header above it and the footer below it, and 6px of its own here would push
+ * the first icon off the header's centre line without anything asking it to.
+ */
+const RAIL_GUTTER = cn(
+  "px-2",
+  RAIL_GUTTER_COLLAPSED,
+  "group-data-[collapsible=icon]:py-0"
+)
 
 /**
  * Centres a fixed-width collapsed item in the rail rather than left-aligning
@@ -113,7 +138,7 @@ export function AppSidebar({
           people hit by accident reaching for bold. */}
       <SidebarRail />
 
-      <SidebarHeader className={cn("group-data-[collapsible=icon]:p-1.5", RAIL_CENTRE)}>
+      <SidebarHeader className={cn(RAIL_GUTTER_COLLAPSED, RAIL_CENTRE)}>
         {/* `to={NAV_ITEMS[0].to}`, not a `"/timer"` literal, so the header
             link always points at whatever the first nav destination is.
 
@@ -124,19 +149,27 @@ export function AppSidebar({
         <Link
           to={NAV_ITEMS[0].to}
           aria-label="Trace"
+          // The nav button's own geometry, not a second copy of it: the 36px
+          // row, the 44px collapsed target and the centring that puts it on
+          // the rail's centre line are all decided once, in the cva, and were
+          // being re-derived here down to the pixel. `px-2` because the rail's
+          // one left edge is 16px (RAIL_GUTTER) and the cva's `px-3` is
+          // upstream's; the nav buttons below override it for the same reason.
           className={cn(
-            "flex h-9 items-center rounded-md px-2 text-base font-medium tracking-tight",
-            // Same centring the collapsed nav buttons get, so the wordmark
-            // sits on the rail's centre line with them rather than 4px off it.
-            "group-data-[collapsible=icon]:size-11 group-data-[collapsible=icon]:justify-center",
-            "group-data-[collapsible=icon]:px-0"
+            sidebarMenuButtonVariants(),
+            "px-2 text-base font-medium tracking-tight"
           )}
         >
-          <span aria-hidden="true" className="group-data-[collapsible=icon]:hidden">
-            Trace
-          </span>
+          {/* The collapsed initial FIRST, so the full wordmark is the last
+              child: the cva sends that one `sr-only` when the rail collapses,
+              which is right for a nav label and would otherwise delete the
+              one glyph a collapsed rail has to keep. Only ever one of the two
+              is displayed, so the order is invisible. */}
           <span aria-hidden="true" className="hidden group-data-[collapsible=icon]:inline">
             T
+          </span>
+          <span aria-hidden="true" className="group-data-[collapsible=icon]:hidden">
+            Trace
           </span>
         </Link>
       </SidebarHeader>
@@ -190,16 +223,15 @@ export function AppSidebar({
           region that is not navigation, and a hairline is cheaper than the
           40px of dead space it would otherwise take to say so. */}
       <SidebarFooter
-        className={cn(
-          "border-t border-edge-soft p-2",
-          "group-data-[collapsible=icon]:p-1.5"
-        )}
+        className={cn("border-t border-edge-soft p-2", RAIL_GUTTER_COLLAPSED, RAIL_CENTRE)}
       >
-        <SidebarMenu className={RAIL_CENTRE}>
-          <SidebarMenuItem>
-            <ProfileMenu email={email} name={name} onSignOut={onSignOut} />
-          </SidebarMenuItem>
-        </SidebarMenu>
+        {/* Straight into the footer, with no `SidebarMenu`/`SidebarMenuItem`
+            around it. Those are a `<ul>` and an `<li>`, and one control inside
+            them is announced as "list, 1 item" — the same false promise about
+            a list of commands that ProfileMenu's own docblock refuses `role`
+            for. `SidebarMenuButton` needs no `li` parent, and the footer is
+            already the flex column the centring class was landing on. */}
+        <ProfileMenu email={email} name={name} onSignOut={onSignOut} />
       </SidebarFooter>
     </Sidebar>
   )
@@ -303,7 +335,17 @@ function ProfileMenu({
           </div>
         </div>
 
-        <div role="separator" className="mx-2 my-1 h-px bg-edge-soft" />
+        {/* `bg-edge-soft`, not `Separator`'s own `bg-border`: that resolves to
+            `--edge`, which DESIGN.md reserves for the boundary of an
+            interactive control. A divider between passive content is Edge
+            Soft, and this is the only divider in the rail that is not one.
+
+            `h-px` is stated here because the vendored base sets its height
+            under a `data-horizontal:` variant, and this version of Base UI
+            marks orientation with `data-orientation="horizontal"` — so the
+            base's own height never lands. Removing this line makes the
+            divider invisible rather than merely differently styled. */}
+        <Separator className="mx-2 my-1 h-px bg-edge-soft" />
 
         {/* `Popover.Close` wrapping the button rather than a close call inside
             the handler: Base UI merges its own dismissal with ours, so the
@@ -311,21 +353,31 @@ function ProfileMenu({
             being unmounted underneath it. */}
         <Popover.Close
           render={
-            <button
-              type="button"
+            /* `Button`, not a hand-written one. `ghost` is the step DOWN to
+               Surface on a Surface-Raised popup that this used to spell out,
+               derived once — and, more to the point, `Button` carries the
+               focus treatment DESIGN.md argues for at length: a border shift
+               to `--ring` (7.59:1, and what actually satisfies SC 2.4.11)
+               plus a 3px halo at 30% (decoration). A 2px solid ring is the
+               halo's weight applied to the indicator's job.
+
+               `Button` is Base UI's own `ButtonPrimitive`, so `Popover.Close`
+               merges its dismissal onto it exactly as `Popover.Trigger` does
+               onto `SidebarMenuButton` above — the popup is gone before the
+               sign-out navigation starts, rather than unmounted underneath it.
+
+               `px-2` over the size's `px-3`: the identity block above sits on
+               this popup's 8px gutter and the label has to start on the same
+               pixel as the name does. */
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={onSignOut}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm",
-                // Steps DOWN to Surface on a Surface-Raised popup, which is
-                // what `menu.tsx` already does for a highlighted item — one
-                // hover treatment for floating UI, not two.
-                "hover:bg-surface",
-                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              )}
+              className="w-full justify-start gap-2 px-2"
             >
               <LogOut aria-hidden="true" className="size-4 text-ink-muted" />
               Sign out
-            </button>
+            </Button>
           }
         />
       </Popover.Popup>

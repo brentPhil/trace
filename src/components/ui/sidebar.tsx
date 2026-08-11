@@ -330,6 +330,17 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
          * its outer edge, and still lands on the divider: that line is the
          * only thing that makes any of this discoverable. Narrower, yes; a
          * resize-handle's width is a target people already use. Gone, no.
+         *
+         * AND 6px IS WELL UNDER THE 44px FLOOR the nav buttons above are sized
+         * to, which the gutter arithmetic on its own does not say out loud.
+         * That is a KNOWN, ACCEPTED trade rather than an oversight: widening
+         * it takes the pixels back off the nav buttons (the defect one level
+         * in), and the only other answer is a permanent desktop expand
+         * control, which is a design decision and not a width. The accessible
+         * path is the keyboard one — ⌘B/Ctrl+B toggles from anywhere, and it
+         * is why this element is `tabIndex={-1}`: a 6px target is a mouse
+         * shortcut for a command that already has a real one, not the only way
+         * to issue it. Revisit the width only together with that control.
          */
         "absolute inset-y-0 z-20 hidden w-2 transition-all ease-linear sm:flex",
         "group-data-[side=left]:-right-px group-data-[side=right]:-left-px",
@@ -797,5 +808,9 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
+  // Exported so a control that is NOT a menu button but must share its
+  // geometry — the wordmark in `AppSidebar` — can take it from here rather
+  // than measuring the same rail twice.
+  sidebarMenuButtonVariants,
   useSidebar,
 }

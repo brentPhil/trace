@@ -63,8 +63,17 @@ export function AppShell({
               measured height IS the offset. Keeping the breakpoint in CSS
               rather than in the ResizeObserver means the mobile decision
               cannot be broken by a measurement.
+
+              `--log-sticky-top` starts EQUAL to it, so a page that renders a
+              log without a sticky band of its own still puts its day headers
+              below the bar rather than under it — the `0px` in styles.css is
+              a substitution guard, not a sensible default anywhere inside
+              this shell. A page that does have a band overrides this on its
+              own root (see `PageStickyHeader`), which is nearer the log and
+              therefore wins.
             */
-            "[--shell-sticky-top:0px] md:[--shell-sticky-top:var(--timer-bar-height)]"
+            "[--shell-sticky-top:0px] md:[--shell-sticky-top:var(--timer-bar-height)]",
+            "[--log-sticky-top:var(--shell-sticky-top)]"
           )}
         >
           {/*

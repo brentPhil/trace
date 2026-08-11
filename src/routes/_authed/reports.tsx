@@ -9,10 +9,10 @@ import { FilterBar } from "@/components/history/filter-bar"
 import { CreateInvoiceLink } from "@/components/reports/create-invoice-link"
 import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
+import { PageStickyHeader } from "@/components/shell/page-sticky-header"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
-import { useHeightVar } from "@/hooks/use-height-var"
 import { groupByDay } from "@/lib/group-entries"
 import {
   defaultFilters,
@@ -135,9 +135,6 @@ export function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects } = useClassifiers()
 
-  // The header block's height, published on this page's root — see the JSX.
-  const { hostRef, measuredRef } = useHeightVar("--filter-band-height")
-
   const today = dayOf(Date.now(), settings.timezone)
   const [filters, setFilters] = useState<Filters>(() =>
     defaultFilters(today, settings.weekStartDay)
@@ -210,26 +207,22 @@ export function Reports() {
   )
 
   return (
-    /* The same two-part sticky stack /timer uses, for the same reason and at
-       the same cost: `--log-sticky-top` puts the Detailed tab's day headers
-       under this page's header instead of under the top of the viewport. */
-    <div
-      ref={hostRef}
-      className="flex flex-col [--log-sticky-top:calc(var(--shell-sticky-top)_+_var(--filter-band-height))]"
-    >
-      {/*
-        The range, the filter over it and the two things you do with the
-        result stay on screen while the summary or the rows scroll. A date
-        range you cannot see is a date range you have to scroll back up to
-        check before believing any figure under it.
+    /*
+      The range, the filter over it and the two things you do with the result
+      stay on screen while the summary or the rows scroll. A date range you
+      cannot see is a date range you have to scroll back up to check before
+      believing any figure under it. `PageStickyHeader` (shared with /timer)
+      owns how that is done, and what the Detailed tab's day headers then
+      stick to.
 
-        No bottom border, deliberately: the tab strip immediately below draws
-        one of its own, and two hairlines 12px apart on an unscrolled page is
-        clutter bought to solve a problem that only exists mid-scroll.
-      */}
-      <div ref={measuredRef} className="sticky top-(--shell-sticky-top) z-20 bg-ground">
-        {/* `w-full px-4`, the same pair the rows below it take, so the filter
-            row and everything under it share their left and right edges. */}
+      No bottom border, deliberately: the tab strip immediately below draws
+      one of its own, and two hairlines 12px apart on an unscrolled page is
+      clutter bought to solve a problem that only exists mid-scroll.
+    */
+    <PageStickyHeader
+      header={
+        /* `w-full px-4`, the same pair the rows below it take, so the filter
+           row and everything under it share their left and right edges. */
         <div className="flex w-full flex-col gap-3 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -275,8 +268,8 @@ export function Reports() {
             </div>
           </div>
         </div>
-      </div>
-
+      }
+    >
       <Tabs
         value={view}
         onValueChange={(value) => setView(value as View)}
@@ -308,7 +301,7 @@ export function Reports() {
           <DetailedTab filters={filters} settings={settings} />
         </TabsContent>
       </Tabs>
-    </div>
+    </PageStickyHeader>
   )
 }
 
