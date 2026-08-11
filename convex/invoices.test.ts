@@ -602,11 +602,11 @@ describe("invoices.createFromRange", () => {
     }
     const invoice = await get(t, invoiceId)
 
-    // The column is GONE, not defaulted. `status` is still in the schema as a
-    // `v.optional` for one commit — see the TODO on it — and this asserts the
-    // mutation stopped writing it, which is what `migrations.clearInvoiceStatus`
-    // then does for the rows raised before this change.
-    expect(invoice.status).toBeUndefined()
+    // The column is GONE, not defaulted — asserted by key rather than by value,
+    // because `status` is no longer in the schema and `invoice.status` does not
+    // typecheck. That is the point: a draft/issued/paid workflow shipped here
+    // and was removed, and this fails the day one is reintroduced by accident.
+    expect("status" in invoice).toBe(false)
     // settings.currencyOf is otherwise unexercised anywhere in this suite —
     // without this, a currency snapshot that silently fell back to "USD"
     // regardless of the account's own setting would pass every other test.

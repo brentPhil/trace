@@ -112,23 +112,18 @@ export const invoiceFields = {
   clientKey: v.string(),
   number: v.string(),
   /*
-   * TODO: DELETE THIS FIELD once `migrations.clearInvoiceStatus` has run.
+   * There is deliberately no `status`. A draft/issued/paid workflow shipped
+   * here and was removed: it made the product a place to TRACK invoices, and
+   * what it was asked to be is a place to RAISE one and export it. An invoice
+   * is a document you edit and send, always editable — so there is no state to
+   * hold, nothing to freeze, and nothing to unlock.
    *
-   * There is no draft/issued/paid workflow any more, and nothing reads or
-   * writes this. An invoice is a document you edit and export, always editable
-   * — a status column made this app a place to TRACK invoices, which is not
-   * what it was asked to be.
-   *
-   * It is optional rather than gone because Convex validates every EXISTING
-   * document against the schema on push, and rows raised before this change
-   * still carry the field: deleting it here would fail the deploy rather than
-   * the data. The three steps are optional (this commit), clear the column
-   * (the migration), delete the field (a follow-up commit) — and only the last
-   * one may remove this comment.
+   * It came out in three steps, because Convex validates existing documents
+   * against the schema on push and a straight deletion fails the deploy rather
+   * than the data: make it optional, clear the column
+   * (`migrations.clearInvoiceStatus`, run 2026-08-11), then delete the field.
+   * Any future column removal on a table with rows in it owes the same three.
    */
-  status: v.optional(
-    v.union(v.literal("draft"), v.literal("issued"), v.literal("paid"))
-  ),
   clientId: v.union(v.id("clients"), v.null()),
   /** SNAPSHOT of the client's block at creation, not a join. Renaming a client
    *  must not rewrite last year's invoices; `clientId` beside it is what still
