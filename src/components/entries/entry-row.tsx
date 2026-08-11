@@ -110,7 +110,7 @@ export function EntryRow({
       className={cn(
         "group border-b border-edge-soft/60 last:border-b-0",
         "transition-colors hover:bg-surface/60",
-        "focus:-outline-offset-2 focus:outline-2 focus:outline-ring"
+        "focus:outline-2 focus:-outline-offset-2 focus:outline-ring"
       )}
     >
       {/*
