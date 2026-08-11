@@ -562,10 +562,13 @@ export function TimerBar({
     >
       {/*
         Wraps below `sm`, where the classifier cluster gets its own line.
-        Single-row at 375px, the project name plus three controls plus the
+        Single-row at 375px, the project name plus four controls — project,
+        tags, billable and the `+` that moved here from /timer — plus the
         elapsed time plus a 42px button left the title field zero width and
-        pushed the start button off the edge — the two things on this bar that
-        must never be crowded out.
+        pushed the start button off the edge, the two things on this bar that
+        must never be crowded out. The `+` arriving is why this says four:
+        `min-w-[7rem] flex-1` on the input and `flex-wrap` here are what
+        absorbed it, and what has to keep absorbing the next one.
       */}
       <div className="relative flex flex-wrap items-center gap-2 px-3 py-2.5 sm:px-4 sm:py-3">
         <label htmlFor="timer-title" className="sr-only">
