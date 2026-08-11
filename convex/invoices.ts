@@ -4,7 +4,9 @@ import { requireUserId } from "./auth"
 import { getOwned } from "./owned"
 import { traceError } from "./errors"
 import { rangeBreakdownImpl } from "./entries"
+import { MAX_ADDRESS_LENGTH, MAX_NAME_LENGTH } from "./clients"
 import { centiHours } from "./lib/duration"
+import { isValidCurrency } from "./lib/money"
 import { invoiceTotals, lineAmountCents } from "./lib/invoiceMath"
 import { nextInvoiceNumber } from "./lib/invoiceNumber"
 import { invoiceDoc, invoiceLineDoc } from "./lib/docs"
@@ -466,4 +468,290 @@ export const createFromRangeAs = internalMutation({
   returns: createFromRangeReturns,
   handler: async (ctx, { userId, ...args }) =>
     await createFromRangeImpl(ctx, userId, args),
+})
+
+// ---------------------------------------------------------------------------
+// update — the document head
+// ---------------------------------------------------------------------------
+
+/*
+ * BOUNDING THIS TEXT IS NOT HOUSEKEEPING.
+ *
+ * `INVOICE_NUMBER_SCAN_LIMIT` and `INVOICE_LIST_LIMIT` (convex/lib/scan.ts) are
+ * both derived from a per-row byte estimate for an `invoices` row, and until
+ * this mutation existed that estimate held only because no human could type
+ * into one — `createFromRange` writes a `billedTo` bounded by clients.ts and
+ * leaves the rest empty. This is the editor those two comments warned about, so
+ * each bound below is a term in that arithmetic and changing one means redoing
+ * the division there rather than trusting the number that is written down.
+ */
+
+/**
+ * A party block: `billedTo` and `payTo`.
+ *
+ * Derived from clients.ts's own two bounds rather than picked again, because
+ * `createFromRange` snapshots `name\naddress` into `billedTo` — a bound below
+ * this one would let this product write a document its own editor then refuses
+ * to save back, which the user would experience as an invoice that cannot be
+ * touched without being retyped.
+ */
+export const MAX_PARTY_LENGTH = MAX_NAME_LENGTH + 1 + MAX_ADDRESS_LENGTH
+
+/** A reference issued by the client's own purchasing system, not a sentence.
+ *  The same 100 characters a client's name gets, which is already far past
+ *  every real PO number and short enough that the field cannot become prose. */
+export const MAX_PURCHASE_ORDER_LENGTH = 100
+
+/**
+ * "Net 30", "Due on receipt, bank transfer to …" — a line or two.
+ *
+ * Deliberately short, because this is the field a notes field would come back
+ * as. An invoice states what is owed; commentary belongs on the time entries
+ * the lines were built from, which is exactly the argument that keeps
+ * `INVOICE_NUMBER_SCAN_LIMIT`'s per-row estimate honest.
+ */
+export const MAX_PAYMENT_TERMS_LENGTH = 200
+
+/**
+ * Trimmed at the ends, NEVER collapsed inside.
+ *
+ * The same rule and the same reason as `checkAddress` in clients.ts: a party
+ * block is rendered verbatim on a document, so its internal newlines are the
+ * block's shape, and a normaliser that tidied them would print a three-line
+ * address on one line.
+ */
+function checkText(raw: string, what: string, max: number): string {
+  const trimmed = raw.trim()
+  if (trimmed.length > max) {
+    traceError("TOO_LONG", `Keep the ${what} under ${max} characters.`)
+  }
+  return trimmed
+}
+
+/**
+ * A date, as a real instant.
+ *
+ * `v.number()` round-trips NaN and Infinity — the same fact `INVALID_RATE`
+ * exists for. One NaN `issuedAt` sorts nowhere in `by_user_issued`, renders as
+ * "Invalid Date" on the document, and is invisible until a client is holding
+ * the PDF.
+ */
+function checkInstant(value: number, what: string): number {
+  if (!Number.isFinite(value)) {
+    traceError("INVALID_DATE", `That ${what} is not a date I can read.`)
+  }
+  return value
+}
+
+/**
+ * The fields a human types into the document head, patched one at a time.
+ *
+ * WHAT IS DELIBERATELY ABSENT, since a patch validator is a list of permissions:
+ *
+ *   - `number`. Making it editable means enforcing per-user uniqueness on
+ *     write, which is the bounded full-table scan `createFromRange` performs
+ *     for exactly that reason (see `INVOICE_NUMBER_SCAN_LIMIT`). That decision
+ *     belongs beside that scan, not smuggled into a field patch — and an
+ *     invoice quietly renumbered by a blur is two documents claiming one id.
+ *   - `status`. `setStatus` below is what moves it, because the transitions
+ *     are a rule rather than a value.
+ *   - `taxes`, and every line. Task 6.
+ *   - `sourceFromMs`, `sourceToMs`, `unratedMsAtCreation`, `clientId`,
+ *     `clientKey`. These record where the figures came from. THE SNAPSHOT RULE
+ *     is the load-bearing decision of this whole feature — an invoice holds
+ *     values, not references — and provenance is the half of it that must not
+ *     move even when the values do.
+ *
+ * `billedTo`, `payTo` and `currency` ARE snapshot fields and ARE editable, and
+ * that is not a contradiction: the snapshot rule says this document never
+ * re-reads the client, not that its own text is frozen while it is still a
+ * draft. Editing them writes THIS row and never touches the `clients` row it
+ * was copied from — correcting a typo on an invoice must not rename a client,
+ * and renaming a client must not rewrite an invoice.
+ */
+const updateArgs = {
+  invoiceId: v.id("invoices"),
+  billedTo: v.optional(v.string()),
+  payTo: v.optional(v.string()),
+  currency: v.optional(v.string()),
+  issuedAt: v.optional(v.number()),
+  dueAt: v.optional(v.number()),
+  purchaseOrder: v.optional(v.string()),
+  paymentTerms: v.optional(v.string()),
+}
+
+type UpdateArgs = {
+  invoiceId: Id<"invoices">
+  billedTo?: string
+  payTo?: string
+  currency?: string
+  issuedAt?: number
+  dueAt?: number
+  purchaseOrder?: string
+  paymentTerms?: string
+}
+
+async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
+  const invoice = await getOwned(ctx, userId, "invoices", args.invoiceId)
+
+  /*
+   * THE FREEZE, ENFORCED HERE.
+   *
+   * The editor also disables its fields once an invoice leaves draft, and that
+   * is a convenience — this is the rule. An issued invoice is a document
+   * somebody has been sent, so the copy in their inbox and the copy in this
+   * table have to keep saying the same thing; a client-side `disabled` is one
+   * stale tab or one hand-written mutation away from being no rule at all.
+   *
+   * The way back is `setStatus` to draft, which is the unlock: a deliberate
+   * act, unlike typing an address.
+   */
+  if (invoice.status !== "draft") {
+    traceError(
+      "INVOICE_LOCKED",
+      "This invoice has been issued, so its details are locked. Set it back to Draft to edit it."
+    )
+  }
+
+  const patch: Partial<Doc<"invoices">> = { updatedAt: Date.now() }
+
+  if (args.billedTo !== undefined) {
+    patch.billedTo = checkText(args.billedTo, "billed-to block", MAX_PARTY_LENGTH)
+  }
+  if (args.payTo !== undefined) {
+    patch.payTo = checkText(args.payTo, "pay-to block", MAX_PARTY_LENGTH)
+  }
+  if (args.currency !== undefined) {
+    if (!isValidCurrency(args.currency)) {
+      // The same refusal `settings.update` makes, in the same words: the list
+      // is `money.SUPPORTED_CURRENCIES`, which is the runtime's own codes
+      // narrowed to the ones whose minor unit really is a hundredth.
+      traceError(
+        "INVALID_CURRENCY",
+        `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`
+      )
+    }
+    patch.currency = args.currency
+  }
+  /*
+   * The two dates are checked independently and NOT against each other.
+   *
+   * A due date before an issue date is odd, and refusing it here would still
+   * be wrong: this editor autosaves one field per blur, so an ordering rule
+   * makes moving an invoice a month forward refuse or succeed depending on
+   * which of the two the user happens to blur first. Both dates are printed on
+   * the document a person is looking at, which is where that mistake is
+   * visible; a refusal that depends on edit order is not.
+   */
+  if (args.issuedAt !== undefined) {
+    patch.issuedAt = checkInstant(args.issuedAt, "invoice date")
+  }
+  if (args.dueAt !== undefined) {
+    patch.dueAt = checkInstant(args.dueAt, "due date")
+  }
+  /*
+   * Emptied means ABSENT, not "". Both optional fields print as "—" when unset,
+   * and storing an empty string would be a second way to say the same thing —
+   * `patch` with `undefined` removes the column, which is what "clear it"
+   * means here. (`clientId` uses an explicit `null` for the same idea because
+   * its schema type includes null; these two are plain `v.optional`.)
+   */
+  if (args.purchaseOrder !== undefined) {
+    const po = checkText(args.purchaseOrder, "purchase order", MAX_PURCHASE_ORDER_LENGTH)
+    patch.purchaseOrder = po === "" ? undefined : po
+  }
+  if (args.paymentTerms !== undefined) {
+    const terms = checkText(args.paymentTerms, "payment terms", MAX_PAYMENT_TERMS_LENGTH)
+    patch.paymentTerms = terms === "" ? undefined : terms
+  }
+
+  await ctx.db.patch(invoice._id, patch)
+  return null
+}
+
+export const update = mutation({
+  args: updateArgs,
+  returns: v.null(),
+  handler: async (ctx, args) => await updateImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const updateAs = internalMutation({
+  args: { ...updateArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { userId, ...args }) => await updateImpl(ctx, userId, args),
+})
+
+// ---------------------------------------------------------------------------
+// setStatus
+// ---------------------------------------------------------------------------
+
+/**
+ * Draft, Issued, Paid — a LINE, walked one step at a time.
+ *
+ * The legal moves, and what each one is:
+ *
+ *   draft  -> issued   Raising it. This is what freezes the document.
+ *   issued -> draft    THE UNLOCK. The plan asks for exactly this and it is
+ *                      why the freeze can be strict: an invoice sent with a
+ *                      wrong address is fixable, in one deliberate act, rather
+ *                      than by raising a second document.
+ *   issued -> paid     The money arrived.
+ *   paid   -> issued   It did not, or it was recorded against the wrong
+ *                      invoice. Un-paying is a correction, not an unlock.
+ *
+ * The two refused moves are the ones that skip Issued. `draft -> paid` claims
+ * a document nobody has been sent has already been settled, and it would also
+ * be the one path to a frozen invoice that was never frozen at the moment it
+ * was raised. `paid -> draft` is the same edge backwards: a paid invoice is
+ * unlocked by un-paying it first, so the unlock is always one step from the
+ * state the freeze belongs to. Two clicks, and each says what it does.
+ *
+ * Setting the status an invoice already has is a no-op rather than a refusal.
+ * A double-fired click or a retried mutation must not raise an error at
+ * somebody about a state they are already in.
+ */
+const STATUS_LINE = ["draft", "issued", "paid"] as const
+type InvoiceStatus = (typeof STATUS_LINE)[number]
+
+function isLegalStep(from: InvoiceStatus, to: InvoiceStatus): boolean {
+  return Math.abs(STATUS_LINE.indexOf(to) - STATUS_LINE.indexOf(from)) <= 1
+}
+
+const setStatusArgs = {
+  invoiceId: v.id("invoices"),
+  /** The schema's own union, not a second copy of it — a hand-repeated status
+   *  validator is one literal away from accepting a status the table cannot
+   *  hold. */
+  status: invoiceDoc.fields.status,
+}
+
+async function setStatusImpl(
+  ctx: MutationCtx,
+  userId: string,
+  invoiceId: Id<"invoices">,
+  status: InvoiceStatus
+) {
+  const invoice = await getOwned(ctx, userId, "invoices", invoiceId)
+  if (!isLegalStep(invoice.status, status)) {
+    traceError(
+      "INVALID_STATUS_CHANGE",
+      "An invoice moves Draft, Issued, Paid one step at a time. Set this one to Issued first."
+    )
+  }
+  await ctx.db.patch(invoice._id, { status, updatedAt: Date.now() })
+  return null
+}
+
+export const setStatus = mutation({
+  args: setStatusArgs,
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setStatusImpl(ctx, await requireUserId(ctx), args.invoiceId, args.status),
+})
+
+export const setStatusAs = internalMutation({
+  args: { ...setStatusArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setStatusImpl(ctx, args.userId, args.invoiceId, args.status),
 })

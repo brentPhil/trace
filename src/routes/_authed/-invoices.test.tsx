@@ -30,16 +30,29 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<RouterModule>()
   return {
     ...actual,
+    /*
+     * Params are substituted the way the real `Link` builds an href, so a row
+     * that linked to the literal "/invoices/$invoiceId" — a route with the
+     * params forgotten — cannot pass the assertion below.
+     */
     Link: ({
       to,
+      params,
       children,
       ...rest
     }: {
       to: string
+      params?: Record<string, string>
       children: React.ReactNode
       className?: string
     }) => (
-      <a href={to} {...rest}>
+      <a
+        href={Object.entries(params ?? {}).reduce(
+          (path, [key, value]) => path.replace(`$${key}`, value),
+          to
+        )}
+        {...rest}
+      >
         {children}
       </a>
     ),
@@ -115,6 +128,19 @@ describe("Invoices — the rows", () => {
     // whole address block.
     expect(screen.getByText("Vessel Vanguard")).toBeTruthy()
     expect(screen.getByText("$988.00")).toBeTruthy()
+  })
+
+  /*
+   * The rows were deliberately not links until /invoices/$invoiceId existed,
+   * so this is the assertion that the list stopped being a dead end. The link
+   * is on the NUMBER rather than the row: a `<tr>` inside an `<a>` is invalid
+   * HTML, and an onClick on the row is unreachable from a keyboard.
+   */
+  it("links each number to that invoice's own page", () => {
+    renderInvoices([makeRow({ number: "072726-0013" })])
+
+    const link = screen.getByRole("link", { name: "072726-0013" })
+    expect(link.getAttribute("href")).toBe("/invoices/072726-0013")
   })
 
   it("renders each invoice's own currency, not the account's", () => {

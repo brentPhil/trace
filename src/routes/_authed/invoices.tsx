@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
+import { STATUS_LABEL } from "@/components/invoices/status-control"
 import { Empty } from "@/components/ui/empty"
 import { format } from "@/lib/report-series"
 import { cn } from "@/lib/utils"
@@ -146,22 +147,15 @@ const DATE_COL = "hidden w-32 sm:table-cell"
 const TOTAL_COL = "w-28"
 const STATUS_COL = "w-20"
 
-/**
- * The status, as a word.
- *
- * A coloured dot is the obvious control here and this system forbids it:
- * meaning is never carried by colour alone. There is no colour that could
- * carry it either — cold means running and warm means money, and a draft
- * invoice is neither. So the word IS the signal, and the only reinforcement is
- * a step of the neutral ramp: an issued or paid invoice is a fact about the
- * outside world and sits at Ink, a draft is still only yours and sits at Ink
- * Muted.
+/*
+ * The status is a WORD (see `STATUS_LABEL`, which the editor shares so the two
+ * screens cannot spell "Issued" two ways), and the only reinforcement it gets
+ * here is a step of the neutral ramp: an issued or paid invoice is a fact
+ * about the outside world and sits at Ink, a draft is still only yours and
+ * sits at Ink Muted. No dot, no hue — meaning is never carried by colour
+ * alone, and there is no colour that could carry this one: cold means running
+ * and warm means money, and a draft invoice is neither.
  */
-const STATUS_LABEL = {
-  draft: "Draft",
-  issued: "Issued",
-  paid: "Paid",
-} as const
 
 function InvoiceRowItem({
   invoice,
@@ -185,9 +179,24 @@ function InvoiceRowItem({
 
         `scope="row"` because the number is what names this invoice: a screen
         reader reading the total then announces which invoice it belongs to.
+
+        THE LINK IS ON THE NUMBER, not on the row. A `<tr>` wrapped in an `<a>`
+        is not valid HTML and no browser keeps the table layout through it, and
+        a row made clickable with an onClick alone is unreachable from a
+        keyboard. The number is also the thing that names the invoice, so it is
+        what a screen reader's link list should say — "072726-0013", not "row".
       */}
       <th scope="row" className="px-3 py-2 text-left font-normal tabular">
-        {invoice.number}
+        <Link
+          to="/invoices/$invoiceId"
+          params={{ invoiceId: invoice._id }}
+          className={cn(
+            "rounded-sm underline-offset-2 hover:underline",
+            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          )}
+        >
+          {invoice.number}
+        </Link>
       </th>
 
       <td className="truncate px-3 py-2">

@@ -94,21 +94,38 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * `timeEntries` scan bounded by `INVOICE_SCAN_LIMIT` above — its budget is
  * whatever the 8 MiB ceiling has left after that scan's own worst case
  * (`INVOICE_SCAN_LIMIT` rows at up to ~2.7 KB each, or ~5.4 MB), not the full
- * 8 MiB. An `invoices` row is far lighter: nothing this mutation writes onto
- * one is free text yet, so the worst case is `billedTo` — bounded by
- * `clients.ts`'s own `MAX_NAME_LENGTH` (100) plus `MAX_ADDRESS_LENGTH` (500)
- * — beside a handful of ids and numbers, call it ~800 bytes. 2,000 such rows
- * is ~1.6 MB, leaving real headroom inside the ~2.6 MB the entry scan's worst
- * case leaves behind.
+ * 8 MiB. Call what is left ~3.0 MB.
  *
- * An invoice deliberately carries NO notes field, which is what would otherwise
- * blow this estimate — an invoice is a statement of what is owed, and free-form
- * commentary belongs on the time entries the lines were built from. The two
- * free-text fields that remain (`purchaseOrder`, `paymentTerms`) are short by
- * nature, but nothing yet enforces that: the editor that first WRITES them must
- * bound their length, or this estimate stops holding.
+ * WHAT AN `invoices` ROW COSTS — redone, because the editor this comment used
+ * to warn about now exists. `invoices.update` is where a human first types
+ * into one of these rows, and every bound it enforces is a term here:
+ * `billedTo` and `payTo` at `MAX_PARTY_LENGTH` (601 each, which is clients.ts's
+ * `MAX_NAME_LENGTH` + a newline + `MAX_ADDRESS_LENGTH`, so a block
+ * `createFromRange` snapshots always fits the editor that has to save it back),
+ * `purchaseOrder` at 100, `paymentTerms` at 200. That is ~1.5 KB of text beside
+ * a handful of ids and numbers — call the row ~1.8 KB, where this comment said
+ * ~800 B while `billedTo` was the only writable text on it.
+ *
+ * So the LIMIT halved rather than the estimate being quietly restated. 1,000
+ * rows is ~1.8 MB of the ~3.0 MB available; the old 2,000 would now be ~3.6 MB
+ * and would not fit. An account past 1,000 invoices is refused a new number
+ * instead of handed a wrong one, which is the trade this constant already
+ * made at 2,000 and the same one `RANGE_TOO_LARGE` makes.
+ *
+ * The bounds count CHARACTERS and the ceiling counts BYTES, and everything
+ * above equates the two. A document written entirely in a non-Latin script
+ * costs up to three bytes a character, so the real worst case is larger than
+ * this arithmetic and the ~40% headroom is what absorbs the realistic part of
+ * it. Anyone raising this number again has to say what happens to the account
+ * whose thousand invoices are all CJK addresses.
+ *
+ * An invoice deliberately carries NO notes field, which is what would blow the
+ * estimate all over again — an invoice is a statement of what is owed, and
+ * free-form commentary belongs on the time entries the lines were built from.
+ * `paymentTerms` is bounded at 200 for precisely that reason: it is the field
+ * a notes field would come back as.
  */
-export const INVOICE_NUMBER_SCAN_LIMIT = 2_000
+export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
 
 /**
  * How many `invoices` rows `invoices.list` hands back, newest first.
@@ -121,26 +138,29 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 2_000
  * and so the read is a page of invoices PLUS every line of every one of them.
  *
  * The arithmetic, on the same per-row accounting `INVOICE_NUMBER_SCAN_LIMIT`
- * above uses. An `invoices` row is ~800 B (`billedTo` bounded by clients.ts's
- * `MAX_NAME_LENGTH` + `MAX_ADDRESS_LENGTH`, beside ids and numbers). An
+ * above uses. An `invoices` row is ~1.8 KB once `invoices.update`'s bounds are
+ * summed (see that constant — `billedTo` and `payTo` at 601 each,
+ * `purchaseOrder` at 100, `paymentTerms` at 200, beside ids and numbers). An
  * `invoiceLines` row is a description, four numbers and two ids — call it
- * ~400 B. For M lines an invoice, a page of 50 costs 50 x (800 + M x 400)
+ * ~400 B. For M lines an invoice, a page of 50 costs 50 x (1,800 + M x 400)
  * bytes and 50 x (1 + M) documents.
  *
  * That ~400 B assumes a bound `invoiceLines.description` does not actually
  * have. It is a bare `v.string()`, and it holds today only because the sole
  * writer is `createFromRange`, which puts a project name (bounded by
  * projects.ts) or `NO_PROJECT_LABEL` in it. A line editor writing free text
- * breaks the per-row figure the same way unbounded `purchaseOrder` would break
- * `INVOICE_NUMBER_SCAN_LIMIT`'s — so it gets the same warning: whichever editor
- * first lets a human type a description must bound its length.
+ * breaks the per-row figure the same way an unbounded `purchaseOrder` would
+ * have broken `INVOICE_NUMBER_SCAN_LIMIT`'s — so it gets the same warning, and
+ * `invoices.update` is the worked example of answering it: whichever editor
+ * first lets a human type a description must bound its length, and then redo
+ * the division below.
  *
  * DOCUMENTS BIND, NOT BYTES, and it is worth saying plainly because the
  * accounting above is all in bytes and the byte ceiling is the LOOSER of the
  * two here. At a page of 50 the document limit is reached at M = 327 and the
- * byte limit not until M = 418, so the real headroom is:
+ * byte limit not until M = 415, so the real headroom is:
  *
- *     M <= 326 fits. M = 200 -> 10,050 docs (61% of 16,384) and ~4.0 MB (48%).
+ *     M <= 326 fits. M = 200 -> 10,050 docs (61% of 16,384) and ~4.1 MB (49%).
  *
  * WHAT BOUNDS M: nothing, honestly. `createFromRange` writes one line per
  * project with billable time in the range, which is bounded only by how many

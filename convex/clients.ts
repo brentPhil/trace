@@ -7,10 +7,14 @@ import { clientDoc } from "./lib/docs"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
-const MAX_NAME_LENGTH = 100
+/* Exported because convex/invoices.ts derives its own party-block bound from
+ * these two: `createFromRange` snapshots `name\naddress` into `billedTo`, so a
+ * shorter bound over there would refuse to save back a block this product
+ * itself wrote. Two numbers that must agree, in one place. */
+export const MAX_NAME_LENGTH = 100
 /* Long enough for a multi-line international address, short enough that a
  * paste accident cannot become a document. */
-const MAX_ADDRESS_LENGTH = 500
+export const MAX_ADDRESS_LENGTH = 500
 
 function checkName(raw: string): string {
   const trimmed = raw.trim()
