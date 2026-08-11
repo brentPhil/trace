@@ -1,4 +1,4 @@
-import { dayOf, localPartsOf } from "@shared/day"
+import { addDays, dayOf, localPartsOf, weekdayOf } from "@shared/day"
 import type { DayString } from "@shared/day"
 import type { EventInput } from "@fullcalendar/react"
 import type { Doc } from "../../convex/_generated/dataModel"
@@ -14,11 +14,25 @@ import type { Doc } from "../../convex/_generated/dataModel"
  * rail, the block times, the midnight segmentation and the day totals.
  */
 
+/**
+ * What the grid reports about the window it is drawing.
+ *
+ * `days` IS NOT DERIVABLE FROM THE OTHER TWO by anything outside the panel: the
+ * 5-day view hides two weekdays inside its own range, so the range's width and
+ * the number of columns are different questions. Both answers travel together
+ * because the page needs both — the instants key the Convex query, and the days
+ * are what "Range total" is allowed to sum.
+ */
+export type CalendarRange = {
+  fromMs: number
+  toMs: number
+  days: Array<DayString>
+}
+
 /** The typed half of `extendedProps`, read by the panel's render hooks. */
 export type CalendarEventProps = {
   entryId: string
   projectId: string | undefined
-  billable: boolean
   /*
    * The STORED instants, carried through untouched.
    *
@@ -65,10 +79,16 @@ export function calendarEvents(
        * from this view. `eventMinHeight` keeps it clickable once it is drawn.
        */
       end: new Date(Math.max(ended, entry.startedAt + MIN_SPAN_MS)),
+      /*
+       * `billable` is deliberately absent. It was carried here "for styling"
+       * and nothing ever read it: blocks take no hue at all under the Two
+       * Temperatures Rule — warm means money and it is spent on the money
+       * figures, not on a grid — so there is nothing for it to feed. A field
+       * that is written and never read is a claim the code does not keep.
+       */
       extendedProps: {
         entryId: entry._id,
         projectId: entry.projectId,
-        billable: entry.billable,
         startedAt: entry.startedAt,
         endedAt: entry.endedAt,
       },
@@ -98,6 +118,69 @@ export function dayTotals(
     totals.set(day, (totals.get(day) ?? 0) + elapsed)
   }
   return totals
+}
+
+/**
+ * The figure under the stepper's arrows: the sum of the DRAWN columns' totals.
+ *
+ * A function rather than three lines in the page, because the assertion that
+ * holds it is "this equals the sum of the numbers in the column headers" and
+ * that assertion has to be made against the same code the page runs — see
+ * `calendar-range-label.test.tsx`, which renders the real grid, reads the
+ * figures off it, and calls this.
+ *
+ * `days` is the list the GRID reported. Summing `dayTotals`'s values instead
+ * sums every day the QUERY covers, and the two differ whenever a view hides a
+ * weekday inside its own range: a header total describing days that have no
+ * column, on a tool people invoice from.
+ */
+export function rangeTotal(
+  entries: Array<Doc<"timeEntries">>,
+  timeZone: string,
+  nowMs: number,
+  days: Array<DayString>
+): number {
+  const totals = dayTotals(entries, timeZone, nowMs)
+  let sum = 0
+  for (const day of days) {
+    sum += totals.get(day) ?? 0
+  }
+  return sum
+}
+
+/**
+ * The days a range actually draws a column for.
+ *
+ * Every local day the half-open range `[fromMs, toMs)` touches, less the
+ * weekdays the view hides. The 5-day view is the whole reason this exists: its
+ * range is five days wide and its hidden set is `[0, 6]`, and only the caller
+ * that owns both can say which of those two facts applies — so this takes the
+ * hidden set rather than a size.
+ *
+ * Both ends go through `dayOf`, the same function the grid's column headers and
+ * `dayTotals` use, so a day in this list is a key that can be looked up in that
+ * map. `toMs` is EXCLUSIVE, so the last day is the one holding the millisecond
+ * before it. Day strings sort lexicographically, which is what the loop's bound
+ * relies on, and `addDays` is calendar arithmetic — no `+ 86_400_000`, so a DST
+ * day does not skip or repeat one.
+ */
+export function drawnDays(
+  fromMs: number,
+  toMs: number,
+  timeZone: string,
+  hiddenDays: Array<number>
+): Array<DayString> {
+  if (toMs <= fromMs) return []
+  const last = dayOf(toMs - 1, timeZone)
+  const days: Array<DayString> = []
+  for (
+    let day = dayOf(fromMs, timeZone);
+    day <= last;
+    day = addDays(day, 1)
+  ) {
+    if (!hiddenDays.includes(weekdayOf(day))) days.push(day)
+  }
+  return days
 }
 
 /**

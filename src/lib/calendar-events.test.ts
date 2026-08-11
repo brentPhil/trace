@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { calendarEvents, dayTotals, earliestHour } from "./calendar-events"
+import {
+  calendarEvents,
+  dayTotals,
+  drawnDays,
+  earliestHour,
+} from "./calendar-events"
 import type { Doc } from "../../convex/_generated/dataModel"
 
 /*
@@ -62,16 +67,82 @@ describe("calendarEvents", () => {
     expect((event.end as Date).getTime()).toBe(at + 60_000)
   })
 
-  it("passes the classification through for styling", () => {
+  it("carries the project, the stored instants and the id, and nothing else", () => {
+    /*
+     * `billable` used to ride along here "for styling" and nothing ever read
+     * it. Blocks take no hue at all — the Two Temperatures Rule spends warm on
+     * the money figures, not on a grid — so there was nothing for it to feed.
+     * The key list is asserted, not just the values: a field written and never
+     * read is how the next one gets added.
+     */
     const [event] = calendarEvents(
       [entry({ projectId: "p1" as never, billable: true })],
       NOW
     )
+    expect(Object.keys(event.extendedProps).sort()).toEqual([
+      "endedAt",
+      "entryId",
+      "projectId",
+      "startedAt",
+    ])
     expect(event.extendedProps.projectId).toBe("p1")
-    expect(event.extendedProps.billable).toBe(true)
     expect(event.extendedProps.startedAt).toBe(Date.UTC(2026, 7, 10, 9, 0))
     expect(event.extendedProps.endedAt).toBe(Date.UTC(2026, 7, 10, 10, 0))
     expect(event.id).toBe("e1")
+  })
+})
+
+describe("drawnDays", () => {
+  /*
+   * What "Range total" is allowed to sum. The 5-day view hides two weekdays
+   * INSIDE its own range, so the range's width and the number of columns are
+   * different questions — and summing the first while the header draws the
+   * second is how a total comes to describe days that have no column.
+   */
+  const week = { fromMs: Date.UTC(2026, 7, 10), toMs: Date.UTC(2026, 7, 17) }
+
+  it("lists every day a full week draws", () => {
+    expect(drawnDays(week.fromMs, week.toMs, UTC, [])).toEqual([
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+    ])
+  })
+
+  it("drops the hidden weekdays wherever in the range they fall", () => {
+    // Interior, not merely at the ends — which is the case FullCalendar's own
+    // `hiddenDays` trimming does NOT handle, and why `calendar-panel.tsx`
+    // pins `firstDay` to Monday for that size.
+    expect(drawnDays(week.fromMs, week.toMs, UTC, [0, 6])).toEqual([
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ])
+  })
+
+  it("treats toMs as exclusive", () => {
+    // The last day is the one holding the millisecond before `toMs`, never the
+    // midnight that opens the day after it.
+    const day = { fromMs: Date.UTC(2026, 7, 10), toMs: Date.UTC(2026, 7, 11) }
+    expect(drawnDays(day.fromMs, day.toMs, UTC, [])).toEqual(["2026-08-10"])
+  })
+
+  it("reads the days in the stored zone, not the browser's", () => {
+    // Manila is UTC+8: this window is 08:00 on the 10th to 08:00 on the 11th
+    // there, so it touches two local days rather than one.
+    expect(
+      drawnDays(Date.UTC(2026, 7, 10), Date.UTC(2026, 7, 11), "Asia/Manila", [])
+    ).toEqual(["2026-08-10", "2026-08-11"])
+  })
+
+  it("answers with nothing for an empty window", () => {
+    expect(drawnDays(week.toMs, week.fromMs, UTC, [])).toEqual([])
   })
 })
 
