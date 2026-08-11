@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
+import { Page } from "@/components/shell/page"
 import { Empty } from "@/components/ui/empty"
 import { format } from "@/lib/report-series"
 import { cn } from "@/lib/utils"
@@ -31,12 +32,19 @@ export function Invoices() {
   const totals = sumByCurrency(data.invoices)
 
   return (
-    <div className="flex flex-col">
+    /*
+      NOT PINNED — see `Page`'s rule. This header is a title and nothing else,
+      and a title does not stop being true when it scrolls away. The thing on
+      this page that WOULD be worth pinning is the table's own header row, not
+      the word above it, and that is a `<thead>` decision rather than a page
+      one — so pinning here would put the wrong element on screen and still
+      leave the columns unlabelled halfway down a fifty-row list.
+    */
+    <Page title="Invoices">
       {/* Full width and `px-4` on the content element itself, like every other
-          page — see The One Measure Rule. */}
-      <div className="flex flex-1 flex-col gap-3 px-4 py-6">
-        <h1 className="text-sm font-semibold">Invoices</h1>
-
+          page — see The One Measure Rule. `pb-6` only: the top padding belongs
+          to the title row above, which is the one place that draws it. */}
+      <div className="flex flex-1 flex-col gap-3 px-4 pb-6">
         {data.invoices.length === 0 ? (
           <Empty>
             {/*
@@ -179,7 +187,7 @@ export function Invoices() {
           </div>
         )}
       </div>
-    </div>
+    </Page>
   )
 }
 

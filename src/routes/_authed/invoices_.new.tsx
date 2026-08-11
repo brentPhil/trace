@@ -4,6 +4,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { BillPreview } from "@/components/invoices/bill-preview"
 import { InvoiceForm } from "@/components/invoices/invoice-form"
+import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { useCreateInvoice } from "@/hooks/use-invoice-mutations"
 import { errorMessage } from "@/lib/error-message"
@@ -335,33 +336,44 @@ export function NewInvoicePage({
   }
 
   return (
-    <div className="flex flex-col">
-      {/* Full width and `px-4` on the content element itself, like every other
-          page — see The One Measure Rule. */}
-      <div className="flex flex-1 flex-col gap-6 px-4 py-6">
-        <div className="flex flex-col gap-3">
-          <nav aria-label="Breadcrumb">
-            <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <li>
-                <Link to="/invoices" className="underline-offset-2 hover:underline">
-                  Invoices
-                </Link>
-              </li>
-              {/* Decorative: the trail is already ordered, and a screen reader
-                  announcing "rsaquo" between the crumbs is noise. */}
-              <li aria-hidden="true">›</li>
-              <li aria-current="page" className="text-foreground">
-                New invoice
-              </li>
-            </ol>
-          </nav>
-          {/* The same page-heading treatment /invoices, /projects and
-              /settings use. A bigger one here would make this page look like a
-              different product's, and the hierarchy this page needs is between
-              its two panels rather than above them. */}
-          <h1 className="text-sm font-semibold">New invoice</h1>
-        </div>
+    /*
+      NOT PINNED — see `Page`'s rule. The header is a breadcrumb and a title,
+      and this page's one action is deliberately at its FOOT, after the form and
+      the preview it is a decision about. Pinning the top would keep the way OUT
+      on screen and leave the thing you came to press below the fold.
 
+      The heading takes `Page`'s vocabulary rather than restating it. It used to
+      carry a comment arguing for `text-sm font-semibold` "the same as
+      /invoices, /projects and /settings" — an argument that had to be made in
+      four files because the value was written in four files. It is made once
+      now, in `Page`, and the rest of it still holds: a bigger heading here
+      would make this page look like a different product's, and the hierarchy
+      this page needs is between its two panels rather than above them.
+    */
+    <Page
+      title="New invoice"
+      above={
+        <nav aria-label="Breadcrumb">
+          <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <li>
+              <Link to="/invoices" className="underline-offset-2 hover:underline">
+                Invoices
+              </Link>
+            </li>
+            {/* Decorative: the trail is already ordered, and a screen reader
+                announcing "rsaquo" between the crumbs is noise. */}
+            <li aria-hidden="true">›</li>
+            <li aria-current="page" className="text-foreground">
+              New invoice
+            </li>
+          </ol>
+        </nav>
+      }
+    >
+      {/* Full width and `px-4` on the content element itself, like every other
+          page — see The One Measure Rule. `pb-6` only: the top padding is the
+          title row's. */}
+      <div className="flex flex-1 flex-col gap-6 px-4 pb-6">
         <SourceStrip
           range={range}
           rangeGiven={rangeGiven}
@@ -452,7 +464,7 @@ export function NewInvoicePage({
           )}
         </div>
       </div>
-    </div>
+    </Page>
   )
 }
 

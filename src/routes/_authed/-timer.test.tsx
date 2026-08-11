@@ -134,6 +134,30 @@ function renderTimer() {
 const search = () =>
   screen.getByPlaceholderText<HTMLInputElement>("Search titles, notes and projects")
 
+/*
+ * THE HEADING THIS PAGE DID NOT HAVE.
+ *
+ * /timer rendered no `<h1>` at all — a document-structure gap rather than a
+ * style choice: a screen reader's heading list is how a page is skimmed without
+ * sight, and this one offered nothing to skim. It is `sr-only` because the
+ * header directly beneath it already says what the page is twice over, and that
+ * is exactly why an assertion is the only thing that can hold it: nothing about
+ * a missing invisible heading shows up in a screenshot.
+ */
+describe("Timer — the page heading", () => {
+  it("has exactly one h1, named for the page, and does not paint it", () => {
+    renderTimer()
+
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings.length).toBe(1)
+    expect(headings[0].textContent).toBe("Timer")
+    // `sr-only` — in the tree, out of sight. jsdom applies no CSS, so the class
+    // is what carries the decision here; the point of the assertion above is
+    // that hiding it never became deleting it.
+    expect(headings[0].className).toContain("sr-only")
+  })
+})
+
 describe("Timer — filtering to nothing", () => {
   it("keeps EntryLog mounted, so the drafts it holds survive the keystroke", () => {
     resolvePage(paginatedKey(api.entries.listPage, logRange), {

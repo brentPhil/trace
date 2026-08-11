@@ -9,7 +9,7 @@ import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TotalsRow } from "@/components/entries/totals-row"
 import { FilterControls } from "@/components/history/filter-controls"
-import { PageStickyHeader } from "@/components/shell/page-sticky-header"
+import { Page } from "@/components/shell/page"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
@@ -156,13 +156,27 @@ export function Timer() {
 
   return (
     /*
-      THE TOP OF THIS PAGE STAYS PUT. What the timer bar above it is for — the
-      numbers you check and the filter you type into — is useless once it has
-      scrolled past the log it describes, and this is the one page whose whole
-      body is a scroll. `PageStickyHeader` owns how that is done and what the
-      day headers below then stick to.
+      THE TOP OF THIS PAGE STAYS PUT — `sticky`, which `Page` defaults to false
+      and which every caller has to argue. What the timer bar above it is for —
+      the numbers you check and the filter you type into — is useless once it
+      has scrolled past the log it describes, and this is the one page whose
+      whole body is a scroll. Both halves of the header are readouts of, or
+      controls over, exactly the rows underneath them, which is Page's stated
+      test for pinning. `Page` owns how that is done and what the day headers
+      below then stick to.
+
+      `titleHidden`, and the heading is NEW. This page had no `<h1>` at all,
+      which is a document-structure gap rather than a style: a screen reader's
+      heading list is how a page is skimmed without sight, and this one offered
+      nothing to skim. It stays out of SIGHT because the header directly beneath
+      it already says what the page is, twice over — a week's totals and a
+      filter over a log — and a `text-sm` word "Timer" above them would push the
+      running timer down the screen to label something already labelled.
     */
-    <PageStickyHeader
+    <Page
+      title="Timer"
+      titleHidden
+      sticky
       header={
         <>
           {/*
@@ -249,6 +263,6 @@ export function Timer() {
           onLoadMore={() => loadMore(PAGE_SIZE)}
         />
       </div>
-    </PageStickyHeader>
+    </Page>
   )
 }

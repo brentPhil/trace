@@ -103,6 +103,38 @@ function openRateEditor(projectName: string): HTMLInputElement {
   return asInput(screen.getByLabelText(`Hourly rate for ${projectName}`))
 }
 
+/*
+ * THE PAGE'S OWN STRUCTURE, not the rate flow.
+ *
+ * /projects used to build itself a second way: no `Page`, and a bare
+ * `<h1 className="text-sm font-semibold">` sitting INSIDE the first section
+ * beside the create button, doing double duty as the page's heading and as that
+ * section's label — which is why "Archived" and "Tags" below it are `<h2>`s of a
+ * heading that lived in a sibling of theirs. Nothing about that is visible, so
+ * the only thing that can hold it is an assertion.
+ */
+describe("Projects — the page heading", () => {
+  it("has exactly one h1, and it names the page", () => {
+    renderProjects([makeProject({ name: "Acme" })])
+
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings.length).toBe(1)
+    expect(headings[0].textContent).toBe("Projects")
+  })
+
+  it("keeps the section headings BELOW it, so the outline is h1 then h2", () => {
+    renderProjects([
+      makeProject({ name: "Acme" }),
+      makeProject({ name: "Old client", archived: true }),
+    ])
+
+    // Not "no h2s" — the point is that the two that exist are subordinate to
+    // the page's heading rather than siblings of it.
+    const sections = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)
+    expect(sections).toEqual(["Archived", "Tags"])
+  })
+})
+
 describe("Projects — the rate column", () => {
   it("keeps an unset rate and an explicit zero apart on screen", () => {
     renderProjects([

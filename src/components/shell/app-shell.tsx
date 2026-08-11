@@ -69,7 +69,7 @@ export function AppShell({
               below the bar rather than under it — the `0px` in styles.css is
               a substitution guard, not a sensible default anywhere inside
               this shell. A page that does have a band overrides this on its
-              own root (see `PageStickyHeader`), which is nearer the log and
+              own root (see `Page`, and its `sticky`), which is nearer the log and
               therefore wins.
             */
             "[--shell-sticky-top:0px] md:[--shell-sticky-top:var(--timer-bar-height)]",

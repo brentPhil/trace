@@ -131,6 +131,34 @@ function bodyOf(container: HTMLElement) {
   return within(tbody)
 }
 
+/*
+ * The page's structure, which used to be written here rather than shared: a
+ * bare `<h1 className="text-sm font-semibold">` inside the page's own layout,
+ * one of five spellings of the same treatment. It comes from `Page` now, and
+ * this is what stops the sixth spelling appearing.
+ */
+describe("Invoices — the page heading", () => {
+  it("has exactly one h1, and it names the page", () => {
+    renderInvoices([])
+
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings.length).toBe(1)
+    expect(headings[0].textContent).toBe("Invoices")
+  })
+
+  /*
+   * The table keeps its own accessible name. The `<h1>` is not attached to the
+   * table — a heading before an element names nothing in the accessibility tree
+   * — so removing the caption because "the page already says Invoices" would
+   * leave a screen reader announcing "table with 4 columns".
+   */
+  it("does not let the page heading stand in for the table's caption", () => {
+    renderInvoices([makeRow({ number: "081126-0001" })])
+
+    expect(screen.getByText("Invoices, most recently issued first")).toBeTruthy()
+  })
+})
+
 describe("Invoices — the empty state", () => {
   it("names the route an invoice comes from, and links to it", () => {
     renderInvoices([])

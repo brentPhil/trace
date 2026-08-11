@@ -296,6 +296,21 @@ function renderReports(
   return { queryClient, resolveSummary }
 }
 
+/*
+ * The same gap /timer had, and the same answer. This page opened on a date
+ * range and two charts with no `<h1>` anywhere in it.
+ */
+describe("Reports — the page heading", () => {
+  it("has exactly one h1, named for the page, and does not paint it", () => {
+    renderReports(() => {}, "summary")
+
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings.length).toBe(1)
+    expect(headings[0].textContent).toBe("Reports")
+    expect(headings[0].className).toContain("sr-only")
+  })
+})
+
 describe("Reports — changing the range", () => {
   it("keeps the previous rows on screen while the new range's query is in flight", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)

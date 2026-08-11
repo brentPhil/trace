@@ -136,6 +136,30 @@ function renderRecord(over: Record<string, unknown> = {}, settings = SETTINGS) {
   )
 }
 
+/*
+ * THE ONE PAGE IN THE PRODUCT THAT PASSES NO `title` TO `Page`.
+ *
+ * Every other route names itself and gets an `<h1>` from `Page`. This one does
+ * not, because the document already opens with one — "Invoice", set as the
+ * paper's masthead inside `InvoiceRecord` rather than as a label above it. The
+ * escape is documented at the call site, and this is what keeps it a decision
+ * rather than the beginning of a second way to build a page: the moment somebody
+ * "fixes" the missing title by passing one, this page has two `<h1>`s saying the
+ * same word, and that is a worse outline than the one it has.
+ */
+describe("the invoice record — the page heading", () => {
+  it("takes its ONE h1 from the document, not from the page frame", () => {
+    renderRecord()
+
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings.length).toBe(1)
+    expect(headings[0].textContent).toBe("Invoice")
+    // The masthead's own treatment, not the page-title vocabulary — this is the
+    // first line of a document, and it is set the way the paper sets it.
+    expect(headings[0].className).toContain("text-2xl")
+  })
+})
+
 describe("the invoice record — it is read-only", () => {
   /*
    * THE HEADLINE, and it is a negative. This page's whole claim is that what is

@@ -9,7 +9,7 @@ import { FilterBar } from "@/components/history/filter-bar"
 import { CreateInvoiceLink } from "@/components/reports/create-invoice-link"
 import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
-import { PageStickyHeader } from "@/components/shell/page-sticky-header"
+import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
@@ -211,15 +211,27 @@ export function Reports() {
       The range, the filter over it and the two things you do with the result
       stay on screen while the summary or the rows scroll. A date range you
       cannot see is a date range you have to scroll back up to check before
-      believing any figure under it. `PageStickyHeader` (shared with /timer)
-      owns how that is done, and what the Detailed tab's day headers then
-      stick to.
+      believing any figure under it — which is precisely `Page`'s test for
+      pinning: a header that stops being TRUE once it leaves the screen.
+      `sticky` is opt-in there and argued here for that reason. `Page` (shared
+      with /timer) owns how that is done, and what the Detailed tab's day
+      headers then stick to.
 
       No bottom border, deliberately: the tab strip immediately below draws
       one of its own, and two hairlines 12px apart on an unscrolled page is
       clutter bought to solve a problem that only exists mid-scroll.
+
+      `titleHidden`, and the heading is NEW — the same gap and the same answer
+      as /timer. This page had no `<h1>` at all, so it offered nothing to a
+      screen reader skimming by heading. It stays out of sight because a
+      `text-sm` word "Reports" above a date range and two charts labels
+      something that has already introduced itself: the heading is here so the
+      page has an OUTLINE, not so it has a caption.
     */
-    <PageStickyHeader
+    <Page
+      title="Reports"
+      titleHidden
+      sticky
       header={
         /* `w-full px-4`, the same pair the rows below it take, so the filter
            row and everything under it share their left and right edges. */
@@ -301,7 +313,7 @@ export function Reports() {
           <DetailedTab filters={filters} settings={settings} />
         </TabsContent>
       </Tabs>
-    </PageStickyHeader>
+    </Page>
   )
 }
 

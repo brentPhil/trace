@@ -2,6 +2,7 @@ import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
+import { Page } from "@/components/shell/page"
 import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
@@ -46,7 +47,15 @@ function Settings() {
   }
 
   return (
-    <div className="flex flex-col">
+    /*
+      NOT PINNED — see `Page`'s rule. The header is a lone title, and nothing
+      on it acts on what scrolls underneath: every control on this page is
+      inside the section it belongs to and saves the instant it changes, so
+      there is nothing at the top that a reader eight sections down still
+      needs. Pinning would cost a permanent band of ground to keep the word
+      "Settings" in view of a page that has already been navigated to.
+    */
+    <Page title="Settings">
       {/*
         FULL WIDTH, like every other page — but the fix for a wide settings
         page is in `Section`, not here.
@@ -57,10 +66,10 @@ function Settings() {
         middle, and narrowing the page only hid it. `Section` now puts the
         title and hint in a column beside the control, so the rule spans
         something.
-      */}
-      <div className="flex flex-1 flex-col gap-8 px-4 py-6">
-        <h1 className="text-sm font-semibold">Settings</h1>
 
+        `pb-6` only — the top padding is the title row's, above.
+      */}
+      <div className="flex flex-1 flex-col gap-8 px-4 pb-6">
         <Section
           title="Time zone"
           hint="Every day boundary in the app comes from this — which entries fall on which day, and what the week totals cover. Changing it re-files history rather than rewriting it, so nothing is lost, but old days may shift."
@@ -216,7 +225,7 @@ function Settings() {
           </label>
         </Section>
       </div>
-    </div>
+    </Page>
   )
 }
 

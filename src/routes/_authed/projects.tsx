@@ -4,6 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { Archive, ArchiveRestore, Plus, Trash2 } from "lucide-react"
 import { InlineEdit } from "@/components/entries/inline-edit"
+import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Empty } from "@/components/ui/empty"
 import { Toast } from "@/components/ui/toast"
@@ -31,7 +32,24 @@ export function Projects() {
   const archived = projects.filter((p) => p.archived)
 
   return (
-    <div className="flex flex-col">
+    /*
+      NOT PINNED, and that is the rule rather than an omission — see `Page`.
+      A header is pinned when it is a readout of, or a control over, what
+      scrolls beneath it. This one is a title and a create button: "New
+      project" adds a row, it does not DESCRIBE the rows, and it is reachable
+      from the top of a page nobody scrolls far. The page also runs three
+      sections deep — Projects, Archived, Tags — so a pinned "Projects" would
+      hang over the Tags list claiming to name it, which is worse than not
+      being there.
+
+      The heading and the action move OUT of the first section and onto the
+      page, where they always belonged: "Projects" was doing double duty as the
+      page's `<h1>` and as the live list's section label, which is why the two
+      sections beneath it are `<h2>`s of a heading that was sitting inside a
+      sibling of theirs. The live list is now the page's primary content
+      directly under its own `<h1>`, which is what it always was.
+    */
+    <Page title="Projects" actions={<NewProject currency={settings.currency} />}>
       {/*
         FULL WIDTH, like every other page.
 
@@ -43,13 +61,12 @@ export function Projects() {
         shape. So the width goes to the name, not to a gap — the 1196px hole
         the old comment described is what happens to a row whose middle is
         empty, and this row's middle is its rate.
+
+        `pb-6` and no `pt`: the top padding is the title row's, above, which is
+        the whole point of there being one place that draws it.
       */}
-      <div className="flex flex-1 flex-col gap-10 px-4 py-6">
+      <div className="flex flex-1 flex-col gap-10 px-4 pb-6">
         <section className="flex flex-col gap-3">
-          <div className="flex items-baseline justify-between gap-3">
-            <h1 className="text-sm font-semibold">Projects</h1>
-            <NewProject currency={settings.currency} />
-          </div>
           {live.length === 0 ? (
             <Empty>
               No projects yet. A project is who the work is for — a client, or a
@@ -103,7 +120,7 @@ export function Projects() {
           )}
         </section>
       </div>
-    </div>
+    </Page>
   )
 }
 

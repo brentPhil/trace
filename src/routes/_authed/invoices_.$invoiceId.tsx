@@ -3,6 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { ExportPdfButton } from "@/components/invoices/export-pdf-button"
 import { InvoiceRecord } from "@/components/invoices/invoice-record"
+import { Page } from "@/components/shell/page"
 import { Empty } from "@/components/ui/empty"
 import { traceErrorCode } from "@shared/codes"
 import { api } from "../../../convex/_generated/api"
@@ -94,17 +95,26 @@ export function InvoiceUnreachable({ error }: { error: Error }) {
   if (traceErrorCode(error) === "UNAUTHENTICATED") throw error
 
   return (
-    <div className="flex flex-col gap-6 px-4 py-6">
-      <h1 className="text-sm font-semibold">Invoice</h1>
-      <Empty>
-        There is no invoice at this address. It may have been deleted, or the link
-        may be mistyped — invoice pages are not shared between accounts.{" "}
-        <Link to="/invoices" className="underline underline-offset-2">
-          Back to invoices
-        </Link>
-        .
-      </Empty>
-    </div>
+    /*
+      A `Page` like every other screen in this product, error component or not.
+      This one renders in the outlet exactly where the record would have, so a
+      failure that built itself a different way would be the very inconsistency
+      `Page` exists to end — and it is the one branch of this route that DOES
+      need its own `<h1>`, because the document whose masthead normally supplies
+      it is the thing that is missing.
+    */
+    <Page title="Invoice">
+      <div className="px-4 pb-6">
+        <Empty>
+          There is no invoice at this address. It may have been deleted, or the
+          link may be mistyped — invoice pages are not shared between accounts.{" "}
+          <Link to="/invoices" className="underline underline-offset-2">
+            Back to invoices
+          </Link>
+          .
+        </Empty>
+      </div>
+    </Page>
   )
 }
 
@@ -143,43 +153,54 @@ export function InvoicePage({ invoiceId }: { invoiceId: Id<"invoices"> }) {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
 
   return (
-    <div className="flex flex-col">
+    /*
+      THE ONE PAGE THAT PASSES NO `title`, and `Page` permits exactly this case:
+      the content already supplies the `<h1>`. It is `InvoiceRecord`'s masthead
+      — the word "Invoice", set the way the paper sets it, as the first line of
+      the document rather than a label above it. A `title` here, even
+      `titleHidden`, would put a second `<h1>` on the page saying the same word
+      as the first, which is a worse outline than one heading in the right
+      place. The `sr-only` answer /timer and /reports take is for a page with no
+      heading at all; this page has one.
+
+      NOT PINNED. Export is a control, but it is not a control over what scrolls
+      — it acts on the whole document, which is one panel roughly a screen tall,
+      and it is where the breadcrumb is because leaving is the only other thing
+      you can do here.
+    */
+    <Page
+      above={
+        <nav aria-label="Breadcrumb">
+          <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <li>
+              <Link to="/invoices" className="underline-offset-2 hover:underline">
+                Invoices
+              </Link>
+            </li>
+            {/* Decorative: the list above and the page below are already
+                ordered, and a screen reader announcing "rsaquo" between them
+                is noise. */}
+            <li aria-hidden="true">›</li>
+            <li aria-current="page" className="tabular text-foreground">
+              #{invoice.number}
+            </li>
+          </ol>
+        </nav>
+      }
+      /*
+        Top-right, opposite the breadcrumb: the one thing you do to a finished
+        document. There is no Edit beside it — an invoice is write-once — so
+        Export is not competing for the eye with a control that would be the
+        more destructive of the two.
+      */
+      actions={<ExportPdfButton invoice={invoice} timeZone={settings.timezone} />}
+    >
       {/* Full width and `px-4` on the content element itself, like every other
-          page — see The One Measure Rule. */}
-      <div className="flex flex-1 flex-col gap-6 px-4 py-6">
-        <div className="flex items-start justify-between gap-3">
-          <nav aria-label="Breadcrumb">
-            <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <li>
-                <Link to="/invoices" className="underline-offset-2 hover:underline">
-                  Invoices
-                </Link>
-              </li>
-              {/* Decorative: the list above and the page below are already
-                  ordered, and a screen reader announcing "rsaquo" between them
-                  is noise. */}
-              <li aria-hidden="true">›</li>
-              <li aria-current="page" className="tabular text-foreground">
-                #{invoice.number}
-              </li>
-            </ol>
-          </nav>
-
-          {/*
-            Top-right, opposite the breadcrumb: the one thing you do to a
-            finished document. There is no Edit beside it — an invoice is
-            write-once — so Export is not competing for the eye with a control
-            that would be the more destructive of the two.
-          */}
-          <ExportPdfButton invoice={invoice} timeZone={settings.timezone} />
-        </div>
-
-        {/* No heading here. The document carries its own masthead — the word
-            "Invoice", set the way the paper sets it — and a second `<h1>` above
-            the panel would be the app talking over the document it is showing.
-            See `InvoiceRecord`. */}
+          page — see The One Measure Rule. `pb-6` only: the top padding is the
+          header row's. */}
+      <div className="flex flex-1 flex-col px-4 pb-6">
         <InvoiceRecord invoice={invoice} timeZone={settings.timezone} />
       </div>
-    </div>
+    </Page>
   )
 }

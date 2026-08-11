@@ -263,6 +263,24 @@ function totalsRows(): Array<Array<string>> {
 
 // ---------------------------------------------------------------------------
 
+/*
+ * The page frame, which this route also used to build by hand — a breadcrumb and
+ * a bare `<h1 className="text-sm font-semibold">` inside its own layout, one of
+ * the five spellings of the same treatment.
+ */
+describe("/invoices/new — the page heading", () => {
+  it("has exactly one h1, and the preview's own heading stays subordinate to it", () => {
+    renderNew()
+
+    const headings = screen.getAllByRole("heading", { level: 1 })
+    expect(headings.length).toBe(1)
+    expect(headings[0].textContent).toBe("New invoice")
+    // `BillPreview` names itself with an `<h2>`. The page heading is what makes
+    // that an h2 OF something rather than the first heading on the page.
+    expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(0)
+  })
+})
+
 describe("/invoices/new — the preview is what will be billed", () => {
   /*
    * THE TEST THIS PAGE EXISTS FOR. Every figure is a hand-computed literal, so

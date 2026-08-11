@@ -62,7 +62,7 @@ export function DayList({
           {/*
             `top-(--log-sticky-top)`, not `top-0`. A page that owns a sticky
             band sets that variable to the height of everything above this
-            (see `PageStickyHeader`); inside the shell and without one, it is
+            (see `Page`, and its `sticky`); inside the shell and without one, it is
             the timer bar's height alone (see `app-shell.tsx`), so a log on
             any other page still clears the bar rather than sliding under it.
             The `0px` in styles.css is the last resort: the variable must
