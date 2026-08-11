@@ -19,6 +19,21 @@ export function exportFilename(from: string, to: string, extension: string): str
   return `trace-report-${range}.${extension}`
 }
 
+/**
+ * `invoice-072726-0013-2026-07-27.pdf`.
+ *
+ * THE NUMBER FIRST, because that is what the document is called: a client
+ * asking about "invoice 072726-0013" is asking about this file, and a name that
+ * led with the date would sort a downloads folder by nothing anyone refers to.
+ * The issue date follows it for the same reason `exportFilename` carries a
+ * range — a file found six weeks later has to say when it was raised without
+ * being opened — and the number already guarantees the name cannot collide, so
+ * the date is orientation rather than identity.
+ */
+export function invoiceFilename(number: string, issuedOn: string): string {
+  return `invoice-${number}-${issuedOn}.pdf`
+}
+
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement("a")

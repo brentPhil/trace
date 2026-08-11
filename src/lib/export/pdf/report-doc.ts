@@ -85,8 +85,15 @@ function rowSlotHeight(lineCount: number): number {
 
 const HEADER_GAP = 33
 
-/** `2026-07-13` as `07/13/2026`, the reference report's own format. */
-function us(day: string): string {
+/**
+ * `2026-07-13` as `07/13/2026`, the reference report's own format.
+ *
+ * Exported, and imported by `invoice-doc.ts` rather than restated there: the
+ * two documents this product prints are read side by side by the same client,
+ * and a report dated `07/13/2026` beside an invoice dated `13/07/2026` is a
+ * pair of documents nobody can tell apart on a July 13th.
+ */
+export function usDate(day: string): string {
   const { year, month, day: date } = parseDayString(day)
   return `${String(month).padStart(2, "0")}/${String(date).padStart(2, "0")}/${year}`
 }
@@ -138,7 +145,7 @@ function summaryPage(rows: ReportRows): PdfPage {
     text({
       x: LEFT,
       y: TOP,
-      text: `Summary report from ${us(meta.from)} to ${us(meta.to)}`,
+      text: `Summary report from ${usDate(meta.from)} to ${usDate(meta.to)}`,
       size: TYPE.title,
       bold: true,
     })

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import { InvoiceEditor, InvoiceUnreachable, Route } from "@/routes/_authed/invoices_.$invoiceId"
 import { convexKey } from "@/test-utils/convex-query"
@@ -59,10 +59,23 @@ vi.mock("@/hooks/use-invoice-mutations", () => ({
   useInvoiceMutations: () => mutations,
 }))
 
+/* `invoicePdfBlob` does real work — pdf-lib, an embedded TTF fetched over the
+ * network — and none of it is what these tests are about. Mocked so the
+ * assertions can be about the DOCUMENT this page hands over and the name it
+ * saves under, which is the part the page is responsible for. */
+vi.mock("@/lib/export/to-pdf", () => ({ invoicePdfBlob: vi.fn() }))
+
 afterEach(() => {
   cleanup()
+  // Module-level mocks (`invoicePdfBlob`) keep their recorded calls across
+  // tests otherwise, and a test asserting on "the first call" would then be
+  // reading the PREVIOUS test's document.
+  vi.clearAllMocks()
   for (const fn of Object.values(mutations)) fn.mockReset()
   mutations.updateInvoice.mockResolvedValue(null)
+  // The Export PDF tests below stub `URL`, which jsdom implements neither half
+  // of; left stubbed it would leak into every file that runs after this one.
+  vi.unstubAllGlobals()
 })
 
 const INVOICE_ID = "inv-1" as unknown as Id<"invoices">
@@ -100,7 +113,7 @@ type Invoice = {
   lines: Array<Line>
 }
 
-function renderEditor(over: Partial<Invoice> = {}) {
+function renderEditor(over: Partial<Invoice> = {}, settings = SETTINGS) {
   const invoice = {
     _id: INVOICE_ID,
     _creationTime: NOW,
@@ -138,7 +151,7 @@ function renderEditor(over: Partial<Invoice> = {}) {
     convexKey(api.invoices.get, { invoiceId: INVOICE_ID }),
     invoice
   )
-  queryClient.setQueryData(convexKey(api.settings.get, {}), SETTINGS)
+  queryClient.setQueryData(convexKey(api.settings.get, {}), settings)
 
   render(
     <QueryClientProvider client={queryClient}>
@@ -504,5 +517,101 @@ describe("the invoice route", () => {
     } as unknown as Error
 
     expect(() => render(<InvoiceUnreachable error={expired} />)).toThrow()
+  })
+})
+
+/*
+ * EXPORT PDF — the whole reason the feature exists. "I wanted to be able to
+ * export or download the invoice in PDF".
+ *
+ * What is asserted here is the page's own half of that: the button exists, the
+ * document handed to the renderer is THIS invoice, its dates are resolved to
+ * days in the user's STORED zone, and the file is saved under a name a client
+ * can be told over the phone. The layout of the pages themselves is pure and is
+ * asserted directly in `src/lib/export/pdf/invoice-doc.test.ts`.
+ */
+describe("the invoice editor — Export PDF", () => {
+  /** jsdom implements neither half of the object-URL dance `downloadBlob`
+   *  performs, and an anchor click would try to navigate. */
+  function stubDownload() {
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: () => "blob:x",
+      revokeObjectURL: () => {},
+    })
+    return vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+  }
+
+  it("renders the document it is looking at and saves it under the invoice number", async () => {
+    const click = stubDownload()
+    const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
+    vi.mocked(invoicePdfBlob).mockResolvedValue(new Blob(["%PDF-"]))
+
+    renderEditor({ notes: "Bank transfer to Acme\nAccount 1234-5678" })
+    fireEvent.click(screen.getByRole("button", { name: /export pdf/i }))
+
+    await waitFor(() => expect(click).toHaveBeenCalled())
+
+    // The document, not a re-fetch: every field the paper prints comes off the
+    // invoice already on screen, including the notes at its foot.
+    expect(vi.mocked(invoicePdfBlob).mock.calls[0][0]).toMatchObject({
+      number: "072726-0013",
+      billedTo: "Vessel Vanguard\nBonita Springs, FL\n34134, USA",
+      currency: "USD",
+      notes: "Bank transfer to Acme\nAccount 1234-5678",
+    })
+
+    // `invoice-072726-0013-2026-08-05.pdf` — the NUMBER, because that is what
+    // the document is called when a client asks about it.
+    const anchor = click.mock.instances[0] as HTMLAnchorElement
+    expect(anchor.download).toBe("invoice-072726-0013-2026-08-05.pdf")
+
+    click.mockRestore()
+  })
+
+  /*
+   * The document prints DAYS, and a day only exists once a zone has been
+   * chosen. It is the user's STORED zone — never the browser's, never UTC by
+   * accident — the same rule every date on this page already follows. `NOW` is
+   * noon UTC, which in Auckland is already the next calendar day, so a
+   * regression to the wrong zone moves both dates AND the filename.
+   */
+  it("resolves both dates in the user's stored zone, not the browser's", async () => {
+    const click = stubDownload()
+    const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
+    vi.mocked(invoicePdfBlob).mockResolvedValue(new Blob(["%PDF-"]))
+
+    renderEditor({}, { ...SETTINGS, timezone: "Pacific/Auckland" })
+    fireEvent.click(screen.getByRole("button", { name: /export pdf/i }))
+
+    await waitFor(() => expect(click).toHaveBeenCalled())
+    expect(vi.mocked(invoicePdfBlob).mock.calls[0][0]).toMatchObject({
+      issuedOn: "2026-08-06",
+      dueOn: "2026-09-05",
+    })
+    expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe(
+      "invoice-072726-0013-2026-08-06.pdf"
+    )
+
+    click.mockRestore()
+  })
+
+  /* A failed export must never be silent: before the report's export menu grew
+   * its own catch, a rejection was unhandled and the button simply went back to
+   * looking ready, having done nothing. */
+  it("says so when the export fails, and un-sticks the button", async () => {
+    const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
+    vi.mocked(invoicePdfBlob).mockRejectedValueOnce(new Error("boom"))
+
+    renderEditor()
+    fireEvent.click(screen.getByRole("button", { name: /export pdf/i }))
+
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText("PDF export failed.")).toBeTruthy()
+    // Never the thrown Error's own text — that is written for a developer.
+    expect(screen.queryByText(/boom/i)).toBeNull()
+
+    const trigger = screen.getByRole("button", { name: /export pdf/i })
+    expect((trigger as HTMLButtonElement).disabled).toBe(false)
   })
 })

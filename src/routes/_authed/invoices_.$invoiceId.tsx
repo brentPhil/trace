@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
+import { ExportPdfButton } from "@/components/invoices/export-pdf-button"
 import { InvoiceMeta } from "@/components/invoices/invoice-meta"
 import { PartyBlock } from "@/components/invoices/party-block"
 import { Empty } from "@/components/ui/empty"
@@ -130,7 +131,7 @@ function InvoiceRoute() {
  * it. There is no draft/issued/paid, nothing freezes, and there is nothing to
  * unlock: an invoice is a document you edit and export, editable for as long as
  * it exists, and `invoices.update` enforces exactly that by refusing nothing on
- * state. What belongs top-right is Export PDF, which is the next task.
+ * state. Export PDF sits top-right, and is the only thing that does.
  *
  * The lines, taxes and totals are Task 6; they render here read-only so the
  * page is a document rather than a form with the money missing.
@@ -152,8 +153,6 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
           page — see The One Measure Rule. */}
       <div className="flex flex-1 flex-col gap-6 px-4 py-6">
         <div className="flex items-start justify-between gap-3">
-          {/* Alone on its row for now: Export PDF lands beside it, which is
-              what the space on the right is being held for. */}
           <nav aria-label="Breadcrumb">
             <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <li>
@@ -170,6 +169,12 @@ export function InvoiceEditor({ invoiceId }: { invoiceId: Id<"invoices"> }) {
               </li>
             </ol>
           </nav>
+          {/*
+            Top-right, opposite the breadcrumb: the one thing this page is FOR.
+            Every field here autosaves, so there is no Save for it to be
+            confused with — it is the document leaving the app, not a commit.
+          */}
+          <ExportPdfButton invoice={invoice} timeZone={settings.timezone} />
         </div>
 
         <h1 className="text-sm font-semibold">Invoice</h1>

@@ -38,6 +38,18 @@ type LineForTotal = { amountCents: number }
 type TaxForTotal = { label: string; basisPoints: number }
 
 /**
+ * One tax line's own amount, from the subtotal it is a share OF.
+ *
+ * Exported because the PDF PRINTS each tax on its own row while `invoiceTotals`
+ * below returns only their sum: the document and the total would otherwise
+ * round in two places, and two roundings that agree today are two roundings.
+ * Applied to the SUBTOTAL rather than to a running total — see `invoiceTotals`.
+ */
+export function taxLineCents(subtotalCents: number, basisPoints: number): number {
+  return Math.round((subtotalCents * basisPoints) / 10_000)
+}
+
+/**
  * An invoice's subtotal, tax and total, from the STORED line amounts.
  *
  * Sums `amountCents` rather than recomputing each line from its quantity and
@@ -56,7 +68,7 @@ export function invoiceTotals(
 ): { subtotalCents: number; taxCents: number; totalCents: number } {
   const subtotalCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
   const taxCents = taxes.reduce(
-    (sum, tax) => sum + Math.round((subtotalCents * tax.basisPoints) / 10_000),
+    (sum, tax) => sum + taxLineCents(subtotalCents, tax.basisPoints),
     0
   )
   return { subtotalCents, taxCents, totalCents: subtotalCents + taxCents }
