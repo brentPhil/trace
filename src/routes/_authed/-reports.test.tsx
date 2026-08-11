@@ -42,16 +42,41 @@ type RouterModule = typeof RouterModuleType
  */
 
 /*
+ * The two things `Create invoice` reaches outside this component for: the
+ * mutation that mints the document and the navigation to it. Both are hoisted
+ * spies rather than a real client and a real router, for the same reason
+ * `EntryLog` is mocked above — what is under test is Reports' own composition,
+ * which here is a genuinely load-bearing question: whether the control is
+ * disabled from the range on screen, and whether one click mints exactly one
+ * invoice and goes to it.
+ */
+const { createInvoice, navigateSpy } = vi.hoisted(() => ({
+  createInvoice: vi.fn(async () => ({
+    invoiceId: "inv-1",
+    unratedMs: 0,
+    replayed: false,
+  })),
+  navigateSpy: vi.fn(async () => undefined),
+}))
+
+vi.mock("@/hooks/use-invoice-mutations", () => ({
+  useCreateInvoice: () => ({ createInvoice }),
+}))
+
+/*
  * `Link` reads router context via `useRouter`, and this file deliberately
  * renders `Reports` on its own — the route's COMPONENT is what is under test,
  * not the router. `createFileRoute` and everything else stay real:
  * reports.tsx calls `createFileRoute` at module scope, and stubbing the whole
  * module would hide a genuine route-definition error behind a test double.
+ * `useNavigate` joins `Link` in the doubles for the same reason: it reads that
+ * same context, and where the button GOES is the assertion.
  */
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<RouterModule>()
   return {
     ...actual,
+    useNavigate: () => navigateSpy,
     Link: ({
       to,
       children,
@@ -114,6 +139,10 @@ beforeEach(() => {
   // state that would otherwise leak a resolved page from one test's range
   // into the next test's identical-looking key.
   resetPaginatedStore()
+  createInvoice.mockReset()
+  createInvoice.mockResolvedValue({ invoiceId: "inv-1", unratedMs: 0, replayed: false })
+  navigateSpy.mockReset()
+  navigateSpy.mockResolvedValue(undefined)
 })
 
 afterEach(cleanup)
@@ -842,6 +871,219 @@ describe("Reports — the Summary tab", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Summary" }))
 
     await waitFor(() => expect(screen.getByText("1:30:00")).toBeTruthy())
+
+    dateSpy.mockRestore()
+  })
+})
+
+/*
+ * THE CONTROL THE FEATURE WAS MISSING. `createFromRange` shipped in Task 3 and
+ * had no call site at all until this button, so /invoices could only ever show
+ * its empty state.
+ *
+ * What can go wrong here without anything looking wrong: the button raises a
+ * NUMBERED document that gets sent to a client, and the two ways that goes
+ * badly are both silent. A truncated range's figures are a floor, so an invoice
+ * built from one under-bills by an unknown amount with nothing on the document
+ * to say so. And a second click, or a retried request, mints a second number
+ * for the same work.
+ */
+describe("Reports — Create invoice", () => {
+  const today = dayOf(NOW, SETTINGS.timezone)
+  const filters = defaultFilters(today, SETTINGS.weekStartDay)
+  const range = rangeOf(filters, SETTINGS.timezone)
+
+  /** The Summary tab, over one seeded breakdown for the default range. */
+  function renderWith(over: Partial<Breakdown>) {
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports((queryClient) => {
+      seedBreakdown(queryClient, filters, {
+        ...EMPTY_BREAKDOWN,
+        totalMs: 3_600_000,
+        count: 4,
+        ...over,
+      })
+    }, "summary")
+    return dateSpy
+  }
+
+  const trigger = () => screen.getByRole("button", { name: "Create invoice" })
+
+  /** The sentence a screen reader gets for a disabled trigger. */
+  function reasonOf(button: HTMLElement): string {
+    const id = button.getAttribute("aria-describedby")
+    if (id === null) throw new Error("the trigger carries no description")
+    return document.getElementById(id)?.textContent ?? ""
+  }
+
+  it("sits beside Export rather than inside it", () => {
+    const dateSpy = renderWith({})
+
+    // Two controls, not one menu with a fourth item — see the spec's argument
+    // in `CreateInvoiceButton`. Export is still the dropdown it was.
+    expect(trigger()).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Export/ })).toBeTruthy()
+
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * THE HEADLINE REFUSAL, and the reason it is asserted on the TRIGGER rather
+   * than on what happens after a click: a control that looks live and then
+   * fails has already let the user believe the invoice was raised.
+   */
+  it("refuses a truncated range on the trigger, and mints nothing when clicked", () => {
+    const dateSpy = renderWith({ truncated: true, count: 5_000 })
+
+    expect(trigger().hasAttribute("disabled")).toBe(true)
+    expect(reasonOf(trigger())).toContain("under-bill")
+
+    fireEvent.click(trigger())
+    expect(createInvoice).not.toHaveBeenCalled()
+
+    dateSpy.mockRestore()
+  })
+
+  it("refuses a range that has not finished totalling", () => {
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    // No breakdown seeded for the default range at all — `renderReports` seeds
+    // `EMPTY_BREAKDOWN`, so this seeds nothing further and leaves it empty,
+    // which is the OTHER refusal.
+    renderReports(() => undefined, "summary")
+
+    expect(trigger().hasAttribute("disabled")).toBe(true)
+    expect(reasonOf(trigger())).toBe("Nothing tracked in this period to invoice.")
+
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * `invoices.createFromRange` takes a date range and nothing else — it
+   * re-reads the period server-side and knows nothing about the preset chips.
+   * With one active the page and the invoice answer two different questions,
+   * and the invoice is the WIDER one, so it would bill work this page is not
+   * showing.
+   */
+  it("refuses once a filter narrows the page beyond its dates", async () => {
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    const narrowed = { ...filters, presets: ["no-project" as const] }
+    const settled = { ...EMPTY_BREAKDOWN, totalMs: 3_600_000, count: 4 }
+
+    renderReports((client) => {
+      seedBreakdown(client, filters, settled)
+      // The FILTERED range's own key, seeded up front: a preset chip mints a
+      // new query key, and an unsettled one would refuse for the loading
+      // reason instead — which is the correct priority and would prove nothing
+      // about this one.
+      seedBreakdown(client, narrowed, settled)
+    }, "summary")
+
+    expect(trigger().hasAttribute("disabled")).toBe(false)
+
+    fireEvent.click(screen.getByRole("button", { name: "No project" }))
+
+    await waitFor(() => expect(trigger().hasAttribute("disabled")).toBe(true))
+    expect(reasonOf(trigger())).toContain("raised from the dates alone")
+
+    dateSpy.mockRestore()
+  })
+
+  it("mints one invoice for the range on screen and goes to it", async () => {
+    const dateSpy = renderWith({})
+
+    fireEvent.click(trigger())
+
+    await waitFor(() => {
+      expect(navigateSpy).toHaveBeenCalledWith({
+        to: "/invoices/$invoiceId",
+        params: { invoiceId: "inv-1" },
+      })
+    })
+    // The DATES the page is showing, in the user's stored zone — not the
+    // browser's, and not a range assembled a second time by hand.
+    expect(createInvoice).toHaveBeenCalledWith({
+      fromMs: range.fromMs,
+      toMs: range.toMs,
+      timeZone: SETTINGS.timezone,
+      weekStartDay: SETTINGS.weekStartDay,
+    })
+
+    dateSpy.mockRestore()
+  })
+
+  /* A second document is a second NUMBER, which is the failure the whole
+   * numbering scheme exists to prevent. `clientKey` covers a retried request;
+   * this covers a second click. */
+  it("mints nothing on a second click while the first is still in flight", async () => {
+    let release: (value: { invoiceId: string; unratedMs: number; replayed: boolean }) => void =
+      () => undefined
+    createInvoice.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const dateSpy = renderWith({})
+
+    fireEvent.click(trigger())
+    await waitFor(() => expect(screen.getByRole("button", { name: "Creating…" })).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: "Creating…" }))
+
+    expect(createInvoice).toHaveBeenCalledTimes(1)
+
+    release({ invoiceId: "inv-1", unratedMs: 0, replayed: false })
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledTimes(1))
+
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * The refusal only the server can make: which client each project belongs to
+   * is decided over the rows the invoice will be built from, not the rows on
+   * screen. It is printed beside the button rather than toasted — it names two
+   * companies and a fix, and a sentence that has to be acted on should not be
+   * on a timer.
+   */
+  it("names both clients when the range covers two, and stays on the page", async () => {
+    createInvoice.mockRejectedValue({
+      data: {
+        code: "MIXED_CLIENTS",
+        message:
+          'This range covers two clients — "Acme Corp" and "Globex Inc" — and an invoice can only be billed to one. Narrow the dates or filter to a single client.',
+      },
+    })
+    const dateSpy = renderWith({})
+
+    fireEvent.click(trigger())
+
+    await waitFor(() => expect(screen.getByText(/Acme Corp/)).toBeTruthy())
+    expect(screen.getByText(/Globex Inc/).textContent).toContain("billed to one")
+    expect(navigateSpy).not.toHaveBeenCalled()
+    // And the control comes back, because narrowing the dates is the fix and
+    // the user has to be able to try again.
+    expect(trigger().hasAttribute("disabled")).toBe(false)
+
+    dateSpy.mockRestore()
+  })
+
+  /* Written for a human by `convex/invoices.ts` and shown verbatim — these are
+   * the refusals a generic "that didn't save" would throw away. */
+  it("shows a history-too-large refusal in the words the server wrote", async () => {
+    createInvoice.mockRejectedValue({
+      data: {
+        code: "INVOICE_HISTORY_TOO_LARGE",
+        message: "This account has too many invoices for the next number to be verified unique.",
+      },
+    })
+    const dateSpy = renderWith({})
+
+    fireEvent.click(trigger())
+
+    await waitFor(() =>
+      expect(screen.getByText(/too many invoices/).textContent).toContain(
+        "verified unique"
+      )
+    )
 
     dateSpy.mockRestore()
   })

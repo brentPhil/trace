@@ -70,6 +70,31 @@ export function InvoiceMeta({
           readOnly={readOnly}
           onPick={async (next) => await onChange({ dueAt: next })}
         />
+        {/*
+          ADVISORY, NOT A REFUSAL — and the two are different acts here.
+          `invoices.update` deliberately does not check one date against the
+          other, because autosave commits one field per blur and an ordering
+          rule would refuse or accept the same edit depending on which date was
+          blurred first (see that function's comment). Saying nothing was the
+          other half of that decision going wrong: nothing on the document drew
+          the relationship, so the mistake was only "visible" to a reader who
+          already knew to look.
+
+          This recomputes every render from the two values as they stand, so it
+          is order-independent by construction and costs nothing server-side.
+          Compared as DAYS rather than instants: an invoice raised at 14:00 has
+          an `issuedAt` mid-afternoon while a picked due date is midnight, so an
+          instant comparison would warn about a due date on the same day.
+          `status` rather than `alert` — nothing has failed and nothing is
+          blocked — and muted rather than Alarm, which DESIGN.md reserves for
+          destructive and error, never for a warning.
+        */}
+        {dayOf(dueAt, timeZone) < dayOf(issuedAt, timeZone) ? (
+          <p role="status" className="mt-1 text-xs text-muted-foreground">
+            This due date is before the invoice date, so this document asks to be
+            paid before it was raised.
+          </p>
+        ) : null}
       </Row>
 
       <Row label="Purchase order">
@@ -122,6 +147,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * Saved on CHANGE rather than on blur, unlike the text beside it. A picker
  * commits a whole date at once, so there is no half-typed state to protect;
  * the selects on /settings save the same way, and for the same reason.
+ *
+ * THE PICK SURVIVES A REFUSAL. Controlled straight off `instant`, a rejected
+ * save left React re-rendering the previous value, so the date the user chose
+ * vanished at the same moment the message beside it said the date on screen was
+ * the thing to fix — the one autosave path in the product that discarded input,
+ * where `PartyBlock` and `InlineEdit` both keep it. `pending` holds the chosen
+ * day until the write lands, and only the write clears it.
  */
 function DateField({
   label,
@@ -139,6 +171,9 @@ function DateField({
   const id = useId()
   const errorId = useId()
   const [error, setError] = useState<string | null>(null)
+  /** The day the user picked, held only until the write that would make it the
+   *  stored one either lands or is refused. */
+  const [pending, setPending] = useState<string | null>(null)
   const day = dayOf(instant, timeZone)
 
   if (readOnly) {
@@ -157,20 +192,28 @@ function DateField({
         aria-label={label}
         aria-invalid={error !== null}
         aria-describedby={error === null ? undefined : errorId}
-        value={day}
+        value={pending ?? day}
         onChange={(event) => {
           const picked = event.target.value
           // An emptied date input is the browser saying "mid-typing", not
           // "this invoice has no date". Ignored rather than written: a
           // document always carries both.
           if (picked === "") return
+          setPending(picked)
           // No cast: `DayString` is a documented alias for `string`, and the
           // input's own value is already YYYY-MM-DD, which is the whole reason
           // this is a date input rather than a parsed text field.
           void onPick(startOfDay(picked, timeZone)).then(
-            () => setError(null),
+            () => {
+              // Cleared only if this pick is still the one on screen. A second
+              // pick made while the first was in flight would otherwise be
+              // replaced by the first one's now-stored value.
+              setPending((current) => (current === picked ? null : current))
+              setError(null)
+            },
             // A refusal is shown BESIDE the field it came from rather than as
-            // a toast: the date is still on screen and is the thing to fix.
+            // a toast: the date is still on screen and is the thing to fix —
+            // which is only true because `pending` is NOT cleared here.
             (thrown: unknown) => setError(errorMessage(thrown))
           )
         }}

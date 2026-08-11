@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilterBar } from "@/components/history/filter-bar"
+import { CreateInvoiceButton } from "@/components/reports/create-invoice-button"
 import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
 import { Button } from "@/components/ui/button"
@@ -20,7 +21,11 @@ import {
   rangeOf,
 } from "@/lib/history-filters"
 import { staleProps } from "@/lib/stale"
-import { exportDisabledReason } from "@/lib/export/export-disabled-reason"
+import {
+  exportDisabledReason,
+  invoiceDisabledReason,
+} from "@/lib/export/export-disabled-reason"
+import { useCreateInvoice } from "@/hooks/use-invoice-mutations"
 import { dayOf } from "@shared/day"
 import { unpriced } from "@/lib/format-money"
 import { formatMoney } from "@shared/money"
@@ -127,6 +132,8 @@ export const Route = createFileRoute("/_authed/reports")({
 export function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects } = useClassifiers()
+  const { createInvoice } = useCreateInvoice()
+  const navigate = useNavigate()
 
   const today = dayOf(Date.now(), settings.timezone)
   const [filters, setFilters] = useState<Filters>(() =>
@@ -157,6 +164,15 @@ export function Reports() {
   })
 
   const exportReason = exportDisabledReason(breakdown, isPlaceholderData)
+  /*
+   * A SECOND reason, not the same one. Both refuse a truncated range and both
+   * refuse a range that has not settled, in the same priority order — that
+   * order lives once, in `rangeBlocker` — but an invoice additionally cannot be
+   * raised from a view narrowed by anything other than its dates, because
+   * `createFromRange` re-reads the period server-side and would bill work this
+   * page is not showing. See `invoiceDisabledReason`.
+   */
+  const invoiceReason = invoiceDisabledReason(breakdown, isPlaceholderData, filters)
 
   return (
     <div className="flex flex-col">
@@ -173,13 +189,41 @@ export function Reports() {
               onChange={setFilters}
             />
           </div>
-          <ExportMenu
-            breakdown={breakdown ?? EMPTY_BREAKDOWN}
-            from={filters.from}
-            to={filters.to}
-            currency={settings.currency}
-            disabledReason={exportReason}
-          />
+          {/*
+            TWO CONTROLS, side by side, in that order: `[ Create invoice ]
+            [ Export ▾ ]`. The spec draws them this way and argues why they are
+            not one menu — see `CreateInvoiceButton`. `items-start` because the
+            invoice control grows a refusal underneath itself and the Export
+            trigger must not follow it down.
+          */}
+          <div className="flex shrink-0 items-start gap-2">
+            <CreateInvoiceButton
+              disabledReason={invoiceReason}
+              onCreate={async () => {
+                const { invoiceId } = await createInvoice({
+                  fromMs: range.fromMs,
+                  toMs: range.toMs,
+                  timeZone: settings.timezone,
+                  weekStartDay: settings.weekStartDay,
+                })
+                // STRAIGHT TO THE DOCUMENT. An invoice raised and left on the
+                // page it was raised from is a number the user has to go
+                // looking for, and the next thing they have to do to it —
+                // fill in `payTo`, set the terms, issue it — is all on that
+                // page. The route file is `invoices_.$invoiceId.tsx`; the
+                // underscore keeps it from nesting under the list and the URL
+                // is unaffected.
+                await navigate({ to: "/invoices/$invoiceId", params: { invoiceId } })
+              }}
+            />
+            <ExportMenu
+              breakdown={breakdown ?? EMPTY_BREAKDOWN}
+              from={filters.from}
+              to={filters.to}
+              currency={settings.currency}
+              disabledReason={exportReason}
+            />
+          </div>
         </div>
       </div>
 

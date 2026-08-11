@@ -1,6 +1,7 @@
 import { useCallback } from "react"
 import { useConvexMutation } from "@convex-dev/react-query"
 import { useLatest } from "@/hooks/use-latest"
+import { newClientKey } from "@/lib/client-key"
 import { api } from "../../convex/_generated/api"
 import type { Id } from "../../convex/_generated/dataModel"
 
@@ -42,4 +43,38 @@ export function useInvoiceMutations() {
   )
 
   return { updateInvoice, setInvoiceStatus }
+}
+
+/**
+ * Raising an invoice from a range — /reports' write, not the editor's.
+ *
+ * Its own hook rather than a third member of the one above, because the two
+ * live on different pages and the editor has no business holding a mutation
+ * that mints documents.
+ *
+ * THE `clientKey` IS MINTED HERE, at the moment of the call, exactly as
+ * `use-entry-edit-mutations.ts` mints one for a created entry. It is what makes
+ * the mutation idempotent: a request whose response is lost and is retried by
+ * the Convex client carries the same key, and `createFromRange` finds the row
+ * through `by_user_clientKey` and returns it instead of minting a second
+ * invoice — and a second invoice is a second NUMBER, which is the failure the
+ * whole numbering scheme exists to prevent. Minting it inside this callback
+ * rather than once per mount is deliberate and is the same trade entries make:
+ * one deliberate act gets one key, so a genuine second click after a genuine
+ * first invoice raises a genuine second document.
+ */
+export function useCreateInvoice() {
+  const createMutation = useLatest(useConvexMutation(api.invoices.createFromRange))
+
+  const createInvoice = useCallback(
+    async (range: {
+      fromMs: number
+      toMs: number
+      timeZone: string
+      weekStartDay: number
+    }) => await createMutation({ clientKey: newClientKey(), ...range }),
+    [createMutation]
+  )
+
+  return { createInvoice }
 }

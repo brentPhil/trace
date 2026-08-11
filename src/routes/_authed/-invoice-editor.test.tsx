@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
-import { InvoiceEditor } from "@/routes/_authed/invoices_.$invoiceId"
+import { InvoiceEditor, InvoiceUnreachable, Route } from "@/routes/_authed/invoices_.$invoiceId"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { api } from "../../../convex/_generated/api"
@@ -155,6 +155,12 @@ function renderEditor(over: Partial<Invoice> = {}) {
 /** Narrows a queried element to the textarea it is, or fails loudly. */
 function asTextarea(el: HTMLElement): HTMLTextAreaElement {
   if (!(el instanceof HTMLTextAreaElement)) throw new Error("expected a textarea")
+  return el
+}
+
+/** The same, for the date fields. */
+function asInput(el: HTMLElement): HTMLInputElement {
+  if (!(el instanceof HTMLInputElement)) throw new Error("expected an input")
   return el
 }
 
@@ -359,5 +365,119 @@ describe("the invoice editor — the document", () => {
   it("states an absent purchase order and terms rather than leaving them blank", () => {
     renderEditor()
     expect(screen.getAllByText("Not set")).toHaveLength(2)
+  })
+})
+
+/*
+ * A date pick is the ONE autosave path that used to discard the user's input
+ * on a refusal: the input was controlled straight off `instant`, so a rejected
+ * save re-rendered the previous value and the picked date vanished at the same
+ * moment the message beside it said the date on screen was the thing to fix.
+ * `PartyBlock` and `InlineEdit` both keep the typed value; this now does too.
+ */
+describe("the invoice editor — a refused date", () => {
+  it("keeps the picked date on screen beside the refusal", async () => {
+    mutations.updateInvoice.mockRejectedValue({
+      data: { code: "INVALID_DATE", message: "That due date is not a date I can read." },
+    })
+    renderEditor()
+
+    fireEvent.change(screen.getByLabelText("Due date"), {
+      target: { value: "2026-10-01" },
+    })
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("not a date I can read")
+    })
+    expect(asInput(screen.getByLabelText("Due date")).value).toBe("2026-10-01")
+  })
+})
+
+/*
+ * `invoices.update` deliberately does NOT refuse a due date before its issue
+ * date — autosave commits one field per blur, so an ordering rule would accept
+ * or refuse the same edit depending on which date was blurred first. The other
+ * half of that decision is that something has to draw the relationship, or the
+ * mistake is only "visible on the document" to a reader who knew to look.
+ */
+describe("the invoice editor — the date advisory", () => {
+  it("says when the due date precedes the invoice date, and blocks nothing", () => {
+    renderEditor({ issuedAt: NOW, dueAt: NOW - 24 * 3_600_000 })
+
+    expect(screen.getByRole("status").textContent).toContain("before the invoice date")
+    // Advisory, not refusal: the field is still there to fix, and there is no
+    // error state on it.
+    expect(screen.getByLabelText("Due date")).toBeTruthy()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
+  /*
+   * The case that makes this a DAY comparison rather than an instant one. An
+   * invoice raised at midday stamps `issuedAt` at midday, while a due date
+   * picked as the same day is midnight — so `dueAt < issuedAt` is true of a
+   * perfectly ordinary due-on-receipt invoice, and warning about it would be
+   * crying wolf on the reference document's own shape.
+   */
+  it("stays quiet for a due date on the same day as the invoice date", () => {
+    renderEditor({ issuedAt: NOW, dueAt: NOW - 12 * 3_600_000 })
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+
+  it("stays quiet for the ordinary net-30 invoice", () => {
+    renderEditor()
+    expect(screen.queryByRole("status")).toBeNull()
+  })
+})
+
+/*
+ * The route's own two decisions, tested through the route rather than the
+ * editor component: which title the tab gets, and what `/invoices/anything`
+ * renders. Before this, a stale bookmark or another account's id put the user
+ * on TanStack's built-in error screen with a raw serialised ConvexError and no
+ * link back — on what, with `Create invoice` on /reports, is now the app's
+ * most-shared URL shape.
+ */
+describe("the invoice route", () => {
+  it("names the invoice in the tab title, so two open invoices differ", () => {
+    const head = Route.options.head as (ctx: {
+      loaderData?: { number: string }
+    }) => { meta: Array<{ title: string }> }
+
+    expect(head({ loaderData: { number: "072726-0013" } }).meta[0]?.title).toBe(
+      "Invoice #072726-0013 — Trace"
+    )
+    // Still in flight, so there is no number to name yet.
+    expect(head({}).meta[0]?.title).toBe("Invoice — Trace")
+  })
+
+  it("answers a missing invoice with a way back rather than a raw error", () => {
+    // The route's OWN boundary, so it catches both failures this URL has: a
+    // `NOT_FOUND` from `getOwned`, and `/invoices/whatever` failing the
+    // `v.id()` argument validator — which carries no Trace code at all, and
+    // which a layout boundary narrowing on a code would rethrow.
+    expect(Route.options.errorComponent).toBe(InvoiceUnreachable)
+
+    for (const error of [
+      { data: { code: "NOT_FOUND", message: "Not found." } } as unknown as Error,
+      new Error("ArgumentValidationError: Value does not match validator"),
+    ]) {
+      render(<InvoiceUnreachable error={error} />)
+      expect(screen.getByText(/no invoice at this address/)).toBeTruthy()
+      expect(
+        screen.getByRole("link", { name: "Back to invoices" }).getAttribute("href")
+      ).toBe("/invoices")
+      cleanup()
+    }
+  })
+
+  /* An expired session is the LAYOUT boundary's job — it answers with a sign-in
+   * link, which "no such invoice" would replace with a dead end. Rethrowing is
+   * how it gets there, the same device `AuthedErrorBoundary` itself uses. */
+  it("hands an expired session up to the layout boundary instead", () => {
+    const expired = {
+      data: { code: "UNAUTHENTICATED", message: "Not signed in." },
+    } as unknown as Error
+
+    expect(() => render(<InvoiceUnreachable error={expired} />)).toThrow()
   })
 })

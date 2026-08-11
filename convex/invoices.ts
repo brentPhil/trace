@@ -639,9 +639,14 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
    * A due date before an issue date is odd, and refusing it here would still
    * be wrong: this editor autosaves one field per blur, so an ordering rule
    * makes moving an invoice a month forward refuse or succeed depending on
-   * which of the two the user happens to blur first. Both dates are printed on
-   * the document a person is looking at, which is where that mistake is
-   * visible; a refusal that depends on edit order is not.
+   * which of the two the user happens to blur first.
+   *
+   * Not refusing is not the same as saying nothing, and for a while it was.
+   * `InvoiceMeta` now draws a non-blocking advisory under the due date whenever
+   * it precedes the issue date — recomputed every render, so it is
+   * order-independent in the way a write-time rule cannot be, and free
+   * server-side. That is what makes the claim below true: the mistake IS
+   * visible on the document, because something on the document names it.
    */
   if (args.issuedAt !== undefined) {
     patch.issuedAt = checkInstant(args.issuedAt, "invoice date")
@@ -732,6 +737,11 @@ async function setStatusImpl(
   status: InvoiceStatus
 ) {
   const invoice = await getOwned(ctx, userId, "invoices", invoiceId)
+  // Returned BEFORE the patch, not merely tolerated by it. A no-op that still
+  // wrote `updatedAt` would move the document's own record of when it last
+  // changed for a request that changed nothing — and `updatedAt` is the field
+  // an audit reads to ask when an issued invoice was last touched.
+  if (invoice.status === status) return null
   if (!isLegalStep(invoice.status, status)) {
     traceError(
       "INVALID_STATUS_CHANGE",

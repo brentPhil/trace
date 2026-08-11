@@ -9,6 +9,7 @@ import { convexTest } from "convex-test"
 import { describe, expect, it, vi } from "vitest"
 import schema from "./schema"
 import { api, internal } from "./_generated/api"
+import { MAX_ADDRESS_LENGTH, MAX_NAME_LENGTH } from "./clients"
 import {
   MAX_PARTY_LENGTH,
   MAX_PAYMENT_TERMS_LENGTH,
@@ -471,6 +472,30 @@ describe("invoices.createFromRange", () => {
    * bounded read of the WHOLE table can no longer prove correctness, rather
    * than silently handing out a number some other invoice already holds.
    */
+  /*
+   * Pins the CONSTANT and the arithmetic it rests on, for the reason the
+   * `INVOICE_SCAN_LIMIT` assertion above exists — and this one was learned the
+   * hard way. The test below seeds `INVOICE_NUMBER_SCAN_LIMIT + 1` rows, so it
+   * passed identically at 2,000 and at 1,000: it watched a bound halve, a 2x
+   * change in what this product does, and could not have failed either way.
+   *
+   * The second assertion is the half that would otherwise rot silently. 1,000
+   * is not a chosen number, it is ~3.0 MB of mutation budget divided by a
+   * per-row estimate, and every term of that estimate is a bound
+   * `invoices.update` enforces (see convex/lib/scan.ts for the division). Task
+   * 6's line editor is the next thing to add free text to these rows. Raising
+   * any bound below without redoing that division would leave the scan reading
+   * more bytes than it has, which is the opaque platform error
+   * `INVOICE_HISTORY_TOO_LARGE` exists to replace — so raising one has to break
+   * a test here rather than pass quietly.
+   */
+  it("keeps INVOICE_NUMBER_SCAN_LIMIT and the row estimate it is divided from", () => {
+    expect(INVOICE_NUMBER_SCAN_LIMIT).toBe(1_000)
+    expect(
+      2 * MAX_PARTY_LENGTH + MAX_PURCHASE_ORDER_LENGTH + MAX_PAYMENT_TERMS_LENGTH
+    ).toBe(1_502)
+  })
+
   it("refuses to mint a number once the invoice history is too large to scan safely", async () => {
     const t = setup()
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
@@ -961,17 +986,21 @@ describe("invoices.update", () => {
    */
   it("accepts the largest block createFromRange can snapshot", async () => {
     const t = setup()
+    // The CONSTANTS, not the numbers they happen to hold today. Written out as
+    // 100/500/601 this test asserted three literals against a fourth and would
+    // have gone on passing if clients.ts widened an address — which is exactly
+    // the change that would break the round trip it exists to prove.
     const { clientId } = await t.mutation(internal.clients.createAs, {
       userId: ALICE,
-      name: "n".repeat(100),
-      address: "a".repeat(500),
+      name: "n".repeat(MAX_NAME_LENGTH),
+      address: "a".repeat(MAX_ADDRESS_LENGTH),
     })
     const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000, clientId })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
     const { invoiceId } = await create(t)
     const snapshot = (await row(t, invoiceId))?.billedTo ?? ""
-    expect(snapshot).toHaveLength(601)
+    expect(snapshot).toHaveLength(MAX_PARTY_LENGTH)
 
     // Saved straight back, unchanged in length: the editor can round-trip what
     // the mutation wrote.
@@ -1144,17 +1173,65 @@ describe("invoices.setStatus", () => {
     expect((await row(t, invoiceId))?.status).toBe("paid")
   })
 
-  /* A double-fired click or a retried mutation must not raise an error at
-   * somebody about a state they are already in. */
-  it("treats setting the status it already has as a no-op", async () => {
+  /*
+   * ALL THREE self-transitions, not just `paid -> paid`. A double-fired click
+   * or a retried mutation must not raise an error at somebody about a state
+   * they are already in, and that has to hold from wherever the invoice is.
+   *
+   * `issued -> issued` is the one the design comment reasons about and the one
+   * that was never covered: it is the only self-transition that touches a
+   * FROZEN document, and a no-op that quietly thawed it would be a laundering
+   * path — re-issue, edit, and the copy in the client's inbox and the copy in
+   * this table stop agreeing with nobody having unlocked anything. So it is
+   * asserted to leave the freeze exactly where it was.
+   */
+  it("treats setting the status it already has as a no-op, from any of the three", async () => {
+    const t = setup()
+    for (const [index, status] of (["draft", "issued", "paid"] as const).entries()) {
+      const invoiceId = await seedInvoice(t, {
+        number: `010126-000${index + 1}`,
+        issuedAt: MON,
+        status,
+      })
+
+      await setStatusAs(t, invoiceId, status)
+      expect((await row(t, invoiceId))?.status, status).toBe(status)
+    }
+  })
+
+  it("leaves an issued invoice locked after it is re-issued", async () => {
     const t = setup()
     const invoiceId = await seedInvoice(t, {
       number: "010126-0001",
       issuedAt: MON,
-      status: "paid",
+      status: "issued",
+      billedTo: "Acme Corp",
     })
 
-    await setStatusAs(t, invoiceId, "paid")
-    expect((await row(t, invoiceId))?.status).toBe("paid")
+    await setStatusAs(t, invoiceId, "issued")
+
+    await expectCode(updateAs(t, invoiceId, { billedTo: "Laundered" }), "INVOICE_LOCKED")
+    expect((await row(t, invoiceId))?.billedTo).toBe("Acme Corp")
+  })
+
+  /*
+   * The no-op returns BEFORE the patch rather than writing the same status
+   * back. `updatedAt` is what an audit reads to ask when an issued invoice was
+   * last touched, and a retried click is not a touch — asserting the field
+   * rather than the status is the only way to tell the two implementations
+   * apart, since both leave `status` exactly where it was.
+   */
+  it("does not restamp updatedAt for a status it is already in", async () => {
+    const t = setup()
+    const invoiceId = await seedInvoice(t, {
+      number: "010126-0001",
+      issuedAt: MON,
+      status: "issued",
+    })
+    const before = (await row(t, invoiceId))?.updatedAt
+
+    await setStatusAs(t, invoiceId, "issued")
+
+    expect((await row(t, invoiceId))?.updatedAt).toBe(before)
   })
 })

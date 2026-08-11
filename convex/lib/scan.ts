@@ -130,12 +130,32 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * platform's opaque error rather than this constant's refusal.
  *
  * Lowering the number until that case fits is the wrong fix: it would trade a
- * limit nobody reaches for one many accounts do. The right one is to stop
- * scanning. `nextInvoiceNumber` reads the whole table only because it needs the
- * highest sequence ever used and string order does not track sequence order
- * (see above) — persisting that high-water mark on write removes the scan, this
- * constant, and this entire comment. That is the change to make before raising
- * this number, not instead of thinking about it.
+ * limit nobody reaches for one many accounts do.
+ *
+ * NAMING THE TENSION IN THAT SENTENCE, because it is the shape of the halving
+ * this comment just defended. The paragraph above says a real party block runs
+ * 60-120 characters, which makes a real `invoices` row ~400 B rather than the
+ * ~1.8 KB the division uses — and at ~400 B even 2,000 rows would be ~0.8 MB,
+ * comfortably inside the ~3.0 MB budget. So 1,000 is set by a paste-accident
+ * guard nobody approaches, while 2,000 was a limit no account would reach and
+ * 1,000 is one a decade of monthly multi-client invoicing does. The argument
+ * against lowering further applies, in weaker form, to the lowering that
+ * happened here.
+ *
+ * It stands anyway, and deliberately: every bound in this file is derived from
+ * a PROVABLE worst case rather than from an expected one, because a limit sized
+ * to the typical row fails exactly on the atypical account — the one that
+ * pasted a contract into an address field — and fails as the platform's opaque
+ * transaction error rather than as a sentence. What is not defensible is
+ * pretending the trade is free, which is why this paragraph exists rather than
+ * a quiet number change.
+ *
+ * The right fix is neither number: it is to stop scanning. `nextInvoiceNumber`
+ * reads the whole table only because it needs the highest sequence ever used
+ * and string order does not track sequence order (see above) — persisting that
+ * high-water mark on write removes the scan, this constant, and this entire
+ * comment. That is the change to make before raising this number, not instead
+ * of thinking about it.
  *
  * An invoice deliberately carries NO notes field, which is what would blow the
  * estimate all over again — an invoice is a statement of what is owed, and
