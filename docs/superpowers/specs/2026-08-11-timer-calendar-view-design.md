@@ -102,7 +102,9 @@ range — never to midnight.
 The scroll is set when the **range** changes and at no other time. Not on every
 query update: a live subscription pushes on every keystroke into a title, and a
 grid that jumped back to its earliest entry each time would be unusable while
-anything is running.
+anything is running. FullCalendar's `scrollTimeReset` defaults to exactly this
+behaviour — reset on navigation, untouched by an event change — so it is left
+alone rather than configured, and `scrollTime` carries the computed hour.
 
 Cropping the axis to the entries was considered and
 rejected: the grid's height would then change every time the range did, and two
@@ -133,117 +135,109 @@ total still counts zero for it, and the hatch is what explains the apparent
 discrepancy on the one day it shows up. The Hatch Rule already covers this:
 absence and continuation are textures, never hues.
 
+FullCalendar segments the crossing event across both columns on its own and
+reports which half is which: the render props carry `isStart` and `isEnd`, so
+the tail is exactly the segment where `isStart === false`. Both the hatch class
+and the suppressed title key off that one boolean.
+
 ## Structure
 
+The grid itself is **FullCalendar v7** (`@fullcalendar/react@7`, `timeGrid`
+view). Hand-rolling it was the first proposal and was rejected on evidence:
+
+- v7 is built on `temporal-polyfill`, so `timeZone` takes an IANA name
+  natively. That was the decisive objection to a library here — v6 and every
+  competitor compute *which day an instant falls on* in the **browser's** zone,
+  which would have meant adopting luxon as a second date system that must agree
+  with `convex/lib/day.ts` about midnight and DST forever.
+- v7 styles through **class-name props** — one per element, taking Tailwind
+  utilities directly. DESIGN.md's rules are applied as our own classes rather
+  than as overrides fighting a vendored stylesheet, which is the failure mode
+  DESIGN.md §5 records from recharts.
+- Overlap packing, the now-line, midnight segmenting, `eventMinHeight` and
+  `slotMinHeight` are all built in.
+
+**Packaging note.** v7 moved plugins to subpath exports:
+`@fullcalendar/react/timegrid`, not the standalone `@fullcalendar/timegrid`
+package (which is stranded at 6.1.21 and must not be installed). `plugins` and
+`temporal-polyfill` are peer dependencies and are installed explicitly.
+
+**No theme is imported.** `@fullcalendar/react/skeleton.css` supplies structure
+only; every visible surface is ours.
+
 ```
-src/lib/calendar-range.ts        anchor + size -> { days, fromMs, toMs, label }
-src/lib/day-grid.ts              entries + days -> positioned blocks
+src/lib/calendar-events.ts       entries -> EventInput[], and per-day totals
+src/lib/calendar-label.ts        range + size + today -> the stepper's text
 src/components/calendar/
-  calendar-view.tsx              composes the below; takes entries and a range
+  calendar-panel.tsx             the <Calendar>, every class-name prop
   calendar-header.tsx            ‹ label ›, size dropdown, range total
-  time-axis.tsx                  hour labels, fixed left column
-  day-column.tsx                 one day: its blocks and the now-line
-  entry-block.tsx                one positioned entry
 ```
 
-The split is the shape this codebase already uses four times — `month-grid.ts`,
-`group-entries.ts`, `period-totals.ts`, `report-series.ts` are each pure,
-separately tested, with presentational components on top. It is chosen here for
-a specific reason rather than for symmetry: overlap packing and day-boundary
-arithmetic are wrong in ways nobody notices until one particular week arrives,
-which is the argument [month-grid.ts:6](../../../src/lib/month-grid.ts) makes
-for itself. Those cases want a test file, not a component test.
-
-A calendar library (FullCalendar, react-big-calendar, schedule-x) was
-considered and rejected. It reaches a working grid quickly and then every rule
-in DESIGN.md becomes an override on someone else's DOM. DESIGN.md §5 already
-records that lesson from recharts: *a selector aimed at a vendored library's
-internal class names fails silently, and dimmer-than-the-floor is exactly the
-failure nobody notices.*
+Two pure modules and two components. What is left to hand-write is the mapping
+in and the styling out — the layout math that was going to be `day-grid.ts` is
+the library's job now.
 
 ### Range state
 
-`{ anchor: DayString, size: "day" | "5day" | "week" }`, held in `useState` in
+`{ anchor: DayString, size: "day" | "5day" | "week" }` in `useState` in
 timer.tsx beside `filters`, matching how Reports holds its period. Not in the
 URL: Reports does not put its filters there either, and one page inventing a
 second convention for the same kind of state is how the two drift.
 
-`calendar-range.ts` turns that pair into the concrete window:
+Size maps onto views directly, with no custom view registration:
 
-```ts
-export type CalendarSize = "day" | "5day" | "week"
+| size   | `initialView`   | `hiddenDays` |
+| ------ | --------------- | ------------ |
+| `week` | `timeGridWeek`  | `[]`         |
+| `5day` | `timeGridWeek`  | `[0, 6]`     |
+| `day`  | `timeGridDay`   | `[]`         |
 
-export function calendarRange(
-  anchor: DayString,
-  size: CalendarSize,
-  timeZone: string,
-  weekStartDay: number
-): { days: Array<DayString>; fromMs: number; toMs: number; label: string }
+`hiddenDays: [0, 6]` hides Saturday and Sunday whatever `firstDay` is, which is
+exactly the "Monday–Friday regardless of `weekStartDay`" rule. `5day` therefore
+also steps by a whole week for free, because it *is* the week view.
 
-export function stepRange(
-  anchor: DayString,
-  size: CalendarSize,
-  delta: -1 | 1,
-  weekStartDay: number
-): DayString
-```
+The visible window comes back from FullCalendar's `datesSet` callback as
+`{ start: Date, end: Date, timeZone }`, and those two instants are what the
+Convex query is keyed on. Nothing computes the range twice.
 
-`label` is the stepper's own text, computed here so the header cannot assemble
-it a second way:
+**This is the one place the two date systems could disagree**, so it is
+asserted rather than assumed: a test checks that `datesSet`'s range for a given
+anchor equals `weekWindow(anchor, timeZone, weekStartDay)` from `day.ts`,
+including across a DST boundary. If FullCalendar's Temporal-based midnight and
+`day.ts`'s Intl-based midnight ever drift, that test is what says so.
 
-| size    | current                | otherwise              |
-| ------- | ---------------------- | ---------------------- |
-| `week`  | `This week · W33`      | `4–10 Aug · W32`       |
-| `5day`  | `This week · Mon–Fri`  | `4–8 Aug`              |
-| `day`   | `Today · Mon 11 Aug`   | `Sun 10 Aug`           |
+### The label
 
-`5day` steps by a whole week, not by five days — otherwise paging twice lands
-on a weekend the view cannot show.
+`calendar-label.ts` owns the stepper's text so the header cannot assemble it a
+second way:
 
-### Layout
+| size          | today in range          | otherwise                     |
+| ------------- | ----------------------- | ----------------------------- |
+| `week`/`5day` | `This week · 10–16 Aug` | `3–9 Aug`                     |
+| `day`         | `Today · Mon 11 Aug`    | `Sun 10 Aug`                  |
 
-```ts
-export type Placed = {
-  entry: Doc<"timeEntries">
-  dayIndex: number        // which column
-  startFraction: number   // 0..1 through that day
-  endFraction: number     // 0..1, clamped
-  column: number          // slot within its overlap cluster
-  columns: number         // how wide that cluster is
-  continuedFrom: boolean  // this is the hatched tail of the previous day
-}
+Toggl's `W33` is deliberately absent. ISO week numbers are Monday-based by
+definition, and this app's week start is configurable — under
+`weekStartDay: 0` the number would name a week different from the one on
+screen.
 
-export function placeEntries(
-  entries: Array<Doc<"timeEntries">>,
-  days: Array<DayString>,
-  timeZone: string,
-  nowMs: number
-): Array<Placed>
-```
+### Mapping entries in
 
-Three things it owns, each a bug that surfaces on exactly one day of the year:
+`calendar-events.ts` turns rows into `EventInput`s. Two rules it owns:
 
-**Day length is read, never assumed.** Fractions are computed against the day's
-real span from `dayWindow`, never against `86_400_000`. A spring-forward day is
-23 hours; a hard-coded divisor puts every block on it four percent out of place.
+**Instants, never wall-clock strings.** `start` and `end` are `Date` objects
+built from the stored millisecond instants. An ISO string without an offset
+would be interpreted in the calendar's `timeZone`, which is right by accident
+today and wrong the moment anything reads the field differently.
 
-**Midnight splits into two `Placed`.** A head in the start day, a tail in the
-next with `continuedFrom: true` — and the tail is emitted only when that next
-day is actually within `days`, so the last column of a range does not sprout a
-tail with nowhere to go.
+**A zero-length entry is floored to one minute.** FullCalendar drops an event
+whose end equals its start, and a row that exists must be visible or it cannot
+be edited from this view. `eventMinHeight` keeps it clickable once drawn.
 
-**Overlaps pack into columns.** Sort by start, then by duration descending;
-sweep into clusters of mutually overlapping entries; each takes the first free
-column. Entries that merely touch — one ending on the tick the next starts — are
-not a cluster, which is the case a naive `<=` gets wrong and which is the
-commonest shape in real data.
-
-The running entry is placed with `endedAt ?? nowMs`, using the `nowMs` timer.tsx
-already computes for the totals. Nothing special-cases it in the layout.
-
-Minimum block height is a **rendering** floor in `entry-block.tsx` (~18px, so a
-four-minute entry stays clickable), never a layout adjustment. Growing a short
-block by moving its top is how a 09:03 entry ends up drawn at 08:58.
+Day totals are computed here too, by **attribution by start**
+([convex/entries.ts:207](../../../convex/entries.ts)) — so a column header and
+the same day's header in List can never disagree, even on the one day an entry
+crosses midnight.
 
 ## Data
 
@@ -278,6 +272,19 @@ instead:
 - **The Tabular Rule** covers every hour label on the axis, the range total in
   the header, each column's day total, and any time rendered inside a block.
 - **Sentence case** on the size dropdown and every label.
+
+Each of those is a class-name prop rather than a stylesheet override, which is
+what makes them auditable. The ones this feature sets:
+
+| prop                  | carries                                              |
+| --------------------- | ---------------------------------------------------- |
+| `columnEventClass`    | the block: `surface-raised` + `edge-raised`; `enlarger` while running; `hatch-empty` when `!isStart` |
+| `eventContent`        | title, `ProjectDot`, time — title suppressed on a tail |
+| `slotLaneClass`       | the hour rules, `border-edge-soft`                    |
+| `slotHeaderClass` / `slotHeaderContent` | hour labels, `tabular`              |
+| `dayHeaderClass` / `dayHeaderContent` | weekday, date, and the day's total   |
+| `nowIndicatorLineClass` / `nowIndicatorDotClass` | Ink Muted — never `enlarger` |
+| `tableClass` / `tableHeaderClass` / `tableBodyClass` | the frame and the fixed header row |
 
 ## The `+` button
 
@@ -334,19 +341,24 @@ removing the popover's fields would take a path someone may already be using.
 
 ## Tests
 
-`src/lib/day-grid.test.ts` carries the weight:
+Overlap packing and midnight segmenting are the library's now, so the tests
+follow the code: what remains ours is the mapping in, the label, and the
+agreement between the two date systems.
 
-- two-way, three-way, and chained overlaps
-- entries that touch but do not overlap
-- midnight crossing, with and without the following day in `days`
-- a spring-forward day and a fall-back day
-- a running entry (`endedAt === null`)
-- a zero-length entry
+`src/lib/calendar-events.test.ts`: a running entry ends at `nowMs`; a
+zero-length entry is floored to one minute; `start`/`end` are absolute instants,
+not wall-clock strings; day totals attribute a midnight-crossing entry wholly to
+its start day; a filtered-out entry produces no event.
 
-`src/lib/calendar-range.test.ts`: stepping across a month and a year boundary,
-`weekStartDay` 0 versus 1, 5-day resolving to Monday–Friday under both, 5-day
-stepping by a whole week rather than five days, and each size's label in its
-current and non-current form.
+`src/lib/calendar-label.test.ts`: each size in its today-in-range and
+out-of-range form, a range spanning a month boundary, a range spanning a year
+boundary, and `weekStartDay` 0 versus 1.
+
+**The date-system agreement test** is the one that earns its keep:
+FullCalendar's `datesSet` range for a given anchor must equal
+`weekWindow(anchor, timeZone, weekStartDay)`, checked across a DST boundary. It
+is the only assertion standing between us and a grid that quietly disagrees with
+the day headers.
 
 Component tests: the switcher swaps views, a project filter narrows both views,
 clicking a block opens the time popover. `-timer.test.tsx`'s existing
@@ -354,18 +366,32 @@ clicking a block opens the time popover. `-timer.test.tsx`'s existing
 `manual-entry-dialog.test.tsx` keeps working unchanged, since `aria-label="Add
 entry"` is unchanged.
 
+**A jsdom caveat, stated so nobody wastes an afternoon on it.** FullCalendar
+measures element geometry to lay a grid out, and jsdom reports every element as
+zero-sized. Rendering the real calendar in a unit test is therefore not a
+reliable assertion about anything visual. `calendar-panel.tsx` is mocked in the
+route-level tests, its logic lives in the two pure modules above, and its
+appearance is verified in a browser.
+
 ## Staging
 
-1. `calendar-range.ts`, `day-grid.ts` and their tests. No UI.
+1. `calendar-events.ts`, `calendar-label.ts` and their tests. No UI.
 2. The `+` button move, including the `today` → `timeZone` contract change.
    Independent of the calendar and shippable alone.
-3. Week grid, `Calendar | List` switcher, filter wiring.
-4. Day and 5-day sizes, the stepper, the size dropdown.
-5. `−/+` zoom over pixels-per-hour. Last, and optional — Toggl has it, Google
-   does not, and it needs a persisted preference to be worth anything.
+3. Install FullCalendar v7; `calendar-panel.tsx` at week width, fully styled.
+4. `calendar-header.tsx`, the sizes and the stepper.
+5. Wire into timer.tsx: the `Calendar | List` switcher, `listRange` keyed on
+   `datesSet`, and the filter applied to both views.
 
 ## Out of scope
 
-Drag to create, move or resize. A month view. A date-range picker or presets on
-/timer. Split-at-midnight as a data operation — `Split` already exists as the
-manual correction and this view does not change what an entry is.
+Drag to create, move or resize — the one place a library plainly earns its keep,
+and now a config change rather than a rewrite, but not this plan.
+
+A month view. A date-range picker or presets on /timer. Split-at-midnight as a
+data operation — `Split` already exists as the manual correction and this view
+does not change what an entry is.
+
+The `−/+` zoom from the reference screenshot. It is a `slotMinHeight` change, so
+it is nearly free — but it is only worth anything with a persisted preference,
+and that means a `userSettings` field and a mutation. Its own plan.
