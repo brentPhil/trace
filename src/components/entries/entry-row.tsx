@@ -97,14 +97,27 @@ export function EntryRow({
         right, the title takes the rest. The cap traded that gap for a dead
         band of page to the right of every row, which reads worse.
 
-        4 + 20 + 2 + 20 + 4 = the 50px the row is specified at, so `min-h` is a
-        floor the content sits exactly on rather than a number it fights. The
-        note slot is a fixed 20px box because the hatch carries a border and the
-        written note does not — left to size themselves, a day of mixed rows
+        6 + 20 + 2 + 20 + 6 = 54, so `min-h` is a floor the content sits exactly
+        on rather than a number it fights.
+
+        IT WAS 4 + 20 + 2 + 20 + 4 = 50, and the answer to that argument is that
+        4px was never a spacing decision — it is what was left over after two
+        20px lines were fitted into a height picked so a working day fits on one
+        screen. A row and the row under it were 9px apart, which is closer than
+        a title is to its own note plus a rule between them, and the log read as
+        one block of text. 13px instead (6 + the 1px rule + 6).
+
+        The 2px between a title and its note does NOT move. They are one thing,
+        and padding every gap at the same rate is how a list stops having any
+        rhythm to read: the room goes AROUND the pair, and more of it again
+        between one day and the next (see `day-list.tsx`).
+
+        The note slot is a fixed 20px box because the hatch carries a border and
+        the written note does not — left to size themselves, a day of mixed rows
         would ripple by two pixels down the whole column.
       */}
-      <div className="flex min-h-[50px] w-full items-center gap-2 px-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
+      <div className="flex min-h-[54px] w-full items-center gap-2 px-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <EditableTitle
               entry={entry}

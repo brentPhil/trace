@@ -301,10 +301,54 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onClick={toggleSidebar}
       title="Toggle Sidebar"
       className={cn(
-        "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+        /*
+         * CONFINED TO THE SIDEBAR'S OWN EDGE, where upstream straddled it.
+         *
+         * Upstream centres a 16px rail ON the divider (`-right-4` plus
+         * `-translate-x-1/2`), which leaves half of it — 8px — lying over the
+         * page. Measured at 256px expanded: the rail occupied x 247→263 with
+         * the divider at 255, so the left 8px of every entry row in the log
+         * showed an `e-resize` cursor and swallowed the click, over content
+         * that does not resize. A control that toggles one region may not take
+         * clicks from another, however narrow the strip.
+         *
+         * `-right-px` reaches the sidebar's OUTER edge and stops: the extra
+         * pixel is the sidebar's own border, which is sidebar, not page. The
+         * width is then whatever the gutter that is already there can hold —
+         *   expanded   256px rail, `w-2`   -> x 248→256; nav buttons end at 247
+         *   collapsed   56px rail, `w-1.5` -> x  50→56;  nav buttons end at 49.5
+         * — so nothing is overlapped on either side in either state. The
+         * collapsed width is 6px rather than 8 because a 56px rail carrying a
+         * 44px target has only 5.5px of gutter to spend (see `RAIL_GUTTER` in
+         * app-sidebar.tsx); 8px there would take 1.5px off each nav button,
+         * which is the same defect one level in.
+         *
+         * THE AFFORDANCE STAYS. `SidebarTrigger` is `md:hidden`
+         * (app-shell.tsx), so on desktop this rail is the only mouse path back
+         * from a collapsed sidebar — ⌘B is a shortcut people hit reaching for
+         * bold. So the 2px hover line moves with the rail, from its centre to
+         * its outer edge, and still lands on the divider: that line is the
+         * only thing that makes any of this discoverable. Narrower, yes; a
+         * resize-handle's width is a target people already use. Gone, no.
+         */
+        "absolute inset-y-0 z-20 hidden w-2 transition-all ease-linear sm:flex",
+        "group-data-[side=left]:-right-px group-data-[side=right]:-left-px",
+        "group-data-[collapsible=icon]:w-1.5",
+        "after:absolute after:inset-y-0 after:w-[2px] hover:after:bg-sidebar-border",
+        "group-data-[side=left]:after:right-0 group-data-[side=right]:after:left-0",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
-        "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
+        /*
+         * OFFCANVAS KEEPS ITS OVERHANG, and that is not a hole in the rule
+         * above: that mode takes the entire sidebar off screen, so a rail
+         * confined to its edge would leave with it and there would be no
+         * affordance left to overlap anything with. Nothing in this product
+         * mounts it — `AppSidebar` is `collapsible="icon"` — and it is kept
+         * only so the primitive stays whole for a future caller.
+         * `translate-x-0` and `after:left-full` are gone along with the
+         * translate they existed to undo.
+         */
+        "hover:group-data-[collapsible=offcanvas]:bg-sidebar",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
         className

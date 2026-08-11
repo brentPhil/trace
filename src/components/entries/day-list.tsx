@@ -113,7 +113,23 @@ export function DayList({
             </div>
           </header>
 
-          <div className="flex flex-col">
+          {/*
+            `pb-3` — the one deliberately generous gap in the log.
+
+            Two rows are the same kind of thing and stay 13px apart
+            (`entry-row.tsx`); a day and the next day are not, and that break
+            has to be visible before the heading is read, not after. 12px of
+            ground here makes it ~26px from the last note to the next day
+            label against 13px between rows — a ratio the eye groups on,
+            without the log turning into an airy page. It is a table.
+
+            It sits on the ROWS rather than on the heading beneath it so that
+            it scrolls away. The heading is sticky for the whole of its day, so
+            anything added to the heading's own box is paid for again on every
+            pixel of that scroll; the heading keeps `py-2` for that reason, and
+            takes its breathing room from the space above it instead.
+          */}
+          <div className="flex flex-col pb-3">
             {group.entries.map((entry) => (
               <EntryRow
                 key={entry._id}
@@ -212,10 +228,13 @@ export function LogSkeleton() {
                 <Skeleton className="h-4 w-14" />
               </div>
             </div>
-            <div className="flex flex-col">
+            {/* `pb-3` and `h-[54px]`, tracking the real row and the real group
+                gap above — a placeholder that reserves the wrong height moves
+                the page under the reader the moment the answer arrives. */}
+            <div className="flex flex-col pb-3">
               {[0, 1, 2].map((row) => (
                 <div key={row} className="border-b border-edge-soft">
-                  <div className="flex h-[50px] w-full items-center gap-3 px-4">
+                  <div className="flex h-[54px] w-full items-center gap-3 px-4">
                     <Skeleton className="h-4 flex-1 max-w-64" />
                     <Skeleton className="h-4 w-16 shrink-0" />
                   </div>

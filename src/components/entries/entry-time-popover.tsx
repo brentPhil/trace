@@ -154,7 +154,7 @@ export function EntryTimePopover({
                 // was survivable while the control was `hidden sm:inline-flex`
                 // and desktop-only; it is now the phone affordance for editing
                 // a time. The class grows the hit area to 24px without growing
-                // the box, which the 50px row height depends on.
+                // the box, which the 54px row height depends on.
                 "touch-target tabular shrink-0 rounded-sm px-1 py-0.5 text-xs text-muted-foreground",
                 "transition-colors hover:bg-surface-raised/70 hover:text-foreground",
                 "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
