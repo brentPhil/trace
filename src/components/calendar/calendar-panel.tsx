@@ -7,7 +7,7 @@ import {
   dayTotals,
   earliestHour,
 } from "@/lib/calendar-events"
-import { formatTimeRange } from "@/lib/format-time"
+import { formatTimeOfInstant, formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
 import { dayOf } from "@shared/day"
@@ -57,6 +57,31 @@ const EVENT_MIN_HEIGHT = 18
 
 /** Where the grid opens when the range is empty. */
 const FALLBACK_SCROLL_HOUR = 8
+
+/*
+ * Hour rules and column dividers.
+ *
+ * A COLOUR ALONE DRAWS NOTHING. Tailwind's preflight sets `border: 0 solid` on
+ * every element, `skeleton.css` only ever REMOVES borders, and the widths a
+ * calendar normally gets live in `themes/`, which this file deliberately does
+ * not import — so `border-edge-soft` without a width is an invisible grid.
+ *
+ * A full `border` on each of these is right rather than excessive, because the
+ * skeleton subtracts the edges that would double up, with `!important`: the
+ * first lane and the first column get `border: 0` (`.fc-Tu`), the remaining
+ * lanes lose left/right/bottom (`.fc-hU`) and the remaining columns lose
+ * top/bottom/end (`.fc-PB`). What survives is exactly one rule per hour and one
+ * per column boundary. It is the same mechanism every bundled theme uses.
+ *
+ * Edge Soft throughout: these are dividers between passive content, where no
+ * contrast floor applies.
+ */
+const HOUR_RULE = "border border-edge-soft"
+const COLUMN_RULE = "border border-edge-soft"
+/** The hour rail's own boundary. No cell border can draw it — the first
+ *  column's are all stripped — so this divider element is what separates the
+ *  hours from the grid, in the header row and in the body alike. */
+const RAIL_RULE = "border-r border-edge-soft"
 
 /**
  * The calendar grid.
@@ -203,16 +228,27 @@ export function CalendarPanel({
       // against the grid scrolling beneath it.
       tableHeaderClass="border-b border-edge-soft bg-surface"
       tableBodyClass="bg-surface"
-      // Dividers between passive content: Edge Soft, no contrast floor.
-      slotLaneClass="border-edge-soft"
-      slotHeaderClass="border-edge-soft"
+      slotLaneClass={HOUR_RULE}
+      slotHeaderClass={HOUR_RULE}
+      slotHeaderDividerClass={RAIL_RULE}
+      dayLaneClass={COLUMN_RULE}
       slotHeaderContent={(info) => (
-        // The Tabular Rule: every digit the user reads, at any size.
+        /*
+         * Through the app's own formatter, not FullCalendar's.
+         *
+         * timegrid's own label is "9am"; `formatTimeOfInstant` says "9:00 AM",
+         * and it is what every other time in the product is spelled with. Two
+         * casings of the same clock on one screen is the defect. It also caches
+         * its `Intl.DateTimeFormat`, which matters here: this hook runs 24
+         * times per render, and this component re-renders every second.
+         *
+         * The Tabular Rule: every digit the user reads, at any size.
+         */
         <span className="tabular pr-2 text-xs text-muted-foreground">
-          {formatHour(info.date, timeZone, use12Hour)}
+          {formatTimeOfInstant(info.date.getTime(), timeZone, use12Hour)}
         </span>
       )}
-      dayHeaderClass="border-edge-soft py-2"
+      dayHeaderClass={cn(COLUMN_RULE, "py-2")}
       dayHeaderContent={(info) => {
         // Through `dayOf`, so the column header and the same day's header in
         // the list are computed by one function and cannot disagree.
@@ -220,39 +256,66 @@ export function CalendarPanel({
         const total = totals.get(day) ?? 0
         return (
           <div className="flex flex-col items-center gap-0.5">
+            {/* FullCalendar has already formatted both of these, in the
+             * calendar's own timeZone. Building an `Intl.DateTimeFormat` per
+             * cell to recompute them is the cost this render hook can least
+             * afford — see `format-time.ts`'s note on why its formatters are
+             * cached. */}
             <span className="text-xs text-muted-foreground">
-              {weekdayShort(info.date, timeZone)}
+              {info.weekdayText}
             </span>
             <span className="tabular text-base text-foreground">
-              {dayNumber(info.date, timeZone)}
+              {info.dayNumberText}
             </span>
-            <span className="tabular text-xs text-muted-foreground">
-              {formatTotal(total, display)}
-            </span>
+            {/* Nothing at all on an untracked day. `0:00:00` under five of
+             * seven columns on a light week is noise that reads as a value,
+             * and `formatCompactDuration` refuses to print `0m` for the same
+             * reason: a zero total reads as a defect. */}
+            {total === 0 ? null : (
+              <span className="tabular text-xs text-muted-foreground">
+                {formatTotal(total, display)}
+              </span>
+            )}
           </div>
         )
       }}
       // The now-indicator marks NOW, not RUNNING. Ink Muted, never
       // `enlarger` — see the Cold Light Rule.
       nowIndicatorLineClass="border-t border-muted-foreground"
-      nowIndicatorDotClass="bg-muted-foreground"
+      // A filled dot, sized. The element FullCalendar hands us is empty and has
+      // no intrinsic size, so a background colour alone paints a 0×0 box. The
+      // negative margin centres the 8px circle on the line's left end, which is
+      // what the themes do with their own `border-width`/`margin` pair.
+      nowIndicatorDotClass="-m-1 size-2 rounded-full bg-muted-foreground"
       columnEventClass={(info) => {
         const running = propsOf(info.event).endedAt === null
         return cn(
           // No transition anywhere: the running block's height changes with
           // the clock, and an eased height change is continuous motion with no
           // reduced-motion alternative.
-          "overflow-hidden rounded-md border px-1.5 py-1 text-left",
+          "overflow-hidden rounded-md px-1.5 py-1 text-left",
           running
             ? // Cold light, and only here: something IS running.
-              "border-enlarger bg-enlarger/15 text-foreground"
-            : // A block sits on a panel, not on ground, so Edge Raised is the
-              // token that clears 3:1 there — the Adjacent Colour Rule.
-              "border-edge-raised bg-surface-raised text-foreground",
-          // The tail of an entry that crossed midnight. FullCalendar segments
-          // it across both columns and `isStart` says which half this is. A
-          // continuation is a TEXTURE, never a hue — the Hatch Rule.
-          info.isStart ? null : "hatch-empty"
+              "bg-enlarger/15 text-foreground"
+            : "bg-surface-raised text-foreground",
+          /*
+           * The tail of an entry that crossed midnight. FullCalendar segments
+           * it across both columns and `isStart` says which half this is. A
+           * continuation is a TEXTURE, never a hue — the Hatch Rule.
+           *
+           * The border is stated per branch rather than once above, because
+           * `.hatch-empty` carries its own `1px dashed` and is unlayered — it
+           * outranks every Tailwind utility, so a `border-enlarger` beside it
+           * would be in the class list and absent from the screen. Here the
+           * class list says what renders.
+           */
+          info.isStart
+            ? running
+              ? "border border-enlarger"
+              : // A block sits on a panel, not on ground, so Edge Raised is
+                // the token that clears 3:1 there — the Adjacent Colour Rule.
+                "border border-edge-raised"
+            : "hatch-empty"
         )
       }}
       eventContent={(info) => {
@@ -266,7 +329,7 @@ export function CalendarPanel({
         if (!info.isStart) {
           return (
             <span className="sr-only">
-              {info.event.title} — continued from the previous day
+              {titleOf(info.event)} — continued from the previous day
             </span>
           )
         }
@@ -274,7 +337,7 @@ export function CalendarPanel({
         return (
           <div className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate text-xs font-medium">
-              {info.event.title.trim() === "" ? "Untitled" : info.event.title}
+              {titleOf(info.event)}
             </span>
             {/*
              * `formatTimeRange`, never FullCalendar's `timeText`.
@@ -311,32 +374,9 @@ function propsOf(event: EventApi): CalendarEventProps {
   return event.extendedProps as CalendarEventProps
 }
 
-/*
- * Three small formatters, kept local.
- *
- * Each takes a `Date` that FullCalendar hands to a render hook and formats it
- * in the USER's stored zone — never through `getHours()`/`getDate()`, which
- * would answer for the browser and put the whole grid's labels an hour or a
- * day out for anyone not sitting in their own timezone.
- */
-
-function formatHour(date: Date, timeZone: string, use12Hour: boolean): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    hour: "numeric",
-    hour12: use12Hour,
-    ...(use12Hour ? {} : { minute: "2-digit" }),
-  }).format(date)
-}
-
-function weekdayShort(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "short" }).format(
-    date
-  )
-}
-
-function dayNumber(date: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", { timeZone, day: "numeric" }).format(
-    date
-  )
+/** A block's heading. An entry with no title is normal — starting the timer
+ *  must never require one — so both the head and the midnight tail need the
+ *  same fallback, or the tail's screen-reader text opens with a bare dash. */
+function titleOf(event: EventApi): string {
+  return event.title.trim() === "" ? "Untitled" : event.title
 }
