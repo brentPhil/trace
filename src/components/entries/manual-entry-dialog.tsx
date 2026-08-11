@@ -6,6 +6,7 @@ import { errorMessage } from "@/lib/error-message"
 import { instantOfDayTime, localMinutesOf } from "@/lib/format-time"
 import { resolveInterval, timeFieldHelp } from "@shared/timeOfDay"
 import { cn } from "@/lib/utils"
+import { dayOf } from "@shared/day"
 import type { DayString } from "@shared/day"
 
 /**
@@ -21,11 +22,9 @@ import type { DayString } from "@shared/day"
  * the platform's own keyboard, calendar and screen-reader behaviour for free.
  */
 export function ManualEntryDialog({
-  today,
   timeZone,
   onCreate,
 }: {
-  today: DayString
   timeZone: string
   /** Passed in, not reached for — see TimerBarActions on why. */
   onCreate: (input: {
@@ -38,7 +37,7 @@ export function ManualEntryDialog({
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState("")
   const [note, setNote] = useState("")
-  const [day, setDay] = useState<DayString>(today)
+  const [day, setDay] = useState<DayString>(() => dayOf(Date.now(), timeZone))
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -47,24 +46,31 @@ export function ManualEntryDialog({
   const reset = () => {
     setTitle("")
     setNote("")
-    setDay(today)
+    setDay(dayOf(Date.now(), timeZone))
     setFrom("")
     setTo("")
     setError(null)
   }
 
   /*
-   * Re-seed the day every time the dialog OPENS, not once at mount.
+   * Re-read the day every time the dialog OPENS, from the wall clock.
    *
-   * `today` is derived from the wall clock, and this page is one people leave
-   * open. Seeded only at mount, a tab opened yesterday evening offers yesterday
-   * as the default when it is used at 09:00 this morning — so an entry meant
-   * for today lands on a day that has very likely already been reported, and
-   * goes missing from the total the user is looking at while they add it.
+   * This is a page people leave open, and the tab that has been sitting there
+   * since yesterday evening must not offer yesterday when it is used at 09:00
+   * this morning — an entry meant for today would land on a day that has very
+   * likely already been reported, and go missing from the total the user is
+   * looking at while they add it.
+   *
+   * THE CLOCK, NOT A PROP. This used to be `today: DayString`, which /timer
+   * kept current by recomputing it every second (`useSecond`). The dialog now
+   * mounts in the shell, above the outlet, and the shell has no clock — so a
+   * prop would freeze at page load and reintroduce the exact bug this effect
+   * exists to prevent. Reading `Date.now()` here removes the hazard by
+   * construction rather than by whoever mounts the dialog remembering to tick.
    */
   useEffect(() => {
-    if (open) setDay(today)
-  }, [open, today])
+    if (open) setDay(dayOf(Date.now(), timeZone))
+  }, [open, timeZone])
 
   const submit = async () => {
     if (saving) return
@@ -127,16 +133,24 @@ export function ManualEntryDialog({
       }}
     >
       {/*
-        The label collapses to the glyph below `sm`. At 375px the three totals
-        beside it need every pixel, and "Add entry" costs a hundred of them —
-        enough to push the row from two lines to three. `aria-label` carries the
-        name at every width, so nothing is lost but the ink.
+        Icon only, at every width. It sits beside Play now — the most important
+        control in the app — and a label there would either crowd Play or push
+        the title field, which the bar's own doc comment says must never give.
+        `aria-label` carries the name, so nothing is lost but the ink.
+
+        A 36px ghost SQUARE, deliberately not a second 42px filled circle:
+        two round controls of similar weight side by side is how the one button
+        that must never be mis-clicked gets mis-clicked.
       */}
       <Dialog.Trigger
         render={
-          <Button variant="ghost" size="sm" aria-label="Add entry">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Add entry"
+            className="size-9 shrink-0 rounded-md"
+          >
             <Plus className="size-4" />
-            <span className="hidden sm:inline">Add entry</span>
           </Button>
         }
       />

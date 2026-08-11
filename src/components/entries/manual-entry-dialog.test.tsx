@@ -18,9 +18,7 @@ afterEach(() => {
 
 function openDialog() {
   const onCreate = vi.fn(async () => {})
-  render(
-    <ManualEntryDialog today="2026-08-07" timeZone={LONDON} onCreate={onCreate} />
-  )
+  render(<ManualEntryDialog timeZone={LONDON} onCreate={onCreate} />)
   fireEvent.click(screen.getByLabelText("Add entry"))
   return { onCreate }
 }
@@ -71,5 +69,44 @@ describe("ManualEntryDialog", () => {
         endedAt: Date.parse("2026-08-07T16:30:00Z"),
       })
     )
+  })
+
+  it("seeds the day from the clock at open, not from a prop fixed at mount", async () => {
+    /*
+     * The regression this guards.
+     *
+     * The dialog used to take `today` as a prop. /timer recomputed it every
+     * second through `useSecond`, so it was always current there — but the
+     * dialog now mounts in the shell (`_authed.tsx`), which has no clock at
+     * all. A prop would freeze at page load, and a tab opened yesterday
+     * evening would offer yesterday at 09:00 this morning: precisely the
+     * failure the re-seed-on-open effect was written to prevent, reintroduced
+     * by moving the mount point.
+     *
+     * So the dialog reads the wall clock itself. This test mounts it, moves the
+     * clock across midnight WITHOUT re-rendering, and opens it.
+     */
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date("2026-08-10T23:50:00Z"))
+
+      render(<ManualEntryDialog timeZone="UTC" onCreate={vi.fn()} />)
+
+      vi.setSystemTime(new Date("2026-08-11T00:10:00Z"))
+
+      fireEvent.click(screen.getByLabelText("Add entry"))
+
+      // `getByLabelText`, not `findByLabelText`: this suite's `@testing-library/dom`
+      // has no `jest` global to detect (this project imports `vi` explicitly rather
+      // than running with `test.globals`), so its fake-timer detection never fires —
+      // `findBy*`/`waitFor` would poll the now-mocked `setInterval`, which never
+      // ticks, and hang until Vitest's own real-time test timeout. `fireEvent`
+      // already flushes the open-effect synchronously via `act()`, exactly as the
+      // sibling tests above rely on when they read a field right after clicking.
+      const day = screen.getByLabelText("Day")
+      expect((day as HTMLInputElement).value).toBe("2026-08-11")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
