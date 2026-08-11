@@ -38,7 +38,7 @@ vi.mock("@/lib/popover-force-close", async (importOriginal) => {
  * shadcn's `Calendar mode="range"` (react-day-picker).
  *
  * Pure props in, `{ from, to }` out — no router, no Convex — so what these
- * tests prove is exactly what `FilterBar` gets: a single control that makes
+ * tests prove is exactly what `PeriodControls` gets: a single control that makes
  * an inverted range impossible to express and a matching period nameable at
  * a glance.
  */

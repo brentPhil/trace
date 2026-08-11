@@ -8,6 +8,7 @@ import { LogSkeleton } from "@/components/entries/day-list"
 import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TotalsRow } from "@/components/entries/totals-row"
+import { FilterBand } from "@/components/history/filter-band"
 import { FilterControls } from "@/components/history/filter-controls"
 import { Page } from "@/components/shell/page"
 import { useClassifiers } from "@/hooks/use-classifiers"
@@ -202,16 +203,17 @@ export function Timer() {
           </div>
 
           {/*
-            The band is full-bleed — it is a strip of the page, like a day header —
-            and its CONTROLS take the same `px-4` gutter as everything else, so the
-            search box starts on the same pixel as the entry titles below it and
-            the totals above it. It was the one thing on this page that did neither.
+            The band's chrome — the full bleed, the Surface fill, the two
+            hairlines and the `px-4` the controls take so the search box starts
+            on the same pixel as the entry titles below it and the totals above
+            it — was spelt out here, and only here. /reports drew this same
+            `FilterControls` on bare ground because that spelling was not
+            something a second page could render. It is `FilterBand` now, which
+            is where that argument lives.
           */}
-          <div className="border-y border-edge-soft bg-surface py-2.5">
-            <div className="w-full px-4">
-              <FilterControls filters={filters} projects={projects} onChange={setFilters} />
-            </div>
-          </div>
+          <FilterBand>
+            <FilterControls filters={filters} projects={projects} onChange={setFilters} />
+          </FilterBand>
         </>
       }
     >

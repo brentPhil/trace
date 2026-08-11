@@ -5,7 +5,10 @@ import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
-import { FilterBar } from "@/components/history/filter-bar"
+import { FilterBand } from "@/components/history/filter-band"
+import { FilterControls } from "@/components/history/filter-controls"
+import { PeriodControls } from "@/components/history/period-controls"
+import { PresetChips } from "@/components/history/preset-chips"
 import { CreateInvoiceLink } from "@/components/reports/create-invoice-link"
 import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
@@ -49,7 +52,7 @@ const PAGE_SIZE = 100
 /**
  * The two views, as data.
  *
- * TABS RATHER THAN TWO ROUTES, so the FilterBar above them is one control
+ * TABS RATHER THAN TWO ROUTES, so the filter bar above them is one control
  * governing both. A freelancer narrows to a client and a fortnight once, then
  * looks at the shape of it and at the rows behind the shape — making that a
  * second page would mean setting the same filters twice and, worse, would let
@@ -217,9 +220,12 @@ export function Reports() {
       with /timer) owns how that is done, and what the Detailed tab's day
       headers then stick to.
 
-      No bottom border, deliberately: the tab strip immediately below draws
-      one of its own, and two hairlines 12px apart on an unscrolled page is
-      clutter bought to solve a problem that only exists mid-scroll.
+      The header ENDS in the filter band's own bottom hairline now, where it
+      used to end in nothing. That was argued as avoiding two hairlines 12px
+      apart, since the tab strip below draws one — but the band's is a
+      boundary of a filled strip rather than a spare rule, and the tab strip's
+      sits a whole row lower, so the pair brackets the tabs instead of doubling
+      up on them. /timer's band closes the same way onto its log.
 
       `titleHidden`, and the heading is NEW — the same gap and the same answer
       as /timer. This page had no `<h1>` at all, so it offered nothing to a
@@ -233,14 +239,20 @@ export function Reports() {
       titleHidden
       sticky
       header={
-        /* `w-full px-4`, the same pair the rows below it take, so the filter
-           row and everything under it share their left and right edges. */
-        <div className="flex w-full flex-col gap-3 px-4 py-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <>
+          {/*
+            THE PERIOD, AND THE TWO THINGS YOU DO WITH IT — on the page's own
+            ground, outside the band, which is where /timer's totals row sits
+            for the same reason: this row says what the page IS SHOWING and
+            offers the two exports of it, rather than narrowing what is on
+            screen. `w-full px-4` is spelt here because it is spelt on every
+            row this page draws itself; the band below supplies its own, since
+            a full-bleed fill cannot take its gutter from a caller.
+          */}
+          <div className="flex w-full flex-wrap items-start justify-between gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
-              <FilterBar
+              <PeriodControls
                 filters={filters}
-                projects={projects}
                 today={today}
                 weekStartDay={settings.weekStartDay}
                 onChange={setFilters}
@@ -279,7 +291,21 @@ export function Reports() {
               />
             </div>
           </div>
-        </div>
+
+          {/*
+            EVERYTHING THAT CUTS INTO THE PERIOD, in the same band /timer draws
+            — the point of the exercise. Both rows narrow what is already
+            bounded by the row above, so they belong on one fill together;
+            `FilterControls` in particular is the identical component /timer
+            renders, and it now sits on the identical Surface.
+          */}
+          <FilterBand>
+            <div className="flex flex-col gap-3">
+              <FilterControls filters={filters} projects={projects} onChange={setFilters} />
+              <PresetChips filters={filters} onChange={setFilters} />
+            </div>
+          </FilterBand>
+        </>
       }
     >
       <Tabs
@@ -434,7 +460,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
    * part of the query key, so any filter change that moves the range mints a
    * brand new key with nothing cached for it yet. `useSuspenseQuery` answers
    * that by THROWING, which unmounts this whole component up to the nearest
-   * Suspense boundary — FilterBar, the log, everything — and swaps in its
+   * Suspense boundary — the filter bar, the log, everything — and swaps in its
    * fallback. That throw-and-unmount is exactly the "the whole page briefly
    * goes blank" bug reported against this file.
    *

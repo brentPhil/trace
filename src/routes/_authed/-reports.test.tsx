@@ -15,6 +15,7 @@ import {
   resetPaginatedStore,
   resolvePage,
 } from "@/test-utils/convex-query"
+import { expectFilterControlsInBand } from "@/test-utils/filter-band"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
 import { dayOf } from "@shared/day"
@@ -33,7 +34,7 @@ type RouterModule = typeof RouterModuleType
  * the ENTIRE route. `fromMs`/`toMs` are part of `entries.rangeSummary`'s
  * query key, so a range change mints a key with nothing cached for it, and
  * `useSuspenseQuery` answered that by throwing — unmounting this whole
- * component (FilterBar, the log, everything) up to the nearest Suspense
+ * component (the filter bar, the log, everything) up to the nearest Suspense
  * boundary. `usePaginatedQuery`'s own args-changed reset had the same
  * consequence for the log itself, one level down (see reports.tsx's
  * `settledPageRef` comment).
@@ -306,6 +307,25 @@ describe("Reports — the page heading", () => {
     renderReports(() => {}, "summary")
 
     expectPageHeading("Reports", { hidden: true })
+  })
+})
+
+/*
+ * THE INCONSISTENCY THIS ASSERTION EXISTS FOR.
+ *
+ * This page put the period controls, `FilterControls` and the preset chips in
+ * one unfilled `px-4 py-3` container while /timer wrapped the SAME
+ * `FilterControls` in a Surface band with a hairline above and below. Two
+ * pages, one component, two pieces of chrome — and nothing failed, because
+ * chrome is not behaviour. The band is `FilterBand` now and both pages render
+ * it; this is /timer's assertion, made against the same helper so the two
+ * cannot drift apart again without one of them going red.
+ */
+describe("Reports — the filter band", () => {
+  it("puts the filter controls on the shared Surface strip, as /timer does", () => {
+    renderReports(() => {}, "summary")
+
+    expectFilterControlsInBand()
   })
 })
 
@@ -723,7 +743,7 @@ describe("Reports — the Summary tab", () => {
   /*
    * Summary is the tab /reports opens on, and the one a freelancer looks at to
    * answer "how did this period go". Everything below is about it stating the
-   * same facts the Detailed tab's sentence does — the two share one FilterBar
+   * same facts the Detailed tab's sentence does — the two share one filter bar
    * and one range, so a figure that differs between them is a disagreement the
    * user has no way to adjudicate.
    */
@@ -851,7 +871,7 @@ describe("Reports — the Summary tab", () => {
 
     // Starts on Detailed so the range can be stepped there and read back on
     // Summary. That is the whole reason these are tabs rather than two routes:
-    // one FilterBar governs both, and a range set on one is the range the other
+    // one filter bar governs both, and a range set on one is the range the other
     // answers for.
     const { queryClient } = renderReports((client) => {
       client.setQueryData(convexKey(api.entries.rangeSummary, nextRange), {

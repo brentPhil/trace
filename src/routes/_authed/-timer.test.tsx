@@ -9,6 +9,7 @@ import {
   resetPaginatedStore,
   resolvePage,
 } from "@/test-utils/convex-query"
+import { expectFilterControlsInBand } from "@/test-utils/filter-band"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
 import { dayOf, dayWindow, weekWindow } from "@shared/day"
@@ -151,6 +152,22 @@ describe("Timer — the page heading", () => {
 
     // `sr-only` — in the tree, out of sight.
     expectPageHeading("Timer", { hidden: true })
+  })
+})
+
+/*
+ * The band this page has always drawn, now asserted rather than assumed.
+ *
+ * It used to be spelt out inline here and nowhere else, which is how /reports
+ * came to render the same `FilterControls` on bare ground. Both pages call
+ * `FilterBand` now, and both make this assertion, so removing the band from
+ * either one fails a test instead of only looking wrong.
+ */
+describe("Timer — the filter band", () => {
+  it("puts the filter controls on the shared Surface strip", () => {
+    renderTimer()
+
+    expectFilterControlsInBand()
   })
 })
 

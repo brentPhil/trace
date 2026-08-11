@@ -19,7 +19,7 @@ import type { DayString } from "@shared/day"
  * react-day-picker's `mode="range"` already owns).
  *
  * Pure props in, `{ from, to }` out. This component never touches `period` —
- * the caller (`FilterBar`) is the one that knows setting a custom range means
+ * the caller (`PeriodControls`) is the one that knows setting a custom range means
  * `period: "custom"`, exactly as it already knows for the segmented control.
  *
  * `Date` only exists inside this component, for react-day-picker's grid.
@@ -103,7 +103,7 @@ export function DateRangePicker({
     setOpen(false)
   }
 
-  // FilterBar listens for arrow keys at the document level to step
+  // PeriodControls listens for arrow keys at the document level to step
   // Day/Week/Month (see `2b25007`). react-day-picker owns arrow/Home/End/
   // PageUp/PageDown navigation inside the open grid, and the two must not
   // fight over the same keys — so the popup swallows every key its own grid
@@ -155,7 +155,7 @@ export function DateRangePicker({
           onSelect={handleSelect}
           // Below 2, react-day-picker would complete a range on the very
           // first click (`{ from: day, to: day }` immediately) — this forces
-          // the second click FilterBar's own tests, and the trigger label
+          // the second click PeriodControls' own tests, and the trigger label
           // logic above, both assume happens before anything commits.
           min={1}
           // Without this, react-day-picker treats a click as EXTENDING the

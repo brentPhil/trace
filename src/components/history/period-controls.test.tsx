@@ -1,16 +1,21 @@
 import { useState } from "react"
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { FilterBar } from "@/components/history/filter-bar"
+import { PeriodControls } from "@/components/history/period-controls"
 import { defaultFilters } from "@/lib/history-filters"
 import type { Filters } from "@/lib/history-filters"
 
 /*
- * The one thing FilterBar itself has to get right about the range picker: it
- * is the caller that knows setting a custom range means `period: "custom"` —
+ * The one thing PeriodControls itself has to get right about the range picker:
+ * it is the caller that knows setting a custom range means `period: "custom"` —
  * the picker itself never touches `period`. Everything else about the
  * calendar is covered by date-range-picker.test.tsx against the component
  * directly.
+ *
+ * Both of these came across whole when `FilterBar` was split: the picker and
+ * the arrow keys are the period's, and the period is what this component now
+ * is. Nothing about either assertion depends on the filters that stayed
+ * behind.
  */
 
 afterEach(cleanup)
@@ -21,9 +26,8 @@ function Harness() {
   const [filters, setFilters] = useState<Filters>(() => defaultFilters(TODAY, 1))
   return (
     <div>
-      <FilterBar
+      <PeriodControls
         filters={filters}
-        projects={[]}
         today={TODAY}
         weekStartDay={1}
         onChange={setFilters}
@@ -33,7 +37,7 @@ function Harness() {
   )
 }
 
-describe("FilterBar's date range picker", () => {
+describe("PeriodControls' date range picker", () => {
   it("sets period to custom when a range is picked", () => {
     render(<Harness />)
 
@@ -51,7 +55,7 @@ describe("FilterBar's date range picker", () => {
     expect(state.to).toBe("2026-08-09")
   })
 
-  // Regression test for `2b25007`: FilterBar binds ArrowLeft/ArrowRight at
+  // Regression test for `2b25007`: PeriodControls binds ArrowLeft/ArrowRight at
   // the document level to step Day/Week/Month. Before that fix, the same
   // keys bubbled up from an OPEN calendar and shifted the whole period out
   // from under the picker mid-navigation.

@@ -14,7 +14,7 @@ import type { Doc } from "../../convex/_generated/dataModel"
  * WHAT an entry has to look like to survive is NOT stated here: that is
  * `convex/lib/entryFilter.ts`, which the server's `entries.rangeBreakdown` runs
  * over the same rows. Reports' Summary tab and its Detailed tab share one
- * FilterBar, so they have to share one definition of "matches" — this file is
+ * the filter bar, so they have to share one definition of "matches" — this file is
  * the client's half of the wiring (period stepping, the range, the
  * presets-or-not union) and delegates the predicate itself.
  */
