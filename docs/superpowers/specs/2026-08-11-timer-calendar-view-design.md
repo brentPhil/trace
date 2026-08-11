@@ -53,12 +53,24 @@ from /timer.
 
 ## Decisions taken, and why
 
-**Read, not draw.** Blocks are not draggable. Clicking one opens the editing
-that already exists (`EntryTimePopover`, `NoteSheet`, the inline title). The
-view exists to show the shape of a day, and drag-to-create is a second product
-with its own failure modes — an accidental 40-minute entry created by a stray
-drag is precisely the kind of silent data corruption "defensible by default"
-rules out. It can be added later on top of this layout model without a rewrite.
+**Read, not draw.** Blocks are not draggable, and the calendar contains no
+editing of its own. Clicking a block **switches to List and focuses that
+entry's row**, where the editing already exists — `EntryTimePopover`,
+`NoteSheet`, the inline title. The calendar navigates to the editor; it is not
+one. A popover on the grid would be a second place to fix the same mistyped
+field, which is how two places come to disagree about it.
+
+The view exists to show the shape of a day, and drag-to-create is a second
+product with its own failure modes — an accidental 40-minute entry created by a
+stray drag is precisely the kind of silent data corruption "defensible by
+default" rules out. It can be added later on top of this layout model without a
+rewrite.
+
+Two clicks are deliberately inert rather than misleading, because the row they
+would navigate to does not exist: the **running** entry (`groupByDay` keeps it
+out of the list on purpose) and any entry **outside the loaded pages** or dated
+in the **future** (the list's range is pinned to the end of today). Each says
+why instead of silently doing nothing.
 
 **A tab, not a route.** [reports.tsx:49](../../../src/routes/_authed/reports.tsx)
 already settled this argument for Summary and Detailed: *tabs rather than two

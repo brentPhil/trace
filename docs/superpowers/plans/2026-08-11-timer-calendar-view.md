@@ -1040,10 +1040,21 @@ export function CalendarPanel({
       // so the grid's midnight and `convex/lib/day.ts`'s midnight are the same
       // instant.
       timeZone={timeZone}
-      firstDay={weekStartDay}
-      // `[0, 6]` hides Saturday and Sunday whatever `firstDay` is, which is
-      // exactly "Monday to Friday regardless of weekStartDay". A 5-day range
-      // therefore also steps by a whole week for free, because it IS the week.
+      // CORRECTED 2026-08-12. This draft read `firstDay={weekStartDay}` with
+      // the comment below claiming `hiddenDays` trims independently of it.
+      // THAT CLAIM IS FALSE — FullCalendar builds the week from `firstDay` and
+      // trims hidden days only from the ENDS, so for weekStartDay 2-5 the
+      // weekend falls in the interior and is not removed at all: a Wednesday
+      // week start drew Wed, Thu, Fri, MON, TUE. 31 of 49 anchor x weekStartDay
+      // combinations disagreed with the label above them, and the range total
+      // came from the grid, so the header could name a week other than the one
+      // it was counting. The line below is the shipped fix; the original is
+      // recorded here because this same claim survived two reviews.
+      firstDay={size === "5day" ? 1 : weekStartDay}
+      // A Monday-started week puts Saturday and Sunday at the END, which is the
+      // only place `trimHiddenDays` can reach them — so this yields Mon-Fri for
+      // every `weekStartDay`, and a 5-day range steps by a whole week for free
+      // because it IS the week.
       hiddenDays={size === "5day" ? [0, 6] : []}
       headerToolbar={false}
       // Nothing here is all-day. An entry is a span of a working day, and an
