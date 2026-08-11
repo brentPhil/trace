@@ -53,7 +53,7 @@ describe("invoiceLineDrafts", () => {
    * time is $61.34. A test at 98:48:00 alone cannot tell the two apart.
    */
   it("computes the amount from the FLOORED quantity, not from exact milliseconds", () => {
-    const [line] = invoiceLineDrafts(
+    const lines = invoiceLineDrafts(
       [
         bucket({
           billableMs: HOUR + 20_000,
@@ -62,14 +62,14 @@ describe("invoiceLineDrafts", () => {
       ],
       null
     )
-    expect(line?.quantityCentis).toBe(100)
-    expect(line?.amountCents).toBe(6_100)
+    expect(lines[0]?.quantityCentis).toBe(100)
+    expect(lines[0]?.amountCents).toBe(6_100)
   })
 
   it("falls back to the account rate for a project that has none", () => {
-    const [line] = invoiceLineDrafts([bucket({ project: { name: "Website" } })], 1500)
-    expect(line?.unitCents).toBe(1500)
-    expect(line?.amountCents).toBe(1_500)
+    const lines = invoiceLineDrafts([bucket({ project: { name: "Website" } })], 1500)
+    expect(lines[0]?.unitCents).toBe(1500)
+    expect(lines[0]?.amountCents).toBe(1_500)
   })
 
   /*
@@ -79,12 +79,12 @@ describe("invoiceLineDrafts", () => {
    * invoice for work that was given away.
    */
   it("keeps a zero-rate project at $0.00 rather than falling through to the default", () => {
-    const [line] = invoiceLineDrafts(
+    const lines = invoiceLineDrafts(
       [bucket({ project: { name: "Pro bono", hourlyRateCents: 0 } })],
       1500
     )
-    expect(line?.unitCents).toBe(0)
-    expect(line?.amountCents).toBe(0)
+    expect(lines[0]?.unitCents).toBe(0)
+    expect(lines[0]?.amountCents).toBe(0)
   })
 
   /* Time nobody has priced is left OFF, never guessed at and never billed at
@@ -106,13 +106,13 @@ describe("invoiceLineDrafts", () => {
    * fault, not as "work with no project". The label is shared with the client's
    * own charts through convex/lib/labels.ts. */
   it("names the unassigned bucket rather than leaving the description blank", () => {
-    const [line] = invoiceLineDrafts(
+    const lines = invoiceLineDrafts(
       [bucket({ projectId: null, project: undefined })],
       2000
     )
-    expect(line?.description).toBe(NO_PROJECT_LABEL)
-    expect(line?.unitCents).toBe(2000)
-    expect(line?.projectId).toBe(null)
+    expect(lines[0]?.description).toBe(NO_PROJECT_LABEL)
+    expect(lines[0]?.unitCents).toBe(2000)
+    expect(lines[0]?.projectId).toBe(null)
   })
 
   /* A bucket assembled with no rate anywhere must produce no line rather than

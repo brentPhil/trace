@@ -335,3 +335,15 @@ export const TITLE_CAP_NOTE =
 /** The sentence unpriced billable time must carry. Same reasoning. */
 export const UNPRICED_NOTE =
   "Some billable time has no hourly rate and is not in the amount above."
+
+/**
+ * WHERE A RATE IS SET, for the two places that have to say it.
+ *
+ * `BillPreview` says it under a preview that is short by an unpriced bucket;
+ * `invoiceDisabledReason` says it on a button refusing a range where EVERY
+ * bucket is. Same fix, same two places to apply it, so it is one sentence —
+ * a second phrasing of "go and set a rate" is how the two start naming
+ * different screens.
+ */
+export const SET_A_RATE_NOTE =
+  "Set a rate on the project, or on the account in Settings, to bill it."

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
@@ -246,7 +246,24 @@ export function NewInvoicePage({
    *  `INVOICE_HISTORY_TOO_LARGE`, a network failure. It goes beside the button,
    *  which is the only place a refusal about the whole document can land. */
   const [refusal, setRefusal] = useState<string | null>(null)
+  /** The label and the `disabled` attribute — state, because both are rendered
+   *  and a ref does not re-render. It is NOT the guard; see `inFlight`. */
   const [busy, setBusy] = useState(false)
+  /*
+   * THE ACTUAL IN-FLIGHT GUARD, and it has to be a ref.
+   *
+   * `busy` above cannot do this job. It is read from the render closure — the
+   * same value `disabled={… || busy}` renders from — so two clicks landing
+   * before React has re-rendered both see `busy === false`, both pass, and the
+   * account gets two documents with two numbers. A ref is the only thing whose
+   * write is visible to the second handler in that same tick.
+   *
+   * `clientKey` (see `useCreateInvoice`) makes a RETRIED request safe; this is
+   * what makes a second CLICK safe. Neither substitutes for the other: the key
+   * is minted per call, so two calls are two keys and the replay branch in
+   * `createFromRangeImpl` never sees them as the same request.
+   */
+  const inFlight = useRef(false)
 
   /** Editing a field is also the answer to that field's refusal — the same rule
    *  every other editable surface in this product follows, and it stops a
@@ -266,20 +283,25 @@ export function NewInvoicePage({
    * What the range on screen cannot support, said ON the trigger.
    *
    * The SAME `invoiceDisabledReason` /reports' button uses — not a second set
-   * of words for the same three states. The button there is a link now, so this
+   * of words for the same four states. The button there is a link now, so this
    * is where those sentences are finally acted on: a link cannot be pressed
    * into a refusal, and a hand-typed URL at a truncated range has to meet the
    * same rule the button did.
+   *
+   * `lines.length` is the fourth of those states and the one this page is best
+   * placed to answer, because it has already priced them: a range whose every
+   * bucket is unrated draws an empty table above and would mint a permanent,
+   * numbered, $0.00 document. `createFromRange` refuses it too — see
+   * `NO_PRICED_TIME` — so this is the sentence before the click rather than the
+   * only thing standing in the way.
    */
-  const disabledReason = invoiceDisabledReason(breakdown, isPlaceholderData)
+  const disabledReason = invoiceDisabledReason(breakdown, isPlaceholderData, lines.length)
 
   async function create() {
-    // The in-flight guard, and the reason it is not merely `disabled={busy}`: a
-    // double click can land two events before React has painted the disabled
-    // state, and the second one would be a second invoice with a second number.
-    // `clientKey` (see `useCreateInvoice`) makes a RETRIED request safe; this is
-    // what makes a second CLICK safe.
-    if (busy || disabledReason !== null) return
+    // Set BEFORE the first `await` — the ref write and this read are in one
+    // synchronous block, which is exactly the window `disabled` cannot cover.
+    if (inFlight.current || disabledReason !== null) return
+    inFlight.current = true
     setBusy(true)
     setErrors({})
     setRefusal(null)
@@ -304,6 +326,10 @@ export function NewInvoicePage({
       if (field === null) setRefusal(errorMessage(thrown))
       else setErrors({ [field]: errorMessage(thrown) })
     } finally {
+      // Both, and in this order: the guard is what makes the control pressable
+      // again in fact, `busy` is what makes it look it. Every refusal above has
+      // a fix the user can go and apply, so the button must come back.
+      inFlight.current = false
       setBusy(false)
     }
   }

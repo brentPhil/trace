@@ -27,6 +27,7 @@ import {
 } from "@/lib/export/export-disabled-reason"
 import { invoiceSearchOf } from "@/lib/invoice-search"
 import { dayOf } from "@shared/day"
+import { billableBucketsOf, invoiceLineDrafts } from "@shared/invoiceLines"
 import { unpriced } from "@/lib/format-money"
 import { formatMoney } from "@shared/money"
 import { formatTotal } from "@/lib/format-total"
@@ -163,16 +164,46 @@ export function Reports() {
 
   const exportReason = exportDisabledReason(breakdown, isPlaceholderData)
   /*
+   * HOW MANY LINES THIS RANGE WOULD ACTUALLY PRICE, through the shared
+   * derivation — the same `billableBucketsOf` + `invoiceLineDrafts` pair
+   * /invoices/new previews with and `createFromRange` writes from.
+   *
+   * Zero means a NUMBERED, permanent, un-deletable $0.00 document, which is why
+   * the link has to be disabled here rather than at the far end of it. Counted
+   * off THIS page's breakdown, which may have been scanned with the billable
+   * chip off — that does not change the answer, because `billableBucketsOf`
+   * keeps only buckets with billable time and a bucket's rate is a fact about
+   * the project rather than about the scan. What the chip CAN change is
+   * `breakdown.count`, which is why `invoiceDisabledReason` checks
+   * `billableMs` too.
+   */
+  const invoiceLineCount = useMemo(
+    () =>
+      breakdown === undefined
+        ? 0
+        : invoiceLineDrafts(
+            billableBucketsOf(breakdown.projects),
+            settings.defaultHourlyRateCents ?? null
+          ).length,
+    [breakdown, settings.defaultHourlyRateCents]
+  )
+  /*
    * A SECOND reason, not the same one. The two refuse the same three states in
    * the same priority order — that order lives once, in `rangeBlocker` — and
    * word them differently, because an export of a floor is a wrong report while
-   * an invoice raised from one is a client under-billed.
+   * an invoice raised from one is a client under-billed. The invoice control
+   * then refuses one state the export has no analogue for: a range that would
+   * price no lines at all.
    *
-   * It used to refuse a fourth state, a view narrowed by anything but its
-   * dates. `createFromRange` now takes the filter too, so there is nothing left
-   * to refuse — see `invoiceDisabledReason`.
+   * It used to refuse a different fourth state, a view narrowed by anything but
+   * its dates. `createFromRange` now takes the filter too, so there is nothing
+   * left to refuse there — see `invoiceDisabledReason`.
    */
-  const invoiceReason = invoiceDisabledReason(breakdown, isPlaceholderData)
+  const invoiceReason = invoiceDisabledReason(
+    breakdown,
+    isPlaceholderData,
+    invoiceLineCount
+  )
 
   return (
     <div className="flex flex-col">

@@ -82,6 +82,14 @@ export type TraceErrorCode =
    *  than guessed: a wrong number here means two documents claiming the same
    *  invoice id, which is worse than refusing to mint one. */
   | "INVOICE_HISTORY_TOO_LARGE"
+  /** The range priced NO lines at all — every bucket in it is either empty or
+   *  unrated, so the document would carry a $0.00 total and nothing to justify
+   *  it. Refused rather than minted, because an invoice is write-once: there is
+   *  no `remove` and nothing sets `deletedAt`, so a zero-line document is
+   *  permanent, un-editable, un-deletable, and has spent a sequence number. The
+   *  same trade `RANGE_TOO_LARGE` and `MIXED_CLIENTS` make — every other
+   *  permanent-document risk in this feature refuses rather than mints. */
+  | "NO_PRICED_TIME"
 
 export type TraceErrorData = {
   code: TraceErrorCode

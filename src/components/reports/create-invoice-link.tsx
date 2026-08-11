@@ -22,13 +22,21 @@ import type { InvoiceSearch } from "@/lib/invoice-search"
  * of the lines they will be attached to.
  *
  * THE REFUSALS DID NOT MOVE WITH IT, and that is deliberate. What is knowable
- * from the range on screen — still totalling, truncated, nothing in it — keeps
- * disabling the control HERE and stating the reason ON it, because a link that
- * leads to a page which must then refuse is worse than a disabled control: the
- * user has spent a navigation, and possibly a filled-in form, to be told
- * something this page already knew. `/invoices/new` checks the same three
- * states with the same `invoiceDisabledReason`, for the URL that was typed
- * rather than clicked.
+ * from the range on screen — still totalling, truncated, nothing in it, nothing
+ * in it that would price a line — keeps disabling the control HERE and stating
+ * the reason ON it, because a link that leads to a page which must then refuse
+ * is worse than a disabled control: the user has spent a navigation, and
+ * possibly a filled-in form, to be told something this page already knew.
+ * `/invoices/new` checks the same states with the same `invoiceDisabledReason`,
+ * for the URL that was typed rather than clicked.
+ *
+ * THE TWO PAGES DO NOT HOLD THE SAME SCAN, which is the part that makes that
+ * claim non-obvious and which it was once quietly wrong about. /reports queries
+ * `billableOnly` from the chip; /invoices/new hard-codes it true, because
+ * `createFromRange` does. So a range of purely non-billable entries with the
+ * chip OFF has `count > 0` here and `count === 0` there, and this control would
+ * have enabled a link to a page that refuses. `invoiceDisabledReason` reads
+ * `billableMs` as well as `count` for exactly that reason — see its comment.
  *
  * What only the server can decide — a range covering two clients
  * (`MIXED_CLIENTS`), a history too large to number safely, a scan that ran out

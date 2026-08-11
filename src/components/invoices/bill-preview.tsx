@@ -1,6 +1,6 @@
 import { InvoiceLines } from "@/components/invoices/invoice-lines"
 import { formatTotal } from "@/lib/format-total"
-import { UNPRICED_NOTE } from "@/lib/export/report-rows"
+import { SET_A_RATE_NOTE, UNPRICED_NOTE } from "@/lib/export/report-rows"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { InvoiceLineDraft } from "@shared/invoiceLines"
 
@@ -102,8 +102,11 @@ export function BillPreview({
         <p role="status" className="max-w-prose text-xs text-muted-foreground">
           {UNPRICED_NOTE} There is{" "}
           <span className="tabular">{formatTotal(unratedMs, durationDisplay)}</span>{" "}
-          of it in this period, and it will not appear on the invoice at all.
-          Set a rate on the project, or on the account in Settings, to bill it.
+          of it in this period, and it will not appear on the invoice at all.{" "}
+          {/* `SET_A_RATE_NOTE`, shared with the button's own refusal for the
+              range where EVERY bucket is unpriced — see
+              `invoiceDisabledReason`. One fix, so one sentence naming it. */}
+          {SET_A_RATE_NOTE}
         </p>
       ) : null}
     </section>

@@ -766,6 +766,39 @@ async function createFromRangeImpl(
     accountRateCents
   )
 
+  /*
+   * NO LINES IS NOT A DOCUMENT. Refused here, where it is still refusable.
+   *
+   * `invoiceLineDrafts` skips a bucket whose billable time has no rate — time
+   * nobody priced is left off rather than guessed at — so a range with hours in
+   * it but no project rate and no account default prices NOTHING and would be
+   * inserted as a numbered invoice with zero lines and a $0.00 total. That is
+   * the most likely first run of this feature, not an edge: tracked billable
+   * time, no rate set anywhere.
+   *
+   * An invoice is write-once. There is no `remove`, nothing sets `deletedAt`,
+   * and the number is spent the moment the row exists — so that document is
+   * permanent, un-editable and un-deletable, and the account's next invoice is
+   * numbered one past it. Every other permanent-document risk in this mutation
+   * refuses rather than mints (`RANGE_TOO_LARGE`, `MIXED_CLIENTS`,
+   * `INVOICE_HISTORY_TOO_LARGE`), and this is the same trade.
+   *
+   * SERVER-SIDE AS WELL AS ON THE PAGE, which is the half that makes it a rule.
+   * /invoices/new disables its button for the same state in the same words, but
+   * `createFromRangeAs` is reachable without that page and a hand-typed URL
+   * reaches the mutation — a client-side guard on a permanent document is a
+   * convenience, not a rule.
+   *
+   * It subsumes the empty range too: no entries means no buckets means no
+   * lines, and "this would bill nothing" is the true thing to say about both.
+   */
+  if (lines.length === 0) {
+    traceError(
+      "NO_PRICED_TIME",
+      "Nothing in this period has an hourly rate, so this invoice would have no lines and a $0.00 total. Set a rate on the project, or on the account in Settings, to bill it."
+    )
+  }
+
   const now = Date.now()
   // Bounded, not `.collect()`: `nextInvoiceNumber` needs the HIGHEST sequence
   // ever used, and `by_user_number` sorts `number` as a STRING — which does
