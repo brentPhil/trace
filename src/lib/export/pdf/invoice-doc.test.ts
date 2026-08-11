@@ -64,7 +64,7 @@ function descriptionOpsOf(page: { ops: Array<PdfOp> }) {
 }
 
 describe("invoiceDocPages — the head", () => {
-  it("states the document's identity: number, both dates, and its own currency", () => {
+  it("states the document's identity: number and both dates", () => {
     const [first] = invoiceDocPages(makeInvoice())
     const strings = textOf(first)
 
@@ -74,9 +74,26 @@ describe("invoiceDocPages — the head", () => {
     // read side by side by the same client.
     expect(strings).toContain("07/27/2026")
     expect(strings).toContain("08/26/2026")
-    // The invoice's OWN snapshotted currency, which every amount below is
-    // formatted in; `$` alone does not distinguish USD from CAD.
-    expect(strings).toContain("USD")
+  })
+
+  /*
+   * No Currency row. An earlier version printed one, on the reasoning that "$
+   * alone does not distinguish USD from CAD" — which is true of the character
+   * and false of this product's output. `formatMoney` goes through
+   * `Intl.NumberFormat` at `MONEY_LOCALE`, which renders CAD as `CA$`, AUD as
+   * `A$` and SGD as `SGD `, so a bare `$` on a Trace invoice IS unambiguous.
+   *
+   * The row was therefore restating what every amount on the page already
+   * said. This asserts it stays gone, and the CAD case is what proves the
+   * reasoning rather than just the removal.
+   */
+  it("names no currency of its own, because every amount already carries one", () => {
+    expect(textOf(invoiceDocPages(makeInvoice())[0])).not.toContain("USD")
+
+    const canadian = textOf(invoiceDocPages(makeInvoice({ currency: "CAD" }))[0])
+    expect(canadian).not.toContain("CAD")
+    // Not merely absent — disambiguated where it counts, in the figures.
+    expect(canadian.some((text) => text.includes("CA$"))).toBe(true)
   })
 
   /*

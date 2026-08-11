@@ -212,11 +212,19 @@ function headOps(invoice: InvoiceDoc): { ops: Array<PdfOp>; tableTop: number } {
    * order  Not set` on a document sent to a client is the product talking about
    * its own form fields on someone else's invoice.
    */
+  /*
+   * No Currency row. Every amount below it is already written by `formatMoney`
+   * in the invoice's own currency, symbol and all, so a row spelling out "USD"
+   * restates what `$530.30` has said four times by the time the reader reaches
+   * the total. The currency is still SNAPSHOT on the document and still what
+   * the figures are formatted from — it just is not a fact the paper has to
+   * state twice. It remains on the editor, where it is a control rather than a
+   * restatement.
+   */
   const metaRows: Array<[string, string]> = [
     ["Invoice number", invoice.number],
     ["Invoice date", usDate(invoice.issuedOn)],
     ["Due date", usDate(invoice.dueOn)],
-    ["Currency", invoice.currency],
   ]
   if (invoice.purchaseOrder !== undefined && invoice.purchaseOrder !== "") {
     metaRows.push(["Purchase order", invoice.purchaseOrder])
