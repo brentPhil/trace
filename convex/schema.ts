@@ -132,6 +132,41 @@ export const invoiceFields = {
    *  exists so a human can ask where the figures came from. */
   sourceFromMs: v.union(v.number(), v.null()),
   sourceToMs: v.union(v.number(), v.null()),
+  /*
+   * Provenance, continued: WHICH ROWS of that range. Same rule as the two
+   * instants above — never read to recompute anything, ever.
+   *
+   * They exist because a range alone MISDESCRIBES an invoice the moment
+   * `createFromRange` bills a filtered view. "3–9 August" and "3–9 August,
+   * project Website only, rows matching 'migration'" are different sets of
+   * work with the same dates, and a human asking where a figure came from
+   * would be handed the first sentence for the second invoice — provenance
+   * that reads as complete while naming a superset of what was billed.
+   *
+   * `billableOnly` is deliberately absent. It is not a view setting an invoice
+   * happens to have been raised under: `createFromRange` hard-codes it true
+   * for every invoice this product will ever raise, so storing it would record
+   * a choice nobody made and imply it could have been otherwise.
+   *
+   * OPTIONAL, and each one WRITTEN ON EVERY NEW INVOICE — including the
+   * unfiltered defaults (`null`, `""`, `[]`). So absence means exactly one
+   * thing, "raised before this product recorded which rows it billed", rather
+   * than being a second spelling of "no filter". Existing rows keep validating
+   * and keep telling the truth about themselves.
+   */
+  sourceProjectId: v.optional(v.union(v.string(), v.null())),
+  /** Bounded by `MAX_SOURCE_TEXT_LENGTH` on write — see that constant and
+   *  `INVOICE_NUMBER_SCAN_LIMIT`, whose per-row byte estimate this is a term
+   *  in. Stored as the filter matched: trimmed, never otherwise normalised. */
+  sourceText: v.optional(v.string()),
+  /** Deduplicated and sorted on write, which is what bounds it: there are three
+   *  presets, so the stored set can never exceed three elements however many
+   *  the caller sent. */
+  sourcePresets: v.optional(
+    v.array(
+      v.union(v.literal("no-project"), v.literal("no-note"), v.literal("under-a-minute"))
+    )
+  ),
   /** SNAPSHOT of `entries.rangeBreakdownImpl`'s `unratedBillableMs` for the
    *  source range, AT CREATION — how much billable time had no rate and so
    *  landed on neither this invoice nor any line of it. Like every other

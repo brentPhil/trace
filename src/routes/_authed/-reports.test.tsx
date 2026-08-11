@@ -958,13 +958,21 @@ describe("Reports — Create invoice", () => {
   })
 
   /*
-   * `invoices.createFromRange` takes a date range and nothing else — it
-   * re-reads the period server-side and knows nothing about the preset chips.
-   * With one active the page and the invoice answer two different questions,
-   * and the invoice is the WIDER one, so it would bill work this page is not
-   * showing.
+   * THE DEADLOCK THIS BUTTON SHIPPED WITH, and the test that used to assert it.
+   *
+   * `createFromRange` took a date range and nothing else, so a narrowed page
+   * would have billed a superset of the rows on it, and this control refused
+   * rather than let that happen. Meanwhile a range covering two clients is
+   * refused server-side as `MIXED_CLIENTS` — whose message says to filter to a
+   * single client. Both routes to an invoice were closed, and an account with
+   * two live clients could not raise one at all.
+   *
+   * The mutation now takes the filter. So the assertion inverts: the trigger
+   * stays live, and what the click sends carries the narrowing. Asserting only
+   * the first half would pass against a button that raised an invoice for the
+   * whole period anyway, which is the more expensive of the two failures.
    */
-  it("refuses once a filter narrows the page beyond its dates", async () => {
+  it("stays live once a filter narrows the page, and bills that narrowing", async () => {
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
     const narrowed = { ...filters, presets: ["no-project" as const] }
     const settled = { ...EMPTY_BREAKDOWN, totalMs: 3_600_000, count: 4 }
@@ -978,12 +986,22 @@ describe("Reports — Create invoice", () => {
       seedBreakdown(client, narrowed, settled)
     }, "summary")
 
-    expect(trigger().hasAttribute("disabled")).toBe(false)
-
     fireEvent.click(screen.getByRole("button", { name: "No project" }))
 
-    await waitFor(() => expect(trigger().hasAttribute("disabled")).toBe(true))
-    expect(reasonOf(trigger())).toContain("raised from the dates alone")
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "No project" }).getAttribute("aria-pressed")).toBe(
+        "true"
+      )
+    )
+    expect(trigger().hasAttribute("disabled")).toBe(false)
+
+    fireEvent.click(trigger())
+
+    await waitFor(() =>
+      expect(createInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({ presets: ["no-project"] })
+      )
+    )
 
     dateSpy.mockRestore()
   })
@@ -1000,12 +1018,18 @@ describe("Reports — Create invoice", () => {
       })
     })
     // The DATES the page is showing, in the user's stored zone — not the
-    // browser's, and not a range assembled a second time by hand.
+    // browser's, and not a range assembled a second time by hand — PLUS the
+    // filter those dates are being viewed through, which is what makes the
+    // invoice bill exactly what is on screen. `billableOnly` is deliberately
+    // absent: the mutation hard-codes it true.
     expect(createInvoice).toHaveBeenCalledWith({
       fromMs: range.fromMs,
       toMs: range.toMs,
       timeZone: SETTINGS.timezone,
       weekStartDay: SETTINGS.weekStartDay,
+      projectId: null,
+      text: "",
+      presets: [],
     })
 
     dateSpy.mockRestore()
@@ -1049,7 +1073,7 @@ describe("Reports — Create invoice", () => {
       data: {
         code: "MIXED_CLIENTS",
         message:
-          'This range covers two clients — "Acme Corp" and "Globex Inc" — and an invoice can only be billed to one. Narrow the dates or filter to a single client.',
+          'This range covers two clients — "Acme Corp" and "Globex Inc" — and an invoice can only be billed to one. Narrow the dates or filter to a single project.',
       },
     })
     const dateSpy = renderWith({})

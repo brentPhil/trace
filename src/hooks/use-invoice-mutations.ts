@@ -67,12 +67,25 @@ export function useCreateInvoice() {
   const createMutation = useLatest(useConvexMutation(api.invoices.createFromRange))
 
   const createInvoice = useCallback(
-    async (range: {
+    /*
+     * A RANGE AND THE FILTER OVER IT, because those together are what /reports
+     * is showing. `createFromRange` applies the three filter fields to the same
+     * scan the page's own `rangeBreakdown` ran, so the invoice bills the rows
+     * on screen rather than every row in the dates.
+     *
+     * `billableOnly` is deliberately not among them: the mutation hard-codes it
+     * true for every invoice, and a caller able to send `false` could raise one
+     * for time nobody means to charge for.
+     */
+    async (view: {
       fromMs: number
       toMs: number
       timeZone: string
       weekStartDay: number
-    }) => await createMutation({ clientKey: newClientKey(), ...range }),
+      projectId: string | null
+      text: string
+      presets: Array<"no-project" | "no-note" | "under-a-minute">
+    }) => await createMutation({ clientKey: newClientKey(), ...view }),
     [createMutation]
   )
 

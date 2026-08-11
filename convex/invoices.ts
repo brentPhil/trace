@@ -1,4 +1,5 @@
 import { v } from "convex/values"
+import type { ObjectType } from "convex/values"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
 import { getOwned } from "./owned"
@@ -195,6 +196,25 @@ export const listAs = internalQuery({
 // createFromRange
 // ---------------------------------------------------------------------------
 
+/**
+ * A search needle, and the id of the project it was typed beside.
+ *
+ * Both are stored on the invoice as provenance, so both are free strings on an
+ * `invoices` row — which is the thing `INVOICE_NUMBER_SCAN_LIMIT` and
+ * `INVOICE_LIST_LIMIT` (convex/lib/scan.ts) divide a byte budget by. Two more
+ * unbounded columns there is that division silently ceasing to hold, which is
+ * the failure mode both of those comments were written to prevent, so this is a
+ * term in their arithmetic and not a tidiness rule.
+ *
+ * 100, the same bound a purchase order and a client's name get: far past any
+ * phrase somebody types to narrow a fortnight's work, far past the ~32
+ * characters a Convex id occupies, and short enough that neither field can
+ * become the prose an invoice deliberately has no room for. A project id
+ * cannot be typed at all, so its share of this is a guard against a
+ * hand-written client rather than a limit a user can meet.
+ */
+export const MAX_SOURCE_TEXT_LENGTH = 100
+
 const createFromRangeArgs = {
   /** UUIDv7 minted client-side before the mutation is sent — the same
    *  idempotency device `timeEntries.clientKey` uses. A retry after a lost
@@ -208,15 +228,44 @@ const createFromRangeArgs = {
    *  of its arguments rather than a second reader of `userSettings`. */
   timeZone: v.string(),
   weekStartDay: v.number(),
+  /*
+   * THE FILTER BAR, and the reason /reports' promise is now literally true.
+   *
+   * Copied field for field from `entries.rangeBreakdown`'s own validators —
+   * `projectId` three-state (null is "no filter", "" is "entries with no
+   * project"), `text`, and the preset union spelled out rather than referenced,
+   * because that query keeps its args private. They are handed straight to the
+   * SAME `rangeBreakdownImpl` the page drew its figures with, so an invoice
+   * bills the rows on screen rather than a superset of them.
+   *
+   * Without this the product deadlocked, and it took two live clients to
+   * notice: an unfiltered range covering both is refused `MIXED_CLIENTS`, and
+   * narrowing to one used to make the invoice describe rows the page was not
+   * showing — so /reports disabled the button instead. Neither route raised an
+   * invoice, while `MIXED_CLIENTS` itself said "filter to a single client".
+   *
+   * `billableOnly` is NOT here, and must not be. This mutation hard-codes it
+   * true below: an invoice bills billable time only, which is a product rule
+   * about what an invoice IS, not a view setting the page happens to be in.
+   * Accepting it as an argument would make it look negotiable and would let a
+   * caller raise an invoice for time nobody intends to charge for.
+   */
+  projectId: v.optional(v.union(v.string(), v.null())),
+  text: v.optional(v.string()),
+  presets: v.optional(
+    v.array(
+      v.union(v.literal("no-project"), v.literal("no-note"), v.literal("under-a-minute"))
+    )
+  ),
 }
 
-type CreateFromRangeArgs = {
-  clientKey: string
-  fromMs: number
-  toMs: number
-  timeZone: string
-  weekStartDay: number
-}
+/*
+ * DERIVED from the validators above, never restated — the same device and the
+ * same reason as `BreakdownArgs` in convex/entries.ts. The hand-written twin
+ * this replaces would have compiled perfectly while the three fields just added
+ * went unread by the handler, which is precisely the bug being fixed here.
+ */
+type CreateFromRangeArgs = ObjectType<typeof createFromRangeArgs>
 
 const createFromRangeReturns = v.object({
   invoiceId: v.id("invoices"),
@@ -260,11 +309,45 @@ async function createFromRangeImpl(
   }
 
   /*
+   * ONE filter, computed once, then both billed from and recorded.
+   *
+   * The same values go into `rangeBreakdownImpl` below and onto the invoice
+   * row at the bottom — not two separately-derived copies — so the document's
+   * account of which rows it billed cannot describe a different set from the
+   * one it actually billed.
+   *
+   * `checkText` (the editor's own bound-and-trim, further down this file)
+   * refuses either string past `MAX_SOURCE_TEXT_LENGTH`. Trimming changes
+   * nothing about what matches: `matchesFilter` trims the needle itself, and a
+   * project id has no whitespace to lose.
+   *
+   * Presets are deduplicated, which is what BOUNDS this field — there are three
+   * of them, so a caller sending eight thousand copies of one chip stores three
+   * elements at most. Deduplicating cannot change what is billed either: the
+   * predicate ANDs the presets together, so a repeat is a no-op, and sorting
+   * only makes two identical filters record identically.
+   */
+  const sourceText = checkText(args.text ?? "", "search filter", MAX_SOURCE_TEXT_LENGTH)
+  const sourceProjectId =
+    args.projectId === undefined || args.projectId === null
+      ? null
+      : checkText(args.projectId, "project filter", MAX_SOURCE_TEXT_LENGTH)
+  const sourcePresets = [...new Set(args.presets ?? [])].sort()
+
+  /*
    * The SAME `rangeBreakdownImpl` /reports draws, called with a MutationCtx.
    *
    * A second scan written here would be a second rounding rule, and the
    * invoice would disagree with the page the user raised it from — which is
-   * the one disagreement this product cannot afford.
+   * the one disagreement this product cannot afford. The filter is threaded
+   * through for the same reason one step further out: the page applies these
+   * three fields to this same scan, so an invoice raised without them would
+   * bill a strict superset of the rows the user was looking at.
+   *
+   * `billableOnly: true` is HARD-CODED and is not an argument. An invoice
+   * bills billable time only — that is what an invoice is in this product, a
+   * documented rule rather than whatever state the billable chip happened to
+   * be in when the button was pressed.
    *
    * `INVOICE_SCAN_LIMIT`, not the default `SUMMARY_SCAN_LIMIT` — this runs
    * inside a mutation, and has to refuse before the transaction's own byte
@@ -280,6 +363,9 @@ async function createFromRangeImpl(
       timeZone: args.timeZone,
       weekStartDay: args.weekStartDay,
       billableOnly: true,
+      projectId: sourceProjectId,
+      text: sourceText,
+      presets: sourcePresets,
     },
     INVOICE_SCAN_LIMIT
   )
@@ -334,11 +420,18 @@ async function createFromRangeImpl(
       clientId = projectClientId
     } else if (clientId !== projectClientId) {
       const [a, b] = await Promise.all([ctx.db.get(clientId), ctx.db.get(projectClientId)])
+      // "A SINGLE PROJECT", not "a single client", which is what this sentence
+      // used to say. There is no client filter on /reports — the picker is by
+      // project — so the old advice named a control that does not exist, and
+      // for as long as this mutation ignored the filter entirely it was worse
+      // than imprecise: taking it disabled the button. Filtering to one project
+      // is always followable and always yields a document billed to one client,
+      // which is the property this refusal is protecting.
       traceError(
         "MIXED_CLIENTS",
         `This range covers two clients — "${a?.name ?? "one client"}" and ` +
           `"${b?.name ?? "another client"}" — and an invoice can only be billed ` +
-          `to one. Narrow the dates or filter to a single client.`
+          `to one. Narrow the dates or filter to a single project.`
       )
     }
   }
@@ -431,6 +524,14 @@ async function createFromRangeImpl(
     // schema comment on `sourceFromMs`/`sourceToMs`.
     sourceFromMs: args.fromMs,
     sourceToMs: args.toMs,
+    // The rest of that same answer, under the same never-recompute rule: the
+    // dates say WHEN, these three say WHICH ROWS. Written even when they are
+    // the unfiltered defaults, so an absent field means "raised before this was
+    // recorded" and never "raised from everything" — see the schema comment.
+    // The very values the scan above ran with, not a second derivation of them.
+    sourceProjectId,
+    sourceText,
+    sourcePresets,
     // SNAPSHOT — see the schema comment. Read back verbatim on the replay
     // branch above, never recomputed.
     unratedMsAtCreation: breakdown.unratedBillableMs,
@@ -484,6 +585,12 @@ export const createFromRangeAs = internalMutation({
  * leaves the rest empty. This is the editor those two comments warned about, so
  * each bound below is a term in that arithmetic and changing one means redoing
  * the division there rather than trusting the number that is written down.
+ *
+ * The set of terms is no longer only below this line: `MAX_SOURCE_TEXT_LENGTH`
+ * up in `createFromRange` bounds the two provenance strings a filter puts on
+ * the row, and counts twice. The division in convex/lib/scan.ts names all of
+ * them; this comment names none of them, deliberately, because a second list
+ * here would be the one that stopped agreeing.
  */
 
 /**

@@ -165,14 +165,16 @@ export function Reports() {
 
   const exportReason = exportDisabledReason(breakdown, isPlaceholderData)
   /*
-   * A SECOND reason, not the same one. Both refuse a truncated range and both
-   * refuse a range that has not settled, in the same priority order — that
-   * order lives once, in `rangeBlocker` — but an invoice additionally cannot be
-   * raised from a view narrowed by anything other than its dates, because
-   * `createFromRange` re-reads the period server-side and would bill work this
-   * page is not showing. See `invoiceDisabledReason`.
+   * A SECOND reason, not the same one. The two refuse the same three states in
+   * the same priority order — that order lives once, in `rangeBlocker` — and
+   * word them differently, because an export of a floor is a wrong report while
+   * an invoice raised from one is a client under-billed.
+   *
+   * It used to refuse a fourth state, a view narrowed by anything but its
+   * dates. `createFromRange` now takes the filter too, so there is nothing left
+   * to refuse — see `invoiceDisabledReason`.
    */
-  const invoiceReason = invoiceDisabledReason(breakdown, isPlaceholderData, filters)
+  const invoiceReason = invoiceDisabledReason(breakdown, isPlaceholderData)
 
   return (
     <div className="flex flex-col">
@@ -200,11 +202,26 @@ export function Reports() {
             <CreateInvoiceButton
               disabledReason={invoiceReason}
               onCreate={async () => {
+                /*
+                 * THE RANGE AND THE FILTER OVER IT — what this page is showing,
+                 * not merely when it is showing it. Read through the same
+                 * `entryFilterOf` that `breakdownArgs` above builds the query
+                 * key from, so the invoice is raised from the very filter the
+                 * figures beside this button were drawn with.
+                 *
+                 * `billableOnly` is left behind on purpose: `createFromRange`
+                 * hard-codes it true, so passing the chip's state could only
+                 * ever weaken a rule the document depends on.
+                 */
+                const filter = entryFilterOf(filters)
                 const { invoiceId } = await createInvoice({
                   fromMs: range.fromMs,
                   toMs: range.toMs,
                   timeZone: settings.timezone,
                   weekStartDay: settings.weekStartDay,
+                  projectId: filter.projectId,
+                  text: filter.text,
+                  presets: [...filter.presets],
                 })
                 // STRAIGHT TO THE DOCUMENT. An invoice raised and left on the
                 // page it was raised from is a number the user has to go

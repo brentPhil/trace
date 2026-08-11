@@ -96,19 +96,25 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * (`INVOICE_SCAN_LIMIT` rows at up to ~2.7 KB each, or ~5.4 MB), not the full
  * 8 MiB. Call what is left ~3.0 MB.
  *
- * WHAT AN `invoices` ROW COSTS — redone, because the editor this comment used
- * to warn about now exists. `invoices.update` is where a human first types
- * into one of these rows, and every bound it enforces is a term here:
+ * WHAT AN `invoices` ROW COSTS — redone a second time, because a second writer
+ * of free text arrived. `invoices.update` is where a human types into one of
+ * these rows, and `invoices.createFromRange` now records the FILTER that built
+ * it as well as the range; every bound either one enforces is a term here:
  * `billedTo` and `payTo` at `MAX_PARTY_LENGTH` (601 each, which is clients.ts's
  * `MAX_NAME_LENGTH` + a newline + `MAX_ADDRESS_LENGTH`, so a block
  * `createFromRange` snapshots always fits the editor that has to save it back),
- * `purchaseOrder` at 100, `paymentTerms` at 200. That is ~1.5 KB of text beside
- * a handful of ids and numbers — call the row ~1.8 KB, where this comment said
- * ~800 B while `billedTo` was the only writable text on it.
+ * `purchaseOrder` at 100, `paymentTerms` at 200, and `sourceText` and
+ * `sourceProjectId` at `MAX_SOURCE_TEXT_LENGTH` (100 each). That is 1,702
+ * characters — ~1.7 KB of text beside a handful of ids and numbers and a
+ * `sourcePresets` array deduplication bounds at three short literals. Call the
+ * row ~2.1 KB, where this comment said ~1.8 KB before the filter was stored and
+ * ~800 B before there was an editor at all.
  *
- * So the LIMIT halved rather than the estimate being quietly restated. 1,000
- * rows is ~1.8 MB of the ~3.0 MB available; the old 2,000 would now be ~3.6 MB
- * and would not fit. An account past 1,000 invoices is refused a new number
+ * The LIMIT does NOT move for this one, and that is a result rather than an
+ * omission: 1,000 rows is ~2.1 MB of the ~3.0 MB available, up from ~1.8 MB and
+ * still inside it. (The halving to 1,000 happened when the editor landed — the
+ * old 2,000 would be ~4.2 MB at today's row and would not fit, as it already
+ * did not at ~1.8 KB.) An account past 1,000 invoices is refused a new number
  * instead of handed a wrong one, which is the trade this constant already
  * made at 2,000 and the same one `RANGE_TOO_LARGE` makes.
  *
@@ -116,9 +122,9 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * above equates the two — which is only true for ASCII. Being exact about how
  * far that goes, rather than calling it headroom:
  *
- *     1 B/char  1,000 rows ~ 1.8 MB   fits inside the ~3.0 MB above
- *     2 B/char  1,000 rows ~ 3.3 MB   does NOT fit
- *     3 B/char  1,000 rows ~ 4.8 MB   does NOT fit
+ *     1 B/char  1,000 rows ~ 2.1 MB   fits inside the ~3.0 MB above
+ *     2 B/char  1,000 rows ~ 3.8 MB   does NOT fit
+ *     3 B/char  1,000 rows ~ 5.5 MB   does NOT fit
  *
  * So the honest statement is not that 1,000 has margin for any account. It is
  * that 1,000 holds for an account whose invoices are ASCII, and that what makes
@@ -126,16 +132,18 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * 601-character bound — a name and a postal address run 60-120 characters, not
  * 601, and the bounds exist to stop a paste accident rather than to describe a
  * document. An account that genuinely saturated these fields in a three-byte
- * script would exceed the budget at roughly 600 invoices, and would get the
- * platform's opaque error rather than this constant's refusal.
+ * script would exceed the budget at roughly 550 invoices — 600 before the
+ * filter joined the row — and would get the platform's opaque error rather than
+ * this constant's refusal.
  *
  * Lowering the number until that case fits is the wrong fix: it would trade a
  * limit nobody reaches for one many accounts do.
  *
  * NAMING THE TENSION IN THAT SENTENCE, because it is the shape of the halving
- * this comment just defended. The paragraph above says a real party block runs
- * 60-120 characters, which makes a real `invoices` row ~400 B rather than the
- * ~1.8 KB the division uses — and at ~400 B even 2,000 rows would be ~0.8 MB,
+ * this comment once defended. The paragraph above says a real party block runs
+ * 60-120 characters, and a real search filter is a word or two, which makes a
+ * real `invoices` row ~400 B rather than the
+ * ~2.1 KB the division uses — and at ~400 B even 2,000 rows would be ~0.8 MB,
  * comfortably inside the ~3.0 MB budget. So 1,000 is set by a paste-accident
  * guard nobody approaches, while 2,000 was a limit no account would reach and
  * 1,000 is one a decade of monthly multi-client invoicing does. The argument
@@ -161,7 +169,9 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * estimate all over again — an invoice is a statement of what is owed, and
  * free-form commentary belongs on the time entries the lines were built from.
  * `paymentTerms` is bounded at 200 for precisely that reason: it is the field
- * a notes field would come back as.
+ * a notes field would come back as. `sourceText` is bounded at 100 for the
+ * narrower version of it — a needle a user typed into a search box arrives here
+ * as free text, and the box itself has no length attribute to lean on.
  */
 export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
 
@@ -176,11 +186,12 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
  * and so the read is a page of invoices PLUS every line of every one of them.
  *
  * The arithmetic, on the same per-row accounting `INVOICE_NUMBER_SCAN_LIMIT`
- * above uses. An `invoices` row is ~1.8 KB once `invoices.update`'s bounds are
+ * above uses. An `invoices` row is ~2.1 KB once every bound written into one is
  * summed (see that constant — `billedTo` and `payTo` at 601 each,
- * `purchaseOrder` at 100, `paymentTerms` at 200, beside ids and numbers). An
+ * `purchaseOrder` at 100, `paymentTerms` at 200, `sourceText` and
+ * `sourceProjectId` at 100 each, beside ids and numbers). An
  * `invoiceLines` row is a description, four numbers and two ids — call it
- * ~400 B. For M lines an invoice, a page of 50 costs 50 x (1,800 + M x 400)
+ * ~400 B. For M lines an invoice, a page of 50 costs 50 x (2,100 + M x 400)
  * bytes and 50 x (1 + M) documents.
  *
  * That ~400 B assumes a bound `invoiceLines.description` does not actually
@@ -199,6 +210,14 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
  * byte limit not until M = 415, so the real headroom is:
  *
  *     M <= 326 fits. M = 200 -> 10,050 docs (61% of 16,384) and ~4.1 MB (49%).
+ *
+ * Those three figures are UNCHANGED by the row growing from ~1.8 KB to ~2.1 KB,
+ * and the division was redone rather than assumed: the invoice rows are 105 KB
+ * of a page instead of 90 KB, which leaves the byte failure point exactly where
+ * it was, at M = 415 (50 x (2,100 + 414 x 400) = 8,380,000 B, under the
+ * 8,388,608 ceiling; one more line is 8,400,000 and over it). Lines dominate, so the
+ * head of the row barely registers — which is the same fact that makes M, not
+ * this constant, the number to worry about.
  *
  * WHAT BOUNDS M: nothing, honestly. `createFromRange` writes one line per
  * project with billable time in the range, which is bounded only by how many

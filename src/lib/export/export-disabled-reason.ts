@@ -1,5 +1,4 @@
 import type { Breakdown } from "@/lib/report-series"
-import type { Filters } from "@/lib/history-filters"
 
 /**
  * What stops a control acting on the range that is currently on screen, and
@@ -52,30 +51,6 @@ export function exportDisabledReason(
 }
 
 /**
- * Whether the rows on screen are a SUBSET of the rows an invoice would bill.
- *
- * `invoices.createFromRange` takes a date range and nothing else: it re-reads
- * the period server-side with `billableOnly`, and knows nothing about the
- * project picker, the text box or the preset chips. So with any of those active
- * the figures on this page and the lines on the invoice are answers to two
- * different questions, and the invoice is the wider one — it would bill work
- * the user is not looking at, which on a document sent to a client is the
- * over-billing mirror of the floor `truncated` refuses.
- *
- * `billableOnly` is deliberately NOT in here. `createFromRange` always bills
- * billable time only, so the chip narrows the page TOWARDS what the invoice
- * does rather than away from it, and leaving it off is the documented rule
- * ("billable time on a project with a rate") rather than a divergence.
- *
- * `hasClientSideFilter` is the wrong question and was tried first: it includes
- * `billableOnly` and excludes nothing, because it exists to ask whether the
- * DETAILED tab must pull the whole range before totalling it.
- */
-export function narrowsBeyondDates(filters: Filters): boolean {
-  return filters.projectId !== null || filters.text.trim() !== "" || filters.presets.length > 0
-}
-
-/**
  * Non-null disables `Create invoice` and is announced as its description.
  *
  * The truncation refusal is the one this control exists to make: every figure
@@ -85,26 +60,41 @@ export function narrowsBeyondDates(filters: Filters): boolean {
  * click that appeared to work — a refusal arriving after the act is not a
  * refusal.
  *
- * `MIXED_CLIENTS` is not here, and cannot be: it is a fact about which client
- * each project in the range belongs to, decided by the server over the rows it
- * will actually bill (see above — not the rows on screen). It is raised by
- * `createFromRange` and surfaced where the attempt was made.
+ * A FOURTH REFUSAL USED TO LIVE HERE and is gone, which is worth recording
+ * because its absence is the fix rather than a relaxation. `createFromRange`
+ * once took a date range and nothing else, so any narrowing on this page — the
+ * project picker, the text box, the preset chips — made the invoice a strict
+ * SUPERSET of the rows on screen, and this function refused rather than let it
+ * bill work the user was not looking at. It now takes the same filter the page
+ * queries with, so "bill exactly what you are looking at" is literally what
+ * happens and there is nothing left to refuse. The deadlock that removed is the
+ * reason it had to go: a range covering two clients is refused server-side as
+ * `MIXED_CLIENTS`, whose own message says to filter to one client — and this
+ * refusal was what made taking that advice impossible.
+ *
+ * `MIXED_CLIENTS` itself is not here, and cannot be: it is a fact about which
+ * client each project in the range belongs to, decided by the server over the
+ * rows it will actually bill. It is raised by `createFromRange` and surfaced
+ * where the attempt was made — still reachable, from an unfiltered range that
+ * genuinely spans two clients.
+ *
+ * Which leaves this differing from `exportDisabledReason` only in wording, and
+ * that is not a reason to merge them: the two sentences are about different
+ * acts (a wrong report, an under-billed client), and the shared thing — the
+ * order — is already shared, in `rangeBlocker`.
  */
 export function invoiceDisabledReason(
   breakdown: Breakdown | undefined,
-  isPlaceholderData: boolean,
-  filters: Filters
+  isPlaceholderData: boolean
 ): string | null {
-  const blocker = rangeBlocker(breakdown, isPlaceholderData)
-  if (blocker === "loading") return "Still totalling this period."
-  if (blocker === "truncated") {
-    return "This period is too large to total exactly — every figure is a floor, so an invoice raised from it would under-bill by an unknown amount. Narrow the dates."
+  switch (rangeBlocker(breakdown, isPlaceholderData)) {
+    case "loading":
+      return "Still totalling this period."
+    case "truncated":
+      return "This period is too large to total exactly — every figure is a floor, so an invoice raised from it would under-bill by an unknown amount. Narrow the dates."
+    case "empty":
+      return "Nothing tracked in this period to invoice."
+    default:
+      return null
   }
-  // Above "empty", because with a filter active "nothing tracked" is a claim
-  // about the filtered rows and the invoice would not be raised from those.
-  if (narrowsBeyondDates(filters)) {
-    return "These filters narrow what is on screen, and an invoice is raised from the dates alone — it would bill work this page is not showing. Clear them, or narrow the dates instead."
-  }
-  if (blocker === "empty") return "Nothing tracked in this period to invoice."
-  return null
 }

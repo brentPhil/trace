@@ -14,6 +14,7 @@ import {
   MAX_PARTY_LENGTH,
   MAX_PAYMENT_TERMS_LENGTH,
   MAX_PURCHASE_ORDER_LENGTH,
+  MAX_SOURCE_TEXT_LENGTH,
 } from "./invoices"
 import { traceErrorCode } from "./lib/codes"
 import { parseInvoiceSequence } from "./lib/invoiceNumber"
@@ -52,6 +53,8 @@ type EntryOver = {
   projectId?: Id<"projects">
   billable?: boolean
   clientKey?: string
+  /** Only the text-filter tests care; everything else bills whole projects. */
+  title?: string
 }
 
 /** Inserted directly, like entries.breakdown.test.ts's own fixture helper —
@@ -63,7 +66,7 @@ async function entry(t: ReturnType<typeof setup>, over: EntryOver) {
     return await ctx.db.insert("timeEntries", {
       userId: ALICE,
       clientKey: over.clientKey ?? `inv-${over.startedAt}-${Math.random()}`,
-      title: "Work",
+      title: over.title ?? "Work",
       startedAt: over.startedAt,
       endedAt: over.startedAt + durationMs,
       durationMs,
@@ -106,7 +109,19 @@ async function project(
 
 async function create(
   t: ReturnType<typeof setup>,
-  over: Partial<{ clientKey: string; fromMs: number; toMs: number; timeZone: string; weekStartDay: number }> = {}
+  over: Partial<{
+    clientKey: string
+    fromMs: number
+    toMs: number
+    timeZone: string
+    weekStartDay: number
+    /** The FilterBar, as /reports sends it. Left off entirely by default, which
+     *  is what an unfiltered page sends and what every test written before the
+     *  filter existed assumed. */
+    projectId: string | null
+    text: string
+    presets: Array<"no-project" | "no-note" | "under-a-minute">
+  }> = {}
 ) {
   return await t.mutation(internal.invoices.createFromRangeAs, {
     userId: ALICE,
@@ -115,6 +130,9 @@ async function create(
     toMs: over.toMs ?? RANGE.toMs,
     timeZone: over.timeZone ?? RANGE.timeZone,
     weekStartDay: over.weekStartDay ?? RANGE.weekStartDay,
+    projectId: over.projectId,
+    text: over.text,
+    presets: over.presets,
   })
 }
 
@@ -276,7 +294,157 @@ describe("invoices.createFromRange", () => {
       const message = error instanceof Error ? error.message : String(error)
       expect(message).toContain("Acme Corp")
       expect(message).toContain("Globex Inc")
+      // THE ADVICE, pinned, because it was wrong twice over: it named a client
+      // filter /reports has never had, and following it disabled the button.
+      // The test directly below is the same fixture taking this advice.
+      expect(message).toContain("filter to a single project")
     }
+  })
+
+  /*
+   * THE DEADLOCK, and the single test this change exists to make pass.
+   *
+   * Same fixture as the refusal above — two clients, one range — plus the fix
+   * `MIXED_CLIENTS` itself tells the user to apply: filter to one of them. It
+   * used to be unfollowable, because /reports disabled the button the moment a
+   * filter was set and the mutation would have billed both clients anyway. An
+   * account tracking two clients concurrently could not raise an invoice at all.
+   *
+   * This test cannot pass by accident. Drop the filter from the
+   * `rangeBreakdownImpl` call and this range spans two clients again, so the
+   * mutation throws MIXED_CLIENTS before it reaches a single assertion.
+   */
+  it("bills a two-client range once it is filtered to one project", async () => {
+    const t = setup()
+    const { clientId: acmeId } = await client(t, "Acme Corp")
+    const { clientId: globexId } = await client(t, "Globex Inc")
+    const { projectId: acmeProject } = await project(t, {
+      name: "Acme work",
+      hourlyRateCents: 1000,
+      clientId: acmeId,
+    })
+    const { projectId: globexProject } = await project(t, {
+      name: "Globex work",
+      hourlyRateCents: 2000,
+      clientId: globexId,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId: acmeProject })
+    await entry(t, { startedAt: MON + 2 * HOUR, projectId: globexProject })
+
+    const { invoiceId } = await create(t, { projectId: acmeProject })
+    const invoice = await get(t, invoiceId)
+
+    // ONE line, for the filtered project, billed to that project's client —
+    // not two lines, and not a refusal.
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.description).toBe("Acme work")
+    expect(invoice.lines[0]?.unitCents).toBe(1000)
+    expect(invoice.lines[0]?.amountCents).toBe(1_000)
+    expect(invoice.clientId).toBe(acmeId)
+    expect(invoice.billedTo).toContain("Acme Corp")
+    // Named explicitly: the OTHER client's work is on no line of this document
+    // at any price. A superset invoice would have carried it at 2000/hr.
+    expect(invoice.lines.map((line) => line.projectId)).not.toContain(globexProject)
+  })
+
+  /*
+   * The other two filter fields, on a fixture where dropping either one changes
+   * the money rather than merely the row count — a project filter alone could
+   * be threaded through while `text` and `presets` were quietly left behind.
+   */
+  it("bills only the rows matching the search text", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId, title: "Schema migration" })
+    await entry(t, { startedAt: MON + 2 * HOUR, projectId, title: "Standup" })
+
+    const { invoiceId } = await create(t, { text: "migration" })
+    const invoice = await get(t, invoiceId)
+
+    // One hour of the two, so a line at 1000 rather than 2000. Both entries
+    // sit under one project, so an unfiltered invoice has the same ONE line
+    // and only the amount tells the two apart.
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.quantityCentis).toBe(100)
+    expect(invoice.lines[0]?.amountCents).toBe(1_000)
+  })
+
+  it("bills only the rows matching a preset chip", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      defaultHourlyRateCents: 1000,
+    })
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+    // The only row with no project, which is what the chip keeps. Priced by the
+    // account default, so it lands on a line rather than in `unratedMs`.
+    await entry(t, { startedAt: MON + 2 * HOUR })
+
+    const { invoiceId } = await create(t, { presets: ["no-project"] })
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]?.description).toBe(NO_PROJECT_LABEL)
+    expect(invoice.lines[0]?.amountCents).toBe(1_000)
+  })
+
+  /*
+   * PROVENANCE MUST NOT LIE. A stored range alone says "this period" when the
+   * truth is "this period, only project X, only rows matching 'migration'" —
+   * provenance that reads as complete while describing a superset of what was
+   * billed. Written even when unfiltered (below), so an ABSENT field means
+   * "raised before this was recorded" and never "raised from everything".
+   */
+  it("records the filter beside the range, as provenance", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId, title: "Schema migration" })
+
+    const { invoiceId } = await create(t, {
+      projectId,
+      text: "  migration  ",
+      // Sent twice, and out of order: deduplication is what BOUNDS this field,
+      // and the byte estimate in convex/lib/scan.ts rests on it.
+      presets: ["no-note", "no-project", "no-note"],
+    })
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.sourceFromMs).toBe(RANGE.fromMs)
+    expect(invoice.sourceToMs).toBe(RANGE.toMs)
+    expect(invoice.sourceProjectId).toBe(projectId)
+    // Trimmed, exactly as the predicate trims the needle before matching — so
+    // what is recorded is what was billed, character for character.
+    expect(invoice.sourceText).toBe("migration")
+    expect(invoice.sourcePresets).toEqual(["no-note", "no-project"])
+  })
+
+  it("records the unfiltered defaults rather than leaving the fields absent", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const { invoiceId } = await create(t)
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.sourceProjectId).toBe(null)
+    expect(invoice.sourceText).toBe("")
+    expect(invoice.sourcePresets).toEqual([])
+  })
+
+  /*
+   * The filter arrives as free text and lands on an `invoices` row, which is
+   * the row `INVOICE_NUMBER_SCAN_LIMIT` and `INVOICE_LIST_LIMIT` divide a byte
+   * budget by. The search box has no length attribute, so this refusal is the
+   * only thing keeping that division true — see MAX_SOURCE_TEXT_LENGTH.
+   */
+  it("refuses a search filter past its bound rather than storing it", async () => {
+    const t = setup()
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    await expectCode(create(t, { text: "x".repeat(MAX_SOURCE_TEXT_LENGTH + 1) }), "TOO_LONG")
+    expect(await countInvoices(t)).toBe(0)
   })
 
   it("excludes billable time that has no rate, and reports how much", async () => {
@@ -481,19 +649,30 @@ describe("invoices.createFromRange", () => {
    *
    * The second assertion is the half that would otherwise rot silently. 1,000
    * is not a chosen number, it is ~3.0 MB of mutation budget divided by a
-   * per-row estimate, and every term of that estimate is a bound
-   * `invoices.update` enforces (see convex/lib/scan.ts for the division). Task
-   * 6's line editor is the next thing to add free text to these rows. Raising
-   * any bound below without redoing that division would leave the scan reading
-   * more bytes than it has, which is the opaque platform error
+   * per-row estimate, and every term of that estimate is a bound this file's
+   * mutations enforce (see convex/lib/scan.ts for the division). Raising any
+   * one of them without redoing that division would leave the scan reading more
+   * bytes than it has, which is the opaque platform error
    * `INVOICE_HISTORY_TOO_LARGE` exists to replace — so raising one has to break
    * a test here rather than pass quietly.
+   *
+   * The sum has already moved once for exactly that reason: `createFromRange`
+   * now records the FILTER that built an invoice as well as its dates, and the
+   * two free strings that takes (`sourceText`, `sourceProjectId`) are 200 more
+   * characters on the row. The division was redone — the estimate went from
+   * ~1.8 KB to ~2.1 KB and 1,000 rows from ~1.8 MB to ~2.1 MB of the ~3.0 MB
+   * available, so the LIMIT holds where a term-and-forget would have left it
+   * merely looking as though it did. Task 6's line editor is the next thing to
+   * add free text to these rows.
    */
   it("keeps INVOICE_NUMBER_SCAN_LIMIT and the row estimate it is divided from", () => {
     expect(INVOICE_NUMBER_SCAN_LIMIT).toBe(1_000)
     expect(
-      2 * MAX_PARTY_LENGTH + MAX_PURCHASE_ORDER_LENGTH + MAX_PAYMENT_TERMS_LENGTH
-    ).toBe(1_502)
+      2 * MAX_PARTY_LENGTH +
+        MAX_PURCHASE_ORDER_LENGTH +
+        MAX_PAYMENT_TERMS_LENGTH +
+        2 * MAX_SOURCE_TEXT_LENGTH
+    ).toBe(1_702)
   })
 
   it("refuses to mint a number once the invoice history is too large to scan safely", async () => {

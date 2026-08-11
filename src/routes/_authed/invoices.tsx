@@ -37,12 +37,20 @@ export function Invoices() {
               ONLY way an invoice comes into existence, so the empty state's
               job is to say where that happens — otherwise this screen is a
               dead end with a heading on it.
+
+              "BILL EXACTLY WHAT YOU ARE LOOKING AT" was a promise the product
+              did not keep for as long as `createFromRange` took a range and
+              ignored the filter beside it; it now does, literally. "One
+              project", not "one client", for the reason `MIXED_CLIENTS` gives
+              in convex/invoices.ts: the picker on that page is by project, and
+              an empty state that sends someone looking for a control that does
+              not exist is worse than one that says less.
             */}
             No invoices yet. An invoice is raised from a filtered range on{" "}
             <Link to="/reports" className="underline underline-offset-2">
               Reports
             </Link>
-            : narrow to one client and one period there, then bill exactly what
+            : narrow to one project and one period there, then bill exactly what
             you are looking at.
           </Empty>
         ) : (
