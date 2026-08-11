@@ -77,6 +77,7 @@ export const list = query({
 
 export const listAs = internalQuery({
   args: { userId: v.string() },
+  returns: v.array(clientDoc),
   handler: async (ctx, args) => await listImpl(ctx, args.userId),
 })
 

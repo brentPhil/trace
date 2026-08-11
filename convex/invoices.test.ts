@@ -717,4 +717,72 @@ describe("invoices.list", () => {
 
     expect((await listAs(t)).truncated).toBe(false)
   })
+
+  /*
+   * A trashed row inside the read window must not cost a live invoice its place
+   * on the page. The read takes LIMIT + 1 rows and one of them is deleted, so
+   * filtering BEFORE the slice is the whole difference: slicing first leaves
+   * LIMIT - 1 live rows and a screen that says it is showing LIMIT.
+   */
+  it("fills the page from the extra row when one inside it is trashed", async () => {
+    const t = setup()
+    // LIMIT + 1 invoices, the OLDEST live, with a trashed one wedged in among
+    // the newest so it lands inside the window rather than past its edge.
+    for (let i = 0; i <= INVOICE_LIST_LIMIT; i += 1) {
+      await seedInvoice(t, {
+        number: `010126-${String(i).padStart(4, "0")}`,
+        issuedAt: MON + i * HOUR,
+        deletedAt: i === INVOICE_LIST_LIMIT - 1 ? MON : null,
+      })
+    }
+
+    const { invoices } = await listAs(t)
+    expect(invoices).toHaveLength(INVOICE_LIST_LIMIT)
+    expect(invoices.map((row) => row.number)).not.toContain(
+      `010126-${String(INVOICE_LIST_LIMIT - 1).padStart(4, "0")}`
+    )
+    // The oldest invoice was the LIMIT+1'th row and would have been sliced off
+    // had the trashed row kept its slot. It is on the page.
+    expect(invoices[invoices.length - 1]?.number).toBe("010126-0000")
+  })
+
+  /*
+   * The one inexactness in `truncated`, pinned so it is a decision rather than
+   * a surprise: a full page proves a 51st ROW exists, not a 51st LIVE one. This
+   * over-reports, which is the safe direction — see the comment on the return
+   * in convex/invoices.ts. The dangerous direction is asserted below it.
+   */
+  it("over-reports truncation when the only older invoice is trashed", async () => {
+    const t = setup()
+    for (let i = 0; i <= INVOICE_LIST_LIMIT; i += 1) {
+      await seedInvoice(t, {
+        number: `010126-${String(i).padStart(4, "0")}`,
+        issuedAt: MON + i * HOUR,
+        deletedAt: i === 0 ? MON : null,
+      })
+    }
+
+    const { invoices, truncated } = await listAs(t)
+    // Every live invoice is on the page...
+    expect(invoices).toHaveLength(INVOICE_LIST_LIMIT)
+    // ...and it still says there are older ones. Known, and stated here so a
+    // future exact implementation flips this deliberately rather than by luck.
+    expect(truncated).toBe(true)
+  })
+
+  it("never claims a complete page when a live invoice is missing from it", async () => {
+    const t = setup()
+    for (let i = 0; i < INVOICE_LIST_LIMIT + 5; i += 1) {
+      await seedInvoice(t, {
+        number: `010126-${String(i).padStart(4, "0")}`,
+        issuedAt: MON + i * HOUR,
+      })
+    }
+
+    const { invoices, truncated } = await listAs(t)
+    expect(invoices).toHaveLength(INVOICE_LIST_LIMIT)
+    // The direction that would be a lie about money: 5 live invoices are not
+    // shown, so `truncated` MUST be true.
+    expect(truncated).toBe(true)
+  })
 })

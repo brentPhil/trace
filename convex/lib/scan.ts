@@ -124,17 +124,48 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 2_000
  * above uses. An `invoices` row is ~800 B (`billedTo` bounded by clients.ts's
  * `MAX_NAME_LENGTH` + `MAX_ADDRESS_LENGTH`, beside ids and numbers). An
  * `invoiceLines` row is a description, four numbers and two ids — call it
- * ~400 B. So this page's worst case is 50 x (800 + M x 400) bytes for M lines
- * an invoice: at M = 200 that is ~4.0 MB, half the ceiling, across 50 x 201 =
- * 10,050 documents against the 16,384-document limit.
+ * ~400 B. For M lines an invoice, a page of 50 costs 50 x (800 + M x 400)
+ * bytes and 50 x (1 + M) documents.
+ *
+ * That ~400 B assumes a bound `invoiceLines.description` does not actually
+ * have. It is a bare `v.string()`, and it holds today only because the sole
+ * writer is `createFromRange`, which puts a project name (bounded by
+ * projects.ts) or `NO_PROJECT_LABEL` in it. A line editor writing free text
+ * breaks the per-row figure the same way unbounded `purchaseOrder` would break
+ * `INVOICE_NUMBER_SCAN_LIMIT`'s — so it gets the same warning: whichever editor
+ * first lets a human type a description must bound its length.
+ *
+ * DOCUMENTS BIND, NOT BYTES, and it is worth saying plainly because the
+ * accounting above is all in bytes and the byte ceiling is the LOOSER of the
+ * two here. At a page of 50 the document limit is reached at M = 327 and the
+ * byte limit not until M = 418, so the real headroom is:
+ *
+ *     M <= 326 fits. M = 200 -> 10,050 docs (61% of 16,384) and ~4.0 MB (48%).
  *
  * WHAT BOUNDS M: nothing, honestly. `createFromRange` writes one line per
  * project with billable time in the range, which is bounded only by how many
- * projects an account has, and the editor adds custom charges with no cap at
- * all. M = 200 above is a working figure for an invoice a human raises and
- * prints, not a proof — and the page size IS the margin bought for it. 50
- * rather than the ~200 the byte budget would nominally allow, so an account
- * whose invoices run four times longer than that figure still fits.
+ * projects an account has, and a line editor would add custom charges with no
+ * cap at all. M = 200 is a working figure for an invoice a human raises and
+ * prints, not a proof; 326 is where that figure stops having any margin left.
+ * The margin is therefore ~1.6x, NOT the 4x an earlier draft of this comment
+ * claimed — 50 invoices of 800 lines is 40,050 documents, two and a half times
+ * the ceiling, and the claim was simply wrong. Anyone raising this constant
+ * must redo the division above rather than trust a remembered margin.
+ *
+ * THE RESIDUAL RISK, stated because this file's job is to leave nothing for a
+ * reader to re-derive: unlike `RANGE_TOO_LARGE` and `INVOICE_HISTORY_TOO_LARGE`,
+ * which refuse in a sentence the user can act on, `invoices.list` takes no
+ * arguments — there is no range to narrow. If a page ever did exceed a ceiling
+ * the user would get the platform's own opaque error on the only route that
+ * reaches an invoice, with no way to open one and delete lines. Today that
+ * state is unreachable (nothing writes lines but `createFromRange`, at one per
+ * project), which is why this ships as an argued bound rather than machinery.
+ * The moment a line editor makes M genuinely unbounded, the fix is NOT a bigger
+ * number here: it is storing `totalCents` on the invoice, so the list reads 50
+ * documents instead of 50 x (1 + M) and this whole paragraph goes away. An
+ * invoice holding its own total is also more faithful to the snapshot rule, not
+ * less — it is the same argument `invoiceLines.amountCents` already makes one
+ * level down.
  *
  * Returning the newest page and offering no "load older" is the accepted v1
  * trade, and the UI has to SAY so: a list that silently stops at 50 invoices

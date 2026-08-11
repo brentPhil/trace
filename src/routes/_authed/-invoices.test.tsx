@@ -164,4 +164,24 @@ describe("Invoices — the rows", () => {
     renderInvoices([makeRow({ number: "072726-0013" })])
     expect(screen.queryByText(/Only the/)).toBeNull()
   })
+
+  /*
+   * Five aligned columns under a header row is a table, and it has to BE one.
+   * Rendered as a <ul> the header is announced as the first of N list items
+   * and no cell is ever tied to the column it sits under. These roles come
+   * from the markup — there is no ARIA on this page — so the assertion fails
+   * the moment the table is rewritten as divs.
+   */
+  it("exposes the columns as a table, not a list", () => {
+    renderInvoices([makeRow({ number: "072726-0013" })])
+
+    expect(
+      screen.getAllByRole("columnheader").map((cell) => cell.textContent)
+    ).toEqual(["Number", "Billed to", "Date issued", "Total", "Status"])
+    // The number names its row, so a total read aloud says which invoice it
+    // belongs to.
+    expect(screen.getByRole("rowheader").textContent).toBe("072726-0013")
+    // Header row + one invoice.
+    expect(screen.getAllByRole("row")).toHaveLength(2)
+  })
 })

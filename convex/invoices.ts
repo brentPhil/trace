@@ -125,13 +125,17 @@ async function listImpl(
     .order("desc")
     .take(INVOICE_LIST_LIMIT + 1)
 
-  // Trashed rows are dropped AFTER the take, so they cost a slot on the page —
-  // the same trade `clients.listImpl` makes. `deletedAt` is not in this index's
-  // key, and a second index for a column that is null in every account which
-  // has not been deleting invoices is not worth its write cost.
-  const shown = page
-    .slice(0, INVOICE_LIST_LIMIT)
-    .filter((row) => row.deletedAt === null)
+  // Trashed rows are dropped after the take rather than by the index, because
+  // `deletedAt` is not in this index's key and a second index for a column that
+  // is null in every account which has not deleted an invoice is not worth its
+  // write cost. `clients.listImpl` filters after reading for the same reason —
+  // though it `.collect()`s and so has no page for a trashed row to cost a slot
+  // on, which is the half of this that needed thinking about.
+  //
+  // Filter FIRST, then slice: slicing first would spend a page slot on every
+  // trashed row and show fewer than the cap while claiming to show it.
+  const live = page.filter((row) => row.deletedAt === null)
+  const shown = live.slice(0, INVOICE_LIST_LIMIT)
 
   const invoices: Array<InvoiceListRow> = []
   for (const invoice of shown) {
@@ -155,6 +159,21 @@ async function listImpl(
     })
   }
 
+  // `take(n)` returns fewer than n ONLY when the index is exhausted, so a short
+  // page proves there is nothing older and `truncated` is then exactly right.
+  //
+  // The converse is not exact, and the inexactness is deliberately on the safe
+  // side. A full page proves a 51st ROW exists, not a 51st LIVE row — so an
+  // account holding exactly 51 invoices whose oldest is in the trash is told
+  // older ones exist when only a deleted one does. Being told there is more to
+  // see when there is not costs a glance; NOT being told when there is would be
+  // the list quietly under-reporting how much has been billed, and that
+  // direction is unreachable here: `truncated === false` implies the index ran
+  // out, which implies every live row is on the page.
+  //
+  // Making it exact means reading past the page until 51 live rows are found,
+  // which trades a bounded read for an unbounded one to sharpen a sentence.
+  // Not worth it — and today nothing can soft-delete an invoice at all.
   return { invoices, truncated: page.length > INVOICE_LIST_LIMIT }
 }
 

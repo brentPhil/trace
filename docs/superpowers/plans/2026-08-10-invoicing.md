@@ -678,6 +678,28 @@ Columns: number, client, issued date, total, status. Empty state teaches the int
 **Files:**
 - Create: `src/routes/_authed/invoices.$invoiceId.tsx`
 - Create: `src/components/invoices/invoice-meta.tsx`, `src/components/invoices/party-block.tsx`
+- Modify: `src/routes/_authed/reports.tsx` — the `Create invoice` button (see below)
+- Modify: `convex/invoices.ts` — `update` and `setStatus`, which no task has built yet
+
+**AMENDED 2026-08-11 — two things this task must absorb, because nothing else does.**
+
+**First: the `Create invoice` button does not exist.** The spec opens with it —
+two controls on `/reports`, right-aligned, `[ Create invoice ] [ Export ▾ ]`,
+separate *because they are separate acts* — and then no task in this plan ever
+builds it. Verified in the browser at Task 4: `/reports` has `Export` and
+nothing beside it. So `createFromRange` has been callable and unreachable since
+Task 3, and `/invoices` can only ever show its empty state.
+
+It lands here rather than in Task 4 because the button's job is to mint an
+invoice **and go to it**, and until this task there is no `/invoices/$invoiceId`
+to go to. Both of the spec's refusals ship with it, or it is not done: refuse
+when the range is `truncated`, and refuse when the range spans two clients,
+naming both.
+
+**Second: `update`/`setStatus` do not exist either.** Task 3's file list
+promised them and shipped only `createFromRange`/`get`. Task 6 makes the same
+promise about the line mutations — check before starting it rather than
+discovering it mid-task, which is what happened to `invoices.list` in Task 4.
 
 Layout follows the reference screenshot: breadcrumb `Invoices › #072726-0013`, a status control and `Export PDF` top-right, then `Invoice` heading, the meta grid (ID, invoice date, due date, purchase order, payment terms), a logo slot, `Billed to` / `Pay to` blocks, and the currency selector.
 

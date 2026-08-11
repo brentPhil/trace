@@ -5,6 +5,7 @@ import { convexQuery } from "@convex-dev/react-query"
 import { Archive, ArchiveRestore, Plus, Trash2 } from "lucide-react"
 import { InlineEdit } from "@/components/entries/inline-edit"
 import { Button } from "@/components/ui/button"
+import { Empty } from "@/components/ui/empty"
 import { Toast } from "@/components/ui/toast"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { errorMessage } from "@/lib/error-message"
@@ -511,14 +512,6 @@ function IconButton({
     >
       {children}
     </button>
-  )
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="max-w-prose rounded-md border border-dashed border-edge-soft px-3 py-4 text-sm text-muted-foreground">
-      {children}
-    </p>
   )
 }
 
