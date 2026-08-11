@@ -85,7 +85,9 @@ date-range picker's.
 
 5 days means **Monday to Friday regardless of `weekStartDay`**. It exists to
 hide the weekend; rotating it by the user's week start would make it mean
-something else on a Sunday-start calendar.
+something else on a Sunday-start calendar. It is achieved by overriding
+`firstDay` to Monday **for that size only** — see the range table below for why
+`hiddenDays` alone does not deliver it.
 
 **The filter applies to both views.** Same `filters` state, same `matches()`,
 run over the calendar's entries before placement. The alternative — hiding the
@@ -186,19 +188,56 @@ second convention for the same kind of state is how the two drift.
 
 Size maps onto views directly, with no custom view registration:
 
-| size   | `initialView`   | `hiddenDays` |
-| ------ | --------------- | ------------ |
-| `week` | `timeGridWeek`  | `[]`         |
-| `5day` | `timeGridWeek`  | `[0, 6]`     |
-| `day`  | `timeGridDay`   | `[]`         |
+| size   | `initialView`   | `hiddenDays` | `firstDay`      |
+| ------ | --------------- | ------------ | --------------- |
+| `week` | `timeGridWeek`  | `[]`         | `weekStartDay`  |
+| `5day` | `timeGridWeek`  | `[0, 6]`     | `1` (Monday)    |
+| `day`  | `timeGridDay`   | `[]`         | `weekStartDay`  |
 
-`hiddenDays: [0, 6]` hides Saturday and Sunday whatever `firstDay` is, which is
-exactly the "Monday–Friday regardless of `weekStartDay`" rule. `5day` therefore
-also steps by a whole week for free, because it *is* the week view.
+**`hiddenDays` alone does not give Monday–Friday, and the two columns above are
+one decision.** FullCalendar builds the week from `firstDay` and then removes
+hidden days only from the **ends** of it, so a weekend falling in the *interior*
+is not removed at all. Measured, anchor 2026-08-11 in Asia/Manila, with
+`firstDay = weekStartDay`:
+
+| `weekStartDay` | columns drawn                     | `datesSet` width |
+| -------------- | --------------------------------- | ---------------- |
+| 0, 1, 6        | Mon 10 – Fri 14                   | 5 days           |
+| 2              | Tue 11, Wed 12, Thu 13, Fri 14, **Mon 17** | 7 days  |
+| 3              | Wed 5, Thu 6, Fri 7, **Mon 10, Tue 11**    | 7 days  |
+| 4              | Thu 6, Fri 7, **Mon 10, Tue 11, Wed 12**   | 7 days  |
+| 5              | Fri 7, **Mon 10, Tue 11, Wed 12, Thu 13**  | 7 days  |
+
+`/settings` offers all seven starts, so a user whose week begins on Wednesday got
+a discontinuous grid: three days of one week and two of the next.
+
+Pinning `firstDay` to Monday for this size fixes every row. The week is then
+Mon,Tue,Wed,Thu,Fri,Sat,Sun; trimming from the front stops immediately at Mon,
+and trimming from the back removes Sun, then Sat, and stops at Fri. That is also
+exactly why 0, 1 and 6 already worked — in each of those the weekend already sat
+at an end.
+
+Overriding the user's week start here is the *rule*, not a workaround: 5 days is
+the working week and the working week is Monday to Friday by definition. `week`
+and `day` still take the stored `weekStartDay`.
+
+`visibleRange` would express the same thing directly and is rejected: it is an
+object, and a freshly allocated dateProfile input on every render is the render
+loop `calendar-panel.tsx` documents at length. `firstDay` is a number and is
+compared by value.
+
+`5day` still steps by a whole week for free, because it *is* the week view.
 
 The visible window comes back from FullCalendar's `datesSet` callback as
 `{ start: Date, end: Date, timeZone }`, and those two instants are what the
 Convex query is keyed on. Nothing computes the range twice.
+
+The panel reports the **drawn days** alongside those instants, because with
+`hiddenDays` in play the range's width and the number of columns are different
+questions. "Range total" is summed over that day list and over nothing else, so
+it is the sum of the figures in the column headers by construction — a total
+that included a day with no column is the same defect as a total belonging to a
+range other than the one on screen.
 
 **This is the one place the two date systems could disagree**, so it is
 asserted rather than assumed: a test checks that `datesSet`'s range for a given
@@ -326,9 +365,24 @@ removing the popover's fields would take a path someone may already be using.
 
 ## Edge cases
 
-- **Empty range.** The axis and hour rules draw, with one quiet line of copy.
-  Not DayList's onboarding text — that belongs to the log and would be false
-  here for anyone stepping back to a week they did not work.
+- **Empty range.** The axis and hour rules draw, with one quiet line of copy:
+  *Nothing was tracked in this range.* Not DayList's onboarding text — that
+  belongs to the log and would be false here for anyone stepping back to a week
+  they did not work.
+- **A filter that matched nothing** is a *different* sentence: *No entries in
+  this range match these filters.* "Nothing was tracked" would be flatly false
+  while a filter is hiding rows the range does hold. This is the same
+  distinction `FilteredLogStatus` draws for the list, and drawing it in only one
+  of the two views is the asymmetry "one filter, both views" exists to close.
+  Both messages share one always-mounted `aria-live` region, because a live
+  region inserted already holding its text is not reliably announced.
+- **A block whose entry has no row in the list** raises a toast and leaves the
+  grid where it is. Three cases, three different true sentences: the entry is
+  *running* (it is in the timer bar), it is *not yet paginated in* ("Load
+  earlier entries" reaches it), or it is *dated after today* — the log's range
+  ends with today, so no amount of loading earlier will ever reach it. The
+  reachable way to get one is a mistyped day in the add-entry dialog's unbounded
+  `<input type="date">`, and noticing that is exactly what a calendar is for.
 - **An untitled entry** uses the same fallback the entry row uses.
 - **A block too short for text** shows nothing but its fill; its title is on the
   `title` attribute and in its accessible name.
@@ -361,7 +415,18 @@ is the only assertion standing between us and a grid that quietly disagrees with
 the day headers.
 
 Component tests: the switcher swaps views, a project filter narrows both views,
-clicking a block opens the time popover. `-timer.test.tsx`'s existing
+and clicking a block switches to List and focuses that entry's row — *not* a
+popover on the grid; the calendar navigates and does not edit. Where there is no
+row to land on, it stays put and says which of the three reasons applies.
+
+`calendar-range-label.test.tsx` walks all seven `weekStartDay` values against
+the grid's own `data-date` columns, and asserts the 5-day view draws **exactly
+Monday–Friday** rather than merely that the label agrees with whatever was
+drawn. That weaker assertion is what let a false claim about `hiddenDays`
+survive. The same matrix asserts "Range total" equals the sum of the day totals
+printed in the column headers.
+
+`-timer.test.tsx`'s existing
 `ManualEntryDialog` mock moves to the layout test;
 `manual-entry-dialog.test.tsx` keeps working unchanged, since `aria-label="Add
 entry"` is unchanged.
