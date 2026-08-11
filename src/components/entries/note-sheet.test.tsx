@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { NoteSheet } from "@/components/entries/note-sheet"
+import { NoteSheet, clearNoteDrafts } from "@/components/entries/note-sheet"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import type { Entry } from "@/lib/group-entries"
 import type { Id } from "../../../convex/_generated/dataModel"
@@ -62,6 +62,15 @@ const textarea = () => screen.getByLabelText<HTMLTextAreaElement>("What did you 
 // `src/test-utils/setup-dom.ts`.
 
 afterEach(cleanup)
+/*
+ * The draft store is MODULE state now, deliberately — see note-sheet.tsx. That
+ * is what makes it outlive the sheet, the log around it and the route above
+ * that; it also makes it outlive `cleanup()`, so a draft armed by one test
+ * would seed the textarea in the next. Cleared here rather than exposed as a
+ * reset switch inside the component, because no product path throws a pending
+ * draft away.
+ */
+afterEach(clearNoteDrafts)
 
 describe("dismissing a note with unsaved text", () => {
   it("saves the typed draft when Escape is pressed, instead of discarding it", async () => {
@@ -187,6 +196,35 @@ describe("dismissing a note with unsaved text", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "reopen" }))
     expect(textarea().value).toBe("xyz")
+  })
+
+  /*
+   * THE HOLE THE CALENDAR TAB OPENED, AND THAT /reports HAD ALREADY OPENED.
+   *
+   * This sheet is a child of `EntryLog`. /timer unmounts `EntryLog` when the
+   * view switches to Calendar, and any navigation to /reports unmounts it too —
+   * so while the draft store was a `useRef` on this component, a failed save's
+   * only copy of the user's words died with a tab click. `cleanup()` here IS
+   * that unmount: everything this component held per-mount is gone before the
+   * second render, and the draft has to survive it anyway.
+   */
+  it("keeps a failed save's draft across a full unmount — a tab switch or a route change", async () => {
+    const onSave = vi.fn(async () => {
+      throw new Error("offline")
+    })
+    render(<Harness entry={makeEntry({ note: "old note" })} onSave={onSave} />)
+
+    fireEvent.change(textarea(), { target: { value: "the words that matter" } })
+    await act(async () => {
+      fireEvent.keyDown(textarea(), { key: "Escape" })
+    })
+    expect(onSave).toHaveBeenLastCalledWith("e1", "the words that matter")
+
+    // The whole tree goes, exactly as it does when /timer switches to Calendar.
+    cleanup()
+    render(<Harness entry={makeEntry({ note: "old note" })} onSave={onSave} />)
+
+    expect(textarea().value).toBe("the words that matter")
   })
 
   it("restores the draft on reopen rather than the stale server note, while the save is still in flight", async () => {

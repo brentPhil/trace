@@ -13,6 +13,38 @@ import type { Id } from "../../../convex/_generated/dataModel"
 const MAX_NOTE_LENGTH = 2_000
 
 /**
+ * The in-memory backstop, keyed by entry id. MODULE SCOPE, not a ref.
+ *
+ * It is written when a dismissal starts a save, and dropped the moment that
+ * save succeeds (or a dismissal had nothing to save). A failed or still-in-
+ * flight save keeps it, which is the whole point: there, the user's own words
+ * are the only copy that exists anywhere.
+ *
+ * IT LIVES HERE BECAUSE THE COMPONENT DOES NOT LIVE LONG ENOUGH. As a
+ * `useRef` it belonged to one mount of this sheet, and this sheet is a child of
+ * `EntryLog` — which /timer unmounts when the view switches to Calendar, and
+ * which /reports mounts a second, separate copy of. So the copy of record for a
+ * failed save was destroyed by a tab click or by any navigation away, with no
+ * route back to it. The doc comment below already scoped the promise to the
+ * page's lifetime ("Lost on page reload, same as any other unsynced client
+ * state") — which is exactly a module-level Map's lifetime, and was never the
+ * ref's.
+ *
+ * Bounded by the same two paths that always bounded it: delete on success, and
+ * delete when a dismissal found nothing to save.
+ */
+const drafts = new Map<string, string>()
+
+/**
+ * Empties the draft store. FOR TESTS ONLY — module state outlives `cleanup()`,
+ * so without this a draft armed by one test seeds the textarea in the next.
+ * There is no product path that throws a pending draft away.
+ */
+export function clearNoteDrafts() {
+  drafts.clear()
+}
+
+/**
  * The fifteen-second window.
  *
  * Raised the moment a timer stops, and reachable afterwards from any row. It
@@ -35,11 +67,12 @@ const MAX_NOTE_LENGTH = 2_000
  * SAVES that text on the way out and reports it in the same undo-toast
  * vocabulary delete and re-date use — literally the same, via
  * `toastWithUndo`, rather than a third hand-rolled copy of it — an
- * action already taken, reversible for `UNDO_MS`. `draftsRef` keeps a copy in
+ * action already taken, reversible for `UNDO_MS`. `drafts` keeps a copy in
  * memory too, keyed by entry id, so if the save is still in flight (or fails)
  * and the sheet is reopened on the same entry before the page unloads, the
  * user's own text wins over whatever the server most recently agreed to. See
- * `handleDismiss` below.
+ * `handleDismiss` below, and `drafts` above for why that copy outlives this
+ * component rather than the mount it was typed in.
  */
 export function NoteSheet({
   entry,
@@ -58,15 +91,6 @@ export function NoteSheet({
   const [error, setError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const toasts = Toast.useToastManager()
-
-  /** In-memory backstop, keyed by entry id. Held only while the user's text is
-   * the ONLY copy: it is written when a dismissal starts a save, and dropped
-   * the moment that save succeeds (or a dismissal had nothing to save). A
-   * failed or still-in-flight save keeps it, which is the whole point. Lost on
-   * page reload, same as any other unsynced client state; the save kicked off
-   * by `handleDismiss` is what makes the note durable, this is what makes
-   * reopening feel instant. */
-  const draftsRef = useRef<Map<string, string>>(new Map())
 
   /*
    * Seeded when the sheet OPENS, and never again while it is open.
@@ -92,7 +116,7 @@ export function NoteSheet({
     // overwrite that note anyway (a save is in flight) or already tried to
     // and failed, and either way the user's own words should be what they
     // see, not whatever the last successful write happened to be.
-    if (id !== null) setValue(draftsRef.current.get(id) ?? entry?.note ?? "")
+    if (id !== null) setValue(drafts.get(id) ?? entry?.note ?? "")
     // Cleared alongside the text. Left behind, a failed save's alarm line was
     // still sitting there the next time the sheet opened — on a different
     // entry, about a write that is no longer pending.
@@ -112,7 +136,7 @@ export function NoteSheet({
       await onSave(entry._id, value)
       // Written by the deliberate path, so nothing here still needs the
       // in-memory backstop.
-      draftsRef.current.delete(entry._id)
+      drafts.delete(entry._id)
       onOpenChange(false)
     } catch (thrown) {
       // Without this the dialog simply stayed open with no explanation, and the
@@ -141,7 +165,7 @@ export function NoteSheet({
    *
    * The `toasts` manager is the one thing this component reaches for rather
    * than takes as a prop. Lifting the whole sequence into `EntryLog` would put
-   * the toast beside the other two — but `draftsRef` is spliced through it at
+   * the toast beside the other two — but `drafts` is spliced through it at
    * three points (armed before the write, dropped on success, re-armed by
    * Undo) and would have to go with it, and the draft-survival semantics those
    * three points encode are pinned by tests here that render this sheet alone.
@@ -153,7 +177,7 @@ export function NoteSheet({
       const previous = entry.note ?? ""
       const draft = value
       if (draft !== previous) {
-        draftsRef.current.set(entry._id, draft)
+        drafts.set(entry._id, draft)
         const label = title === "" ? "entry" : `“${title}”`
         void onSave(entry._id, draft)
           .then(() => {
@@ -163,20 +187,20 @@ export function NoteSheet({
             // from anywhere else would be invisible on reopen, then written
             // back over by the next dismissal. The failed path below
             // deliberately keeps it: there, the draft is the only copy.
-            draftsRef.current.delete(entry._id)
+            drafts.delete(entry._id)
             toastWithUndo(toasts, {
               title: `Saved note for ${label}`,
               undo: () => {
                 // Re-armed BEFORE the inverse write, for the same reason the
                 // dismissal arms it before its own: from here until that write
                 // lands, the previous note is a value only this tab holds.
-                draftsRef.current.set(entry._id, previous)
+                drafts.set(entry._id, previous)
                 return onSave(entry._id, previous)
               },
             })
           })
           .catch((thrown: unknown) => {
-            // The draft is already sitting in `draftsRef`, so nothing here is
+            // The draft is already sitting in `drafts`, so nothing here is
             // gone — just not yet on the server. Reopening this entry's sheet
             // will show it again rather than silently reverting to the old
             // note.
@@ -187,7 +211,7 @@ export function NoteSheet({
             })
           })
       } else {
-        draftsRef.current.delete(entry._id)
+        drafts.delete(entry._id)
       }
     }
     onOpenChange(nextOpen)
