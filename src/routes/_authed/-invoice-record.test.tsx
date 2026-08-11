@@ -156,15 +156,20 @@ describe("the invoice record — it is read-only", () => {
     expect(screen.queryByRole("combobox")).toBeNull()
   })
 
-  /* And nothing that WRITES, either. The only buttons this page may carry are
-   * the export and — as a link — the way to the editor. */
-  it("offers Edit and Export, and no Save", () => {
+  /*
+   * And nothing that WRITES, either. Export is the ONLY action this page has:
+   * an invoice is write-once, so there is no Save, and no Edit to reach for
+   * because there is nowhere for it to go and no mutation that would accept it.
+   *
+   * The Edit link is asserted ABSENT rather than simply left untested. It
+   * existed here, and a page that quietly grew one back would be offering a
+   * route to a promise the product no longer keeps.
+   */
+  it("offers Export and nothing that would change the document", () => {
     renderRecord()
 
     expect(screen.queryByRole("button", { name: /save/i })).toBeNull()
-    expect(screen.getByRole("link", { name: "Edit" }).getAttribute("href")).toBe(
-      "/invoices/inv-1/edit"
-    )
+    expect(screen.queryByRole("link", { name: /edit/i })).toBeNull()
     expect(screen.getByRole("button", { name: /export pdf/i })).toBeTruthy()
   })
 

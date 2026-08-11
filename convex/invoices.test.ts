@@ -1,10 +1,12 @@
 /// <reference types="vite/client" />
-// invoices.createFromRange — where tracked time becomes an invoice line.
+// invoices.createFromRange — where tracked time becomes an invoice line, and
+// the ONE moment anything can be written onto an invoice at all.
 //
 // Reuses entries.rangeBreakdownImpl rather than re-scanning (see the comment
 // on that export), so most of the arithmetic is already proven by
 // entries.breakdown.test.ts. What is proven HERE is specific to invoicing:
-// the snapshot rule, the two hard refusals, and the unrated-time exclusion.
+// the snapshot rule, the hard refusals, the unrated-time exclusion, and — since
+// an invoice is write-once — every bound that used to be an editor's job.
 import { convexTest } from "convex-test"
 import { describe, expect, it, vi } from "vitest"
 import schema from "./schema"
@@ -41,13 +43,13 @@ const RANGE = { fromMs: MON, toMs: MON + 7 * 24 * HOUR, timeZone: "UTC", weekSta
 /**
  * A refusal, by its code and — when one is named — by the FIELD it is about.
  *
- * The field half is not decoration. `update` puts the argument's own name in
- * `meta.field` so the editor can put the sentence beside the box that earned it
- * (see `refusedHeadField`), and nothing on this side used to check it: deleting
- * the `"billedTo"` argument from a `checkText` call left every test here green
- * while the client silently regressed to a general banner over the document.
- * That is exactly the failure the mechanism exists to prevent, so the contract
- * is asserted at the end that promises it.
+ * The field half is not decoration. `createFromRange` puts the argument's own
+ * name in `meta.field` so /invoices/new can put the sentence beside the box that
+ * earned it, and nothing on this side used to check it: deleting the
+ * `"billedTo"` argument from a `checkText` call left every test here green while
+ * the client silently regressed to a general banner over the form. That is
+ * exactly the failure the mechanism exists to prevent, so the contract is
+ * asserted at the end that promises it.
  */
 async function expectCode(
   promise: Promise<unknown>,
@@ -140,6 +142,17 @@ async function create(
     projectId: string | null
     text: string
     presets: Array<"no-project" | "no-note" | "under-a-minute">
+    /** The creation form, as /invoices/new sends it. Left off entirely by
+     *  default — which is what a caller with no form sends, and what every test
+     *  written before the form existed assumed. */
+    billedTo: string
+    payTo: string
+    purchaseOrder: string
+    paymentTerms: string
+    notes: string
+    currency: string
+    issuedAt: number
+    dueAt: number
   }> = {}
 ) {
   return await t.mutation(internal.invoices.createFromRangeAs, {
@@ -152,6 +165,14 @@ async function create(
     projectId: over.projectId,
     text: over.text,
     presets: over.presets,
+    billedTo: over.billedTo,
+    payTo: over.payTo,
+    purchaseOrder: over.purchaseOrder,
+    paymentTerms: over.paymentTerms,
+    notes: over.notes,
+    currency: over.currency,
+    issuedAt: over.issuedAt,
+    dueAt: over.dueAt,
   })
 }
 
@@ -1022,190 +1043,220 @@ describe("invoices.list", () => {
 })
 
 // ---------------------------------------------------------------------------
-// update
+// The document, asked once
 // ---------------------------------------------------------------------------
 
-const updateAs = async (
-  t: ReturnType<typeof setup>,
-  invoiceId: Id<"invoices">,
-  patch: Record<string, unknown>,
-  userId = ALICE
-) =>
-  await t.mutation(internal.invoices.updateAs, {
-    userId,
-    invoiceId,
-    ...patch,
-  } as Parameters<typeof t.mutation>[1])
+/*
+ * AN INVOICE IS WRITE-ONCE, so this is the only mutation in the product that
+ * ever writes one of these fields — and the last chance to refuse anything a
+ * human typed onto it. `invoices.update` used to hold this whole block; there is
+ * no `update` any more, and not one bound changed value in the move.
+ *
+ * Two things are proven of each: the boundary from BOTH sides (one character
+ * past refuses, exactly at it is accepted), and the FIELD the refusal names. A
+ * refusal that pointed at the wrong box would send somebody rewriting an address
+ * that was never too long, and one form sends eight of them.
+ */
+describe("invoices.createFromRange — the document it is handed", () => {
+  /** One priced hour under one rated project, which is all any of these needs
+   *  for the mutation to reach the insert. */
+  async function billable(t: ReturnType<typeof setup>) {
+    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+    return projectId
+  }
 
-const row = async (t: ReturnType<typeof setup>, invoiceId: Id<"invoices">) =>
-  await t.run(async (ctx) => await ctx.db.get(invoiceId))
+  const row = async (t: ReturnType<typeof setup>, invoiceId: Id<"invoices">) =>
+    await t.run(async (ctx) => await ctx.db.get(invoiceId))
 
-describe("invoices.update", () => {
   it("rejects an anonymous caller", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
     await expectCode(
-      t.mutation(api.invoices.update, { invoiceId, payTo: "Me" }),
+      t.mutation(api.invoices.createFromRange, {
+        clientKey: "anon",
+        fromMs: RANGE.fromMs,
+        toMs: RANGE.toMs,
+        timeZone: RANGE.timeZone,
+        weekStartDay: RANGE.weekStartDay,
+      }),
       "UNAUTHENTICATED"
     )
   })
 
-  it("refuses to touch an invoice belonging to someone else", async () => {
+  it("carries every typed field onto the document", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, {
-      userId: BOB,
-      number: "010126-0001",
+    await billable(t)
+
+    const { invoiceId } = await create(t, {
+      billedTo: "Vessel Vanguard LLC\nBonita Springs, FL",
+      payTo: "Brent Philip L. Ortega",
+      purchaseOrder: "PO-4471",
+      paymentTerms: "Net 14",
+      notes: "Bank transfer to Acme\nAccount 1234-5678",
+      currency: "EUR",
       issuedAt: MON,
+      dueAt: MON + 14 * 24 * HOUR,
     })
+    const invoice = await get(t, invoiceId)
 
-    await expectCode(updateAs(t, invoiceId, { payTo: "Stolen" }), "NOT_FOUND")
-    expect((await row(t, invoiceId))?.payTo).toBe("")
-  })
-
-  it("patches only what it is handed", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-
-    await updateAs(t, invoiceId, { payTo: "Brent Philip L. Ortega" })
-
-    const after = await row(t, invoiceId)
-    expect(after?.payTo).toBe("Brent Philip L. Ortega")
-    // The block this invoice was raised against is untouched by an edit to the
-    // one beside it.
-    expect(after?.billedTo).toBe("Acme Corp\n1 Way, Springfield")
+    expect(invoice.billedTo).toBe("Vessel Vanguard LLC\nBonita Springs, FL")
+    expect(invoice.payTo).toBe("Brent Philip L. Ortega")
+    expect(invoice.purchaseOrder).toBe("PO-4471")
+    expect(invoice.paymentTerms).toBe("Net 14")
+    expect(invoice.notes).toBe("Bank transfer to Acme\nAccount 1234-5678")
+    expect(invoice.currency).toBe("EUR")
+    expect(invoice.issuedAt).toBe(MON)
+    expect(invoice.dueAt).toBe(MON + 14 * 24 * HOUR)
   })
 
   /*
-   * The newlines are the block's shape — the same property clients.ts's
-   * address test pins, and it has to survive the second writer as well as the
-   * first. Only the surrounding whitespace goes.
+   * THE FORM WINS. It is prefilled from the range's client, so a user who
+   * CLEARED that block meant to clear it — and with no editor afterwards, a
+   * fallback that quietly put the address back would be permanent.
    */
+  it("prefers a supplied billed-to block over the range's own client", async () => {
+    const t = setup()
+    const { clientId } = await client(t, "Acme")
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+      clientId,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const { invoiceId } = await create(t, { billedTo: "Someone Else Entirely" })
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.billedTo).toBe("Someone Else Entirely")
+    // The provenance is untouched: which client's work this range covered is a
+    // fact about the scan, not about the text somebody typed over it.
+    expect(invoice.clientId).toBe(clientId)
+  })
+
+  it("accepts an explicitly emptied billed-to block rather than refilling it", async () => {
+    const t = setup()
+    const { clientId } = await client(t, "Acme")
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+      clientId,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const { invoiceId } = await create(t, { billedTo: "   " })
+    expect((await get(t, invoiceId)).billedTo).toBe("")
+  })
+
+  /* The newlines are the block's shape — the same property clients.ts's address
+   * test pins. Only the surrounding whitespace goes. */
   it("preserves the newlines in a party block and trims only its ends", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
     const block = "Vessel Vanguard LLC\nBonita Springs, FL\n34134, USA"
 
-    await updateAs(t, invoiceId, { billedTo: `\n  ${block}  \n` })
-
-    expect((await row(t, invoiceId))?.billedTo).toBe(block)
+    const { invoiceId } = await create(t, { payTo: `\n  ${block}  \n` })
+    expect((await get(t, invoiceId)).payTo).toBe(block)
   })
 
   /*
-   * A patch validator is a list of permissions, so the things NOT on it are
-   * worth a test of their own. `number` is the invoice's identity and is minted
-   * against a bounded uniqueness scan, so it may not ride in on a field patch —
-   * and the row is re-read afterwards, because a validator that quietly ignored
-   * an unknown field would look identical from the caller's side.
+   * The bank block's newlines are its shape too — an account number, an IBAN
+   * and a SWIFT code printed as one run-on line is a document a client cannot
+   * read a figure off. Same `checkText`, so this is a second writer of one rule
+   * rather than a second rule.
    */
-  it("cannot change the invoice number", async () => {
+  it("keeps the newlines inside notes and trims only their ends", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
+    const block = "Bank transfer to:\nAccount 1234-5678\n\nThank you!"
 
-    await expect(updateAs(t, invoiceId, { number: "999999-9999" })).rejects.toThrow()
-
-    expect((await row(t, invoiceId))?.number).toBe("010126-0001")
+    const { invoiceId } = await create(t, { notes: `\n  ${block}  \n` })
+    expect((await get(t, invoiceId)).notes).toBe(block)
   })
 
-  it("cannot rewrite where the figures came from", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-
-    await expect(updateAs(t, invoiceId, { sourceFromMs: 0 })).rejects.toThrow()
-    await expect(updateAs(t, invoiceId, { unratedMsAtCreation: 0 })).rejects.toThrow()
-  })
-
-  /*
-   * Every bound, one test each, because `INVOICE_NUMBER_SCAN_LIMIT` and
-   * `INVOICE_LIST_LIMIT` are both derived from the sum of them — an unbounded
-   * field here is a byte estimate that stops holding in convex/lib/scan.ts,
-   * not merely a long string.
-   *
-   * Each case asserts the boundary from BOTH sides: one character past refuses,
-   * exactly at the bound is accepted. An off-by-one that refused a legal value
-   * would otherwise pass a refusal-only test.
-   */
   it("refuses a party block past its bound and accepts one exactly at it", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
 
-    // Each names its OWN field: one Save carries eight of them, and a refusal
-    // that pointed at the wrong box would send somebody rewriting an address
-    // that was never too long.
     await expectCode(
-      updateAs(t, invoiceId, { billedTo: "b".repeat(MAX_PARTY_LENGTH + 1) }),
+      create(t, { billedTo: "b".repeat(MAX_PARTY_LENGTH + 1) }),
       "TOO_LONG",
       "billedTo"
     )
     await expectCode(
-      updateAs(t, invoiceId, { payTo: "p".repeat(MAX_PARTY_LENGTH + 1) }),
+      create(t, { payTo: "p".repeat(MAX_PARTY_LENGTH + 1) }),
       "TOO_LONG",
       "payTo"
     )
+    // Refused BEFORE anything is minted — there is no editor to take an
+    // over-long block back out of, so a half-written document is not a state
+    // this mutation may leave behind.
+    expect(await countInvoices(t)).toBe(0)
 
-    await updateAs(t, invoiceId, { billedTo: "b".repeat(MAX_PARTY_LENGTH) })
+    const { invoiceId } = await create(t, { billedTo: "b".repeat(MAX_PARTY_LENGTH) })
     expect((await row(t, invoiceId))?.billedTo).toHaveLength(MAX_PARTY_LENGTH)
   })
 
   /*
    * The bound is derived from clients.ts's own two, and this is why: a maximal
-   * client produces a `billedTo` of name + newline + address, and an editor
-   * that refused to save that back would leave an invoice this product wrote
-   * uneditable until it was retyped shorter.
+   * client produces a `billedTo` of name + newline + address, and a mutation
+   * that refused to accept its own snapshot back from the form it prefilled
+   * would make that client's invoices unraisable.
    */
-  it("accepts the largest block createFromRange can snapshot", async () => {
+  it("accepts the largest block a client can produce, straight back from the form", async () => {
     const t = setup()
     // The CONSTANTS, not the numbers they happen to hold today. Written out as
-    // 100/500/601 this test asserted three literals against a fourth and would
-    // have gone on passing if clients.ts widened an address — which is exactly
-    // the change that would break the round trip it exists to prove.
+    // 100/500/601 this test would assert three literals against a fourth and go
+    // on passing if clients.ts widened an address — which is exactly the change
+    // that would break the round trip it exists to prove.
     const { clientId } = await t.mutation(internal.clients.createAs, {
       userId: ALICE,
       name: "n".repeat(MAX_NAME_LENGTH),
       address: "a".repeat(MAX_ADDRESS_LENGTH),
     })
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000, clientId })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+      clientId,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
-    const { invoiceId } = await create(t)
-    const snapshot = (await row(t, invoiceId))?.billedTo ?? ""
+    const snapshot = (await get(t, (await create(t)).invoiceId)).billedTo
     expect(snapshot).toHaveLength(MAX_PARTY_LENGTH)
 
-    // Saved straight back, unchanged in length: the editor can round-trip what
-    // the mutation wrote.
-    await updateAs(t, invoiceId, { billedTo: snapshot })
+    const { invoiceId } = await create(t, { billedTo: snapshot })
     expect((await row(t, invoiceId))?.billedTo).toBe(snapshot)
   })
 
   it("refuses a purchase order past its bound", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
 
     await expectCode(
-      updateAs(t, invoiceId, {
-        purchaseOrder: "P".repeat(MAX_PURCHASE_ORDER_LENGTH + 1),
-      }),
+      create(t, { purchaseOrder: "P".repeat(MAX_PURCHASE_ORDER_LENGTH + 1) }),
       "TOO_LONG",
       "purchaseOrder"
     )
-    await updateAs(t, invoiceId, { purchaseOrder: "P".repeat(MAX_PURCHASE_ORDER_LENGTH) })
+    const { invoiceId } = await create(t, {
+      purchaseOrder: "P".repeat(MAX_PURCHASE_ORDER_LENGTH),
+    })
     expect((await row(t, invoiceId))?.purchaseOrder).toHaveLength(MAX_PURCHASE_ORDER_LENGTH)
   })
 
   /* Bounded because it is a name/value row of the document HEAD, beside the
    * dates — a paragraph in a `<dl>` is a layout that has stopped working. The
-   * paragraph belongs in `notes`, bounded below. */
+   * paragraph belongs in `notes`. */
   it("refuses payment terms past their bound", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
 
     await expectCode(
-      updateAs(t, invoiceId, {
-        paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH + 1),
-      }),
+      create(t, { paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH + 1) }),
       "TOO_LONG",
       "paymentTerms"
     )
-    await updateAs(t, invoiceId, { paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH) })
+    const { invoiceId } = await create(t, {
+      paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH),
+    })
     expect((await row(t, invoiceId))?.paymentTerms).toHaveLength(MAX_PAYMENT_TERMS_LENGTH)
   })
 
@@ -1216,114 +1267,105 @@ describe("invoices.update", () => {
    * contract, and this field is the LARGEST term in the per-row byte estimate
    * `INVOICE_NUMBER_SCAN_LIMIT` and `INVOICE_LIST_LIMIT` are divided from
    * (convex/lib/scan.ts). Unbounded, the invoice-number scan reads more bytes
-   * than the transaction has and fails as the platform's opaque error — which
-   * is the failure `INVOICE_HISTORY_TOO_LARGE` exists to replace.
-   *
-   * Both sides of the boundary, like every other bound here: one character past
-   * refuses, exactly at it is accepted. An off-by-one that refused a legal value
-   * would pass a refusal-only test.
+   * than the transaction has and fails as the platform's opaque error — the
+   * failure `INVOICE_HISTORY_TOO_LARGE` exists to replace.
    */
   it("refuses notes past their bound and accepts notes exactly at it", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
 
     await expectCode(
-      updateAs(t, invoiceId, { notes: "n".repeat(MAX_NOTES_LENGTH + 1) }),
+      create(t, { notes: "n".repeat(MAX_NOTES_LENGTH + 1) }),
       "TOO_LONG",
       "notes"
     )
-    expect((await row(t, invoiceId))?.notes).toBeUndefined()
-
-    await updateAs(t, invoiceId, { notes: "n".repeat(MAX_NOTES_LENGTH) })
+    const { invoiceId } = await create(t, { notes: "n".repeat(MAX_NOTES_LENGTH) })
     expect((await row(t, invoiceId))?.notes).toHaveLength(MAX_NOTES_LENGTH)
   })
 
-  /*
-   * The bank block's newlines are its shape, exactly as a party block's are —
-   * an account number, an IBAN and a SWIFT code printed as one run-on line is a
-   * document a client cannot read a figure off. Same `checkText`, so this is
-   * the second writer of that rule rather than a second rule.
-   */
-  it("keeps the newlines inside notes and trims only their ends", async () => {
+  /* An emptied optional field is ABSENT, not "". The document prints nothing
+   * for both, and two spellings of one fact is how a later `!== undefined`
+   * check quietly stops working. */
+  it("stores an emptied optional field as absent rather than as an empty string", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-    const block = "Bank transfer to:\nAccount 1234-5678\n\nThank you!"
+    await billable(t)
 
-    await updateAs(t, invoiceId, { notes: `\n  ${block}  \n` })
-
-    expect((await row(t, invoiceId))?.notes).toBe(block)
-  })
-
-  /* Emptied is ABSENT, the same rule the purchase order follows — the document
-   * has nothing to print either way, and two spellings of one fact is how a
-   * later `!== undefined` check quietly stops working. */
-  it("clears notes rather than storing an empty string", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-
-    await updateAs(t, invoiceId, { notes: "Pay me" })
-    expect((await row(t, invoiceId))?.notes).toBe("Pay me")
-
-    await updateAs(t, invoiceId, { notes: "   " })
-    expect((await row(t, invoiceId))?.notes).toBeUndefined()
-  })
-
-  /* An emptied optional field is ABSENT, not "". The document prints "—" for
-   * both, and two spellings of one fact is how a later `!== undefined` check
-   * quietly stops working. */
-  it("clears an optional field rather than storing an empty string", async () => {
-    const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-
-    await updateAs(t, invoiceId, { purchaseOrder: "PO-4471" })
-    expect((await row(t, invoiceId))?.purchaseOrder).toBe("PO-4471")
-
-    await updateAs(t, invoiceId, { purchaseOrder: "   " })
-    expect((await row(t, invoiceId))?.purchaseOrder).toBeUndefined()
+    const { invoiceId } = await create(t, {
+      purchaseOrder: "   ",
+      paymentTerms: "",
+      notes: "  \n ",
+    })
+    const stored = await row(t, invoiceId)
+    expect(stored?.purchaseOrder).toBeUndefined()
+    expect(stored?.paymentTerms).toBeUndefined()
+    expect(stored?.notes).toBeUndefined()
   })
 
   it("refuses a currency this product cannot render honestly", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
 
     // JPY is a real code whose minor unit is not a hundredth — see
     // money.supportedCurrencies. `formatMoney` would silently round the stored
     // hundredths away on a document.
-    await expectCode(updateAs(t, invoiceId, { currency: "JPY" }), "INVALID_CURRENCY", "currency")
-    await expectCode(updateAs(t, invoiceId, { currency: "ZZZ" }), "INVALID_CURRENCY", "currency")
-
-    await updateAs(t, invoiceId, { currency: "EUR" })
-    expect((await row(t, invoiceId))?.currency).toBe("EUR")
+    await expectCode(create(t, { currency: "JPY" }), "INVALID_CURRENCY", "currency")
+    await expectCode(create(t, { currency: "ZZZ" }), "INVALID_CURRENCY", "currency")
+    expect(await countInvoices(t)).toBe(0)
   })
 
   /* `v.number()` round-trips NaN — the fact INVALID_RATE exists for. A NaN
    * `issuedAt` sorts nowhere in `by_user_issued` and prints as "Invalid Date"
-   * on a document nobody re-reads before sending. */
+   * on a document that can never be corrected. */
   it("refuses a date that is not a real instant", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
 
+    await expectCode(create(t, { issuedAt: Number.NaN }), "INVALID_DATE", "issuedAt")
     await expectCode(
-      updateAs(t, invoiceId, { issuedAt: Number.NaN }),
-      "INVALID_DATE",
-      "issuedAt"
-    )
-    await expectCode(
-      updateAs(t, invoiceId, { dueAt: Number.POSITIVE_INFINITY }),
+      create(t, { dueAt: Number.POSITIVE_INFINITY }),
       "INVALID_DATE",
       "dueAt"
     )
-    expect((await row(t, invoiceId))?.issuedAt).toBe(MON)
+    expect(await countInvoices(t)).toBe(0)
   })
 
-  /* Due before issued is odd and is NOT refused: this editor autosaves one
-   * field per blur, so an ordering rule would make moving an invoice a month
-   * forward succeed or fail depending on which date the user blurred first. */
+  /* Due before issued is odd and is NOT refused: due-on-receipt is real, and so
+   * is dating a document to the day the work finished. The form says so under
+   * the due date instead, before the document exists. */
   it("does not refuse a due date before its issue date", async () => {
     const t = setup()
-    const invoiceId = await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+    await billable(t)
 
-    await updateAs(t, invoiceId, { dueAt: MON - 24 * HOUR })
+    const { invoiceId } = await create(t, { issuedAt: MON, dueAt: MON - 24 * HOUR })
     expect((await row(t, invoiceId))?.dueAt).toBe(MON - 24 * HOUR)
+  })
+
+  /* Net 30 counts from the document's OWN issue date, not from the wall clock —
+   * a document dated last week is due thirty days after it says it was raised. */
+  it("defaults the due date to thirty days after the issue date it was given", async () => {
+    const t = setup()
+    await billable(t)
+
+    const { invoiceId } = await create(t, { issuedAt: MON })
+    const stored = await row(t, invoiceId)
+    expect(stored?.issuedAt).toBe(MON)
+    expect(stored?.dueAt).toBe(MON + 30 * 24 * HOUR)
+  })
+
+  /*
+   * A refusal must cost NOTHING, and on this mutation that is a stronger claim
+   * than usual: minting is what advances the invoice number, so a document
+   * half-written before a refusal would burn a sequence nothing points at.
+   */
+  it("mints no invoice and no line when a field is refused", async () => {
+    const t = setup()
+    await billable(t)
+
+    await expectCode(create(t, { notes: "n".repeat(MAX_NOTES_LENGTH + 1) }), "TOO_LONG")
+
+    expect(await countInvoices(t)).toBe(0)
+    expect(
+      await t.run(async (ctx) => (await ctx.db.query("invoiceLines").collect()).length)
+    ).toBe(0)
   })
 })

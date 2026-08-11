@@ -1,12 +1,9 @@
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
-import { Pencil } from "lucide-react"
 import { ExportPdfButton } from "@/components/invoices/export-pdf-button"
 import { InvoiceRecord } from "@/components/invoices/invoice-record"
-import { buttonVariants } from "@/components/ui/button"
 import { Empty } from "@/components/ui/empty"
-import { cn } from "@/lib/utils"
 import { traceErrorCode } from "@shared/codes"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
@@ -23,10 +20,8 @@ import type { Id } from "../../../convex/_generated/dataModel"
  * list into `invoices.index.tsx` beneath an `invoices.tsx` layout — three files
  * and a moved component to say "these are two pages, not one inside another".
  *
- * The editor beside it (`invoices_.$invoiceId_.edit.tsx`) needs the escape a
- * SECOND time, on the `$invoiceId` segment, for the same reason one level down.
- * Check `src/routeTree.gen.ts` after touching either: both must parent to
- * `AuthedRoute`, and a route that has quietly become a child of the other
+ * Check `src/routeTree.gen.ts` after touching this: it must parent to
+ * `AuthedRoute`, and a route that has quietly become a child of the list
  * renders the wrong component at a URL that still looks right.
  */
 export const Route = createFileRoute("/_authed/invoices_/$invoiceId")({
@@ -91,10 +86,6 @@ export const Route = createFileRoute("/_authed/invoices_/$invoiceId")({
  * words and its own way back, and a `NOT_FOUND` arm on the layout would give
  * every one of them the same ones.
  *
- * Exported and shared with the editor route beside it, which has exactly the
- * same two failures at exactly the same id — a second copy would be a second
- * sentence for one fact.
- *
  * `UNAUTHENTICATED` is rethrown deliberately: an expired session is the layout
  * boundary's job and it answers with a sign-in link, which "no such invoice"
  * would replace with a dead end.
@@ -125,22 +116,23 @@ function InvoiceRoute() {
 /**
  * The invoice, as the client received it.
  *
- * THE RECORD, NOT THE EDITOR — and that swap is the reason this page exists in
- * this shape. `/invoices/$invoiceId` is what the list links to and what gets
- * pasted into a message, and the question asked at it is "what did I send
- * them?". A form with the values already in its boxes cannot answer that: an
+ * THE ONLY INVOICE PAGE, and read-only because the document is. An invoice is
+ * write-once: everything on it is asked for at `/invoices/new` and frozen the
+ * moment it is minted. There is no editor to reach from here and no mutation
+ * that would accept the edit.
+ *
+ * That is what lets this page answer the question actually asked at it — "what
+ * did I send them?". A form with the values already in its boxes cannot: an
  * input looks identical whether its contents were sent last month or typed
- * thirty seconds ago and abandoned, and the two mean opposite things when a
- * client is disputing a figure. Editing moved one segment down, to
- * `/invoices/$invoiceId/edit`, where a control means what a control means.
+ * thirty seconds ago and abandoned, and those mean opposite things when a
+ * client is disputing a figure.
  *
  * It is the same document the PDF prints, drawn from the same derivations —
  * see `InvoiceRecord` and `src/lib/invoice-document.ts`.
  *
- * STILL NO STATUS. There is no draft/issued/paid, nothing freezes, and there is
- * nothing to unlock: read-only here is a rendering, not a state the invoice is
- * in. `Edit` is always available, and `invoices.update` still refuses nothing on
- * state.
+ * STILL NO STATUS. There is no draft/issued/paid and nothing freezes, because
+ * there is no state to be in: read-only here is what the document IS, not a
+ * mode it has been put into.
  *
  * Exported and taking its id as a prop — the same split every route test in
  * this directory relies on, so the page can be rendered against a seeded query
@@ -174,27 +166,12 @@ export function InvoicePage({ invoiceId }: { invoiceId: Id<"invoices"> }) {
           </nav>
 
           {/*
-            Top-right, opposite the breadcrumb: the two things you do to a
-            finished document. Export is the one this feature exists for, so it
-            keeps the outline; Edit is the quieter of the two because arriving
-            here to change something is the rarer errand.
+            Top-right, opposite the breadcrumb: the one thing you do to a
+            finished document. There is no Edit beside it — an invoice is
+            write-once — so Export is not competing for the eye with a control
+            that would be the more destructive of the two.
           */}
-          <div className="flex items-center gap-2">
-            {/* A `<Link>` wearing the button's own classes, the idiom
-                `routes/index.tsx` already uses: navigation is an anchor, and an
-                anchor is what gives it a middle-click, a right-click menu and a
-                real href in the status bar. A `<button>` that navigates has
-                none of those. */}
-            <Link
-              to="/invoices/$invoiceId/edit"
-              params={{ invoiceId }}
-              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-            >
-              <Pencil className="size-4" />
-              Edit
-            </Link>
-            <ExportPdfButton invoice={invoice} timeZone={settings.timezone} />
-          </div>
+          <ExportPdfButton invoice={invoice} timeZone={settings.timezone} />
         </div>
 
         <h1 className="text-sm font-semibold">Invoice</h1>

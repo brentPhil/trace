@@ -6,18 +6,18 @@ import { getOwned } from "./owned"
 import { traceError } from "./errors"
 import { rangeBreakdownImpl } from "./entries"
 import { MAX_ADDRESS_LENGTH, MAX_NAME_LENGTH } from "./clients"
-import { centiHours } from "./lib/duration"
 import { isValidCurrency } from "./lib/money"
-import { invoiceTotals, lineAmountCents } from "./lib/invoiceMath"
+import { invoiceTotals } from "./lib/invoiceMath"
+import { invoiceLineDrafts } from "./lib/invoiceLines"
 import { nextInvoiceNumber } from "./lib/invoiceNumber"
 import { invoiceDoc, invoiceLineDoc } from "./lib/docs"
-import { NO_PROJECT_LABEL } from "./lib/labels"
 import {
   INVOICE_LIST_LIMIT,
   INVOICE_NUMBER_SCAN_LIMIT,
   INVOICE_SCAN_LIMIT,
 } from "./lib/scan"
 import { currencyOf, defaultRateCents } from "./settings"
+import type { BillableBucket } from "./lib/invoiceLines"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
@@ -28,6 +28,13 @@ import type { MutationCtx, QueryCtx } from "./_generated/server"
  * explicit userId, a public wrapper deriving it from the session, and an
  * internal wrapper for tests. `userId` never appears in a public args
  * validator.
+ *
+ * AN INVOICE IS WRITE-ONCE. `createFromRange` is the only writer this file has
+ * and there is no `update`: a numbered document that gets sent to a client is
+ * composed once, at /invoices/new, and is a record from the moment it exists.
+ * Everything a human types onto one therefore arrives as an argument to
+ * creation and is bounded there — which is why the length bounds and
+ * `checkText` below live beside that mutation rather than beside an editor.
  */
 
 // ---------------------------------------------------------------------------
@@ -191,6 +198,157 @@ export const listAs = internalQuery({
 })
 
 // ---------------------------------------------------------------------------
+// What a human may type onto an invoice, and how long it may be
+// ---------------------------------------------------------------------------
+
+/*
+ * BOUNDING THIS TEXT IS NOT HOUSEKEEPING.
+ *
+ * `INVOICE_NUMBER_SCAN_LIMIT` and `INVOICE_LIST_LIMIT` (convex/lib/scan.ts) are
+ * both derived from a per-row byte estimate for an `invoices` row, and that
+ * estimate holds only because every free string this file writes is capped
+ * below. Each bound is a term in that arithmetic, so changing one means redoing
+ * the division there rather than trusting the number that is written down.
+ *
+ * The set of terms is not only the four below: `MAX_SOURCE_TEXT_LENGTH` further
+ * down bounds the two provenance strings a filter puts on the row, and counts
+ * twice. The division in convex/lib/scan.ts names all of them; this comment
+ * names none of them, deliberately, because a second list here would be the one
+ * that stopped agreeing.
+ *
+ * These bounds outlived the editor they were written for. An invoice used to be
+ * editable and they were enforced on `invoices.update`; an invoice is now
+ * write-once and they are enforced at CREATION, which is the only moment a
+ * human types into one. Not one of them changed value in the move — the row is
+ * the same row and the division is the same division.
+ */
+
+/**
+ * A party block: `billedTo` and `payTo`.
+ *
+ * Derived from clients.ts's own two bounds rather than picked again, because
+ * `createFromRange` can snapshot `name\naddress` into `billedTo` — a bound
+ * below this one would let this product refuse to write a block it assembled
+ * itself, which the user would experience as an invoice that cannot be raised
+ * from a client they were allowed to save.
+ */
+export const MAX_PARTY_LENGTH = MAX_NAME_LENGTH + 1 + MAX_ADDRESS_LENGTH
+
+/** A reference issued by the client's own purchasing system, not a sentence.
+ *  The same 100 characters a client's name gets, which is already far past
+ *  every real PO number and short enough that the field cannot become prose. */
+export const MAX_PURCHASE_ORDER_LENGTH = 100
+
+/**
+ * "Net 30", "Due on receipt" — a line, in the meta grid beside the dates.
+ *
+ * Short because of WHERE it is rather than what it is worth saying: this is a
+ * name/value row of the document head, and a paragraph in a `<dl>` beside
+ * "Purchase order" is a layout that has stopped working. The paragraph has
+ * somewhere to go — `notes`, at the foot of the document, bounded below.
+ */
+export const MAX_PAYMENT_TERMS_LENGTH = 200
+
+/**
+ * The message at the foot of the document — payment details, thanks, terms.
+ *
+ * THREE TIMES `paymentTerms`, and the ratio is the argument. What actually goes
+ * here is a bank block: account name, bank, account number, IBAN, SWIFT, an
+ * intermediary bank for an international transfer, a reference line, and a
+ * sentence of thanks under it. That is structurally a party block — a handful
+ * of labelled lines printed verbatim — so 600 puts it within a character of
+ * `MAX_PARTY_LENGTH` (601), and a product that lets someone paste a 601-
+ * character address has no reason to give the account details beside it less
+ * room.
+ *
+ * It is not an essay, and the cap is where it is so it cannot become one. A
+ * `<textarea>` at the bottom of a document is exactly where a user would paste
+ * a contract, and this field is the largest single term in the per-row byte
+ * estimate `INVOICE_NUMBER_SCAN_LIMIT` divides ~3.0 MB by — see convex/lib/
+ * scan.ts, where the division is redone with this term in it. That division has
+ * ~300 B a row left over, so this bound could reach about 900 before
+ * `INVOICE_NUMBER_SCAN_LIMIT` has to move; past that, MOVE IT rather than
+ * restate the estimate.
+ */
+export const MAX_NOTES_LENGTH = 600
+
+/**
+ * WHICH FIELD A REFUSAL IS ABOUT, as data rather than as a sentence.
+ *
+ * The creation form sends the whole document in one mutation, so a refusal has
+ * to be shown beside the field that caused it or the user is left rereading
+ * eight controls for the one that is too long. The message already NAMES the
+ * field in prose ("Keep the pay-to block under 601 characters"), and a client
+ * matching on that prose is a client that breaks the day somebody improves the
+ * wording — so the name travels in `meta.field` instead, spelled exactly as the
+ * argument is.
+ *
+ * `meta` is already part of `TraceErrorData` (convex/lib/codes.ts) and is
+ * additive: a caller that ignores it still gets the same code and the same
+ * sentence it always did.
+ */
+type InvoiceField =
+  | "billedTo"
+  | "payTo"
+  | "currency"
+  | "issuedAt"
+  | "dueAt"
+  | "purchaseOrder"
+  | "paymentTerms"
+  | "notes"
+
+/**
+ * Trimmed at the ends, NEVER collapsed inside.
+ *
+ * The same rule and the same reason as `checkAddress` in clients.ts: a party
+ * block is rendered verbatim on a document, so its internal newlines are the
+ * block's shape, and a normaliser that tidied them would print a three-line
+ * address on one line.
+ *
+ * `field` is absent for the two provenance strings `createFromRange` bounds:
+ * those arrive from /reports' filter bar rather than from a control on the
+ * form, so there is nothing for a refusal to point at.
+ */
+function checkText(raw: string, what: string, max: number, field?: InvoiceField): string {
+  const trimmed = raw.trim()
+  if (trimmed.length > max) {
+    traceError(
+      "TOO_LONG",
+      `Keep the ${what} under ${max} characters.`,
+      field === undefined ? undefined : { field }
+    )
+  }
+  return trimmed
+}
+
+/**
+ * A date, as a real instant.
+ *
+ * `v.number()` round-trips NaN and Infinity — the same fact `INVALID_RATE`
+ * exists for. One NaN `issuedAt` sorts nowhere in `by_user_issued`, renders as
+ * "Invalid Date" on the document, and is invisible until a client is holding
+ * the PDF. There is no editor to correct it in, which is what turns a tidiness
+ * check into the only thing standing between a typo and a permanent record.
+ */
+function checkInstant(value: number, what: string, field: InvoiceField): number {
+  if (!Number.isFinite(value)) {
+    traceError("INVALID_DATE", `That ${what} is not a date I can read.`, { field })
+  }
+  return value
+}
+
+/**
+ * An emptied optional field is ABSENT, not "".
+ *
+ * `purchaseOrder`, `paymentTerms` and `notes` all print as nothing when unset,
+ * and storing an empty string would be a second spelling of the same fact —
+ * which is how a later `!== undefined` check quietly stops working.
+ */
+function orAbsent(value: string): string | undefined {
+  return value === "" ? undefined : value
+}
+
+// ---------------------------------------------------------------------------
 // createFromRange
 // ---------------------------------------------------------------------------
 
@@ -255,6 +413,44 @@ const createFromRangeArgs = {
       v.union(v.literal("no-project"), v.literal("no-note"), v.literal("under-a-minute"))
     )
   ),
+
+  /*
+   * THE DOCUMENT ITSELF — asked once, on /invoices/new, and then frozen.
+   *
+   * An invoice is write-once, so these are not conveniences: they are the ONLY
+   * moment this product has to learn who the document is billed to, who is to
+   * be paid, and on what terms. Nothing in a range of time entries says any of
+   * it, and there is no editor afterwards to fill a gap in.
+   *
+   * Every one is optional, and each absence has a stated meaning rather than a
+   * blank: `billedTo` falls back to the range's own client (below), `currency`
+   * to the account's setting, `issuedAt` to now and `dueAt` to thirty days
+   * after it. The three that print as nothing when unset stay unset.
+   *
+   * Each is bounded on write by the constants above and each refusal names its
+   * own field in `meta.field`, so the form can put the sentence beside the box
+   * that earned it.
+   *
+   * WHAT IS DELIBERATELY ABSENT, since an args validator is a list of
+   * permissions:
+   *
+   *   - `number`. It is minted here, one past the highest sequence this account
+   *     has ever used, against the bounded uniqueness scan below. A caller able
+   *     to name it is two documents claiming one id.
+   *   - `taxes`, and every line. Lines are derived from the range — that is
+   *     what this mutation IS — and a tax editor is not built.
+   *   - `clientId`, `sourceFromMs`, `sourceToMs`, `unratedMsAtCreation`. These
+   *     record where the figures came from and are computed here from the scan
+   *     that produced them. Provenance a caller can assert is not provenance.
+   */
+  billedTo: v.optional(v.string()),
+  payTo: v.optional(v.string()),
+  purchaseOrder: v.optional(v.string()),
+  paymentTerms: v.optional(v.string()),
+  notes: v.optional(v.string()),
+  currency: v.optional(v.string()),
+  issuedAt: v.optional(v.number()),
+  dueAt: v.optional(v.number()),
 }
 
 /*
@@ -277,19 +473,11 @@ const createFromRangeReturns = v.object({
   replayed: v.boolean(),
 })
 
-/** One line's worth of work, computed but not yet written. */
-type PricedLine = {
-  description: string
-  quantityCentis: number
-  unitCents: number
-  amountCents: number
-  projectId: Id<"projects"> | undefined
-}
-
 /**
- * Turns a filtered `/reports` range into a draft invoice: one line per
+ * Turns a filtered `/reports` range into a finished invoice: one line per
  * project, priced at that project's rate (or the account default), snapshot
- * against today's client — never against tomorrow's.
+ * against today's client — never against tomorrow's — and carrying whatever
+ * the creation form was told about the document itself.
  */
 async function createFromRangeImpl(
   ctx: MutationCtx,
@@ -307,6 +495,92 @@ async function createFromRangeImpl(
   }
 
   /*
+   * THE TYPED DOCUMENT, checked FIRST — before the range is scanned.
+   *
+   * Two reasons, and the second is the load-bearing one. A refusal a user can
+   * act on should not cost a 2,000-row read, and more importantly the refusals
+   * this mutation makes are ordered by how fixable they are: "your notes are
+   * too long" points at a box on the form, while `RANGE_TOO_LARGE` and
+   * `MIXED_CLIENTS` ask the user to go back to /reports and narrow something.
+   * Checking the cheap, local mistakes first means the form never sends
+   * somebody to another page over a paste accident.
+   *
+   * `undefined` is left `undefined` rather than defaulted here: what an absent
+   * field means differs per field, and each default is applied at the point
+   * where the value it falls back to is actually known.
+   */
+  const typedBilledTo =
+    args.billedTo === undefined
+      ? undefined
+      : checkText(args.billedTo, "billed-to block", MAX_PARTY_LENGTH, "billedTo")
+  const payTo =
+    args.payTo === undefined
+      ? ""
+      : checkText(args.payTo, "pay-to block", MAX_PARTY_LENGTH, "payTo")
+  const purchaseOrder =
+    args.purchaseOrder === undefined
+      ? undefined
+      : orAbsent(
+          checkText(
+            args.purchaseOrder,
+            "purchase order",
+            MAX_PURCHASE_ORDER_LENGTH,
+            "purchaseOrder"
+          )
+        )
+  const paymentTerms =
+    args.paymentTerms === undefined
+      ? undefined
+      : orAbsent(
+          checkText(
+            args.paymentTerms,
+            "payment terms",
+            MAX_PAYMENT_TERMS_LENGTH,
+            "paymentTerms"
+          )
+        )
+  /*
+   * Trimmed at the ends and NEVER collapsed inside, by the same `checkText` the
+   * party blocks use and for the same reason: this prints verbatim at the foot
+   * of the document, so its internal newlines are the bank block's shape. A
+   * normaliser that tidied them would print an account, an IBAN and a SWIFT
+   * code as one run-on line on a document a client has to read a number off.
+   */
+  const notes =
+    args.notes === undefined
+      ? undefined
+      : orAbsent(checkText(args.notes, "notes", MAX_NOTES_LENGTH, "notes"))
+  /*
+   * The two dates are checked independently and NOT against each other.
+   *
+   * A due date before an issue date is odd, and refusing it here would still be
+   * wrong: "due on receipt" is a real arrangement, back-dating a document to
+   * the day the work finished is ordinary, and a rule comparing the pair would
+   * refuse some perfectly deliberate combinations of the two.
+   *
+   * Not refusing is not the same as saying nothing. The creation form draws a
+   * non-blocking advisory under the due date whenever it precedes the invoice
+   * date, recomputed from the values on screen — so the mistake is named BEFORE
+   * the document is minted, which is the only moment it can still be fixed.
+   */
+  const typedIssuedAt =
+    args.issuedAt === undefined
+      ? undefined
+      : checkInstant(args.issuedAt, "invoice date", "issuedAt")
+  const typedDueAt =
+    args.dueAt === undefined ? undefined : checkInstant(args.dueAt, "due date", "dueAt")
+  if (args.currency !== undefined && !isValidCurrency(args.currency)) {
+    // The same refusal `settings.update` makes, in the same words: the list is
+    // `money.SUPPORTED_CURRENCIES`, which is the runtime's own codes narrowed
+    // to the ones whose minor unit really is a hundredth.
+    traceError(
+      "INVALID_CURRENCY",
+      `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`,
+      { field: "currency" }
+    )
+  }
+
+  /*
    * ONE filter, computed once, then both billed from and recorded.
    *
    * The same values go into `rangeBreakdownImpl` below and onto the invoice
@@ -314,8 +588,10 @@ async function createFromRangeImpl(
    * account of which rows it billed cannot describe a different set from the
    * one it actually billed.
    *
-   * `checkText` (the editor's own bound-and-trim, further down this file)
-   * refuses either string past `MAX_SOURCE_TEXT_LENGTH`. Trimming changes
+   * `checkText` (the bound-and-trim above) refuses either string past
+   * `MAX_SOURCE_TEXT_LENGTH`, without a `field` — these two arrive from
+   * /reports' filter bar rather than from a control on the creation form, so
+   * there is nothing to point a refusal at. Trimming changes
    * nothing about what matches: `matchesFilter` trims the needle itself, and a
    * project id has no whitespace to lose.
    *
@@ -438,47 +714,52 @@ async function createFromRangeImpl(
   // SNAPSHOT text, not a join. Renaming a client afterwards must not rewrite
   // this invoice — `clientId` beside it is what still answers "show me
   // everything billed to Vessel Vanguard".
-  const billedTo =
+  const snapshotBilledTo =
     client === null
       ? ""
       : client.address.trim() === ""
         ? client.name
         : `${client.name}\n${client.address}`
+  /*
+   * A SUPPLIED BLOCK WINS, including an empty one.
+   *
+   * The user is on a form that has already been prefilled with the block above
+   * and is telling this mutation who the document is billed to; a fallback that
+   * second-guessed them would put a client's address back onto an invoice they
+   * had just cleared, permanently, with no editor to take it out again.
+   *
+   * `undefined` — the field never sent — is the only thing that falls back, and
+   * that is what keeps a caller with no form (a script, a test) getting the
+   * range's own client exactly as it always did.
+   *
+   * `clientId` beside it is unaffected either way: it records which client's
+   * work this range touched, which is a fact about the scan rather than about
+   * the text somebody typed.
+   */
+  const billedTo = typedBilledTo ?? snapshotBilledTo
 
   // `defaultRateCents` is typed for a `QueryCtx`; a `MutationCtx` satisfies it
   // structurally, the same fact that lets `rangeBreakdownImpl` above be called
   // unmodified — see that export's doc comment.
   const accountRateCents = await defaultRateCents(ctx, userId)
 
-  const lines: Array<PricedLine> = []
-  for (const p of breakdown.projects) {
-    if (p.billableMs === 0) continue
-    // A project's rate is resolved uniformly for every row inside it (see
-    // `rateOf` in entries.ts), so `unratedBillableMs` for one project bucket
-    // is either 0 or exactly `billableMs` — never partial. Skip the latter:
-    // billable time nobody has priced is excluded, not guessed at.
-    if (p.unratedBillableMs > 0) continue
-
-    const project = p.projectId === null ? undefined : projectDocs.get(p.projectId)
-    // Zero is a rate somebody chose, not "no rate" — `??` is what keeps a
-    // zero-rate project's line at $0.00 instead of falling through to the
-    // account default. Same rule as `rateOf`.
-    const unitCents = project?.hourlyRateCents ?? accountRateCents
-    if (unitCents === null) continue // unreachable: unratedBillableMs === 0 above proves a rate exists
-
-    const quantityCentis = centiHours(p.billableMs)
-    lines.push({
-      // A stated label, not "" — a blank cell beside a real amount on a
-      // printed invoice reads as a rendering fault, not as "work with no
-      // project". Shared with the client's own charts via convex/lib/labels.ts
-      // so the two never print two different names for the same bucket.
-      description: project?.name ?? NO_PROJECT_LABEL,
-      quantityCentis,
-      unitCents,
-      amountCents: lineAmountCents(quantityCentis, unitCents),
-      projectId: project?._id,
-    })
-  }
+  /*
+   * THE LINES, from the SHARED builder — the very function /invoices/new draws
+   * its preview with.
+   *
+   * Not a loop written out here. This mutation mints a numbered document from a
+   * preview the user has just read and agreed to, and a preview computed by a
+   * second copy of these rules is a preview that can quietly disagree with what
+   * gets stored. See convex/lib/invoiceLines.ts, which is where every rule this
+   * used to spell out inline now lives, once.
+   */
+  const buckets: Array<BillableBucket> = breakdown.projects.map((p) => ({
+    projectId: p.projectId,
+    billableMs: p.billableMs,
+    unratedBillableMs: p.unratedBillableMs,
+    project: p.projectId === null ? undefined : projectDocs.get(p.projectId),
+  }))
+  const lines = invoiceLineDrafts(buckets, accountRateCents)
 
   const now = Date.now()
   // Bounded, not `.collect()`: `nextInvoiceNumber` needs the HIGHEST sequence
@@ -501,21 +782,29 @@ async function createFromRangeImpl(
   const usedNumbers = invoiceRows.map((row) => row.number)
   const number = nextInvoiceNumber(now, args.timeZone, usedNumbers)
 
+  const issuedAt = typedIssuedAt ?? now
+
   const invoiceId = await ctx.db.insert("invoices", {
     userId,
     clientKey: args.clientKey,
     number,
     clientId,
     billedTo,
-    // Filled in by the editor (Task 6). Empty rather than a guess: nothing
-    // in this range says who the freelancer is or wants to be paid as.
-    payTo: "",
-    currency: await currencyOf(ctx, userId),
-    issuedAt: now,
-    // Net 30, the most common freelance default and a plain, editable
-    // starting point — the editor (Task 6) is where a user states their own
-    // terms via `paymentTerms`.
-    dueAt: now + 30 * 24 * 60 * 60 * 1000,
+    // Empty rather than a guess when nobody said: nothing in a range of time
+    // entries says who the freelancer is or wants to be paid as, and this
+    // product has no pay-to setting to read one from. The creation form is
+    // where that question gets asked.
+    payTo,
+    currency: args.currency ?? (await currencyOf(ctx, userId)),
+    issuedAt,
+    // Net 30, the most common freelance default — and a default rather than a
+    // policy, which is why the form offers a date picker beside it. Counted
+    // from the invoice's OWN issue date rather than from `now`, so a document
+    // dated last week is due thirty days after it says it was raised.
+    dueAt: typedDueAt ?? issuedAt + 30 * 24 * 60 * 60 * 1000,
+    purchaseOrder,
+    paymentTerms,
+    notes,
     taxes: [],
     // Provenance only — NEVER read back to recompute anything. See the
     // schema comment on `sourceFromMs`/`sourceToMs`.
@@ -545,7 +834,11 @@ async function createFromRangeImpl(
       quantityCentis: line.quantityCentis,
       unitCents: line.unitCents,
       amountCents: line.amountCents,
-      projectId: line.projectId,
+      // `null` is how the shared builder spells the unassigned bucket — it is
+      // pure and holds no Convex types (see convex/lib/invoiceLines.ts) — while
+      // the column is `v.optional(v.id("projects"))`. One spelling of "no
+      // project" per side of that boundary, converted at it.
+      projectId: line.projectId === null ? undefined : (line.projectId as Id<"projects">),
       sortKey: index,
       deletedAt: null,
     })
@@ -566,297 +859,4 @@ export const createFromRangeAs = internalMutation({
   returns: createFromRangeReturns,
   handler: async (ctx, { userId, ...args }) =>
     await createFromRangeImpl(ctx, userId, args),
-})
-
-// ---------------------------------------------------------------------------
-// update — the document head
-// ---------------------------------------------------------------------------
-
-/*
- * BOUNDING THIS TEXT IS NOT HOUSEKEEPING.
- *
- * `INVOICE_NUMBER_SCAN_LIMIT` and `INVOICE_LIST_LIMIT` (convex/lib/scan.ts) are
- * both derived from a per-row byte estimate for an `invoices` row, and until
- * this mutation existed that estimate held only because no human could type
- * into one — `createFromRange` writes a `billedTo` bounded by clients.ts and
- * leaves the rest empty. This is the editor those two comments warned about, so
- * each bound below is a term in that arithmetic and changing one means redoing
- * the division there rather than trusting the number that is written down.
- *
- * The set of terms is no longer only below this line: `MAX_SOURCE_TEXT_LENGTH`
- * up in `createFromRange` bounds the two provenance strings a filter puts on
- * the row, and counts twice. The division in convex/lib/scan.ts names all of
- * them; this comment names none of them, deliberately, because a second list
- * here would be the one that stopped agreeing.
- */
-
-/**
- * A party block: `billedTo` and `payTo`.
- *
- * Derived from clients.ts's own two bounds rather than picked again, because
- * `createFromRange` snapshots `name\naddress` into `billedTo` — a bound below
- * this one would let this product write a document its own editor then refuses
- * to save back, which the user would experience as an invoice that cannot be
- * touched without being retyped.
- */
-export const MAX_PARTY_LENGTH = MAX_NAME_LENGTH + 1 + MAX_ADDRESS_LENGTH
-
-/** A reference issued by the client's own purchasing system, not a sentence.
- *  The same 100 characters a client's name gets, which is already far past
- *  every real PO number and short enough that the field cannot become prose. */
-export const MAX_PURCHASE_ORDER_LENGTH = 100
-
-/**
- * "Net 30", "Due on receipt" — a line, in the meta grid beside the dates.
- *
- * Short because of WHERE it is rather than what it is worth saying: this is a
- * name/value row of the document head, and a paragraph in a `<dl>` beside
- * "Purchase order" is a layout that has stopped working. The paragraph has
- * somewhere to go — `notes`, at the foot of the document, bounded below.
- */
-export const MAX_PAYMENT_TERMS_LENGTH = 200
-
-/**
- * The message at the foot of the document — payment details, thanks, terms.
- *
- * THREE TIMES `paymentTerms`, and the ratio is the argument. What actually goes
- * here is a bank block: account name, bank, account number, IBAN, SWIFT, an
- * intermediary bank for an international transfer, a reference line, and a
- * sentence of thanks under it. That is structurally a party block — a handful
- * of labelled lines printed verbatim — so 600 puts it within a character of
- * `MAX_PARTY_LENGTH` (601), and a product that lets someone paste a 601-
- * character address has no reason to give the account details beside it less
- * room.
- *
- * It is not an essay, and the cap is where it is so it cannot become one. A
- * `<textarea>` at the bottom of a document is exactly where a user would paste
- * a contract, and this field is the largest single term in the per-row byte
- * estimate `INVOICE_NUMBER_SCAN_LIMIT` divides ~3.0 MB by — see convex/lib/
- * scan.ts, where the division is redone with this term in it. That division has
- * ~300 B a row left over, so this bound could reach about 900 before
- * `INVOICE_NUMBER_SCAN_LIMIT` has to move; past that, MOVE IT rather than
- * restate the estimate.
- */
-export const MAX_NOTES_LENGTH = 600
-
-/**
- * WHICH FIELD A REFUSAL IS ABOUT, as data rather than as a sentence.
- *
- * The editor saves the whole head in one mutation, so a refusal has to be shown
- * beside the field that caused it or the user is left rereading eight controls
- * for the one that is too long. The message already NAMES the field in prose
- * ("Keep the pay-to block under 601 characters"), and a client matching on that
- * prose is a client that breaks the day somebody improves the wording — so the
- * name travels in `meta.field` instead, spelled exactly as the argument is.
- *
- * `meta` is already part of `TraceErrorData` (convex/lib/codes.ts) and is
- * additive: a caller that ignores it still gets the same code and the same
- * sentence it always did.
- */
-type HeadField =
-  | "billedTo"
-  | "payTo"
-  | "currency"
-  | "issuedAt"
-  | "dueAt"
-  | "purchaseOrder"
-  | "paymentTerms"
-  | "notes"
-
-/**
- * Trimmed at the ends, NEVER collapsed inside.
- *
- * The same rule and the same reason as `checkAddress` in clients.ts: a party
- * block is rendered verbatim on a document, so its internal newlines are the
- * block's shape, and a normaliser that tidied them would print a three-line
- * address on one line.
- *
- * `field` is absent for the two provenance strings `createFromRange` bounds:
- * those arrive from /reports' filter bar rather than from a control on the
- * document, so there is nothing on the editor for a refusal to point at.
- */
-function checkText(raw: string, what: string, max: number, field?: HeadField): string {
-  const trimmed = raw.trim()
-  if (trimmed.length > max) {
-    traceError(
-      "TOO_LONG",
-      `Keep the ${what} under ${max} characters.`,
-      field === undefined ? undefined : { field }
-    )
-  }
-  return trimmed
-}
-
-/**
- * A date, as a real instant.
- *
- * `v.number()` round-trips NaN and Infinity — the same fact `INVALID_RATE`
- * exists for. One NaN `issuedAt` sorts nowhere in `by_user_issued`, renders as
- * "Invalid Date" on the document, and is invisible until a client is holding
- * the PDF.
- */
-function checkInstant(value: number, what: string, field: HeadField): number {
-  if (!Number.isFinite(value)) {
-    traceError("INVALID_DATE", `That ${what} is not a date I can read.`, { field })
-  }
-  return value
-}
-
-/**
- * The fields a human types into the document head.
- *
- * Every one is optional, so this stays a PATCH: the editor sends only what
- * changed since its last Save, and a field absent from the args is a field
- * nobody touched rather than a field being cleared.
- *
- * WHAT IS DELIBERATELY ABSENT, since a patch validator is a list of permissions:
- *
- *   - `number`. Making it editable means enforcing per-user uniqueness on
- *     write, which is the bounded full-table scan `createFromRange` performs
- *     for exactly that reason (see `INVOICE_NUMBER_SCAN_LIMIT`). That decision
- *     belongs beside that scan, not smuggled into a field patch — and an
- *     invoice renumbered as a side effect of editing its address is two
- *     documents claiming one id.
- *   - `taxes`, and every line. Task 6.
- *   - `sourceFromMs`, `sourceToMs`, `unratedMsAtCreation`, `clientId`,
- *     `clientKey`. These record where the figures came from. THE SNAPSHOT RULE
- *     is the load-bearing decision of this whole feature — an invoice holds
- *     values, not references — and provenance is the half of it that must not
- *     move even when the values do.
- *
- * NOTHING HERE REFUSES ON STATE. There is no draft/issued/paid workflow and no
- * freeze: an invoice in this product is a document you edit and export, and it
- * stays editable for as long as it exists. A field is refused for what it says
- * — too long, not a currency, not a date — never for when it was said.
- *
- * `billedTo`, `payTo` and `currency` ARE snapshot fields and ARE editable, and
- * that is not a contradiction: the snapshot rule says this document never
- * re-reads the client, not that its own text cannot be corrected. Editing them
- * writes THIS row and never touches the `clients` row it was copied from —
- * correcting a typo on an invoice must not rename a client, and renaming a
- * client must not rewrite an invoice.
- */
-const updateArgs = {
-  invoiceId: v.id("invoices"),
-  billedTo: v.optional(v.string()),
-  payTo: v.optional(v.string()),
-  currency: v.optional(v.string()),
-  issuedAt: v.optional(v.number()),
-  dueAt: v.optional(v.number()),
-  purchaseOrder: v.optional(v.string()),
-  paymentTerms: v.optional(v.string()),
-  notes: v.optional(v.string()),
-}
-
-type UpdateArgs = {
-  invoiceId: Id<"invoices">
-  billedTo?: string
-  payTo?: string
-  currency?: string
-  issuedAt?: number
-  dueAt?: number
-  purchaseOrder?: string
-  paymentTerms?: string
-  notes?: string
-}
-
-async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
-  const invoice = await getOwned(ctx, userId, "invoices", args.invoiceId)
-
-  const patch: Partial<Doc<"invoices">> = { updatedAt: Date.now() }
-
-  if (args.billedTo !== undefined) {
-    patch.billedTo = checkText(args.billedTo, "billed-to block", MAX_PARTY_LENGTH, "billedTo")
-  }
-  if (args.payTo !== undefined) {
-    patch.payTo = checkText(args.payTo, "pay-to block", MAX_PARTY_LENGTH, "payTo")
-  }
-  if (args.currency !== undefined) {
-    if (!isValidCurrency(args.currency)) {
-      // The same refusal `settings.update` makes, in the same words: the list
-      // is `money.SUPPORTED_CURRENCIES`, which is the runtime's own codes
-      // narrowed to the ones whose minor unit really is a hundredth.
-      traceError(
-        "INVALID_CURRENCY",
-        `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`,
-        { field: "currency" }
-      )
-    }
-    patch.currency = args.currency
-  }
-  /*
-   * The two dates are checked independently and NOT against each other.
-   *
-   * A due date before an issue date is odd, and refusing it here would still be
-   * wrong. This is a PATCH: a caller may send either date alone, so an ordering
-   * rule would compare what was sent against what happens to be stored — and
-   * moving an invoice a month forward would refuse or succeed depending on which
-   * of the two the user got to first. (That used to be a per-blur autosave and
-   * is now a Save button sending both together, which changes nothing about the
-   * argument: the validator still cannot assume it was handed a pair.)
-   *
-   * Not refusing is not the same as saying nothing, and for a while it was.
-   * `InvoiceMeta` draws a non-blocking advisory under the due date whenever it
-   * precedes the issue date — recomputed every render from the values on screen,
-   * so it is order-independent in the way a write-time rule cannot be, and free
-   * server-side. That is what makes the claim below true: the mistake IS visible
-   * on the document, because something on the document names it.
-   */
-  if (args.issuedAt !== undefined) {
-    patch.issuedAt = checkInstant(args.issuedAt, "invoice date", "issuedAt")
-  }
-  if (args.dueAt !== undefined) {
-    patch.dueAt = checkInstant(args.dueAt, "due date", "dueAt")
-  }
-  /*
-   * Emptied means ABSENT, not "". Both optional fields print as "—" when unset,
-   * and storing an empty string would be a second way to say the same thing —
-   * `patch` with `undefined` removes the column, which is what "clear it"
-   * means here. (`clientId` uses an explicit `null` for the same idea because
-   * its schema type includes null; these two are plain `v.optional`.)
-   */
-  if (args.purchaseOrder !== undefined) {
-    const po = checkText(
-      args.purchaseOrder,
-      "purchase order",
-      MAX_PURCHASE_ORDER_LENGTH,
-      "purchaseOrder"
-    )
-    patch.purchaseOrder = po === "" ? undefined : po
-  }
-  if (args.paymentTerms !== undefined) {
-    const terms = checkText(
-      args.paymentTerms,
-      "payment terms",
-      MAX_PAYMENT_TERMS_LENGTH,
-      "paymentTerms"
-    )
-    patch.paymentTerms = terms === "" ? undefined : terms
-  }
-  /*
-   * Trimmed at the ends and NEVER collapsed inside, by the same `checkText` the
-   * party blocks use and for the same reason: this prints verbatim at the foot
-   * of the document, so its internal newlines are the bank block's shape. A
-   * normaliser that tidied them would print an account, an IBAN and a SWIFT
-   * code as one run-on line on a document a client has to read a number off.
-   */
-  if (args.notes !== undefined) {
-    const notes = checkText(args.notes, "notes", MAX_NOTES_LENGTH, "notes")
-    patch.notes = notes === "" ? undefined : notes
-  }
-
-  await ctx.db.patch(invoice._id, patch)
-  return null
-}
-
-export const update = mutation({
-  args: updateArgs,
-  returns: v.null(),
-  handler: async (ctx, args) => await updateImpl(ctx, await requireUserId(ctx), args),
-})
-
-export const updateAs = internalMutation({
-  args: { ...updateArgs, userId: v.string() },
-  returns: v.null(),
-  handler: async (ctx, { userId, ...args }) => await updateImpl(ctx, userId, args),
 })

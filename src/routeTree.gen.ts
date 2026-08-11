@@ -22,7 +22,6 @@ import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
 import { Route as AuthedTimerRouteImport } from './routes/_authed/timer'
 import { Route as AuthedInvoicesInvoiceIdRouteImport } from './routes/_authed/invoices_.$invoiceId'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
-import { Route as AuthedInvoicesInvoiceIdEditRouteImport } from './routes/_authed/invoices_.$invoiceId_.edit'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -88,12 +87,6 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthedInvoicesInvoiceIdEditRoute =
-  AuthedInvoicesInvoiceIdEditRouteImport.update({
-    id: '/invoices_/$invoiceId_/edit',
-    path: '/invoices/$invoiceId/edit',
-    getParentRoute: () => AuthedRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -108,7 +101,6 @@ export interface FileRoutesByFullPath {
   '/timer': typeof AuthedTimerRoute
   '/invoices/$invoiceId': typeof AuthedInvoicesInvoiceIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/invoices/$invoiceId/edit': typeof AuthedInvoicesInvoiceIdEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -123,7 +115,6 @@ export interface FileRoutesByTo {
   '/timer': typeof AuthedTimerRoute
   '/invoices/$invoiceId': typeof AuthedInvoicesInvoiceIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/invoices/$invoiceId/edit': typeof AuthedInvoicesInvoiceIdEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -140,7 +131,6 @@ export interface FileRoutesById {
   '/_authed/timer': typeof AuthedTimerRoute
   '/_authed/invoices_/$invoiceId': typeof AuthedInvoicesInvoiceIdRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
-  '/_authed/invoices_/$invoiceId_/edit': typeof AuthedInvoicesInvoiceIdEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -157,7 +147,6 @@ export interface FileRouteTypes {
     | '/timer'
     | '/invoices/$invoiceId'
     | '/api/auth/$'
-    | '/invoices/$invoiceId/edit'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -172,7 +161,6 @@ export interface FileRouteTypes {
     | '/timer'
     | '/invoices/$invoiceId'
     | '/api/auth/$'
-    | '/invoices/$invoiceId/edit'
   id:
     | '__root__'
     | '/'
@@ -188,7 +176,6 @@ export interface FileRouteTypes {
     | '/_authed/timer'
     | '/_authed/invoices_/$invoiceId'
     | '/api/auth/$'
-    | '/_authed/invoices_/$invoiceId_/edit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -294,13 +281,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authed/invoices_/$invoiceId_/edit': {
-      id: '/_authed/invoices_/$invoiceId_/edit'
-      path: '/invoices/$invoiceId/edit'
-      fullPath: '/invoices/$invoiceId/edit'
-      preLoaderRoute: typeof AuthedInvoicesInvoiceIdEditRouteImport
-      parentRoute: typeof AuthedRoute
-    }
   }
 }
 
@@ -311,7 +291,6 @@ interface AuthedRouteChildren {
   AuthedSettingsRoute: typeof AuthedSettingsRoute
   AuthedTimerRoute: typeof AuthedTimerRoute
   AuthedInvoicesInvoiceIdRoute: typeof AuthedInvoicesInvoiceIdRoute
-  AuthedInvoicesInvoiceIdEditRoute: typeof AuthedInvoicesInvoiceIdEditRoute
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
@@ -321,7 +300,6 @@ const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedSettingsRoute: AuthedSettingsRoute,
   AuthedTimerRoute: AuthedTimerRoute,
   AuthedInvoicesInvoiceIdRoute: AuthedInvoicesInvoiceIdRoute,
-  AuthedInvoicesInvoiceIdEditRoute: AuthedInvoicesInvoiceIdEditRoute,
 }
 
 const AuthedRouteWithChildren =
