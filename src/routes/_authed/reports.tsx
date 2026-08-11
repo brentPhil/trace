@@ -12,6 +12,7 @@ import { SummaryPanel } from "@/components/reports/summary-panel"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
+import { useHeightVar } from "@/hooks/use-height-var"
 import { groupByDay } from "@/lib/group-entries"
 import {
   defaultFilters,
@@ -134,6 +135,9 @@ export function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects } = useClassifiers()
 
+  // The header block's height, published on this page's root — see the JSX.
+  const { hostRef, measuredRef } = useHeightVar("--filter-band-height")
+
   const today = dayOf(Date.now(), settings.timezone)
   const [filters, setFilters] = useState<Filters>(() =>
     defaultFilters(today, settings.weekStartDay)
@@ -206,51 +210,69 @@ export function Reports() {
   )
 
   return (
-    <div className="flex flex-col">
-      {/* `w-full px-4`, the same pair the rows below it take, so the filter
-          row and everything under it share their left and right edges. */}
-      <div className="flex w-full flex-col gap-3 px-4 pt-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <FilterBar
-              filters={filters}
-              projects={projects}
-              today={today}
-              weekStartDay={settings.weekStartDay}
-              onChange={setFilters}
-            />
-          </div>
-          {/*
-            TWO CONTROLS, side by side, in that order: `[ Create invoice ]
-            [ Export ▾ ]`. The spec draws them this way and argues why they are
-            not one menu — see `CreateInvoiceButton`. `items-start` because the
-            invoice control grows a refusal underneath itself and the Export
-            trigger must not follow it down.
-          */}
-          <div className="flex shrink-0 items-start gap-2">
+    /* The same two-part sticky stack /timer uses, for the same reason and at
+       the same cost: `--log-sticky-top` puts the Detailed tab's day headers
+       under this page's header instead of under the top of the viewport. */
+    <div
+      ref={hostRef}
+      className="flex flex-col [--log-sticky-top:calc(var(--shell-sticky-top)_+_var(--filter-band-height))]"
+    >
+      {/*
+        The range, the filter over it and the two things you do with the
+        result stay on screen while the summary or the rows scroll. A date
+        range you cannot see is a date range you have to scroll back up to
+        check before believing any figure under it.
+
+        No bottom border, deliberately: the tab strip immediately below draws
+        one of its own, and two hairlines 12px apart on an unscrolled page is
+        clutter bought to solve a problem that only exists mid-scroll.
+      */}
+      <div ref={measuredRef} className="sticky top-(--shell-sticky-top) z-20 bg-ground">
+        {/* `w-full px-4`, the same pair the rows below it take, so the filter
+            row and everything under it share their left and right edges. */}
+        <div className="flex w-full flex-col gap-3 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <FilterBar
+                filters={filters}
+                projects={projects}
+                today={today}
+                weekStartDay={settings.weekStartDay}
+                onChange={setFilters}
+              />
+            </div>
             {/*
-             * THE RANGE AND THE FILTER OVER IT — what this page is showing, not
-             * merely when it is showing it. Read through the same
-             * `entryFilterOf` that `breakdownArgs` above builds the query key
-             * from, so /invoices/new previews and then bills the very filter
-             * the figures beside this control were drawn with.
-             *
-             * `billableOnly` is left behind on purpose, and `invoiceSearchOf`
-             * has no slot for it: `createFromRange` hard-codes it true, so a
-             * link able to say otherwise could only ever weaken a rule the
-             * document depends on.
-             */}
-            <CreateInvoiceLink
-              disabledReason={invoiceReason}
-              search={invoiceSearchOf(range, entryFilterOf(filters))}
-            />
-            <ExportMenu
-              breakdown={breakdown ?? EMPTY_BREAKDOWN}
-              from={filters.from}
-              to={filters.to}
-              currency={settings.currency}
-              disabledReason={exportReason}
-            />
+              TWO CONTROLS, side by side, in that order: `[ Create invoice ]
+              [ Export ▾ ]`. The spec draws them this way and argues why they are
+              not one menu — see `CreateInvoiceButton`. `items-start` because the
+              invoice control grows a refusal underneath itself and the Export
+              trigger must not follow it down.
+            */}
+            <div className="flex shrink-0 items-start gap-2">
+              {/*
+               * THE RANGE AND THE FILTER OVER IT — what this page is showing, not
+               * merely when it is showing it. Read through the same
+               * `entryFilterOf` that `breakdownArgs` above builds the query key
+               * from, so /invoices/new previews and then bills the very filter
+               * the figures beside this control were drawn with.
+               *
+               * `billableOnly` is left behind on purpose, and `invoiceSearchOf`
+               * has no slot for it: `createFromRange` hard-codes it true, so a
+               * link able to say otherwise could only ever weaken a rule the
+               * document depends on.
+               */}
+              <CreateInvoiceLink
+                disabledReason={invoiceReason}
+                search={invoiceSearchOf(range, entryFilterOf(filters))}
+              />
+              <ExportMenu
+                breakdown={breakdown ?? EMPTY_BREAKDOWN}
+                from={filters.from}
+                to={filters.to}
+                currency={settings.currency}
+                disabledReason={exportReason}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -270,7 +292,7 @@ export function Reports() {
         */}
         <TabsList
           variant="line"
-          className="mx-4 mt-3 h-auto border-b border-edge-soft pb-1.5"
+          className="mx-4 h-auto border-b border-edge-soft pb-1.5"
         >
           {VIEWS.map((item) => (
             <TabsTrigger key={item.value} value={item.value} className="rounded-md px-3">

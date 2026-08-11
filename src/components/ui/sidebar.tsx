@@ -30,7 +30,16 @@ const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-const SIDEBAR_WIDTH_ICON = "3rem"
+/*
+ * 3.5rem, not the 3rem this shipped with.
+ *
+ * A 48px rail cannot hold a 44px target and a gutter, so the collapsed icons
+ * ran flush to the rail's own edge with a dead strip of Surface between them
+ * and the page. 56px buys a 44x44 button (the touch-target floor) with 6px of
+ * air on each side — see `AppSidebar`, which is the only caller and where the
+ * matching gutter is set.
+ */
+const SIDEBAR_WIDTH_ICON = "3.5rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContextProps = {
@@ -480,8 +489,25 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
   )
 }
 
+/*
+ * COLLAPSED SIZING, changed from upstream's `size-8! p-2!`.
+ *
+ * Three things, all forced by the icon rail being a target rather than a
+ * decoration:
+ *   - `size-11!` (44x44) instead of `size-8!` (32x32), which is the touch
+ *     target floor. It fits because SIDEBAR_WIDTH_ICON above grew to 56px.
+ *   - `justify-center`, so the icon sits on the rail's centre line instead of
+ *     against its left edge. Upstream leaves it start-aligned and lets
+ *     `overflow-hidden` clip the label, which parks every icon 8px left of
+ *     centre and leaves a dead strip against the page.
+ *   - the label goes `sr-only` rather than being clipped, which is what makes
+ *     `justify-center` land: an out-of-flow label leaves the icon as the only
+ *     thing to centre. It also KEEPS the accessible name, which clipping only
+ *     preserved by accident and `display:none` would have destroyed — the
+ *     tooltip is a sighted-user affordance, not a substitute for a name.
+ */
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-11! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:[&>span:last-child]:sr-only hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -492,7 +518,9 @@ const sidebarMenuButtonVariants = cva(
       size: {
         default: "h-9 text-sm",
         sm: "h-8 text-xs",
-        lg: "h-14 px-3 text-sm group-data-[collapsible=icon]:p-0!",
+        // The collapsed `p-0!` this used to repeat now lives in the base above,
+        // where it applies to every size rather than only this one.
+        lg: "h-12 px-3 text-sm",
       },
     },
     defaultVariants: {

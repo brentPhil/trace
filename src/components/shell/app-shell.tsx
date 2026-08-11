@@ -1,6 +1,7 @@
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppSidebar } from "@/components/shell/app-sidebar"
+import { useHeightVar } from "@/hooks/use-height-var"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 
@@ -18,16 +19,26 @@ import type { ReactNode } from "react"
 export function AppShell({
   children,
   email,
+  name,
   onSignOut,
   sidebarDefaultOpen,
   timer,
 }: {
   children: ReactNode
   email?: string
+  name?: string
   onSignOut: () => void
   sidebarDefaultOpen: boolean
   timer: ReactNode
 }) {
+  /*
+   * The bar's own height, published onto `<main>` so the PAGE below can stick
+   * underneath it without either file naming a pixel. `<main>` is the nearest
+   * element that is an ancestor of both the bar and the outlet — custom
+   * properties inherit down, not sideways.
+   */
+  const { hostRef, measuredRef } = useHeightVar<HTMLElement>("--timer-bar-height")
+
   return (
     // Sets `delay={0}` for every Tooltip in the tree below — the icon-rail
     // tooltips in AppSidebar (rendered via SidebarMenuButton's `tooltip` prop)
@@ -35,9 +46,27 @@ export function AppShell({
     // just with Base UI's default (non-zero) open delay.
     <TooltipProvider>
       <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-        <AppSidebar email={email} onSignOut={onSignOut} />
+        <AppSidebar email={email} name={name} onSignOut={onSignOut} />
 
-        <SidebarInset className="min-w-0">
+        <SidebarInset
+          ref={hostRef}
+          className={cn(
+            "min-w-0",
+            /*
+              WHAT THE PAGE BELOW STICKS UNDER, expressed once, here.
+
+              Below `md` the bar is pinned to the BOTTOM (see the comment on
+              the bar itself), so it contributes NOTHING to a top offset and
+              this is flat zero — a page's own sticky band then sticks to the
+              top of the viewport, which is the whole of the screen it is not
+              occupying. At `md` and up the bar is sticky at the top and its
+              measured height IS the offset. Keeping the breakpoint in CSS
+              rather than in the ResizeObserver means the mobile decision
+              cannot be broken by a measurement.
+            */
+            "[--shell-sticky-top:0px] md:[--shell-sticky-top:var(--timer-bar-height)]"
+          )}
+        >
           {/*
             Below `md` the bar is pinned to the BOTTOM of the viewport rather
             than sitting at the top of the document.
@@ -50,14 +79,25 @@ export function AppShell({
 
             Toggl has publicly declined to fix its mobile web app. This is the
             surface the incumbent abandoned, and it costs one breakpoint.
+
+            AT `md` AND UP it becomes sticky at the top instead of static —
+            same reasoning, opposite edge. The bar is the one control that
+            belongs to no page, and the log is what scrolls; pinning it means
+            a timer can be started or read from anywhere in a two-thousand-row
+            log. It keeps `bg-ground` there (the base class no longer drops it
+            at `md`) because a transparent sticky element is a window onto the
+            rows sliding under it. No bottom border: on /timer the band
+            directly beneath supplies that hairline, and drawing both would be
+            a 2px rule made of two different elements.
           */}
           <div
+            ref={measuredRef}
             className={cn(
               "fixed inset-x-0 bottom-0 z-30 flex items-center gap-2",
               "border-t border-edge-soft bg-ground px-3 pt-2",
               "pb-[max(0.5rem,env(safe-area-inset-bottom))]",
-              "md:static md:z-auto md:border-t-0 md:bg-transparent",
-              "md:gap-3 md:px-4 md:pt-3 md:pb-0"
+              "md:sticky md:inset-x-auto md:top-0 md:bottom-auto md:border-t-0",
+              "md:gap-3 md:px-4 md:pt-3 md:pb-3"
             )}
           >
             {/* The hamburger. Hidden on desktop, where the rail is always
@@ -100,19 +140,23 @@ export function AppShell({
 
           {/*
             Reserves the fixed bar's height so the last row of a log can
-            always be scrolled clear of it. Sized generously — the timer bar
-            itself grows a second line while recording — because a too-small
-            spacer hides the newest entry, which is the one being worked on.
+            always be scrolled clear of it.
 
-            KNOWN LIMITATION: `timer` also carries `RunawayBanner`, which adds
-            a further line to this same fixed container once a timer has run
-            past its threshold. That combination (recording AND overrunning)
-            is not accounted for here, and on a narrow viewport the banner can
-            overlap the last log row. A fixed spacer cannot chase a
-            conditionally-rendered banner's height without a ResizeObserver,
-            which this file does not have.
+            The 6.5rem is now a FLOOR rather than the whole answer. It was
+            noted here as a known limitation that a fixed spacer cannot chase
+            `RunawayBanner`, which adds a further line to the same fixed
+            container once a timer overruns — so recording AND overrunning
+            could put the banner over the last log row. This file now measures
+            that container for the sticky offset above, so the spacer takes
+            whichever is larger: the number keeps the spacer at its present
+            height through first paint (no jump from zero, which is what a
+            bare `var()` would give), and the measurement takes over the
+            moment the bar is taller than it.
           */}
-          <div aria-hidden="true" className="h-[6.5rem] shrink-0 md:hidden" />
+          <div
+            aria-hidden="true"
+            className="h-[max(6.5rem,var(--timer-bar-height))] shrink-0 md:hidden"
+          />
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

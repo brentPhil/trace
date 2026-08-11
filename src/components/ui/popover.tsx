@@ -16,16 +16,28 @@ const Close = BasePopover.Close
 function Popup({
   className,
   align = "start",
+  // `side` is passed through rather than left at Base UI's default because a
+  // popover anchored to the SIDEBAR has to open sideways: the rail is 56px
+  // wide when collapsed and pinned to the bottom of the viewport, where
+  // "below" is nowhere. The positioner still flips on its own when the chosen
+  // side has no room.
+  side = "bottom",
   sideOffset = 6,
   children,
   ...props
 }: ComponentProps<typeof BasePopover.Popup> & {
   align?: "start" | "center" | "end"
+  side?: "top" | "right" | "bottom" | "left"
   sideOffset?: number
 }) {
   return (
     <BasePopover.Portal>
-      <BasePopover.Positioner align={align} sideOffset={sideOffset} className="z-50">
+      <BasePopover.Positioner
+        align={align}
+        side={side}
+        sideOffset={sideOffset}
+        className="z-50"
+      >
         <BasePopover.Popup
           className={cn(
             "flex max-h-[min(22rem,60svh)] w-[17rem] flex-col overflow-hidden",

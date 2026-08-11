@@ -12,6 +12,7 @@ import { FilterControls } from "@/components/history/filter-controls"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
+import { useHeightVar } from "@/hooks/use-height-var"
 import { groupByDay } from "@/lib/group-entries"
 import { hasClientSideFilter, matches } from "@/lib/history-filters"
 import { periodTotals } from "@/lib/period-totals"
@@ -47,6 +48,10 @@ export const Route = createFileRoute("/_authed/timer")({
 
 export function Timer() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
+
+  // The height of the totals + filter block, published on this page's root so
+  // the day headers further down can stick beneath it. See the JSX below.
+  const { hostRef, measuredRef } = useHeightVar("--filter-band-height")
 
   // The range is pinned to the current second, not to Date.now() at render, so
   // the query key is stable across re-renders and the subscription is not torn
@@ -154,38 +159,63 @@ export function Timer() {
   const totals = periodTotals(weekEntries, settings.timezone, today, nowMs)
 
   return (
-    <div className="flex flex-col">
+    /*
+      `--log-sticky-top` is where the DAY HEADERS stick: below the shell's
+      timer bar AND below this page's own band, without either number being
+      written down. Both halves are measured (see use-height-var.ts); the sum
+      is composed here in CSS so nothing has to re-render to keep it true.
+      `_+_` is Tailwind's escape for the spaces `calc` requires.
+    */
+    <div
+      ref={hostRef}
+      className="flex flex-col [--log-sticky-top:calc(var(--shell-sticky-top)_+_var(--filter-band-height))]"
+    >
       {/*
-        `justify-between` used to put this cluster hard left and "+ Add
-        entry" at the far right — opposite corners of a 1344px+ row, for a
-        button whose entire reason to exist is "I forgot to start the timer",
-        prompted BY the numbers to its left. Adjacent instead, so the control
-        sits next to the totals it relates to however wide the page gets.
-      */}
-      <div className="flex w-full items-center gap-4 px-4">
-        <TotalsRow
-          className="py-3"
-          todayMs={totals.todayMs}
-          weekMs={totals.weekMs}
-          billableMs={totals.billableMs}
-          display={settings.durationDisplay}
-        />
-        <ManualEntryDialog
-          today={today}
-          timeZone={settings.timezone}
-          onCreate={editMutations.create}
-        />
-      </div>
+        THE TOP OF THIS PAGE STAYS PUT. What the timer bar above it is for —
+        the numbers you check and the filter you type into — is useless once
+        it has scrolled past the log it describes, and this is the one page
+        whose whole body is a scroll.
 
-      {/*
-        The band is full-bleed — it is a strip of the page, like a day header —
-        and its CONTROLS take the same `px-4` gutter as everything else, so the
-        search box starts on the same pixel as the entry titles below it and
-        the totals above it. It was the one thing on this page that did neither.
+        It sticks at `--shell-sticky-top`, which is the bar's measured height
+        on desktop and flat zero below `md`, where the bar is pinned to the
+        bottom instead and the top of the viewport is free. `bg-ground` because
+        rows pass underneath; `z-20` sits above the day headers' `z-10` and
+        below the bar's `z-30`, which is the same order as their positions on
+        screen.
       */}
-      <div className="border-y border-edge-soft bg-surface py-2.5">
-        <div className="w-full px-4">
-          <FilterControls filters={filters} projects={projects} onChange={setFilters} />
+      <div ref={measuredRef} className="sticky top-(--shell-sticky-top) z-20 bg-ground">
+        {/*
+          `justify-between` used to put this cluster hard left and "+ Add
+          entry" at the far right — opposite corners of a 1344px+ row, for a
+          button whose entire reason to exist is "I forgot to start the timer",
+          prompted BY the numbers to its left. Adjacent instead, so the control
+          sits next to the totals it relates to however wide the page gets.
+        */}
+        <div className="flex w-full items-center gap-4 px-4">
+          <TotalsRow
+            className="py-3"
+            todayMs={totals.todayMs}
+            weekMs={totals.weekMs}
+            billableMs={totals.billableMs}
+            display={settings.durationDisplay}
+          />
+          <ManualEntryDialog
+            today={today}
+            timeZone={settings.timezone}
+            onCreate={editMutations.create}
+          />
+        </div>
+
+        {/*
+          The band is full-bleed — it is a strip of the page, like a day header —
+          and its CONTROLS take the same `px-4` gutter as everything else, so the
+          search box starts on the same pixel as the entry titles below it and
+          the totals above it. It was the one thing on this page that did neither.
+        */}
+        <div className="border-y border-edge-soft bg-surface py-2.5">
+          <div className="w-full px-4">
+            <FilterControls filters={filters} projects={projects} onChange={setFilters} />
+          </div>
         </div>
       </div>
 

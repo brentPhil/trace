@@ -6,11 +6,18 @@ import { renderWithRouter } from "@/test-utils/router"
 
 afterEach(cleanup)
 
-function mount(path: string, onSignOut = vi.fn()) {
+function mount(
+  path: string,
+  {
+    email = "a@b.com",
+    name,
+    onSignOut = vi.fn(),
+  }: { email?: string; name?: string; onSignOut?: () => void } = {}
+) {
   render(
     renderWithRouter(
       <SidebarProvider defaultOpen>
-        <AppSidebar email="a@b.com" onSignOut={onSignOut} />
+        <AppSidebar email={email} name={name} onSignOut={onSignOut} />
       </SidebarProvider>,
       { path }
     )
@@ -53,16 +60,42 @@ describe("AppSidebar", () => {
    * Router's `Transitioner` resolves the initial match in a `useLayoutEffect`
    * that calls the async `router.load()`, so content appears only after a
    * tick. The "aria-current" test above already accounts for this with
-   * `waitFor`; these two need the same accommodation.
+   * `waitFor`; these need the same accommodation.
    */
-  it("shows the signed-in email", async () => {
+  it("names the profile trigger after the signed-in account", async () => {
     mount("/timer")
-    expect(await screen.findByText("a@b.com")).toBeTruthy()
+    expect(await screen.findByRole("button", { name: /a@b\.com/ })).toBeTruthy()
+  })
+
+  /**
+   * THE ACCESSIBLE NAME IS THE VISIBLE TEXT, in both rail states. The footer
+   * this replaces swapped its label for a "⎋" glyph with `hidden`/`inline` and
+   * needed an `aria-label` to repair the collapsed name; the trigger now sends
+   * the same text `sr-only` instead, so there is no second string to keep in
+   * sync. A display name, when there is one, is what the trigger says — the
+   * email is then the subtitle rather than the headline.
+   */
+  it("prefers a display name over the email on the trigger", async () => {
+    mount("/timer", { name: "Brent Ortega" })
+    expect(await screen.findByRole("button", { name: /Brent Ortega/ })).toBeTruthy()
+  })
+
+  it("opens a profile popover holding the account's identity and Sign out", async () => {
+    mount("/timer", { name: "Brent Ortega" })
+    fireEvent.click(await screen.findByRole("button", { name: /Brent Ortega/ }))
+
+    const signOut = await screen.findByRole("button", { name: "Sign out" })
+    expect(signOut).toBeTruthy()
+    // The identity is the popover's reason to exist, so it has to be IN the
+    // popover and not merely on the trigger that opened it.
+    const popup = signOut.closest('[role="dialog"]')
+    expect(popup?.textContent).toContain("a@b.com")
   })
 
   it("calls onSignOut rather than signing out itself", async () => {
     const onSignOut = mount("/timer")
-    fireEvent.click(await screen.findByRole("button", { name: /sign out/i }))
+    fireEvent.click(await screen.findByRole("button", { name: /a@b\.com/ }))
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out" }))
     expect(onSignOut).toHaveBeenCalledTimes(1)
   })
 })

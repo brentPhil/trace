@@ -92,6 +92,26 @@
 
   --radius: 0.45rem;
 
+  /* THE STICKY STACK, measured at runtime — see src/hooks/use-height-var.ts.
+   *
+   * `--timer-bar-height` and `--filter-band-height` are the two MEASUREMENTS
+   * (written by a ResizeObserver); `--shell-sticky-top` and `--log-sticky-top`
+   * are derived from them by classes on the shell's `<main>` and on the page
+   * root, so the composition stays in CSS and the media query stays where a
+   * media query belongs.
+   *
+   * Declared here so `top: var(--log-sticky-top)` is ALWAYS a valid length. A
+   * custom property that fails substitution computes to the guaranteed-invalid
+   * value, which makes `top` fall back to `auto` — a sticky header that
+   * silently stops sticking, with nothing thrown and nothing logged. Zero is
+   * also the honest pre-measurement value: every page opens at scroll 0, where
+   * a sticky offset has no effect at all, so nothing moves when the real
+   * numbers arrive a frame later. */
+  --timer-bar-height: 0px;
+  --filter-band-height: 0px;
+  --shell-sticky-top: 0px;
+  --log-sticky-top: 0px;
+
   /* THERE IS NO PAGE MEASURE. Every page takes the full width.
    *
    * The log surfaces — the timer bar, /timer's totals and filter band, the day

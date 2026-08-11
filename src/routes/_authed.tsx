@@ -133,6 +133,10 @@ function AuthedLayout() {
   return (
     <AppShell
       email={user.email}
+      // Better Auth stores a display name; it is empty for an account created
+      // with an email and a password and never edited, so `undefined` rather
+      // than `""` is what the sidebar has to branch on.
+      name={user.name === "" ? undefined : user.name}
       onSignOut={() => signOutAndLeave()}
       sidebarDefaultOpen={sidebarOpen}
       timer={

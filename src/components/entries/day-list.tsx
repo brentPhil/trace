@@ -59,9 +59,18 @@ export function DayList({
     <div className="flex flex-col">
       {groups.map((group) => (
         <section key={group.day} aria-label={group.label} className="flex flex-col">
+          {/*
+            `top-(--log-sticky-top)`, not `top-0`. The pages that own a sticky
+            band of their own set that variable to the height of everything
+            above them (see src/hooks/use-height-var.ts); it defaults to `0px`
+            in styles.css, which is exactly the old behaviour, so a log
+            rendered anywhere else still sticks to the top of the viewport.
+            The variable must always resolve to a length — an unset one makes
+            `top` compute to `auto` and the header quietly stops sticking.
+          */}
           <header
             className={cn(
-              "sticky top-0 z-10 border-b border-edge-soft bg-ground/95",
+              "sticky top-(--log-sticky-top) z-10 border-b border-edge-soft bg-ground/95",
               "py-2 backdrop-blur-sm"
             )}
           >
