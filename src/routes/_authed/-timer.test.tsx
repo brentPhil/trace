@@ -1,8 +1,9 @@
 import { useEffect } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Timer } from "@/routes/_authed/timer"
+import { Toast, ToastViewport } from "@/components/ui/toast"
 import {
   convexKey,
   paginatedKey,
@@ -12,9 +13,9 @@ import {
 import { expectFilterControlsInBand } from "@/test-utils/filter-band"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
-import { dayOf, dayWindow, weekWindow } from "@shared/day"
+import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
-import type { Id } from "../../../convex/_generated/dataModel"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as ConvexReactModuleType from "convex/react"
 import type * as UseClockModuleType from "@/hooks/use-clock"
 
@@ -40,8 +41,12 @@ type UseClockModule = typeof UseClockModuleType
  * generation from treating this as a route (see `-reports.test.tsx`).
  */
 
-const { logLifecycle } = vi.hoisted(() => ({
+const { logLifecycle, calendarStub } = vi.hoisted(() => ({
   logLifecycle: { mounts: 0, unmounts: 0 },
+  /** `silent` makes the stub below skip its `datesSet`, which is the one state
+   *  the real grid also passes through: mounted, and not yet having said what
+   *  it is drawing. */
+  calendarStub: { silent: false },
 }))
 
 /*
@@ -82,13 +87,58 @@ vi.mock("@/components/entries/entry-log", () => ({
 /*
  * The grid, stubbed. FullCalendar MEASURES element geometry and jsdom reports
  * every element as zero-sized, so a real one rendered here would be an
- * assertion about nothing — and it would never fire `datesSet`, which is what
- * the panel's own 14 tests exercise (`calendar-panel.test.tsx`). What this file
- * is for is the branch around it: which view is on screen, and what the filter
- * band does across the switch.
+ * assertion about nothing — and the panel's own suite already exercises what it
+ * draws (`calendar-panel.test.tsx`). What this file is for is the branch around
+ * it: which view is on screen, what the filter band does across the switch, and
+ * what a click on a block does.
+ *
+ * IT RENDERS WHAT IT IS GIVEN, which the previous `<div />` did not. Discarding
+ * every prop made four behaviours of this page unassertable, and one of them was
+ * silently unimplemented-able: deleting the filter from `calendarEntries`
+ * outright left all thirteen tests in this file green.
+ *
+ * It also REPORTS A RANGE, because the real grid does — the page's header label
+ * and its range query are both derived from what `datesSet` hands back, and a
+ * stub that never reported would leave the page permanently in its
+ * before-first-`datesSet` state. `weekWindow` is a faithful stand-in for the
+ * week view specifically: FullCalendar builds a week view from `firstDay` with
+ * nothing trimmed, so the two agree by construction. It is NOT a stand-in for
+ * the 5-day view, where `hiddenDays` trims the ends — that disagreement is the
+ * whole subject of `calendar-range-label.test.tsx`, which renders the real grid.
  */
 vi.mock("@/components/calendar/calendar-panel", () => ({
-  CalendarPanel: () => <div data-testid="calendar-panel" />,
+  CalendarPanel: ({
+    entries,
+    anchor,
+    timeZone,
+    weekStartDay,
+    onEntryClick,
+    onRangeChange,
+  }: {
+    entries: Array<Doc<"timeEntries">>
+    anchor: string
+    timeZone: string
+    weekStartDay: number
+    onEntryClick: (entryId: string) => void
+    onRangeChange: (range: { fromMs: number; toMs: number }) => void
+  }) => {
+    const { fromMs, toMs } = weekWindow(anchor, timeZone, weekStartDay)
+    useEffect(() => {
+      if (calendarStub.silent) return
+      onRangeChange({ fromMs, toMs })
+    }, [fromMs, toMs, onRangeChange])
+
+    return (
+      <div data-testid="calendar-panel">
+        <span data-testid="calendar-rows">{entries.length}</span>
+        {entries.map((entry) => (
+          <button key={entry._id} onClick={() => onEntryClick(entry._id)}>
+            {`block: ${entry.title}`}
+          </button>
+        ))}
+      </div>
+    )
+  },
 }))
 
 /* Reaches for `useConvexMutation`, which needs a real Convex client. Timer
@@ -112,6 +162,7 @@ beforeEach(() => {
   resetPaginatedStore()
   logLifecycle.mounts = 0
   logLifecycle.unmounts = 0
+  calendarStub.silent = false
   dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
 })
 
@@ -122,27 +173,85 @@ afterEach(() => {
 
 const today = dayOf(NOW, SETTINGS.timezone)
 const week = weekWindow(today, SETTINGS.timezone, SETTINGS.weekStartDay)
+const lastWeek = weekWindow(
+  addDays(today, -7),
+  SETTINGS.timezone,
+  SETTINGS.weekStartDay
+)
 const logRange = { fromMs: 0, toMs: dayWindow(today, SETTINGS.timezone).toMs }
 
-/** Everything Timer reads with `useSuspenseQuery`, so it never suspends. */
-function renderTimer() {
+/** The args shape both the week totals and the calendar's range query mint. */
+const rangeArgs = (w: { fromMs: number; toMs: number }) => ({
+  fromMs: w.fromMs,
+  toMs: w.toMs,
+})
+
+const PROJECT = {
+  _id: "p1" as unknown as Id<"projects">,
+  _creationTime: 0,
+  userId: "user-1",
+  name: "Acme",
+  archived: false,
+} as unknown as Doc<"projects">
+
+/**
+ * Everything Timer reads with `useSuspenseQuery`, so it never suspends — plus
+ * the two ranges the calendar can ask for.
+ *
+ * THIS WEEK'S RANGE IS ONE KEY, not two: `entries.listRange` over the current
+ * week is both the page's week totals and, once the grid reports, the
+ * calendar's own query. That is the product's behaviour (one subscription, not
+ * two) and it is why the "TotalsRow does not follow the range" test steps back
+ * a week before comparing — on this week they are legitimately the same rows.
+ */
+function renderTimer({
+  thisWeek = [],
+  previousWeek = [],
+  projects = [],
+}: {
+  thisWeek?: Array<Doc<"timeEntries">>
+  previousWeek?: Array<Doc<"timeEntries">>
+  projects?: Array<Doc<"projects">>
+} = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(convexKey(api.settings.get, {}), SETTINGS)
-  queryClient.setQueryData(convexKey(api.projects.list, {}), [])
+  queryClient.setQueryData(convexKey(api.projects.list, {}), projects)
   queryClient.setQueryData(convexKey(api.tags.list, {}), [])
   queryClient.setQueryData(
-    convexKey(api.entries.listRange, { fromMs: week.fromMs, toMs: week.toMs }),
-    []
+    convexKey(api.entries.listRange, rangeArgs(week)),
+    thisWeek
+  )
+  queryClient.setQueryData(
+    convexKey(api.entries.listRange, rangeArgs(lastWeek)),
+    previousWeek
   )
   return render(
     <QueryClientProvider client={queryClient}>
-      <Timer />
+      {/* Timer raises one toast of its own — a calendar block whose row is not
+          in the list. The provider is in the app shell in production; here it
+          has to be spelt, and the viewport with it or nothing renders. */}
+      <Toast.Provider>
+        <Timer />
+        <ToastViewport />
+      </Toast.Provider>
     </QueryClientProvider>
   )
 }
 
 const search = () =>
   screen.getByPlaceholderText<HTMLInputElement>("Search titles, notes and projects")
+
+/** How many rows the calendar was handed, straight off the stub. */
+const calendarRows = () => screen.getByTestId("calendar-rows").textContent
+
+/** "Today1:00:00" — the label and the figure it belongs to, as one string, so
+ *  an assertion cannot pick up an identical figure from somewhere else. */
+const pageTotal = (label: "Today" | "This week") =>
+  screen.getByText(label).parentElement?.textContent
+
+/** The calendar's own total. `getByText` matches on an element's DIRECT text
+ *  nodes, so this finds the wrapper and reads the figure inside it. */
+const rangeTotal = () => screen.getByText("Range total").textContent
 
 /*
  * THE HEADING THIS PAGE DID NOT HAVE.
@@ -249,7 +358,11 @@ describe("Timer — Calendar and List", () => {
     fireEvent.click(tab("Calendar"))
 
     // NOW is Wednesday 5 August 2026, weekStartDay 1 (Monday) — so the label
-    // opens on this week and one step back leaves it.
+    // opens on this week and one step back leaves it. Both labels are derived
+    // from the range the grid REPORTED, never from the anchor: see
+    // `visibleDaysOf`, and `calendar-range-label.test.tsx` for the 31 of 49
+    // combinations where computing it from the anchor disagreed with the
+    // columns on screen.
     expect(screen.getByText("This week · 3–9 Aug")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("button", { name: "Previous week" }))
@@ -257,6 +370,195 @@ describe("Timer — Calendar and List", () => {
     expect(screen.getByText("27 Jul – 2 Aug")).toBeTruthy()
     expect(screen.queryByText("This week · 3–9 Aug")).toBeNull()
   })
+
+  it("draws no range bar at all until the grid has said what it is showing", () => {
+    /*
+     * The header's days come from `datesSet` and from nothing else, so before
+     * the first one there is nothing honest to put on the bar — and the only
+     * other way to produce a label and a total is the second derivation this
+     * replaced, which disagreed with the grid 31 times in 49. A bar that
+     * arrives a commit late beats a bar that is confidently wrong.
+     */
+    calendarStub.silent = true
+    renderTimer()
+
+    fireEvent.click(tab("Calendar"))
+
+    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
+    expect(screen.queryByText("Range total")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Previous week" })).toBeNull()
+  })
+
+  it("says a range failed rather than drawing it as an empty week", async () => {
+    /*
+     * An empty grid and a 0:00:00 range total are what a failed query used to
+     * look like — indistinguishable from a week nobody tracked anything in, on
+     * a product whose stated principle is never to lose time.
+     *
+     * Nothing is seeded for the week AFTER this one and this client has no
+     * Convex `queryFn` behind it, so stepping forward is a range that genuinely
+     * fails, the way a dropped connection would.
+     */
+    renderTimer()
+    fireEvent.click(tab("Calendar"))
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Next week" }))
+    })
+    // One macrotask, explicitly. React Query commits the failed fetch a tick
+    // after the click, and `waitFor` — the idiomatic wait — is the one thing
+    // this repo cannot use (see calendar-panel.test.tsx's header note).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "could not be loaded"
+    )
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+  })
+
+  it("narrows the calendar's rows with the same project filter the list uses", () => {
+    // The regression this replaces: `return rows` in place of the filter left
+    // every test in this file green, because the stub discarded `entries`.
+    const onProject = makeEntry({
+      _id: "a" as unknown as Id<"timeEntries">,
+      title: "Acme work",
+      projectId: PROJECT._id,
+    })
+    const offProject = makeEntry({
+      _id: "b" as unknown as Id<"timeEntries">,
+      title: "Admin",
+    })
+    renderTimer({ thisWeek: [onProject, offProject], projects: [PROJECT] })
+
+    fireEvent.click(tab("Calendar"))
+    expect(calendarRows()).toBe("2")
+
+    fireEvent.change(screen.getByLabelText("Project"), {
+      target: { value: PROJECT._id },
+    })
+    expect(calendarRows()).toBe("1")
+
+    // …and the text box narrows it too, through the same `matches`.
+    fireEvent.change(screen.getByLabelText("Project"), {
+      target: { value: "all" },
+    })
+    fireEvent.change(search(), { target: { value: "admin" } })
+    expect(calendarRows()).toBe("1")
+  })
+
+  it("keeps TotalsRow on the clock while the range total follows the grid", () => {
+    /*
+     * The constraint, asserted with figures that DIFFER — it was previously
+     * asserted only by the presence of the labels, over a fixture where every
+     * number was 0:00:00, so a TotalsRow wired to the calendar's range would
+     * have passed it.
+     */
+    renderTimer({
+      thisWeek: [makeEntry({ durationMs: 3_600_000 })], // 1h, today
+      previousWeek: [
+        makeEntry({
+          _id: "old" as unknown as Id<"timeEntries">,
+          startedAt: lastWeek.fromMs + 9 * 3_600_000,
+          endedAt: lastWeek.fromMs + 11 * 3_600_000 + 1_800_000,
+          durationMs: 9_000_000, // 2:30:00, last week
+        }),
+      ],
+    })
+
+    fireEvent.click(tab("Calendar"))
+    fireEvent.click(screen.getByRole("button", { name: "Previous week" }))
+
+    // The grid is on last week, and its total says so…
+    expect(screen.getByText("27 Jul – 2 Aug")).toBeTruthy()
+    expect(rangeTotal()).toBe("Range total2:30:00")
+
+    // …while today and this week are facts about the clock, unmoved.
+    expect(pageTotal("Today")).toBe("Today1:00:00")
+    expect(pageTotal("This week")).toBe("This week1:00:00")
+  })
+})
+
+/*
+ * CLICKING A BLOCK, when there is no row to land on.
+ *
+ * Both of these used to switch the view and focus nothing — for the running
+ * entry, ALWAYS, since `groupByDay` never gives it a row; for anything outside
+ * the loaded pages, whenever the user had stepped back further than the log has
+ * paginated. The second is the worse of the two: the week on screen is replaced
+ * by a log of recent rows, and nothing says why.
+ */
+describe("Timer — clicking a calendar block", () => {
+  const tab = (name: "Calendar" | "List") => screen.getByRole("tab", { name })
+  const block = (title: string) =>
+    screen.getByRole("button", { name: `block: ${title}` })
+
+  it("switches to the list when the entry has a row there", () => {
+    const entry = makeEntry({ title: "Client call" })
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [entry],
+      isDone: true,
+    })
+    renderTimer({ thisWeek: [entry] })
+
+    fireEvent.click(tab("Calendar"))
+    fireEvent.click(block("Client call"))
+
+    expect(screen.getByTestId("entry-log")).toBeTruthy()
+    expect(screen.queryByTestId("calendar-panel")).toBeNull()
+  })
+
+  it("stays on the calendar for the running entry, and says where it is", () => {
+    const running = makeEntry({
+      _id: "live" as unknown as Id<"timeEntries">,
+      title: "Standup",
+      endedAt: null,
+      durationMs: null,
+    })
+    // In the paginated results — and still not in the log's rows, because
+    // `groupByDay` deliberately keeps a running entry out of them.
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [running],
+      isDone: true,
+    })
+    renderTimer({ thisWeek: [running] })
+
+    fireEvent.click(tab("Calendar"))
+    fireEvent.click(block("Standup"))
+
+    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
+    expect(screen.queryByTestId("entry-log")).toBeNull()
+    expect(screen.getByText(/is still running/)).toBeTruthy()
+  })
+
+  it("stays on the calendar for an entry outside the loaded pages", () => {
+    // The log paginates 50 at a time, newest first; the grid steps to any week.
+    // This block is on the grid and its row has simply never been fetched.
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [makeEntry({ _id: "recent" as unknown as Id<"timeEntries"> })],
+      isDone: false,
+    })
+    renderTimer({
+      thisWeek: [
+        makeEntry({
+          _id: "unloaded" as unknown as Id<"timeEntries">,
+          title: "Deep history",
+        }),
+      ],
+    })
+
+    fireEvent.click(tab("Calendar"))
+    fireEvent.click(block("Deep history"))
+
+    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
+    expect(screen.queryByTestId("entry-log")).toBeNull()
+    expect(screen.getByText(/has not been loaded into the list yet/)).toBeTruthy()
+  })
+})
+
+describe("Timer — the range bar's place in the layout", () => {
+  const tab = (name: "Calendar" | "List") => screen.getByRole("tab", { name })
 
   it("puts the whole range bar inside the header Page measures and pins", () => {
     // Not a detail: the stepper is a control over what scrolls beneath it, so

@@ -12,14 +12,17 @@ import { TotalsRow } from "@/components/entries/totals-row"
 import { FilterBand } from "@/components/history/filter-band"
 import { FilterControls } from "@/components/history/filter-controls"
 import { Page } from "@/components/shell/page"
+import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
 import { dayTotals } from "@/lib/calendar-events"
 import { groupByDay } from "@/lib/group-entries"
 import { hasClientSideFilter, matches } from "@/lib/history-filters"
 import { periodTotals } from "@/lib/period-totals"
-import { addDays, dayOf, dayWindow, weekStartOf, weekWindow } from "@shared/day"
+import { cn } from "@/lib/utils"
+import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { QuickFilters } from "@/lib/history-filters"
@@ -99,6 +102,11 @@ export function Timer() {
 
   const { projects, projectsById } = useClassifiers()
 
+  // Reached for rather than passed in, exactly as `EntryLog` does: this page
+  // raises one toast of its own, for a calendar block whose row is not there
+  // to focus. See `onEntryClick` below.
+  const toasts = Toast.useToastManager()
+
   // Text, project and billable — never a date range, preset chip, or period
   // step. Those stay exclusive to Reports: Timer's range is `fromMs: 0`, all
   // of history, so it has no bounded period for a preset or a step to act on.
@@ -148,8 +156,25 @@ export function Timer() {
   } | null>(null)
 
   const calendarQuery = useQuery({
-    ...convexQuery(api.entries.listRange, calendarRange ?? { fromMs: 0, toMs: 0 }),
+    ...convexQuery(
+      api.entries.listRange,
+      calendarRange ?? { fromMs: 0, toMs: 0 }
+    ),
     enabled: view === "calendar" && calendarRange !== null,
+    /*
+     * The convention `reports.tsx` sets, for the same reason it sets it: the
+     * range is part of the query key, so every arrow click mints a key with
+     * nothing cached for it. Without this the grid blanks and "Range total"
+     * drops to 0:00:00 for the length of the round trip — a zero that reads as
+     * "nothing tracked that week".
+     *
+     * What that buys has to be paid for honestly, and `isPlaceholderData` is
+     * the payment: while it is true the total belongs to the PREVIOUS range
+     * and the label above it already names the new one, which is precisely the
+     * defect `visibleDaysOf` below exists to prevent. It is handed to
+     * `CalendarHeader` as `isStale`, which dims it and says "Updating…".
+     */
+    placeholderData: (previous) => previous,
   })
 
   const filtering = hasClientSideFilter(filters)
@@ -196,8 +221,24 @@ export function Timer() {
    */
   const calendarEntries = useMemo(() => {
     const rows = calendarQuery.data ?? []
-    return filtering ? rows.filter((entry) => matches(entry, filters, nameOf)) : rows
+    if (!filtering) return rows
+    return rows.filter((entry) => matches(entry, filters, nameOf))
   }, [calendarQuery.data, filtering, filters, nameOf])
+
+  /*
+   * The days the header labels, taken from the range the GRID reported.
+   *
+   * `null` until the first `datesSet` — see the branch that renders
+   * `CalendarHeader` for what is drawn in that gap and why it is not a
+   * computed fallback.
+   */
+  const calendarDays = useMemo(
+    () =>
+      calendarRange === null
+        ? null
+        : visibleDaysOf(calendarRange, settings.timezone),
+    [calendarRange, settings.timezone]
+  )
 
   /*
    * The RANGE's total, for the calendar's own header — never for `TotalsRow`,
@@ -206,8 +247,9 @@ export function Timer() {
    * numbers in the column headers, by construction.
    */
   const calendarTotalMs = useMemo(() => {
+    const totals = dayTotals(calendarEntries, settings.timezone, nowMs)
     let sum = 0
-    for (const ms of dayTotals(calendarEntries, settings.timezone, nowMs).values()) {
+    for (const ms of totals.values()) {
       sum += ms
     }
     return sum
@@ -226,6 +268,65 @@ export function Timer() {
    * deliberately never draws.
    */
   const rowCount = groups.reduce((n, group) => n + group.entries.length, 0)
+
+  /**
+   * A block on the grid, clicked.
+   *
+   * The calendar navigates; it does not edit. A block is a picture of an entry,
+   * and the editing controls for that entry already exist on its row — inline
+   * title, the time popover, the note sheet. Growing a second editor inside a
+   * popover on the grid would mean two places to fix the same mistyped field,
+   * which is how they come to disagree. So: switch to List, then focus the row.
+   * The switch has to happen first and the focus after paint, because the row
+   * is not mounted until List renders.
+   *
+   * IT SWITCHES ONLY WHEN THERE IS A ROW TO SWITCH TO. Two kinds of block on
+   * this grid have no row behind them, and both are one click away:
+   *
+   *   - the RUNNING entry, which the grid draws deliberately and `groupByDay`
+   *     deliberately keeps out of its rows (it is already on screen, live and
+   *     larger, in the timer bar);
+   *   - anything OUTSIDE the loaded pages — the list paginates 50 at a time,
+   *     newest first, while the grid steps to any week in history.
+   *
+   * Switching anyway flipped the view to a log of recent rows and focused
+   * nothing, which is worse than a no-op: the week the user was reading is gone
+   * and nothing says why. So the miss is REPORTED instead, in the same toast
+   * vocabulary the rest of the page answers with, and the grid stays put.
+   *
+   * `groups` decides, not `results`: `groups` is what the list actually draws,
+   * and the running entry is in one and not the other.
+   */
+  const onEntryClick = useCallback(
+    (entryId: string) => {
+      const row = groups
+        .flatMap((group) => group.entries)
+        .find((entry) => entry._id === entryId)
+
+      if (row === undefined) {
+        const clicked = calendarEntries.find((e) => e._id === entryId)
+        const title = (clicked?.title ?? "").trim()
+        const label = title === "" ? "That entry" : `“${title}”`
+        toasts.add({
+          title:
+            clicked?.endedAt === null
+              ? `${label} is still running, so the log has no row for it — it is in the timer bar above.`
+              : `${label} has not been loaded into the list yet. Use “Load earlier entries” at the foot of the list to reach it.`,
+        })
+        return
+      }
+
+      setView("list")
+      requestAnimationFrame(() => {
+        const element = document.querySelector<HTMLElement>(
+          `[data-entry-id="${entryId}"]`
+        )
+        element?.scrollIntoView({ block: "center" })
+        element?.focus()
+      })
+    },
+    [groups, calendarEntries, toasts]
+  )
 
   const totals = periodTotals(weekEntries, settings.timezone, today, nowMs)
 
@@ -309,15 +410,28 @@ export function Timer() {
             what scrolls beneath it — Page's stated test for what belongs in
             this slot. It is inside the measured element, so `Page` accounts
             for its height without this file measuring anything.
+
+            NOTHING AT ALL BEFORE THE GRID HAS REPORTED, which is the whole of
+            the answer to "what about the first render". Until `datesSet` fires
+            there is no range, and therefore no honest label and no honest
+            total — and the only other way to produce them is to compute the
+            span here, which is exactly the bug this replaced: a second
+            derivation that disagreed with the grid for 31 of the 49
+            (weekStartDay × anchor) combinations. A bar that appears a commit
+            late is a smaller cost than a bar that is confidently wrong.
+            FullCalendar fires `datesSet` from its own mount effect, so in
+            practice the gap is not painted.
           */}
-          {view === "calendar" ? (
+          {view === "calendar" && calendarDays !== null ? (
             <div className="w-full px-4 pb-3">
               <CalendarHeader
-                {...visibleDays(anchor, size, settings.weekStartDay)}
+                firstDay={calendarDays.firstDay}
+                lastDay={calendarDays.lastDay}
                 size={size}
                 today={today}
                 rangeMs={calendarTotalMs}
                 display={settings.durationDisplay}
+                isStale={calendarQuery.isPlaceholderData}
                 onStep={(delta) =>
                   setAnchor((current) =>
                     addDays(current, size === "day" ? delta : delta * 7)
@@ -367,7 +481,37 @@ export function Timer() {
           `empty` prop below for what removing it used to cost.
         */}
         {view === "calendar" ? (
-          <div className="w-full px-4 pb-4">
+          <div className="flex w-full flex-col gap-3 px-4 pb-4">
+            {/*
+              A FAILED RANGE QUERY IS NOT AN EMPTY WEEK.
+
+              Without this the grid simply draws seven empty columns and a
+              0:00:00 range total — indistinguishable from a week nobody
+              tracked anything in, on a product whose stated principle is never
+              to lose time. `role="alert"` because it appears in place of an
+              answer the user just asked for, and the retry is here rather than
+              in a step-away-and-back gesture because that gesture also changes
+              the range, which is not what they wanted.
+            */}
+            {calendarQuery.isError ? (
+              <p
+                role="alert"
+                className={cn(
+                  "flex flex-wrap items-center gap-3 rounded-md",
+                  "border border-alarm px-3 py-2 text-sm text-alarm"
+                )}
+              >
+                This range could not be loaded, so the grid below is empty for
+                that reason and not because nothing was tracked.
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void calendarQuery.refetch()}
+                >
+                  Try again
+                </Button>
+              </p>
+            ) : null}
             <CalendarPanel
               entries={calendarEntries}
               size={size}
@@ -378,29 +522,7 @@ export function Timer() {
               display={settings.durationDisplay}
               nowMs={nowMs}
               projectsById={projectsById}
-              onEntryClick={(entryId) => {
-                /*
-                 * The calendar navigates; it does not edit.
-                 *
-                 * A block is a picture of an entry, and the editing controls
-                 * for that entry already exist on its row — inline title, the
-                 * time popover, the note sheet. Growing a second editor inside
-                 * a popover on the grid would mean two places to fix the same
-                 * mistyped field, which is how they come to disagree.
-                 *
-                 * So: switch to List, then focus the row. The switch has to
-                 * happen first and the focus after paint, because the row is
-                 * not mounted until List renders.
-                 */
-                setView("list")
-                requestAnimationFrame(() => {
-                  const row = document.querySelector<HTMLElement>(
-                    `[data-entry-id="${entryId}"]`
-                  )
-                  row?.scrollIntoView({ block: "center" })
-                  row?.focus()
-                })
-              }}
+              onEntryClick={onEntryClick}
               onRangeChange={setCalendarRange}
             />
           </div>
@@ -445,30 +567,33 @@ export function Timer() {
 }
 
 /**
- * The days the grid is actually showing, as the label needs them.
+ * The days the grid is showing, read off the range the grid itself reported.
  *
- * BOTH ENDS, from one function, because they have to agree — computing the
- * first here and the last somewhere else is how a label comes to describe a
- * different span from the grid under it.
+ * THE ONE SOURCE IS `datesSet`. This used to be computed from the anchor, the
+ * size and `weekStartDay`, on the claim that `hiddenDays={[0, 6]}` "trims by
+ * day-of-week index independently of where the week is set to start". That
+ * claim is false: FullCalendar builds the week from `firstDay` and then
+ * `trimHiddenDays` removes hidden days only from the ENDS of it. Measured over
+ * all seven anchors × all seven `weekStartDay` values, 31 of the 49
+ * combinations disagreed with the columns on screen — including every Sunday
+ * anchor under a Sunday week start, where the label named the week before the
+ * one being drawn. Worse than a wrong label: "Range total" beside it is summed
+ * from the grid's real range, so the header could read `10–14 Aug` above a
+ * total belonging to `17–21 Aug`, on a billing tool.
  *
- * The 5-day case is the one with a trap in it. That range is Monday to Friday
- * REGARDLESS of `weekStartDay`: it exists to hide the weekend, and the grid
- * achieves it with `hiddenDays={[0, 6]}`, which trims by day-of-week index
- * independently of where the week is set to start. So deriving its first day
- * from the user's own week start would, under `weekStartDay: 0`, label the
- * range from a Sunday while the grid opened on the Monday after it — the label
- * and the columns describing two different weeks, on a billing tool.
+ * There is deliberately no fallback for "the grid has not reported yet". A
+ * fallback here is the second derivation, and the second derivation is the bug.
+ *
+ * `toMs` is EXCLUSIVE — the midnight that opens the day after the last visible
+ * one — so the last day is the one holding the millisecond before it. Both ends
+ * go through `dayOf`, the same function the grid's own column headers use.
  */
-function visibleDays(
-  anchor: DayString,
-  size: CalendarSize,
-  weekStartDay: number
+export function visibleDaysOf(
+  range: { fromMs: number; toMs: number },
+  timeZone: string
 ): { firstDay: DayString; lastDay: DayString } {
-  if (size === "day") return { firstDay: anchor, lastDay: anchor }
-  if (size === "5day") {
-    const monday = weekStartOf(anchor, 1)
-    return { firstDay: monday, lastDay: addDays(monday, 4) }
+  return {
+    firstDay: dayOf(range.fromMs, timeZone),
+    lastDay: dayOf(range.toMs - 1, timeZone),
   }
-  const first = weekStartOf(anchor, weekStartDay)
-  return { firstDay: first, lastDay: addDays(first, 6) }
 }
