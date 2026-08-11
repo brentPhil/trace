@@ -6,14 +6,12 @@ import { usePaginatedQuery } from "convex/react"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
-import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TotalsRow } from "@/components/entries/totals-row"
 import { FilterBand } from "@/components/history/filter-band"
 import { FilterControls } from "@/components/history/filter-controls"
 import { Page } from "@/components/shell/page"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
-import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { groupByDay } from "@/lib/group-entries"
 import { hasClientSideFilter, matches } from "@/lib/history-filters"
 import { periodTotals } from "@/lib/period-totals"
@@ -92,11 +90,6 @@ export function Timer() {
     logRange,
     { initialNumItems: PAGE_SIZE }
   )
-
-  // The live writes for an entry that already exists. Starting, stopping and
-  // discarding the running timer live in the layout route now, above the
-  // outlet — this page only edits rows that are already recorded.
-  const editMutations = useEntryEditMutations()
 
   const { projects, projectsById } = useClassifiers()
 
@@ -181,11 +174,20 @@ export function Timer() {
       header={
         <>
           {/*
-            `justify-between` used to put this cluster hard left and "+ Add
-            entry" at the far right — opposite corners of a 1344px+ row, for a
-            button whose entire reason to exist is "I forgot to start the timer",
-            prompted BY the numbers to its left. Adjacent instead, so the control
-            sits next to the totals it relates to however wide the page gets.
+            Just the totals now.
+
+            "+ Add entry" used to sit here, and the comment this replaces
+            argued for it: the numbers to its left are what prompt "I forgot to
+            start the timer", so the control belonged next to them. That was
+            right while the button lived on this page — and the button living
+            on this page was the problem. Noticing a forgotten block happens on
+            /reports at least as often, and the control was not there.
+
+            It is a `+` beside Play in the timer bar now, which sits in the
+            shell above the outlet and is therefore on every page. Same
+            argument about adjacency, applied to the control it is actually
+            adjacent to: the one that starts and stops the timer you forgot to
+            start.
           */}
           <div className="flex w-full items-center gap-4 px-4">
             <TotalsRow
@@ -194,11 +196,6 @@ export function Timer() {
               weekMs={totals.weekMs}
               billableMs={totals.billableMs}
               display={settings.durationDisplay}
-            />
-            <ManualEntryDialog
-              today={today}
-              timeZone={settings.timezone}
-              onCreate={editMutations.create}
             />
           </div>
 

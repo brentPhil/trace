@@ -151,6 +151,7 @@ function AuthedLayout() {
             use12Hour={settings.timeFormat === "12"}
             weekStartDay={settings.weekStartDay}
             onError={report}
+            onCreateManual={editMutations.create}
           />
           <RunawayBanner
             running={running}

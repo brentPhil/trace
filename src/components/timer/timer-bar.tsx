@@ -7,6 +7,7 @@ import {
 } from "@/components/classifiers/classifier-pickers"
 import { ProjectDot } from "@/components/classifiers/project-dot"
 import { useAnnounce } from "@/components/a11y/announcer"
+import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TimerDurationPopover } from "@/components/timer/timer-duration-popover"
 import { isOptimisticId } from "@/lib/optimistic-id"
 import { describeStagedStart, resolveStagedStart } from "@/lib/staged-start"
@@ -124,6 +125,7 @@ export function TimerBar({
   use12Hour,
   weekStartDay,
   onError,
+  onCreateManual,
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
@@ -151,6 +153,22 @@ export function TimerBar({
    * since the user walks away believing time is being recorded.
    */
   onError?: (thrown: unknown) => void
+  /**
+   * Creates a completed entry from the `+` beside Play.
+   *
+   * A prop for the same reason every other write here is one: the bar must
+   * stay renderable against fixtures with no backend anywhere near it.
+   *
+   * Distinct from `actions.createCompleted`, which the idle duration popover
+   * uses and which carries the staged title and classification. This one is
+   * the dialog's own four fields and nothing else.
+   */
+  onCreateManual: (input: {
+    title?: string
+    note?: string
+    startedAt: number
+    endedAt: number
+  }) => Promise<unknown>
 }) {
   const { start, stop, discard, setTitle, classify } = actions
   const [pending, setPending] = useState(false)
@@ -702,6 +720,8 @@ export function TimerBar({
           onStageStart={stageStart}
           onError={onError}
         />
+
+        <ManualEntryDialog timeZone={timeZone} onCreate={onCreateManual} />
 
         <button
           type="button"

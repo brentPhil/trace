@@ -85,10 +85,6 @@ vi.mock("@/hooks/use-entry-edit-mutations", () => ({
   useEntryEditMutations: () => ({ create: vi.fn(async () => {}) }),
 }))
 
-vi.mock("@/components/entries/manual-entry-dialog", () => ({
-  ManualEntryDialog: () => <button type="button">Add entry</button>,
-}))
-
 /* The same hand-driven `usePaginatedQuery` double `-reports.test.tsx` uses:
  * the real hook wants a subscription this test does not have, and the branch
  * under test keys off its `status`. See `@/test-utils/convex-query`. */

@@ -88,6 +88,7 @@ function Bar({
       use12Hour={use12Hour}
       weekStartDay={1}
       onError={onError}
+      onCreateManual={vi.fn(async () => {})}
     />
   )
 }
@@ -361,6 +362,7 @@ describe("title autocomplete", () => {
         use12Hour
         weekStartDay={1}
         suggestions={suggestions}
+        onCreateManual={vi.fn(async () => {})}
       />
     )
   }
@@ -413,6 +415,7 @@ describe("title autocomplete", () => {
         use12Hour
         weekStartDay={1}
         suggestions={suggestions}
+        onCreateManual={vi.fn(async () => {})}
       />
     )
 
