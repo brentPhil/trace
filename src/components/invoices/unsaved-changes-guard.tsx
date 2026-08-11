@@ -4,6 +4,28 @@ import { Button } from "@/components/ui/button"
 import { Dialog } from "@/components/ui/dialog"
 
 /**
+ * Hoisted so it has ONE identity for the life of the module.
+ *
+ * `useBlocker` lists `shouldBlockFn` in its effect's dependency array (checked
+ * in the installed 1.170.22). Written inline it would be a new function every
+ * render, so every render of the component below would tear the registration
+ * down and put an identical one back — including the renders caused by the
+ * hook's own `setResolver` when a navigation is blocked, which is precisely
+ * when the registration is load-bearing.
+ *
+ * Nothing observably broke that way: `reset` and `proceed` close over the
+ * promise rather than the registration, and the dialog dismisses correctly with
+ * the inline version. This is a stability fix, not a bug fix — the reason to
+ * make it is that "re-register the router blocker on every keystroke" is a
+ * behaviour nobody chose, sitting one dependency-array change away from being a
+ * real one.
+ *
+ * `disabled` is what turns the guard on and off; this only ever answers "yes,
+ * block" when it is consulted at all.
+ */
+const ALWAYS_BLOCK = () => true
+
+/**
  * "You have unsaved changes" — for the two ways a person leaves a page.
  *
  * Only the invoice editor mounts this, and only because that editor is the one
@@ -36,28 +58,6 @@ import { Dialog } from "@/components/ui/dialog"
  * might be read as always-on. It is also directly assertable, which the
  * router's internal registration is not.
  */
-/**
- * Hoisted so it has ONE identity for the life of the module.
- *
- * `useBlocker` lists `shouldBlockFn` in its effect's dependency array (checked
- * in the installed 1.170.22). Written inline it would be a new function every
- * render, so every render of this component would tear the registration down
- * and put an identical one back — including the renders caused by the hook's
- * own `setResolver` when a navigation is blocked, which is precisely when the
- * registration is load-bearing.
- *
- * Nothing observably broke that way: `reset` and `proceed` close over the
- * promise rather than the registration, and the dialog dismisses correctly with
- * the inline version. This is a stability fix, not a bug fix — the reason to
- * make it is that "re-register the router blocker on every keystroke" is a
- * behaviour nobody chose, sitting one dependency-array change away from being a
- * real one.
- *
- * `disabled` is what turns the guard on and off; this only ever answers "yes,
- * block" when it is consulted at all.
- */
-const ALWAYS_BLOCK = () => true
-
 export function UnsavedChangesGuard({
   when,
   what,
