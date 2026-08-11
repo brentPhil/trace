@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { calendarLabel } from "@/lib/calendar-label"
 import { formatTotal } from "@/lib/format-total"
+import { staleProps } from "@/lib/stale"
 import { cn } from "@/lib/utils"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { DurationDisplay } from "@/lib/format-total"
@@ -30,6 +31,7 @@ export function CalendarHeader({
   today,
   rangeMs,
   display,
+  isStale = false,
   onStep,
   onToday,
   onSizeChange,
@@ -40,6 +42,11 @@ export function CalendarHeader({
   today: DayString
   rangeMs: number
   display: DurationDisplay
+  /** Whether `rangeMs` is the PREVIOUS range's total, carried across a refetch
+   *  by `placeholderData`. The label beside it already names the new range, so
+   *  a stale figure here is two spans presented as one — the same failure the
+   *  label's own derivation exists to prevent. Dimmed and said out loud. */
+  isStale?: boolean
   onStep: (delta: -1 | 1) => void
   onToday: () => void
   onSizeChange: (size: CalendarSize) => void
@@ -112,12 +119,21 @@ export function CalendarHeader({
         </select>
       </label>
 
-      <span className="ml-auto flex items-baseline gap-2 text-xs text-muted-foreground">
+      <span
+        {...staleProps(
+          isStale,
+          "ml-auto flex items-baseline gap-2 text-xs text-muted-foreground"
+        )}
+      >
         Range total
         {/* The Tabular Rule. */}
         <span className="tabular text-sm text-foreground">
           {formatTotal(rangeMs, display)}
         </span>
+        {/* Dimming alone is not enough — DESIGN.md: meaning is never carried by
+            colour, and opacity is easy to miss on a number nobody is staring
+            at. The same sentence /reports uses for the same state. */}
+        {isStale ? <span className="italic">Updating…</span> : null}
       </span>
     </div>
   )

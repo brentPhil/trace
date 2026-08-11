@@ -23,6 +23,27 @@ describe("CalendarHeader", () => {
     expect(screen.getByText("14:57:28")).toBeTruthy()
   })
 
+  it("says so when the total belongs to the range it has just left", () => {
+    /*
+     * `placeholderData` on the page's range query keeps the previous range's
+     * rows on screen across an arrow click, so for one round trip this figure
+     * describes a DIFFERENT span from the label beside it. Dimming alone would
+     * not do — DESIGN.md: meaning is never carried by colour — so it is said,
+     * and `aria-busy` carries it to anyone reading neither.
+     */
+    const { rerender } = render(<CalendarHeader {...base} isStale />)
+    expect(screen.getByText("Updating…")).toBeTruthy()
+    expect(screen.getByText("Range total").getAttribute("aria-busy")).toBe(
+      "true"
+    )
+
+    rerender(<CalendarHeader {...base} />)
+    expect(screen.queryByText("Updating…")).toBeNull()
+    expect(screen.getByText("Range total").getAttribute("aria-busy")).toBe(
+      "false"
+    )
+  })
+
   it("steps back and forward", () => {
     const onStep = vi.fn()
     render(<CalendarHeader {...base} onStep={onStep} />)
