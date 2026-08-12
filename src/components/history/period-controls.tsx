@@ -1,6 +1,5 @@
 import { useEffect } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { Chip } from "@/components/history/filter-controls"
 import { DateRangePicker } from "@/components/history/date-range-picker"
 import {
   REPORTS_DEFAULT_PRESET,
@@ -10,7 +9,7 @@ import {
   rangeTriggerLabel,
   reportsPresetFilters,
 } from "@/lib/date-range-picker"
-import { periodFilters, stepPeriod } from "@/lib/history-filters"
+import { stepPeriod } from "@/lib/history-filters"
 import { cn } from "@/lib/utils"
 import type { ReportsPreset } from "@/lib/date-range-picker"
 import type { Filters } from "@/lib/history-filters"
@@ -76,30 +75,30 @@ export function PeriodControls({
   }, [onChange])
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="flex items-center gap-0.5">
-        <IconButton
-          label="Previous period"
-          onClick={() => onChange((f) => stepPeriod(f, -1))}
-        >
-          <ChevronLeft className="size-4" />
-        </IconButton>
-        <IconButton label="Next period" onClick={() => onChange((f) => stepPeriod(f, 1))}>
-          <ChevronRight className="size-4" />
-        </IconButton>
-      </div>
+    <div className="flex flex-wrap items-center gap-1">
+      {/*
+        THE DAY / WEEK / MONTH CHIPS ARE GONE, removed 2026-08-12 at the user's
+        request. They set the range by a coarser name than the picker's own rail
+        already does — This week, This month, This quarter, This year — so they
+        were a second control for one thing, and the one that could say less.
 
-      <div className="flex items-center gap-1">
-        {(["day", "week", "month"] as const).map((period) => (
-          <Chip
-            key={period}
-            active={filters.period === period}
-            onClick={() => onChange((f) => periodFilters(period, today, weekStartDay, f))}
-          >
-            {period === "day" ? "Day" : period === "week" ? "Week" : "Month"}
-          </Chip>
-        ))}
-      </div>
+        THE ARROWS STAYED, and moved: they used to be their own group at the far
+        left with the chips between them and the pill, so the three controls read
+        as three. Hugging the pill they read as one — a range, and the two ways
+        to move it — which is the shape /timer's `RangeBar` already uses and the
+        shape the user's own reference draws.
+
+        `stepPeriod` still steps by whatever the current range's WIDTH is, so the
+        arrows keep working for a quarter or a year even though no chip names
+        those. The ← / → document binding above is unchanged and is now the only
+        thing on this page that still calls itself "period".
+      */}
+      <IconButton
+        label="Previous period"
+        onClick={() => onChange((f) => stepPeriod(f, -1))}
+      >
+        <ChevronLeft className="size-4" />
+      </IconButton>
 
       {/* The trigger's WORDS are this page's, not the picker's: /reports names
           the active period ("This week") where /timer prints US dates. See
@@ -137,6 +136,10 @@ export function PeriodControls({
         }}
         onChange={(range) => onChange((f) => ({ ...f, period: "custom", ...range }))}
       />
+
+      <IconButton label="Next period" onClick={() => onChange((f) => stepPeriod(f, 1))}>
+        <ChevronRight className="size-4" />
+      </IconButton>
     </div>
   )
 }

@@ -1154,35 +1154,23 @@ describe("Reports — Create invoice", () => {
    * asserting only that it stays live would pass against a link that dropped
    * the narrowing on the way.
    */
-  it("stays live once a filter narrows the page, and carries that narrowing", async () => {
-    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
-    const narrowed = { ...filters, presets: ["no-project" as const] }
-    const settled = { ...EMPTY_BREAKDOWN, ...PRICED }
-
-    renderReports((client) => {
-      seedBreakdown(client, filters, settled)
-      // The FILTERED range's own key, seeded up front: a preset chip mints a
-      // new query key, and an unsettled one would refuse for the loading
-      // reason instead — the correct priority, and it would prove nothing
-      // about this one.
-      seedBreakdown(client, narrowed, settled)
-    }, "summary")
-
-    fireEvent.click(screen.getByRole("button", { name: "No project" }))
-
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "No project" }).getAttribute("aria-pressed")
-      ).toBe("true")
-    )
-
-    expect(destination(link())).toEqual({
-      path: "/invoices/new",
-      search: { from: range.fromMs, to: range.toMs, presets: ["no-project"] },
-    })
-
-    dateSpy.mockRestore()
-  })
+  /*
+   * DELETED 2026-08-12 with the control that drove it: "stays live once a
+   * filter narrows the page, and carries that narrowing".
+   *
+   * It clicked the "No project" preset chip and asserted the Create-invoice
+   * link then carried `presets: ["no-project"]` into /invoices/new — i.e. that
+   * the page bills exactly the rows it is showing. `PresetChips` was removed at
+   * the user's request, so there is no longer a way to set a preset from this
+   * page's UI, and a test cannot drive what is not on screen.
+   *
+   * THE BEHAVIOUR IS NOT GONE, only unreachable from here: `filters.presets`
+   * still exists, `hasClientSideFilter` and `entryFilterOf` still honour it,
+   * `invoiceSearchOf` still carries it, and `invoice-search.test.ts` still pins
+   * the round trip through the URL. What is no longer asserted anywhere is the
+   * INTEGRATION — that this page's live filter reaches that link. If preset
+   * filtering ever returns to /reports, this test should return with it.
+   */
 
   /* A search needle and a project are carried the same way — and `text` is the
    * one a URL is most likely to mangle, so it is round-tripped rather than

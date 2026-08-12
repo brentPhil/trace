@@ -8,7 +8,6 @@ import { LogSkeleton } from "@/components/entries/day-list"
 import { FilterBand } from "@/components/history/filter-band"
 import { FilterControls } from "@/components/history/filter-controls"
 import { PeriodControls } from "@/components/history/period-controls"
-import { PresetChips } from "@/components/history/preset-chips"
 import { CreateInvoiceLink } from "@/components/reports/create-invoice-link"
 import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
@@ -306,11 +305,21 @@ export function Reports() {
             `FilterControls` in particular is the identical component /timer
             renders, and it now sits on the identical Surface.
           */}
+          {/*
+            `PresetChips` — No project / No note / Under a minute — was the
+            second row in here and was removed on 2026-08-12 at the user's
+            request. It offered three canned filters for hunting anomalies; the
+            two that remain in `FilterControls` (project, billable) plus the
+            search box are what the page keeps.
+
+            Worth knowing what went with it: those three were the only way to
+            ASK for the absences — an entry with no project, an entry with no
+            note, an entry under a minute — and `hasClientSideFilter` still
+            understands them, so the capability is in the predicate even though
+            nothing on screen reaches it now.
+          */}
           <FilterBand>
-            <div className="flex flex-col gap-3">
-              <FilterControls filters={filters} projects={projects} onChange={setFilters} />
-              <PresetChips filters={filters} onChange={setFilters} />
-            </div>
+            <FilterControls filters={filters} projects={projects} onChange={setFilters} />
           </FilterBand>
         </>
       }
