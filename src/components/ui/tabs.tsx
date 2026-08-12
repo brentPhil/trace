@@ -28,7 +28,7 @@ function Tabs({
  * `default` is shadcn's stock pill — `rounded-full`, `bg-muted`,
  * `data-active:bg-background` — and those are stock tokens rather than this
  * system's: `--muted` and `--background` are not the ground/surface ramp
- * DESIGN.md builds depth out of. `segmented` is the same IDEA in Trace's
+ * DESIGN.md builds depth out of. `segmented` is the same IDEA in Chroneli's
  * vocabulary: a hairline group sitting on the GROUND with the selected tab
  * filled to `--surface-raised`, which is the tonal step this system uses for
  * "in front of" everywhere else.

@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 
 /**
  * shadcn's `calendar` (`base-luma`, react-day-picker-based) brought onto
- * Trace's design system — see DESIGN.md. This is a hand-edit of the
+ * Chroneli's design system — see DESIGN.md. This is a hand-edit of the
  * registry file, the same move `ui/button.tsx` already made for the same
  * reason: the stock component ships a look this system explicitly rejects,
  * and there is nowhere else to put a system-wide fix for a primitive every

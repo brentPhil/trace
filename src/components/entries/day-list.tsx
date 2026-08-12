@@ -12,9 +12,9 @@ import type { Doc } from "../../../convex/_generated/dataModel"
  * The log: entries under day headers, newest first.
  *
  * This is the only list view in the product. Every "report" is this same view
- * with a filter applied, because Trace's entries are meaningful one at a time —
- * the aggregation layer a conventional tracker needs exists to compensate for
- * prose being absent, and here it is not.
+ * with a filter applied, because Chroneli's entries are meaningful one at a
+ * time — the aggregation layer a conventional tracker needs exists to
+ * compensate for prose being absent, and here it is not.
  */
 export function DayList({
   groups,

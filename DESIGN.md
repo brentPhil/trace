@@ -1,6 +1,6 @@
 <!-- SEED: colors, typography, and motion are decided; spacing, radii, and components are not. Re-run /impeccable document once there's real UI to capture the actual tokens and generate the sidecar. -->
 ---
-name: Trace
+name: Chroneli
 description: A time tracker that records what was accomplished, not only how long it took.
 colors:
   ground: "oklch(0.18 0.008 75)"
@@ -33,7 +33,7 @@ typography:
     fontSize: "0.8125rem"
 ---
 
-# Design System: Trace
+# Design System: Chroneli
 
 ## 1. Overview
 

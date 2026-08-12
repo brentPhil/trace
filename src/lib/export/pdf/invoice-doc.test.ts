@@ -81,7 +81,7 @@ describe("invoiceDocPages — the head", () => {
    * alone does not distinguish USD from CAD" — which is true of the character
    * and false of this product's output. `formatMoney` goes through
    * `Intl.NumberFormat` at `MONEY_LOCALE`, which renders CAD as `CA$`, AUD as
-   * `A$` and SGD as `SGD `, so a bare `$` on a Trace invoice IS unambiguous.
+   * `A$` and SGD as `SGD `, so a bare `$` on a Chroneli invoice IS unambiguous.
    *
    * The row was therefore restating what every amount on the page already
    * said. This asserts it stays gone, and the CAD case is what proves the

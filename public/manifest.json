@@ -1,6 +1,6 @@
 {
-  "short_name": "TanStack App",
-  "name": "Create TanStack App Sample",
+  "short_name": "Chroneli",
+  "name": "Chroneli — time tracking that records what was accomplished",
   "icons": [
     {
       "src": "favicon.ico",

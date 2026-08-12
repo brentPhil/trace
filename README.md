@@ -1,6 +1,7 @@
-# TanStack Start + shadcn/ui
+# Chroneli
 
-This is a template for a new TanStack Start project with React, TypeScript, and shadcn/ui.
+A time tracker that records what was accomplished, not only how long it took.
+Built with TanStack Start, React and Convex, and deployed to Cloudflare Workers.
 
 ## Adding components
 
