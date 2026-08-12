@@ -1,3 +1,4 @@
+import { MONTH_ABBR } from "@/lib/date-names"
 import { periodWindow } from "@/lib/history-filters"
 import { parseDayString } from "@shared/day"
 import type { Period } from "@/lib/history-filters"
@@ -53,21 +54,6 @@ export function dateToDay(date: Date): DayString {
   const day = String(date.getDate()).padStart(2, "0")
   return `${year}-${month}-${day}`
 }
-
-const MONTH_ABBR = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-]
 
 /**
  * "3 – 9 Aug 2026" — collapses the month and year when both endpoints share

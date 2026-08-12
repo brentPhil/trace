@@ -1,3 +1,4 @@
+import { MONTH_ABBR, WEEKDAY_ABBR } from "@/lib/date-names"
 import { addDays, parseDayString, weekdayOf } from "@shared/day"
 import type { DayString } from "@shared/day"
 
@@ -17,17 +18,10 @@ import type { DayString } from "@shared/day"
 
 export type CalendarSize = "day" | "5day" | "week"
 
-const MONTHS = [
-  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-]
-
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
 /** "Tue 11 Aug" — a single day, without its year. */
 function dayText(day: DayString): string {
   const d = parseDayString(day)
-  return `${WEEKDAYS[weekdayOf(day)]} ${d.day} ${MONTHS[d.month - 1]}`
+  return `${WEEKDAY_ABBR[weekdayOf(day)]} ${d.day} ${MONTH_ABBR[d.month - 1]}`
 }
 
 /**
@@ -44,12 +38,12 @@ function rangeText(firstDay: DayString, lastDay: DayString): string {
   const b = parseDayString(lastDay)
 
   if (a.year !== b.year) {
-    return `${a.day} ${MONTHS[a.month - 1]} ${a.year} – ${b.day} ${MONTHS[b.month - 1]} ${b.year}`
+    return `${a.day} ${MONTH_ABBR[a.month - 1]} ${a.year} – ${b.day} ${MONTH_ABBR[b.month - 1]} ${b.year}`
   }
   if (a.month !== b.month) {
-    return `${a.day} ${MONTHS[a.month - 1]} – ${b.day} ${MONTHS[b.month - 1]}`
+    return `${a.day} ${MONTH_ABBR[a.month - 1]} – ${b.day} ${MONTH_ABBR[b.month - 1]}`
   }
-  return `${a.day}–${b.day} ${MONTHS[a.month - 1]}`
+  return `${a.day}–${b.day} ${MONTH_ABBR[a.month - 1]}`
 }
 
 export function calendarLabel(

@@ -1,3 +1,4 @@
+import { MONTH_NAMES, WEEKDAY_ABBR } from "@/lib/date-names"
 import { addDays, parseDayString, weekdayOf } from "@shared/day"
 import type { DayString } from "@shared/day"
 
@@ -80,33 +81,16 @@ export function monthGrid(
   return weeks
 }
 
-const MONTH_NAMES = [
-  "January",
-  "February",
-  "March",
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-]
-
 /** "August 2026" — the calendar's heading. */
 export function monthLabel(day: DayString): string {
   const d = parseDayString(day)
   return `${MONTH_NAMES[d.month - 1]} ${d.year}`
 }
 
-const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
 /** Column headings, rotated so the first is the user's `weekStartDay`. */
 export function weekdayLabels(weekStartDay: number): Array<string> {
   return Array.from(
     { length: 7 },
-    (_, i) => WEEKDAY_NAMES[(weekStartDay + i) % 7]
+    (_, i) => WEEKDAY_ABBR[(weekStartDay + i) % 7]
   )
 }
