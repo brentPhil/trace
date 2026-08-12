@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest"
-import { dateToDay, dayToDate, formatDayRange, rangeTriggerLabel } from "./date-range-picker"
+import { daysBetween } from "@/lib/history-filters"
+import { addDays } from "@shared/day"
+import {
+  REPORTS_DEFAULT_PRESET,
+  REPORTS_PRESETS,
+  activeReportsPreset,
+  dateToDay,
+  dayToDate,
+  formatDayRange,
+  quarterWindow,
+  rangeTriggerLabel,
+  reportsDefaultFilters,
+  reportsPresetWindow,
+  yearWindow,
+} from "./date-range-picker"
 
 /*
  * The arithmetic behind the range picker, tested without a DOM: the
@@ -108,5 +122,174 @@ describe("rangeTriggerLabel", () => {
     expect(rangeTriggerLabel("week", "2026-08-02", "2026-08-08", today, 0)).toBe(
       "This week"
     )
+  })
+})
+
+describe("quarterWindow", () => {
+  it("bounds each of the four calendar quarters", () => {
+    expect(quarterWindow("2026-02-14")).toEqual({
+      from: "2026-01-01",
+      to: "2026-03-31",
+    })
+    expect(quarterWindow("2026-05-01")).toEqual({
+      from: "2026-04-01",
+      to: "2026-06-30",
+    })
+    expect(quarterWindow("2026-09-30")).toEqual({
+      from: "2026-07-01",
+      to: "2026-09-30",
+    })
+    expect(quarterWindow("2026-11-02")).toEqual({
+      from: "2026-10-01",
+      to: "2026-12-31",
+    })
+  })
+
+  it("is the same window from the first and the last day of a quarter", () => {
+    // The boundary days are the ones an off-by-one puts in the wrong quarter,
+    // and a report scoped to the wrong quarter looks exactly like a quiet one.
+    expect(quarterWindow("2026-07-01")).toEqual(quarterWindow("2026-09-30"))
+  })
+
+  it("does not run a December anchor's quarter into the next year", () => {
+    expect(quarterWindow("2026-12-31")).toEqual({
+      from: "2026-10-01",
+      to: "2026-12-31",
+    })
+  })
+
+  it("gives Q1 of the NEXT year for the day after a December anchor's quarter", () => {
+    // The year seam, walked rather than asserted about: the day after Q4 ends
+    // has to be the first day of Q1, and that quarter has to belong to 2027.
+    const q4 = quarterWindow("2026-12-15")
+    const next = quarterWindow(addDays(q4.to, 1))
+    expect(next).toEqual({ from: "2027-01-01", to: "2027-03-31" })
+  })
+
+  it("ends Q1 of a leap year on 31 March, whatever February did", () => {
+    expect(quarterWindow("2028-02-29")).toEqual({
+      from: "2028-01-01",
+      to: "2028-03-31",
+    })
+  })
+})
+
+describe("yearWindow", () => {
+  it("bounds the calendar year a day falls in", () => {
+    expect(yearWindow("2026-08-06")).toEqual({
+      from: "2026-01-01",
+      to: "2026-12-31",
+    })
+  })
+
+  it("is the same window from either end of the year", () => {
+    expect(yearWindow("2026-01-01")).toEqual(yearWindow("2026-12-31"))
+  })
+
+  it("is 366 days long in a leap year and 365 otherwise", () => {
+    // The one observable difference a leap year makes to a year window, and
+    // the only way to catch a `to` built from a table rather than from a date.
+    const leap = yearWindow("2028-06-01")
+    expect(daysBetween(leap.from, leap.to) + 1).toBe(366)
+    const plain = yearWindow("2026-06-01")
+    expect(daysBetween(plain.from, plain.to) + 1).toBe(365)
+  })
+})
+
+describe("reportsPresetWindow", () => {
+  const today = "2026-08-06" // a Thursday
+  const monday = 1
+
+  it("bounds the two 'last' spans on calendar boundaries, not on today", () => {
+    expect(reportsPresetWindow("last-week", today, monday)).toEqual({
+      from: "2026-07-27",
+      to: "2026-08-02",
+    })
+    expect(reportsPresetWindow("last-month", today, monday)).toEqual({
+      from: "2026-07-01",
+      to: "2026-07-31",
+    })
+  })
+
+  it("rolls 'last month' back over the year boundary", () => {
+    expect(reportsPresetWindow("last-month", "2026-01-09", monday)).toEqual({
+      from: "2025-12-01",
+      to: "2025-12-31",
+    })
+  })
+
+  it("ends 'last month' on 29 February in a leap year", () => {
+    // The month whose length is not a constant, reached the way a user
+    // reaches it: from the month after it.
+    expect(reportsPresetWindow("last-month", "2028-03-15", monday)).toEqual({
+      from: "2028-02-01",
+      to: "2028-02-29",
+    })
+  })
+
+  it("honours weekStartDay for both of the week spans", () => {
+    expect(reportsPresetWindow("this-week", today, 0)).toEqual({
+      from: "2026-08-02",
+      to: "2026-08-08",
+    })
+    expect(reportsPresetWindow("last-week", today, 0)).toEqual({
+      from: "2026-07-26",
+      to: "2026-08-01",
+    })
+  })
+
+  it("gives every preset a window whose ends are in order", () => {
+    // Cheap, and it is the invariant every figure on /reports depends on:
+    // `rangeOf` turns these into a half-open instant pair, and an inverted
+    // one scans nothing at all while looking like a quiet quarter.
+    for (const preset of REPORTS_PRESETS) {
+      const window = reportsPresetWindow(preset, today, monday)
+      expect(window.from <= window.to).toBe(true)
+    }
+  })
+})
+
+describe("activeReportsPreset", () => {
+  const today = "2026-08-06"
+
+  it("names the preset a range exactly matches", () => {
+    const quarter = reportsPresetWindow("this-quarter", today, 1)
+    expect(activeReportsPreset(quarter.from, quarter.to, today, 1)).toBe(
+      "this-quarter"
+    )
+  })
+
+  it("names nothing once the range has been stepped off a preset", () => {
+    const quarter = reportsPresetWindow("this-quarter", today, 1)
+    expect(
+      activeReportsPreset(addDays(quarter.from, -1), quarter.to, today, 1)
+    ).toBeNull()
+  })
+})
+
+describe("reportsDefaultFilters", () => {
+  it("opens /reports on the current quarter", () => {
+    const filters = reportsDefaultFilters("2026-08-06", 1)
+    expect({ from: filters.from, to: filters.to }).toEqual({
+      from: "2026-07-01",
+      to: "2026-09-30",
+    })
+  })
+
+  it("opens on the preset the rail badges as the default", () => {
+    // The badge and the opening range are one fact. Asserted together so a
+    // change to either has to move the other.
+    const filters = reportsDefaultFilters("2026-08-06", 1)
+    expect(activeReportsPreset(filters.from, filters.to, "2026-08-06", 1)).toBe(
+      REPORTS_DEFAULT_PRESET
+    )
+  })
+
+  it("leaves every non-date filter at its default", () => {
+    const filters = reportsDefaultFilters("2026-08-06", 1)
+    expect(filters.projectId).toBeNull()
+    expect(filters.billableOnly).toBe(false)
+    expect(filters.text).toBe("")
+    expect(filters.presets).toEqual([])
   })
 })

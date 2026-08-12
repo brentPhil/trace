@@ -84,7 +84,21 @@ export function DateRangePicker({
    * are built from, so a preset reads the same everywhere in the product.
    */
   presets?: {
-    items: ReadonlyArray<{ value: string; label: string }>
+    items: ReadonlyArray<{
+      value: string
+      label: string
+      /**
+       * A word set beside the label, for the one thing a preset can be
+       * besides selected: /reports badges its opening range "Default", so
+       * someone who has stepped away can see which one they came from.
+       *
+       * Optional per ITEM rather than a `defaultValue` on the rail, because
+       * "which one is the default" and "which one is pressed" are different
+       * facts and only the caller knows the first. It is a plain string, so
+       * the picker never has to know what a caller might want to say.
+       */
+      badge?: string
+    }>
     active: string | null
     onSelect: (value: string) => void
   }
@@ -232,6 +246,37 @@ export function DateRangePicker({
                   }}
                 >
                   {preset.label}
+                  {preset.badge === undefined ? null : (
+                    <>
+                      {/* THE BADGE, SAID RATHER THAN SHOWN, and only once:
+                          the visible tag is hidden from the accessibility
+                          tree and this carries the whole phrase.
+
+                          A bare `,` between two visible spans would be all a
+                          reader got — an accessible name is built by
+                          concatenating each node's TRIMMED text, so a
+                          separator span holding ", " arrives as
+                          "This quarter,Default" with the space gone (`trim`
+                          eats a no-break space too). Keeping the comma and
+                          the word in ONE node is what makes the space
+                          internal, and therefore survive.
+
+                          It is in the name at all because which preset the
+                          page OPENS on is the entire point of the badge: a
+                          reader without it learns which chip is pressed but
+                          never which one is home. */}
+                      <span className="sr-only">, {preset.badge}</span>
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "ml-1.5 rounded-md border border-edge-soft px-1",
+                          "text-[0.625rem] text-muted-foreground"
+                        )}
+                      >
+                        {preset.badge}
+                      </span>
+                    </>
+                  )}
                 </Chip>
               ))}
             </div>
