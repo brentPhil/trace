@@ -1,25 +1,18 @@
-import { useEffect, useMemo, useRef } from "react"
-import Calendar, { useCalendarController } from "@fullcalendar/react"
+import { useMemo } from "react"
+import Calendar from "@fullcalendar/react"
 import timeGridPlugin from "@fullcalendar/react/timegrid"
 import { ProjectDot } from "@/components/classifiers/project-dot"
-import {
-  calendarEvents,
-  dayTotals,
-  drawnDays,
-  earliestHour,
-} from "@/lib/calendar-events"
+import { calendarEvents, dayTotals, drawnDays } from "@/lib/calendar-events"
 import { formatTimeOfInstant, formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
-import { dayOf, localPartsOf } from "@shared/day"
+import { dayOf } from "@shared/day"
 import { formatClock } from "@shared/duration"
 import type {
   CalendarEventProps,
   CalendarRange,
 } from "@/lib/calendar-events"
-import type { CalendarSize } from "@/lib/calendar-label"
 import type { DurationDisplay } from "@/lib/format-total"
-import type { DayString } from "@shared/day"
 import type { EventApi } from "@fullcalendar/react"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
@@ -31,64 +24,16 @@ import "@fullcalendar/react/skeleton.css"
 
 const PLUGINS = [timeGridPlugin]
 
-/*
- * The two hidden-day sets, hoisted to module scope.
- *
- * NOT an inline `size === "5day" ? [0, 6] : []`. `hiddenDays` is refined by
- * `identity` and is absent from FullCalendar's `COMPLEX_OPTION_COMPARATORS`, so
- * it is compared by REFERENCE: a fresh array rebuilds the dateProfileGenerator,
- * which rebuilds the dateProfile, which re-fires `datesSet` and calls
- * `resetScroll()`. `nowMs` ticks every second, so an inline array snapped the
- * grid back to `scrollTime` about once a second and made it unscrollable.
- *
- * With the controller below wired up it is worse than a nuisance: the
- * `datesSet` it provokes re-renders this component, which allocates another new
- * array, which rebuilds the dateProfile again — an unbounded loop that React
- * ends with "Maximum update depth exceeded". `calendar-panel.test.tsx`'s
- * re-render test is what holds this shut.
- */
-const NO_HIDDEN_DAYS: Array<number> = []
 /**
- * `[0, 6]`, AND IT ONLY MEANS "Monday to Friday" BECAUSE OF THE `firstDay`
- * OVERRIDE BELOW. Neither half of that pair works alone.
+ * The generic timegrid view, deliberately — NOT `timeGridWeek`/`timeGridDay`.
  *
- * `hiddenDays` does not trim by day-of-week index wherever the day falls.
- * FullCalendar builds the week from `firstDay` and then removes hidden days
- * only from the ENDS of it, so a weekend sitting in the INTERIOR of the week is
- * not removed at all. Measured, anchor 2026-08-11 in Asia/Manila, with
- * `firstDay = weekStartDay`:
- *
- *   0, 1, 6 -> Mon 10 – Fri 14, five columns  (the weekend already sat at an end)
- *   2       -> Tue 11, Wed 12, Thu 13, Fri 14, MON 17
- *   3       -> Wed 5, Thu 6, Fri 7, MON 10, TUE 11
- *   4       -> Thu 6, Fri 7, MON 10, TUE 11, WED 12
- *   5       -> Fri 7, MON 10, TUE 11, WED 12, THU 13
- *
- * `/settings` offers all seven starts, so every one of those rows is reachable:
- * a user whose week starts on Wednesday got a discontinuous grid — three days
- * of one week and two of the next — and a `datesSet` range seven days wide
- * under five columns.
- *
- * `WORKING_WEEK_FIRST_DAY` is what makes the trim land right for all seven. With
- * the week built Mon,Tue,Wed,Thu,Fri,Sat,Sun, trimming from the front stops
- * immediately at Mon and trimming from the back removes Sun, then Sat, and stops
- * at Fri. That is also exactly why 0, 1 and 6 already worked.
- *
- * OVERRIDING THE USER'S WEEK START HERE IS THE RULE, NOT A WORKAROUND. 5 days is
- * the working week and the working week is Monday to Friday by definition; the
- * view exists to hide the weekend, and rotating it by `weekStartDay` would make
- * it mean something else on a Sunday-start calendar. `week` and `day` still take
- * the stored `weekStartDay`, which is where it belongs.
- *
- * NOT `visibleRange`, which would say the same thing directly: it is an OBJECT,
- * so it is a freshly allocated dateProfile input on every render — the render
- * loop the note above this describes. `firstDay` is a number, compared by value.
+ * Those two carry a `duration` (`{weeks: 1}`, `{days: 1}`), and FullCalendar's
+ * dateProfileGenerator consults `visibleRange` only when neither `duration` nor
+ * `dayCount` is set. With a duration in the view spec the range prop below is
+ * read and then ignored, and the grid quietly computes its own span again —
+ * which is the entire defect this file was reshaped to remove.
  */
-const WEEKEND_HIDDEN = [0, 6]
-
-/** Monday. The 5-day view's own week start, whatever the user's is — see
- *  `WEEKEND_HIDDEN` for why it is not `weekStartDay`. */
-const WORKING_WEEK_FIRST_DAY = 1
+const VIEW = "timeGrid"
 
 /** 48px an hour, the density every shipping calendar has converged on. */
 const SLOT_MIN_HEIGHT = 48
@@ -136,8 +81,7 @@ const RAIL_RULE = "border-r border-edge-soft"
  */
 export function CalendarPanel({
   entries,
-  size,
-  anchor,
+  range,
   timeZone,
   weekStartDay,
   use12Hour,
@@ -145,107 +89,121 @@ export function CalendarPanel({
   nowMs,
   projectsById,
   onEntryClick,
-  onRangeChange,
 }: {
   entries: Array<Doc<"timeEntries">>
-  size: CalendarSize
-  anchor: DayString
+  /**
+   * The window to draw, computed by the page with `rangeOf`.
+   *
+   * THE GRID NO LONGER DECIDES THIS. It used to: `firstDay` plus `hiddenDays`
+   * produced a span, `datesSet` reported it upward, and the page labelled and
+   * queried whatever came back. That could only work while the range lived in
+   * Calendar view — the range bar is on screen in List now, and in List no
+   * grid is mounted to report anything. One computation, in one pure function,
+   * consumed here and by the label, the query and the total alike.
+   */
+  range: CalendarRange
   timeZone: string
+  /** Which weekday a 7-day week opens on. It no longer decides the SPAN — see
+   *  `range` — but FullCalendar still reads it for week-boundary work inside
+   *  the view, and the 5-day view's Monday is now `rangeOf`'s business. */
   weekStartDay: number
   use12Hour: boolean
   display: DurationDisplay
   nowMs: number
   projectsById: Map<string, Doc<"projects">>
   onEntryClick: (entryId: string) => void
-  onRangeChange: (range: CalendarRange) => void
 }) {
-  const events = useMemo(() => calendarEvents(entries, nowMs), [entries, nowMs])
+  /*
+   * THE CLOCK, ADMITTED ONLY WHEN SOMETHING IS ACTUALLY RUNNING.
+   *
+   * `nowMs` advances once a second for the life of the tab, and both memos
+   * below take it — so both re-ran every second, reallocating the whole events
+   * array (two `Date`s per entry) and rebuilding the whole totals map, once a
+   * second, forever. On a page this product describes as an always-open desktop
+   * companion.
+   *
+   * But `nowMs` only ever REACHES the output through a running entry: it is
+   * where `calendarEvents` ends a block with no `endedAt`, and what
+   * `dayTotals` counts its elapsed time to. With nothing running — every past
+   * week, and the current one whenever the timer is stopped, which is the
+   * ordinary case — each tick rebuilt a result byte-identical to the one before
+   * it.
+   *
+   * So the clock is pinned to `0` unless an entry in view has no end. Pinning
+   * rather than dropping it from the dependency list: a deliberately incomplete
+   * dependency array is a stale closure waiting for the next reader to trip
+   * over, whereas passing a value that provably cannot be read keeps the memo
+   * honest and the lint rule satisfied. `0` is never observable — the only code
+   * that would read it is the `entry.endedAt ?? nowMs` branch that this flag
+   * says nothing takes.
+   *
+   * The `some` scan is O(n) over one boolean per render and touches no `Intl`,
+   * which is the whole cost this replaces `n` day-lookups per second with.
+   */
+  const clockMs = entries.some((entry) => entry.endedAt === null) ? nowMs : 0
+
+  const events = useMemo(() => calendarEvents(entries, clockMs), [entries, clockMs])
 
   const totals = useMemo(
-    () => dayTotals(entries, timeZone, nowMs),
-    [entries, timeZone, nowMs]
-  )
-
-  /** One of two module constants, never a fresh array — see `WEEKEND_HIDDEN`. */
-  const hiddenDays = size === "5day" ? WEEKEND_HIDDEN : NO_HIDDEN_DAYS
-
-  /*
-   * The CURRENT HOUR on an empty range, which is what every shipping calendar
-   * opens at and what the plan says. A fixed 08:00 was the code's own invention:
-   * it is wrong twice a day for anyone who does not start at eight, and on an
-   * empty range there is nothing on screen to say why the grid is where it is.
-   *
-   * Read through `localPartsOf`, never `getHours()` — the browser's zone is not
-   * the user's. `nowHour` rather than `nowMs` is the dependency deliberately:
-   * this component re-renders every second, and `scrollTime` is a dateProfile
-   * input that resets the scroll position when it changes. An hour-stable number
-   * means the string below is identical across every tick within the hour, so
-   * the grid stays where the user scrolled it. It is also unused entirely
-   * whenever the range holds an entry, which is the ordinary case.
-   */
-  const nowHour = localPartsOf(nowMs, timeZone).hour
-  const scrollHour = useMemo(
-    () => earliestHour(entries, timeZone, nowHour),
-    [entries, timeZone, nowHour]
+    () => dayTotals(entries, timeZone, clockMs),
+    [entries, timeZone, clockMs]
   )
 
   /*
-   * The last range handed upward, so `datesSet` firing on a re-render cannot
-   * loop. `onRangeChange` sets state in the page, which re-renders this, which
-   * re-runs `datesSet` — without this guard that is a render loop, and it is
-   * the standard way to get one out of this callback.
+   * NAVIGATION, and the one hazard this prop carries.
+   *
+   * `visibleRange` is refined by `identity` and is absent from FullCalendar's
+   * `COMPLEX_OPTION_COMPARATORS`, so it is compared by REFERENCE — a fresh
+   * object rebuilds the dateProfileGenerator, which rebuilds the dateProfile,
+   * which re-fires `datesSet` and calls `resetScroll()`. `nowMs` ticks every
+   * second, so an inline `{ start, end }` would snap the grid back about once a
+   * second and make it unscrollable; with anything listening on `datesSet` it
+   * is worse than a nuisance, because the re-render allocates another object
+   * and the loop is unbounded — React ends it with "Maximum update depth
+   * exceeded". `hiddenDays` used to carry exactly this hazard, for exactly this
+   * reason, and `calendar-panel.test.tsx`'s re-render test is what holds it
+   * shut.
+   *
+   * Memoised on the two INSTANTS rather than on `range`, so a page that
+   * recomputes an equal range (it does, once a second) does not rebuild this.
+   *
+   * The `Date`s are absolute instants, computed by `rangeOf` through
+   * `@shared/day` — never a wall-clock string, which FullCalendar would
+   * reinterpret in the calendar's own zone.
+   *
+   * This is also what MOVES the grid. `initialDate` is read once, at init, and
+   * every later render dispatches `IDLE`; changing it is inert. Changing
+   * `visibleRange` is not — the manager rebuilds the generator when its inputs
+   * differ, so the columns follow the range without a controller, a `gotoDate`
+   * or a remount.
    */
-  const lastRange = useRef<string>("")
-
-  /*
-   * NAVIGATION. `initialDate` alone does not move the calendar.
-   *
-   * FullCalendar reads `getInitialDate` once, at init, and the React wrapper's
-   * every subsequent render dispatches `IDLE` — only `CHANGE_DATE`/`PREV`/`NEXT`
-   * move the date. So a changed `initialDate` prop is inert: the header's arrows
-   * would move their own label and nothing else, and since `datesSet` would
-   * never re-fire, the Convex query and the range total would stay on the old
-   * week too.
-   *
-   * v7's answer is `useCalendarController` + the `controller` option, which is
-   * how the calendar's api reaches this side (the manager calls the
-   * controller's `_setApi` when it drains its first action queue).
-   * `gotoDate(anchor)` dispatches the `CHANGE_DATE` that `initialDate` cannot.
-   *
-   * A DayString is a wall-clock date with no offset, and `gotoDate` resolves it
-   * through the calendar's own `dateEnv` — so it lands on the same midnight
-   * `convex/lib/day.ts` would compute, in the user's stored zone.
-   *
-   * NOT `key={anchor}`: remounting the grid on every step would throw away the
-   * scroll position and refetch, which is the thing navigation must preserve.
-   */
-  const controller = useCalendarController()
-  useEffect(() => {
-    controller.gotoDate(anchor)
-  }, [controller, anchor])
+  const visibleRange = useMemo(
+    () => ({ start: new Date(range.fromMs), end: new Date(range.toMs) }),
+    [range.fromMs, range.toMs]
+  )
 
   return (
     <Calendar
       plugins={PLUGINS}
-      controller={controller}
-      // `key` on the view, not `changeView` through a ref. The size is a prop
-      // here, and remounting on a change is both simpler and correct — there
-      // is no imperative state in this component worth preserving across it.
-      key={size}
-      initialView={size === "day" ? "timeGridDay" : "timeGridWeek"}
-      // Where the FIRST render opens. Every move after that is the effect
-      // above; this is what keeps the first paint from being today's week
-      // followed by a visible jump to the anchor's.
-      initialDate={anchor}
+      initialView={VIEW}
+      visibleRange={visibleRange}
+      // Where the FIRST profile is built from, before the range above overrides
+      // it. Kept because `getInitialDate` defaults to *now*, and a grid whose
+      // internal date starts three months from what it is drawing relies on the
+      // reducer's out-of-range clamp to correct itself.
+      initialDate={range.days[0]}
       // The user's STORED zone, never the browser's. This is the whole reason
       // v7 is usable here: it resolves an IANA name through temporal-polyfill,
       // so the grid's midnight and `convex/lib/day.ts`'s midnight are the same
       // instant.
       timeZone={timeZone}
-      // Monday for the working week, the stored start for everything else.
-      // The two props below are ONE decision — see `WEEKEND_HIDDEN`.
-      firstDay={size === "5day" ? WORKING_WEEK_FIRST_DAY : weekStartDay}
-      hiddenDays={hiddenDays}
+      // Which weekday a week opens on. It no longer picks the SPAN — the range
+      // above does — and in particular the 5-day view is Mon–Fri because
+      // `rangeOf` says so, not because `hiddenDays` trimmed a week built from
+      // here. That pairing is gone: it removed hidden days only off the ENDS of
+      // the week, so a weekend in the INTERIOR survived and 31 of the 49
+      // (weekStartDay × anchor) combinations drew something other than Mon–Fri.
+      firstDay={weekStartDay}
       headerToolbar={false}
       // Nothing here is all-day. An entry is a span of a working day, and an
       // empty all-day rail above every column is a band of nothing.
@@ -254,40 +212,76 @@ export function CalendarPanel({
       slotDuration="01:00:00"
       slotMinHeight={SLOT_MIN_HEIGHT}
       eventMinHeight={EVENT_MIN_HEIGHT}
-      // A fixed height makes the body a scroll container with the day-header
-      // row fixed above it — the arrangement every shipping calendar uses, and
-      // what keeps the headers in place over 24 hours of grid.
-      height={640}
+      /*
+       * THE WHOLE DAY, AT FULL HEIGHT. No inner scroller.
+       *
+       * `"auto"` lets the grid run to its natural height — 24 hours at
+       * `SLOT_MIN_HEIGHT` — so every hour is on the page and the PAGE is what
+       * scrolls. Two earlier arrangements are worth recording, because each is
+       * the obvious thing to reach for again:
+       *
+       *   `height={640}` — a constant with no argument behind it. The grid was
+       *   640px in a 1400px window, scrolling internally while a third of the
+       *   page sat empty beneath it.
+       *
+       *   `height="100%"` against a viewport-sized container — better, and still
+       *   a cap. It made the grid exactly as tall as the window and no taller,
+       *   which on a 24-hour axis means most of the day is behind a scrollbar
+       *   inside a page that does not scroll. Two scroll contexts, and the one
+       *   holding the content was the one the wheel did not reach first.
+       *
+       * The cost of `"auto"`, paid deliberately: FullCalendar only makes its
+       * body a scroll container when it has a definite height, so the day-header
+       * row is no longer pinned by the library. `tableHeaderClass` below pins it
+       * with CSS instead, against the same measured offset the log's day headers
+       * use — so the columns stay labelled all the way down.
+       *
+       * `scrollTime` and `scrollTimeReset` went with the inner scroller. There
+       * is nothing left to position: with the full day on the page, "open where
+       * the work is" would have to move the PAGE's scroll on the user's behalf,
+       * which fights the scroll they own and the sticky header both.
+       */
+      height="auto"
       expandRows={false}
-      // Opened where the work is, never at midnight. `scrollTimeReset` is left
-      // at its default: it resets on navigation and is untouched by an event
-      // change, which is exactly the rule — a live subscription pushes on
-      // every keystroke into a title, and a grid that jumped back each time
-      // would be unusable while anything is running.
-      scrollTime={`${String(scrollHour).padStart(2, "0")}:00:00`}
       events={events}
       datesSet={(info) => {
+        /*
+         * A CHECK, NOT THE SOURCE.
+         *
+         * This used to be where the range came FROM: the grid computed a span
+         * and handed it up, and the page labelled, queried and totalled
+         * whatever arrived. Now the page says what to draw and this says
+         * whether the grid drew it. The two can only disagree if FullCalendar
+         * has quietly stopped honouring `visibleRange` — a view spec that
+         * regrows a `duration`, a hidden-day set, a `validRange` clamp — and
+         * that is the class of defect this component has shipped once already:
+         * a header labelling one week above columns showing another, on a tool
+         * people invoice from.
+         *
+         * `console.error` rather than a thrown error or a silent correction. A
+         * throw takes the page down over a cosmetic disagreement; a correction
+         * puts the second source of truth straight back. Loud, in the console,
+         * and asserted in `calendar-range-label.test.tsx`, which walks all 49
+         * (weekStartDay × anchor) combinations and fails if this ever fires.
+         *
+         * No dedupe ref is needed any more: nothing here sets state, so this
+         * cannot feed itself, and FullCalendar only fires it when the
+         * dateProfile actually changes.
+         */
         const fromMs = info.start.getTime()
         const toMs = info.end.getTime()
-        const key = `${fromMs}-${toMs}`
-        if (key === lastRange.current) return
-        lastRange.current = key
-        /*
-         * THE COLUMNS GO UP WITH THE RANGE, not just its two ends.
-         *
-         * "Range total" in the header is summed from what this reports, and the
-         * column headers below are looked up per DRAWN day. Handing up only
-         * `fromMs`/`toMs` left the page free to sum a day that has no column —
-         * which it did, and which is the same defect class as a header total
-         * belonging to a range other than the one on screen. `drawnDays` takes
-         * the very `hiddenDays` array the grid was given, one file away from
-         * where it is decided, so the two cannot drift.
-         */
-        onRangeChange({
-          fromMs,
-          toMs,
-          days: drawnDays(fromMs, toMs, timeZone, hiddenDays),
-        })
+        const drawn = drawnDays(fromMs, toMs, timeZone, [])
+
+        if (
+          fromMs !== range.fromMs ||
+          toMs !== range.toMs ||
+          drawn.join(",") !== range.days.join(",")
+        ) {
+          console.error(
+            "CalendarPanel drew a range other than the one it was given.",
+            { asked: range, drew: { fromMs, toMs, days: drawn } }
+          )
+        }
       }}
       eventClick={(info) => {
         info.jsEvent.preventDefault()
@@ -295,11 +289,48 @@ export function CalendarPanel({
       }}
       // ---- Styling. One prop per element; no stylesheet override anywhere. --
       className="text-sm"
-      viewClass="rounded-lg border border-edge-soft bg-surface overflow-hidden"
+      /*
+       * FULL-BLEED: no radius, no side or bottom border.
+       *
+       * This was `rounded-lg border border-edge-soft`, which drew the grid as a
+       * card floating on the page — and DESIGN.md's elevation section is
+       * explicit that depth here is tonal, not cast, with a card treatment
+       * reserved for genuinely floating UI. The grid is not floating; it is the
+       * page's whole remaining surface, reaching both edges the way the filter
+       * band above it does.
+       *
+       * A radius on a box flush with the viewport is also just wrong: the
+       * corners curve away from edges that are still there, leaving two slivers
+       * of ground that read as a rendering fault.
+       *
+       * No TOP border either — `FilterBand` directly above already ends in a
+       * `border-b`, and a second hairline against it is a two-pixel rule nobody
+       * asked for. `bg-surface` alone is what separates the grid from the ground
+       * behind it, which is the tonal step DESIGN.md asks for.
+       */
+      viewClass="overflow-hidden bg-surface"
       tableClass="bg-surface"
-      // The header row sits outside the scroller, so it needs its own boundary
-      // against the grid scrolling beneath it.
-      tableHeaderClass="border-b border-edge-soft bg-surface"
+      /*
+       * THE DAY HEADERS STAY PUT, pinned by CSS rather than by the library.
+       *
+       * With `height="auto"` there is no inner scroller for FullCalendar to
+       * hold them above, and the whole point of a column header is that it is
+       * readable while you are looking at the column — a grid scrolled to 4 PM
+       * with the dates off screen is seven unlabelled columns of blocks.
+       *
+       * `top-(--log-sticky-top)` is the same measured offset the log's own day
+       * headers stick to: the shell's timer bar plus this page's header. So the
+       * dates come to rest exactly under the filter band, in the same place the
+       * log's day headers do, and neither has to know the other's number.
+       *
+       * `z-10` matches the log's day headers — one step under the page header's
+       * `z-20` and two under the timer bar's `z-30`, which is the ladder
+       * `page.tsx` argues for: the thing higher up the screen passes over.
+       *
+       * `bg-surface`, opaque, and a `border-b`: rows scroll under this, and a
+       * transparent sticky element is a window onto them.
+       */
+      tableHeaderClass="sticky top-(--log-sticky-top) z-10 border-b border-edge-soft bg-surface"
       tableBodyClass="bg-surface"
       slotLaneClass={HOUR_RULE}
       slotHeaderClass={HOUR_RULE}

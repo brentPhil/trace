@@ -1,7 +1,30 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
+import { rangeOf } from "@/lib/calendar-events"
+import type { CalendarSize } from "@/lib/calendar-label"
 import type { Doc } from "../../../convex/_generated/dataModel"
+
+/*
+ * `drawnDays` runs once per `datesSet`, and nowhere else in this component —
+ * so counting its calls counts the times FullCalendar rebuilt its dateProfile.
+ * That is the only observable left for the rebuild-per-tick defect the tick
+ * test below guards, now that the panel announces nothing upward: the thing it
+ * actually ruined is scroll position, and jsdom has no layout.
+ */
+const { datesSetCount } = vi.hoisted(() => ({ datesSetCount: { n: 0 } }))
+
+vi.mock("@/lib/calendar-events", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/calendar-events")>()
+  return {
+    ...actual,
+    drawnDays: (...args: Parameters<typeof actual.drawnDays>) => {
+      datesSetCount.n += 1
+      return actual.drawnDays(...args)
+    },
+  }
+})
 
 /*
  * The grid, rendered.
@@ -56,33 +79,43 @@ function entry(over: Partial<Doc<"timeEntries">>): Doc<"timeEntries"> {
   } as unknown as Doc<"timeEntries">
 }
 
-function renderPanel(
-  over: Partial<Parameters<typeof CalendarPanel>[0]> = {}
-): {
-  onRangeChange: ReturnType<typeof vi.fn>
-  rerender: (next: Partial<Parameters<typeof CalendarPanel>[0]>) => void
-  container: HTMLElement
-} {
-  const onRangeChange = vi.fn()
-  const props: Parameters<typeof CalendarPanel>[0] = {
+type PanelProps = Parameters<typeof CalendarPanel>[0]
+
+/**
+ * The harness speaks in SIZE AND ANCHOR, which is what the page holds, and
+ * turns them into a range with `rangeOf` — the same function /timer calls. So
+ * a case below cannot pass while the page hands the panel something else.
+ */
+type Harness = Partial<PanelProps> & { size?: CalendarSize; anchor?: string }
+
+function buildProps(over: Harness): PanelProps {
+  const { size = "week", anchor = ANCHOR, ...rest } = over
+  const timeZone = rest.timeZone ?? MANILA
+  const weekStartDay = rest.weekStartDay ?? MONDAY
+  return {
     entries: [],
-    size: "week",
-    anchor: ANCHOR,
-    timeZone: MANILA,
-    weekStartDay: MONDAY,
+    timeZone,
+    weekStartDay,
     use12Hour: false,
     display: "hms",
     nowMs: NOW,
     projectsById: new Map(),
     onEntryClick: vi.fn(),
-    onRangeChange,
-    ...over,
+    range: rangeOf(anchor, size, weekStartDay, timeZone),
+    // Last, so an explicit `range` in a case beats the derived one.
+    ...rest,
   }
-  const view = render(<CalendarPanel {...props} />)
+}
+
+function renderPanel(over: Harness = {}): {
+  rerender: (next: Harness) => void
+  container: HTMLElement
+} {
+  const view = render(<CalendarPanel {...buildProps(over)} />)
   return {
-    onRangeChange,
     container: view.container,
-    rerender: (next) => view.rerender(<CalendarPanel {...props} {...next} />),
+    rerender: (next) =>
+      view.rerender(<CalendarPanel {...buildProps({ ...over, ...next })} />),
   }
 }
 
@@ -307,17 +340,20 @@ describe("CalendarPanel", () => {
   })
 
   describe("navigation", () => {
-    it("moves the rendered range when the anchor changes", () => {
+    it("moves the rendered range when the range it is given moves", () => {
       /*
-       * THE OTHER REGRESSION THIS FILE WAS WRITTEN FOR.
+       * THE OTHER REGRESSION THIS FILE WAS WRITTEN FOR, in its current
+       * spelling.
        *
        * `initialDate` is read once, at init — FullCalendar's own docs say it
        * "should be initialized once and stay constant" — and the React
-       * wrapper's re-render dispatches `IDLE`. A changed `initialDate` prop
-       * moved nothing: the header's arrows would have moved their label and
-       * left the grid, the Convex query and the range total on the old week.
+       * wrapper's every later render dispatches `IDLE`. A changed `initialDate`
+       * moves nothing. `visibleRange` does: its refined value is an input to
+       * the dateProfileGenerator, and the manager rebuilds the generator, and
+       * with it the profile, whenever those inputs differ. So the columns
+       * follow the page's range with no controller and no remount.
        */
-      const { container, onRangeChange, rerender } = renderPanel()
+      const { container, rerender } = renderPanel()
 
       expect(renderedDays(container)).toEqual([
         "2026-08-10",
@@ -328,7 +364,6 @@ describe("CalendarPanel", () => {
         "2026-08-15",
         "2026-08-16",
       ])
-      onRangeChange.mockClear()
 
       rerender({ anchor: "2026-08-18" })
 
@@ -341,63 +376,65 @@ describe("CalendarPanel", () => {
         "2026-08-22",
         "2026-08-23",
       ])
-      // And the range goes upward, so the query and the total follow the grid.
-      // The DAYS go up with it, not only the two instants: "Range total" is
-      // summed over exactly this list, and a week view hides nothing, so it is
-      // every column drawn above.
-      expect(onRangeChange).toHaveBeenCalledWith({
-        fromMs: Date.parse("2026-08-16T16:00:00Z"), // Mon 17th, Manila midnight
-        toMs: Date.parse("2026-08-23T16:00:00Z"),
-        days: [
-          "2026-08-17",
-          "2026-08-18",
-          "2026-08-19",
-          "2026-08-20",
-          "2026-08-21",
-          "2026-08-22",
-          "2026-08-23",
-        ],
-      })
+    })
+
+    it("changes span without a remount when only the size changes", () => {
+      // Mon 10 is the first day of both, so the range's START does not move —
+      // only its end. `visibleRange` is memoised on BOTH instants, and a memo
+      // keyed on the first day alone would leave seven columns on screen under
+      // a bar labelling five.
+      const { container, rerender } = renderPanel({ anchor: "2026-08-11" })
+      expect(renderedDays(container)).toHaveLength(7)
+
+      rerender({ size: "5day" })
+
+      expect(renderedDays(container)).toEqual([
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+      ])
     })
 
     it("survives the clock ticking without rebuilding its range", () => {
       /*
-       * The guard on `hiddenDays`.
+       * The guard on the memoised `visibleRange`.
        *
        * It is refined by `identity` and absent from
-       * `COMPLEX_OPTION_COMPARATORS`, so a freshly allocated array on each
-       * render rebuilt the dateProfileGenerator, then the dateProfile — which
+       * `COMPLEX_OPTION_COMPARATORS`, so a freshly allocated object on each
+       * render rebuilds the dateProfileGenerator, then the dateProfile — which
        * re-fires `datesSet` and calls `resetScroll()`. `nowMs` ticks every
-       * second, so the grid used to snap back to `scrollTime` about once a
-       * second and could not be scrolled at all.
+       * second, so an inline `{ start, end }` would snap the grid back to
+       * `scrollTime` about once a second and leave it unscrollable; with
+       * anything setting state on `datesSet` the same rebuild is an unbounded
+       * loop that React ends with "Maximum update depth exceeded". `hiddenDays`
+       * carried exactly this hazard before it.
        *
-       * Geometry is what that defect ruined and geometry is what jsdom cannot
-       * see, so this asserts the same rebuild by its other two effects: the
-       * range must not be re-announced, and — because the controller wired up
-       * for navigation re-renders this component on every `datesSet` — the
-       * render must terminate at all. With an inline array this throws
-       * "Maximum update depth exceeded".
+       * Geometry is what that defect ruins and geometry is what jsdom cannot
+       * see, so this counts the REBUILDS instead: `drawnDays` runs once per
+       * `datesSet` and nowhere else, so the mock at the top of this file is a
+       * direct count of them.
        */
-      const { container, onRangeChange, rerender } = renderPanel({
-        entries: [entry({})],
-      })
-      onRangeChange.mockClear()
+      const { container, rerender } = renderPanel({ entries: [entry({})] })
+      datesSetCount.n = 0
 
       rerender({ nowMs: NOW + 1_000 })
       rerender({ nowMs: NOW + 2_000 })
 
-      expect(onRangeChange).not.toHaveBeenCalled()
+      expect(datesSetCount.n).toBe(0)
       expect(renderedDays(container)).toHaveLength(7)
     })
   })
 
   describe("the range sizes", () => {
     it("renders five weekday columns for a 5-day range", () => {
-      // `[0, 6]` AND `firstDay: 1` — Monday to Friday whatever `weekStartDay`
-      // is, because the hidden days only get trimmed off the ENDS of the week
-      // `firstDay` built. A Sunday start is one of the three that happened to
-      // work without the override; `calendar-range-label.test.tsx` walks all
-      // seven, which is what this single case could not.
+      // Monday to Friday whatever `weekStartDay` is, because `rangeOf` says so
+      // — no hidden-day trim, and therefore no week that `firstDay` built for
+      // the trim to land in the wrong place on. A Sunday start is one of the
+      // three that happened to work under the old pairing;
+      // `calendar-range-label.test.tsx` walks all seven, which is what this
+      // single case could not.
       const { container } = renderPanel({ size: "5day", weekStartDay: 0 })
       expect(renderedDays(container)).toEqual([
         "2026-08-10",

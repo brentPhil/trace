@@ -1,4 +1,5 @@
-import { addDays, dayOf, localPartsOf, weekdayOf } from "@shared/day"
+import { addDays, dayOf, dayWindow, weekStartOf, weekdayOf } from "@shared/day"
+import type { CalendarSize } from "@/lib/calendar-label"
 import type { DayString } from "@shared/day"
 import type { EventInput } from "@fullcalendar/react"
 import type { Doc } from "../../convex/_generated/dataModel"
@@ -15,18 +16,97 @@ import type { Doc } from "../../convex/_generated/dataModel"
  */
 
 /**
- * What the grid reports about the window it is drawing.
+ * The window the page has decided to show, and told the grid to draw.
  *
- * `days` IS NOT DERIVABLE FROM THE OTHER TWO by anything outside the panel: the
- * 5-day view hides two weekdays inside its own range, so the range's width and
- * the number of columns are different questions. Both answers travel together
- * because the page needs both — the instants key the Convex query, and the days
- * are what "Range total" is allowed to sum.
+ * IT USED TO BE THE OTHER WAY ROUND — the grid computed the span from
+ * `firstDay`/`hiddenDays` and reported it up through `datesSet`, and the page
+ * took what it was given. That could only ever work while the range existed in
+ * Calendar view: the range bar is on screen in List too now, and it bounds the
+ * list, and in List there is no grid mounted to report anything. So the page
+ * computes the range with `rangeOf` and the grid is told to draw exactly that.
+ *
+ * All three fields travel together because the page needs all three: the
+ * instants key the Convex query, and `days` is what "Range total" is allowed to
+ * sum and what the label's two ends are read off.
  */
 export type CalendarRange = {
   fromMs: number
   toMs: number
   days: Array<DayString>
+}
+
+/**
+ * Monday. The 5-day view's own week start, whatever the user's is.
+ *
+ * 5 days is the WORKING WEEK and the working week is Monday to Friday by
+ * definition. The view exists to hide the weekend; rotating it by
+ * `weekStartDay` would make it mean something else on a Sunday-start calendar.
+ * `week` and `day` still take the stored `weekStartDay`, which is where it
+ * belongs.
+ */
+const WORKING_WEEK_FIRST_DAY = 1
+
+/**
+ * The days a size draws, given where it is anchored.
+ *
+ * THIS IS WHERE THIS CODEBASE'S WORST BUG LIVED, in a different spelling. The
+ * 5-day range used to be produced by `firstDay={weekStartDay}` plus
+ * `hiddenDays={[0, 6]}`, and FullCalendar trims hidden days only off the ENDS
+ * of the week `firstDay` built — so with a Wednesday start the weekend fell in
+ * the INTERIOR and was not removed at all, and the grid drew Wed, Thu, Fri,
+ * MON, TUE: five columns spanning seven days of two different weeks. 31 of the
+ * 49 (weekStartDay × anchor) combinations disagreed with the label above them.
+ * See `calendar-range-label.test.tsx`, which walks the whole matrix.
+ *
+ * Stated as five days from Monday there is no trimming model left to get
+ * wrong: the answer is the same for all seven starts because `weekStartDay`
+ * does not enter this branch at all.
+ */
+function daysOf(
+  anchor: DayString,
+  size: CalendarSize,
+  weekStartDay: number
+): Array<DayString> {
+  if (size === "day") return [anchor]
+
+  const width = size === "5day" ? 5 : 7
+  const first = weekStartOf(
+    anchor,
+    size === "5day" ? WORKING_WEEK_FIRST_DAY : weekStartDay
+  )
+
+  const days: Array<DayString> = []
+  for (let i = 0; i < width; i += 1) days.push(addDays(first, i))
+  return days
+}
+
+/**
+ * The range a size and an anchor mean, as instants and as columns.
+ *
+ * PURE, and the single source of truth for both. The page keys its Convex
+ * query on `fromMs`/`toMs`, labels the bar from the ends of `days`, sums
+ * "Range total" over `days`, and hands the whole thing to `CalendarPanel` as
+ * `visibleRange` — so the query, the label, the total and the columns are one
+ * computation rather than four that agree by coincidence.
+ *
+ * Every boundary goes through `@shared/day`: `weekStartOf` and `addDays` are
+ * calendar arithmetic on a `DayString`, and `dayWindow` resolves the two ends
+ * to instants in the user's stored zone, so a DST day is 23 or 25 hours long
+ * and no hour is lost or counted twice. `toMs` is EXCLUSIVE — the midnight
+ * that ends the last day.
+ */
+export function rangeOf(
+  anchor: DayString,
+  size: CalendarSize,
+  weekStartDay: number,
+  timeZone: string
+): CalendarRange {
+  const days = daysOf(anchor, size, weekStartDay)
+  return {
+    fromMs: dayWindow(days[0], timeZone).fromMs,
+    toMs: dayWindow(days[days.length - 1], timeZone).toMs,
+    days,
+  }
 }
 
 /** The typed half of `extendedProps`, read by the panel's render hooks. */
@@ -121,6 +201,31 @@ export function dayTotals(
 }
 
 /**
+ * The first and last day the grid drew, for the label between the arrows.
+ *
+ * READS `days`, and deliberately does not recompute the ends from `fromMs` and
+ * `toMs`. Those two happen to give the same answer today, because for every
+ * size this app ships the hidden weekdays land at the range's ends where
+ * FullCalendar's own trimming already removed them — but that is a property of
+ * the current trimming model, not of the code, and the whole reason `days`
+ * travels alongside the instants is that nothing outside the panel may assume
+ * it. A view with an interior gap would make a `dayOf(toMs - 1)` derivation
+ * disagree with the columns silently, which is exactly the defect this file's
+ * `rangeTotal` comment describes shipping once already.
+ *
+ * `null` for an empty list, so a caller cannot read `days[0]` off the end.
+ */
+export function rangeEndpoints(
+  range: CalendarRange
+): { firstDay: DayString; lastDay: DayString } | null {
+  if (range.days.length === 0) return null
+  return {
+    firstDay: range.days[0],
+    lastDay: range.days[range.days.length - 1],
+  }
+}
+
+/**
  * The figure under the stepper's arrows: the sum of the DRAWN columns' totals.
  *
  * A function rather than three lines in the page, because the assertion that
@@ -183,23 +288,3 @@ export function drawnDays(
   return days
 }
 
-/**
- * The hour the grid should open scrolled to.
- *
- * The earliest start in the range, in the USER's stored zone — read through
- * `localPartsOf` rather than `getHours()`, which would answer for the browser.
- * A grid scrolled to 23:00 because the entry is 23:30 UTC, when the user is in
- * Manila and started at 07:30, is scrolled past every block on it.
- */
-export function earliestHour(
-  entries: Array<Doc<"timeEntries">>,
-  timeZone: string,
-  fallbackHour: number
-): number {
-  if (entries.length === 0) return fallbackHour
-  let earliest = Infinity
-  for (const entry of entries) {
-    if (entry.startedAt < earliest) earliest = entry.startedAt
-  }
-  return localPartsOf(earliest, timeZone).hour
-}

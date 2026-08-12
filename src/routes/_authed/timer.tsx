@@ -17,14 +17,14 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
-import { rangeTotal } from "@/lib/calendar-events"
+import { rangeEndpoints, rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { groupByDay } from "@/lib/group-entries"
 import { hasClientSideFilter, matches } from "@/lib/history-filters"
 import { periodTotals } from "@/lib/period-totals"
 import { cn } from "@/lib/utils"
 import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
-import type { CalendarRange } from "@/lib/calendar-events"
+
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { QuickFilters } from "@/lib/history-filters"
 import type { DayString } from "@shared/day"
@@ -138,40 +138,44 @@ export function Timer() {
   const [anchor, setAnchor] = useState<DayString>(today)
 
   /*
-   * The window FullCalendar is actually showing, reported back by `datesSet`.
+   * THE WINDOW, COMPUTED HERE AND HANDED DOWN.
    *
-   * Taken from the grid rather than computed here on purpose: computing it
-   * twice is how the query and the columns come to describe different weeks.
-   * `null` until the first `datesSet` fires, which is why the query below is
-   * `useQuery` with an enabled guard rather than `useSuspenseQuery` — there is
-   * nothing to suspend on until the grid has said what it is drawing.
+   * This used to run the other way: the grid decided its own span from
+   * `firstDay` and `hiddenDays`, reported it back through `datesSet`, and the
+   * page labelled and queried whatever arrived — `null` until the first report.
+   * That could only work while the range lived in Calendar view. The range bar
+   * is on screen in List too now, and in List no grid is mounted to report
+   * anything, so the page has to know the answer without one.
    *
-   * The object is only ever replaced by `onRangeChange`, so the query key it
-   * feeds is referentially stable between renders. `CalendarPanel` holds the
-   * other half of that: it drops a `datesSet` whose range it has already
-   * reported, so setState here cannot feed a render loop back into it.
+   * `rangeOf` is that answer, and it is the ONLY one: the grid is told to draw
+   * it (`visibleRange`), the label names it, the query fetches it, and "Range
+   * total" sums its days. A second derivation anywhere is the defect that cost
+   * this feature two review cycles — see `calendar-range-label.test.tsx`.
+   *
+   * Never `null` now, so the query below needs no enabled-guard for it and the
+   * range bar has real days from the first paint.
    */
-  const [calendarRange, setCalendarRange] = useState<CalendarRange | null>(null)
+  const calendarRange = useMemo(
+    () => rangeOf(anchor, size, settings.weekStartDay, settings.timezone),
+    [anchor, size, settings.weekStartDay, settings.timezone]
+  )
 
   /*
    * The two instants ALONE, because they are the query's whole argument list.
    * `calendarRange` also carries the drawn days, and `listRange`'s validator
    * takes `fromMs`/`toMs` and nothing else — spreading the range straight in
-   * would send a third field the backend rejects. `calendarRange` is only ever
-   * replaced by `onRangeChange`, so this memo is referentially stable between
-   * renders and the subscription is not rebuilt on every tick.
+   * would send a third field the backend rejects. The memo keeps the query key
+   * referentially stable between renders so the subscription is not rebuilt on
+   * every tick.
    */
   const calendarArgs = useMemo(
-    () =>
-      calendarRange === null
-        ? { fromMs: 0, toMs: 0 }
-        : { fromMs: calendarRange.fromMs, toMs: calendarRange.toMs },
+    () => ({ fromMs: calendarRange.fromMs, toMs: calendarRange.toMs }),
     [calendarRange]
   )
 
   const calendarQuery = useQuery({
     ...convexQuery(api.entries.listRange, calendarArgs),
-    enabled: view === "calendar" && calendarRange !== null,
+    enabled: view === "calendar",
     /*
      * The convention `reports.tsx` sets, for the same reason it sets it: the
      * range is part of the query key, so every arrow click mints a key with
@@ -182,7 +186,7 @@ export function Timer() {
      * What that buys has to be paid for honestly, and `isPlaceholderData` is
      * the payment: while it is true the total belongs to the PREVIOUS range
      * and the label above it already names the new one, which is precisely the
-     * defect `visibleDaysOf` below exists to prevent. It is handed to
+     * defect `rangeEndpoints` exists to prevent. It is handed to
      * `CalendarHeader` as `isStale`, which dims it and says "Updating…".
      */
     placeholderData: (previous) => previous,
@@ -244,11 +248,8 @@ export function Timer() {
    * computed fallback.
    */
   const calendarDays = useMemo(
-    () =>
-      calendarRange === null
-        ? null
-        : visibleDaysOf(calendarRange, settings.timezone),
-    [calendarRange, settings.timezone]
+    () => (calendarRange === null ? null : rangeEndpoints(calendarRange)),
+    [calendarRange]
   )
 
   /*
@@ -563,14 +564,28 @@ export function Timer() {
         */}
         {view === "calendar" ? (
           /*
-            MARGINS, NOT `gap`. The quiet region below is always mounted and is
-            usually empty; an empty block element generates no line box, but a
-            `gap` between flex items does not care whether either of them drew
-            anything, so a `gap-3` here left 12px of dead space under the grid's
-            ordinary state. `FilteredLogStatus` makes its padding conditional
-            for exactly this reason.
+            NO HEIGHT AT ALL: the grid draws the whole day and the page scrolls.
+
+            Deliberately unconstrained, and it took three tries to get here. A
+            `height={640}` inside the panel, then a
+            `calc(100svh - var(--log-sticky-top))` cap here — both of them capped
+            the grid to something smaller than a day and handed the remainder to
+            an inner scrollbar, so most of the axis lived inside a box on a page
+            that did not itself scroll. Two scroll contexts, and the wheel
+            reached the wrong one first. The panel now asks FullCalendar for
+            `height="auto"` and this element simply lets it be as tall as it is.
+
+            NO GUTTER, deliberately, against DESIGN.md's usual `px-4`. That rule
+            exists so entry titles, day headers, totals and the search box all
+            start on the same pixel — it is about a COLUMN OF TEXT lining up. A
+            time grid is not text in a column; it is a measuring surface whose
+            own first column is an hour rail that lines up with nothing above it.
+            Inset by 16px it read as a card floating on the page, which is what
+            DESIGN.md's flat, tonal-depth section rules out. Full-bleed it reads
+            as a band of the page, exactly as the filter band above it does, and
+            the wider columns are the point of a wider window.
           */
-          <div className="flex w-full flex-col px-4 pb-4">
+          <div className="flex w-full flex-col">
             {/*
               A FAILED RANGE QUERY IS NOT AN EMPTY WEEK.
 
@@ -586,7 +601,10 @@ export function Timer() {
               <p
                 role="alert"
                 className={cn(
-                  "mb-3 flex flex-wrap items-center gap-3 rounded-md",
+                  // `mx-4`, not the parent's gutter: the grid below is
+                  // full-bleed, so this element carries its own alignment with
+                  // the filter band above rather than inheriting one.
+                  "mx-4 mb-3 flex flex-wrap items-center gap-3 rounded-md",
                   "border border-alarm px-3 py-2 text-sm text-alarm"
                 )}
               >
@@ -613,7 +631,10 @@ export function Timer() {
             <p
               aria-live="polite"
               className={cn(
-                "text-sm text-muted-foreground",
+                // Its own `px-4`, for the same reason the alert above carries
+                // `mx-4` — the grid is full-bleed and hands its children no
+                // gutter, so a line of prose has to state its own.
+                "px-4 text-sm text-muted-foreground",
                 calendarNotice !== null && "mb-3"
               )}
             >
@@ -622,8 +643,7 @@ export function Timer() {
 
             <CalendarPanel
               entries={calendarEntries}
-              size={size}
-              anchor={anchor}
+              range={calendarRange}
               timeZone={settings.timezone}
               weekStartDay={settings.weekStartDay}
               use12Hour={settings.timeFormat === "12"}
@@ -631,7 +651,6 @@ export function Timer() {
               nowMs={nowMs}
               projectsById={projectsById}
               onEntryClick={onEntryClick}
-              onRangeChange={setCalendarRange}
             />
           </div>
         ) : status === "LoadingFirstPage" ? (
@@ -674,34 +693,3 @@ export function Timer() {
   )
 }
 
-/**
- * The days the grid is showing, read off the range the grid itself reported.
- *
- * THE ONE SOURCE IS `datesSet`. This used to be computed from the anchor, the
- * size and `weekStartDay`, on the claim that `hiddenDays={[0, 6]}` "trims by
- * day-of-week index independently of where the week is set to start". That
- * claim is false: FullCalendar builds the week from `firstDay` and then
- * `trimHiddenDays` removes hidden days only from the ENDS of it. Measured over
- * all seven anchors × all seven `weekStartDay` values, 31 of the 49
- * combinations disagreed with the columns on screen — including every Sunday
- * anchor under a Sunday week start, where the label named the week before the
- * one being drawn. Worse than a wrong label: "Range total" beside it is summed
- * from the grid's real range, so the header could read `10–14 Aug` above a
- * total belonging to `17–21 Aug`, on a billing tool.
- *
- * There is deliberately no fallback for "the grid has not reported yet". A
- * fallback here is the second derivation, and the second derivation is the bug.
- *
- * `toMs` is EXCLUSIVE — the midnight that opens the day after the last visible
- * one — so the last day is the one holding the millisecond before it. Both ends
- * go through `dayOf`, the same function the grid's own column headers use.
- */
-export function visibleDaysOf(
-  range: { fromMs: number; toMs: number },
-  timeZone: string
-): { firstDay: DayString; lastDay: DayString } {
-  return {
-    firstDay: dayOf(range.fromMs, timeZone),
-    lastDay: dayOf(range.toMs - 1, timeZone),
-  }
-}

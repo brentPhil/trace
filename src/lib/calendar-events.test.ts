@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest"
-import {
-  calendarEvents,
-  dayTotals,
-  drawnDays,
-  earliestHour,
-} from "./calendar-events"
+import { calendarEvents, dayTotals, drawnDays, rangeOf } from "./calendar-events"
 import type { Doc } from "../../convex/_generated/dataModel"
 
 /*
@@ -89,6 +84,86 @@ describe("calendarEvents", () => {
     expect(event.extendedProps.startedAt).toBe(Date.UTC(2026, 7, 10, 9, 0))
     expect(event.extendedProps.endedAt).toBe(Date.UTC(2026, 7, 10, 10, 0))
     expect(event.id).toBe("e1")
+  })
+})
+
+describe("rangeOf", () => {
+  /*
+   * The page's whole answer to "which window am I looking at" — the Convex
+   * query's two instants, the label's two ends, and the days "Range total" is
+   * allowed to sum, from one computation.
+   *
+   * The matrix that matters (all seven `weekStartDay`s against all seven
+   * anchors, asserted against the columns the real grid draws) lives in
+   * `calendar-range-label.test.tsx`. What is here is the arithmetic itself:
+   * the working week's Monday, the stored week start, and the two instants.
+   */
+  it("gives a day view exactly its anchor", () => {
+    expect(rangeOf("2026-08-12", "day", 1, UTC)).toEqual({
+      fromMs: Date.UTC(2026, 7, 12),
+      toMs: Date.UTC(2026, 7, 13),
+      days: ["2026-08-12"],
+    })
+  })
+
+  it("opens a week on the stored week start", () => {
+    // Wednesday the 12th, with the week starting on Sunday: Sun 9 – Sat 15.
+    expect(rangeOf("2026-08-12", "week", 0, UTC)).toEqual({
+      fromMs: Date.UTC(2026, 7, 9),
+      toMs: Date.UTC(2026, 7, 16),
+      days: [
+        "2026-08-09",
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+        "2026-08-14",
+        "2026-08-15",
+      ],
+    })
+  })
+
+  it("is Monday to Friday for 5 days, whatever the week starts on", () => {
+    /*
+     * THE ASSERTION THIS FUNCTION EXISTS FOR. 5 days is the working week and
+     * the working week is Mon–Fri by definition; the view exists to hide the
+     * weekend, and rotating it by `weekStartDay` would make it mean something
+     * else on a Sunday-start calendar. `/settings` offers all seven starts, so
+     * every row here is reachable.
+     */
+    const WORKING_WEEK = [
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+    ]
+    for (const weekStartDay of [0, 1, 2, 3, 4, 5, 6]) {
+      const range = rangeOf("2026-08-12", "5day", weekStartDay, UTC)
+      expect({ weekStartDay, days: range.days }).toEqual({
+        weekStartDay,
+        days: WORKING_WEEK,
+      })
+      expect(range.fromMs).toBe(Date.UTC(2026, 7, 10))
+      // Exclusive: the midnight that ENDS Friday, not the one that opens it.
+      expect(range.toMs).toBe(Date.UTC(2026, 7, 15))
+    }
+  })
+
+  it("resolves both ends in the stored zone", () => {
+    // Manila is UTC+8, so a local Monday midnight is 16:00 UTC the day before.
+    const range = rangeOf("2026-08-12", "week", 1, "Asia/Manila")
+    expect(range.fromMs).toBe(Date.parse("2026-08-09T16:00:00Z"))
+    expect(range.toMs).toBe(Date.parse("2026-08-16T16:00:00Z"))
+  })
+
+  it("spans a DST boundary without losing or repeating an hour", () => {
+    // 8 March 2026, America/New_York: 02:00 does not exist, so this week is
+    // 167 hours long. `+ 7 * 86_400_000` would put `toMs` an hour late and
+    // drag the following Sunday's first hour into the range.
+    const range = rangeOf("2026-03-09", "week", 0, "America/New_York")
+    expect(range.days[0]).toBe("2026-03-08")
+    expect(range.toMs - range.fromMs).toBe(167 * 3_600_000)
   })
 })
 
@@ -199,33 +274,3 @@ describe("dayTotals", () => {
   })
 })
 
-describe("earliestHour", () => {
-  it("returns the hour of the earliest start in the user's zone", () => {
-    const hour = earliestHour(
-      [
-        entry({ startedAt: Date.UTC(2026, 7, 10, 14, 12) }),
-        entry({ _id: "e2", startedAt: Date.UTC(2026, 7, 10, 9, 45) } as Partial<
-          Doc<"timeEntries">
-        >),
-      ],
-      UTC,
-      8
-    )
-    expect(hour).toBe(9)
-  })
-
-  it("falls back when nothing is tracked", () => {
-    expect(earliestHour([], UTC, 8)).toBe(8)
-  })
-
-  it("reads the hour in the stored zone, not the browser's", () => {
-    // 23:30 UTC is 07:30 the next morning in Manila. A grid scrolled to 23:00
-    // for a 07:30 start is a grid scrolled past every block on it.
-    const hour = earliestHour(
-      [entry({ startedAt: Date.UTC(2026, 7, 9, 23, 30) })],
-      "Asia/Manila",
-      8
-    )
-    expect(hour).toBe(7)
-  })
-})

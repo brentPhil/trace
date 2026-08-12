@@ -1,12 +1,9 @@
-import { useState } from "react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 import { CalendarHeader } from "@/components/calendar/calendar-header"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
-import { rangeTotal } from "@/lib/calendar-events"
+import { rangeEndpoints, rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { calendarLabel } from "@/lib/calendar-label"
-import { visibleDaysOf } from "@/routes/_authed/timer"
-import type { CalendarRange } from "@/lib/calendar-events"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
@@ -29,14 +26,19 @@ import type { Doc } from "../../../convex/_generated/dataModel"
  *     fall in the interior rather than at the ends — while the label claimed
  *     Mon–Fri regardless.
  *
- * It was worse than a wrong label. "Range total" beside it is summed from the
+ * It was worse than a wrong label. "Range total" beside it was summed from the
  * grid's real range, so the header could read `10–14 Aug` above a total
  * belonging to `17–21 Aug`, on a tool people invoice from.
  *
- * A SINGLE ANCHOR IS WHAT MISSED IT — `calendar-panel.test.tsx` uses a Tuesday,
- * one of the 18 combinations that happened to agree. So this asserts the whole
- * matrix, and it asserts it against the grid's OWN `data-date` columnheaders
- * rather than against a second computation of what they ought to be.
+ * WHAT THE MATRIX ASSERTS NOW. The direction of the wiring has been inverted:
+ * `rangeOf` computes the range and the grid is TOLD to draw it, rather than the
+ * grid computing a span and the page labelling whatever came back. So the
+ * question is no longer "does the label agree with the grid" but "does the grid
+ * draw what it was given" — and it is still asserted against the grid's OWN
+ * `data-date` columnheaders rather than against a second computation of what
+ * they ought to be. The 5-day rows still assert Mon–Fri outright, because
+ * "whatever the grid drew" is exactly the assertion that let the old defect
+ * through two reviews.
  *
  * NO FAKE TIMERS and no `findBy*`: `nowMs` is a prop and the DOM is complete
  * synchronously after `render`, which is what this repo requires (`waitFor`
@@ -67,10 +69,9 @@ const ANCHORS = [
 const WEEK_STARTS = [0, 1, 2, 3, 4, 5, 6]
 
 /**
- * The page's own wiring, in miniature: the grid reports a range, and the header
- * labels the days that range covers. `visibleDaysOf` is imported from
- * `timer.tsx` rather than reimplemented, so this test cannot pass while the
- * page does something else.
+ * The page's own wiring, in miniature: ONE `rangeOf` feeds the grid, the label
+ * and the total alike. Every function here is imported rather than
+ * reimplemented, so this test cannot pass while the page does something else.
  */
 function Harness({
   anchor,
@@ -83,15 +84,14 @@ function Harness({
   weekStartDay: number
   entries?: Array<Doc<"timeEntries">>
 }) {
-  const [range, setRange] = useState<CalendarRange | null>(null)
-  const days = range === null ? null : visibleDaysOf(range, MANILA)
+  const range = rangeOf(anchor, size, weekStartDay, MANILA)
+  const days = rangeEndpoints(range)
 
   return (
     <>
       <CalendarPanel
         entries={entries}
-        size={size}
-        anchor={anchor}
+        range={range}
         timeZone={MANILA}
         weekStartDay={weekStartDay}
         use12Hour={false}
@@ -99,9 +99,8 @@ function Harness({
         nowMs={NOW}
         projectsById={new Map()}
         onEntryClick={() => {}}
-        onRangeChange={setRange}
       />
-      {days === null || range === null ? null : (
+      {days === null ? null : (
         <div
           data-testid="range-bar"
           data-first={days.firstDay}
@@ -112,10 +111,6 @@ function Harness({
             lastDay={days.lastDay}
             size={size}
             today={TODAY}
-            // The page's own function, not a sum written a second time here —
-            // the same reason `visibleDaysOf` is imported rather than
-            // reimplemented: this test cannot pass while /timer does something
-            // else with the range the grid reported.
             rangeMs={rangeTotal(entries, MANILA, NOW, range.days)}
             display="hms"
             onStep={() => {}}
@@ -136,11 +131,39 @@ function columnDates(container: HTMLElement): Array<string> {
   ].map((cell) => cell.getAttribute("data-date") ?? "")
 }
 
-afterEach(cleanup)
+/*
+ * THE PANEL'S OWN CHECK, held to zero across the whole matrix.
+ *
+ * `CalendarPanel`'s `datesSet` compares the range FullCalendar actually drew
+ * against the one it was handed, and says so on the console when they differ.
+ * Nothing else here would notice: the columns, the label and the total are all
+ * derived from one `rangeOf` now, so they would agree with each other while all
+ * three disagreed with the grid — which is the only shape the original defect
+ * has left to take.
+ *
+ * Only this component's own message is counted. A React warning is a different
+ * complaint and failing on it here would make this file the place unrelated
+ * noise comes to fail.
+ */
+let consoleError: ReturnType<typeof vi.spyOn>
+
+beforeEach(() => {
+  consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+})
+
+afterEach(() => {
+  cleanup()
+  const disagreements = consoleError.mock.calls.filter(
+    (args: Array<unknown>) =>
+      typeof args[0] === "string" && args[0].startsWith("CalendarPanel drew")
+  )
+  consoleError.mockRestore()
+  expect(disagreements).toEqual([])
+})
 
 /**
  * Renders one combination and returns what the grid drew, what the page derived
- * from the grid's report, and what the header printed.
+ * from the range it computed, and what the header printed.
  */
 function measure(anchor: string, size: CalendarSize, weekStartDay: number) {
   const { container } = render(
@@ -154,6 +177,8 @@ function measure(anchor: string, size: CalendarSize, weekStartDay: number) {
   return {
     columns,
     derived: [bar.dataset.first, bar.dataset.last],
+    /** What the page ASKED for — the whole list, not only its two ends. */
+    expected: rangeOf(anchor, size, weekStartDay, MANILA).days,
     label,
   }
 }
@@ -231,13 +256,17 @@ describe("the header's label and the grid's own columns", () => {
   describe.each(WEEK_STARTS)("weekStartDay %i", (weekStartDay) => {
     it("names the first and last column the week view actually drew", () => {
       for (const anchor of ANCHORS) {
-        const { columns, derived, label } = measure(
+        const { columns, derived, expected, label } = measure(
           anchor,
           "week",
           weekStartDay
         )
 
         expect(columns).toHaveLength(7)
+        // THE COLUMNS ARE THE RANGE, every one of them — not merely seven of
+        // something. The grid is told what to draw now, so this is the
+        // assertion that it obeyed.
+        expect({ anchor, columns }).toEqual({ anchor, columns: expected })
         // The anchor rides along in the compared value so a failure names the
         // day it failed on rather than only the dates it disagreed about.
         expect({ anchor, days: derived }).toEqual({
@@ -264,13 +293,18 @@ describe("the header's label and the grid's own columns", () => {
        * two reviews: this used to check only that the label matched WHATEVER
        * the grid drew. It did — and what the grid drew was not Mon–Fri.
        *
-       * `hiddenDays={[0, 6]}` is trimmed off the ENDS of the week `firstDay`
+       * `hiddenDays={[0, 6]}` was trimmed off the ENDS of the week `firstDay`
        * built, so with `firstDay = weekStartDay` the weekend fell in the
        * INTERIOR from Tuesday onward and was not removed at all: `weekStartDay:
        * 3` drew Wed 5, Thu 6, Fri 7, MON 10, TUE 11 — five columns spanning
-       * seven days of two different weeks. `calendar-panel.tsx` pins `firstDay`
-       * to Monday for this size, which puts the weekend back at the end where
-       * the trim can reach it, for all seven starts.
+       * seven days of two different weeks. There is no trim any more:
+       * `rangeOf` states the five days from Monday outright, and the grid is
+       * given them.
+       *
+       * SPELT OUT, not read back off `rangeOf`. Every other assertion in this
+       * file compares the grid with the range the page asked for; this one has
+       * to pin down what the page is allowed to ASK for, or a `rangeOf` that
+       * rotated the working week by `weekStartDay` would pass the whole matrix.
        *
        * `/settings` offers all seven, so this is the whole reachable matrix.
        */
@@ -283,7 +317,7 @@ describe("the header's label and the grid's own columns", () => {
       ]
 
       for (const anchor of ANCHORS) {
-        const { columns, derived, label } = measure(
+        const { columns, derived, expected, label } = measure(
           anchor,
           "5day",
           weekStartDay
@@ -292,6 +326,7 @@ describe("the header's label and the grid's own columns", () => {
         // Every anchor here is inside Mon 10 – Sun 16, so every one of them
         // resolves to the same working week however the user's week starts.
         expect({ anchor, columns }).toEqual({ anchor, columns: WORKING_WEEK })
+        expect({ anchor, expected }).toEqual({ anchor, expected: WORKING_WEEK })
         expect({ anchor, days: derived }).toEqual({
           anchor,
           days: [columns[0], columns[columns.length - 1]],
