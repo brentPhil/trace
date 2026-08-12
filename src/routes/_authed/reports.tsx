@@ -348,8 +348,16 @@ export function Reports() {
 
           `w-fit` so the group is as wide as its two cells — a segmented
           control stretched across the page is a nav bar, not a switch.
+
+          `my-4` because the variant brought no vertical rhythm with it. The
+          `line` variant this replaced carried its own `pb-1.5` and a full-width
+          hairline, which held the tabs off the band above and the figures
+          below; a segmented group is just a box, so it sat flush against both
+          and read as part of the filter strip rather than as the control that
+          chooses what is under it. It is the only thing between two dense rows
+          and needs room on both sides to be either.
         */}
-        <TabsList variant="segmented" className="mx-4 w-fit">
+        <TabsList variant="segmented" className="mx-4 my-4 w-fit">
           {VIEWS.map((item) => (
             <TabsTrigger key={item.value} value={item.value}>
               {item.label}
