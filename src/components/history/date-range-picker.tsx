@@ -188,6 +188,21 @@ export function DateRangePicker({
         align="start"
         className={cn(
           "gap-0 p-3",
+          /*
+           * OFF `Popover.Popup`'S OWN `max-h-[min(22rem,60svh)]
+           * overflow-hidden`, which is sized for a short menu list and
+           * silently amputates a calendar.
+           *
+           * A one-month grid with a preset rail measures ~305px and a
+           * two-month one is no shorter, so `60svh` cuts the last week row off
+           * — with `overflow-hidden` there is not even a scrollbar to say so —
+           * on any viewport under about 510px tall. Measured in the live DOM:
+           * at a 512px-tall window the popup came back exactly 307px high with
+           * its content clipped. `overflow-auto` keeps the rounded corners
+           * clipping the way the menu case wants while letting a genuinely
+           * cramped viewport scroll instead of lie.
+           */
+          "max-h-[min(34rem,88svh)] overflow-auto",
           // Content-sized once a rail is beside the grid: a fixed width would
           // have to guess at the widest preset label in whichever language.
           presets !== undefined

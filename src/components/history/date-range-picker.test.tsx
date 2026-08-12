@@ -248,6 +248,32 @@ describe("DateRangePicker calendar", () => {
     expect(onChange).toHaveBeenCalledWith({ from: "2026-08-03", to: "2026-08-03" })
     expect(onChange).toHaveBeenCalledTimes(1)
   })
+
+  it("draws a one-day range as one closed day, not as a half-open one", () => {
+    /*
+     * THE DEFECT THIS PINS. react-day-picker sets BOTH `range_start` and
+     * `range_end` on a range whose two ends are the same day, and never a bare
+     * `selected` — so reading "single" as "selected with none of the range
+     * flags" made that case unreachable. The day fell into both endpoint
+     * branches at once, and tailwind-merge collapsed the conflicting
+     * `rounded-l-*` / `rounded-r-*` down to the last one: a flat-left,
+     * round-right half pill, with ", start of range" announced and no end
+     * anywhere in the grid to match it.
+     *
+     * It is the shape /timer's "Today" and "Yesterday" presets drew and the
+     * one /reports' Day period drew, which is to say the most common selection
+     * this control has.
+     */
+    open({ from: "2026-08-03", to: "2026-08-03" })
+
+    const day = dayButton(3)
+    expect(day).toHaveAttribute("data-range", "single")
+    expect(day.getAttribute("aria-label")).toContain(", selected")
+    expect(day.getAttribute("aria-label")).not.toContain("of range")
+    // Nothing is left half-open: no lone start, no lone end.
+    expect(document.querySelectorAll('[data-range="start"]')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-range="end"]')).toHaveLength(0)
+  })
 })
 
 describe("DateRangePicker today", () => {

@@ -29,7 +29,7 @@ import { cn } from "@/lib/utils"
  *    tonal-layering vocabulary without depending on which surface it sits on.
  *  - Endpoints differ from the band, and from EACH OTHER, in shape as well
  *    as fill: the start opens the band to its right, the end opens it to its
- *    left, and a lone selected day is a plain circle. Meaning is never
+ *    left, and a lone selected day is closed on both. Meaning is never
  *    colour alone (DESIGN.md, "The Boundary Rule" / never-colour-alone).
  *  - Today gets a dot, not a tint — the same non-hue mark
  *    `time-popover-fields.tsx`'s calendar already uses, so the two date
@@ -95,7 +95,23 @@ function Calendar({
           "tabular w-8 text-center text-[0.6875rem] text-muted-foreground select-none",
           defaultClassNames.week_number
         ),
-        day: cn("p-0.5 text-center", defaultClassNames.day),
+        /*
+         * NO PADDING ON THE CELL, and that is the whole reason the band reads
+         * as a band.
+         *
+         * The in-range fill is painted by the day BUTTON below, not by this
+         * `td`. With `p-0.5` here the button was 32px inside a 35.3px cell, so
+         * every pair of neighbouring band days was separated by a 3.9px gutter
+         * of untinted popover — a "continuous" selection rendered as a row of
+         * detached blocks, horizontally and (4px) between week rows too.
+         * Measured in the live DOM, not guessed at.
+         *
+         * Flush cells make the button's own fill the cell's fill, so the band
+         * is continuous by construction rather than by two paddings agreeing.
+         * The cost is that a focus ring now has no gutter to sit in, which is
+         * what the button's `focus-visible:z-10` answers.
+         */
+        day: cn("p-0 text-center", defaultClassNames.day),
         range_start: defaultClassNames.range_start,
         range_middle: defaultClassNames.range_middle,
         range_end: defaultClassNames.range_end,
@@ -112,6 +128,12 @@ function Calendar({
         // Sunday-first, which is how `Date.prototype.getDay` indexes; stock
         // formats `cccccc` (2-letter, e.g. "Mo").
         formatWeekdayName: (date) => SUNDAY_FIRST_WEEKDAYS[date.getDay()],
+        /* react-day-picker's default is `""`, which left the week-number
+           column the only headed column in the grid with a blank head — six
+           numbers under nothing. The `<th>` already carries an "Week Number"
+           accessible name of react-day-picker's own; this is the visible half
+           of it, and it is what the reference design draws. */
+        formatWeekNumberHeader: () => "W",
         ...formatters,
       }}
       labels={{
@@ -168,7 +190,12 @@ const SUNDAY_FIRST_WEEKDAYS = weekdayLabels(0)
 function dayButtonLabel(date: Date, modifiers: Record<string, boolean>): string {
   let label = formatDayName(date.getFullYear(), date.getMonth() + 1, date.getDate())
   if (modifiers.today) label += ", today"
-  if (modifiers.range_start) {
+  if (modifiers.range_start && modifiers.range_end) {
+    // A one-day range carries BOTH flags (see `CalendarDayButton`), and this
+    // branch has to come first or it announces as "start of range" with no end
+    // anywhere in the grid — which is what /timer's "Today" preset said.
+    label += ", selected"
+  } else if (modifiers.range_start) {
     label += ", start of range"
   } else if (modifiers.range_end) {
     label += ", end of range"
@@ -196,12 +223,25 @@ function CalendarDayButton({
     if (modifiers.focused) ref.current?.focus()
   }, [modifiers.focused])
 
-  const single =
-    modifiers.selected &&
-    !modifiers.range_start &&
-    !modifiers.range_end &&
-    !modifiers.range_middle
-  const endpoint = modifiers.range_start || modifiers.range_end || single
+  /*
+   * A ONE-DAY selection, which react-day-picker marks as `range_start` AND
+   * `range_end` at once — see DayPicker's own modifier assignment, where both
+   * are `isSameDay(date, from)` / `isSameDay(date, to)` against a range whose
+   * two ends are the same day. It is never a bare `selected` with no range
+   * flag.
+   *
+   * Deriving `single` as "selected but none of the three range flags" — as
+   * this did — therefore made it UNREACHABLE in `mode="range"`. A one-day pick
+   * fell into both endpoint branches at once, and tailwind-merge resolved the
+   * conflicting `rounded-l-full rounded-r-none` / `rounded-r-full
+   * rounded-l-none` down to the LAST one: a flat-left, semicircular-right half
+   * pill. That is what /timer's "Today" and "Yesterday" presets drew, and what
+   * /reports' Day period drew, every time.
+   */
+  const single = modifiers.range_start && modifiers.range_end
+  const isStart = modifiers.range_start && !single
+  const isEnd = modifiers.range_end && !single
+  const endpoint = isStart || isEnd || single
   const inRangeMiddle = modifiers.range_middle && !endpoint
 
   return (
@@ -216,9 +256,9 @@ function CalendarDayButton({
       data-range={
         single
           ? "single"
-          : modifiers.range_start
+          : isStart
             ? "start"
-            : modifiers.range_end
+            : isEnd
               ? "end"
               : inRangeMiddle
                 ? "in-range"
@@ -227,7 +267,12 @@ function CalendarDayButton({
       className={cn(
         "tabular relative flex size-8 items-center justify-center rounded-md text-sm",
         "text-foreground transition-colors motion-reduce:transition-none",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        // `z-10` because the cell around this button has no padding any more
+        // (see `classNames.day`): without it the 2px ring would be painted
+        // over on its right by the next day's own fill, which comes later in
+        // DOM order. Focus has to stay a complete rectangle.
+        "focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring",
+        "focus-visible:outline-none",
         !endpoint && !inRangeMiddle && "hover:bg-foreground/10",
         // The band: shape (flat, no radius) as well as tint — see the file
         // header on why this is an ink overlay and not `bg-muted`.
@@ -235,10 +280,16 @@ function CalendarDayButton({
         endpoint &&
           // Ink on ground — see the file header's Cold Light Rule note.
           "bg-primary font-medium text-primary-foreground",
-        // Endpoints differ from each other in FORM, not only fill.
-        single && "rounded-full",
-        modifiers.range_start && !single && "rounded-l-full rounded-r-none",
-        modifiers.range_end && !single && "rounded-r-full rounded-l-none",
+        /*
+         * Endpoints differ from each other in FORM, not only fill — but at
+         * `rounded-md`, never `rounded-full`. A 32px cell at `rounded-full`
+         * computes to a 33554432px radius, which is a circle: precisely the
+         * "rounded-everything" pill DESIGN.md §5 rejects on a control this
+         * size, and precisely what the header comment above already claimed
+         * this file did not do.
+         */
+        isStart && "rounded-r-none",
+        isEnd && "rounded-l-none",
         className
       )}
       {...props}
