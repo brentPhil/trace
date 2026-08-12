@@ -577,7 +577,7 @@ async function createFromRangeImpl(
     // to the ones whose minor unit really is a hundredth.
     traceError(
       "INVALID_CURRENCY",
-      `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`,
+      `"${args.currency}" is not a currency Chroneli can use. Pick one from the list in Settings.`,
       { field: "currency" }
     )
   }

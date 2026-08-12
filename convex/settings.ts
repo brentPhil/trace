@@ -224,7 +224,7 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
     // hundredth (JPY, KWD, and 37 others).
     traceError(
       "INVALID_CURRENCY",
-      `"${args.currency}" is not a currency Trace can use. Pick one from the list in Settings.`
+      `"${args.currency}" is not a currency Chroneli can use. Pick one from the list in Settings.`
     )
   }
 

@@ -2,7 +2,7 @@ import { defineSchema, defineTable } from "convex/server"
 import { v } from "convex/values"
 
 /**
- * Trace's domain tables.
+ * Chroneli's domain tables.
  *
  * Better Auth is installed as a Convex component, so user, session and account
  * tables live in the component's own namespace rather than here. `userId` below

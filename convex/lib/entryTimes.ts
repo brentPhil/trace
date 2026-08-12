@@ -6,7 +6,7 @@
  * evidence that a hidden rule confuses people — but a preference is worse,
  * because now the same gesture means different things on different machines.
  *
- * Trace has one rule, stated in the UI:
+ * Chroneli has one rule, stated in the UI:
  *
  *     Timestamps are facts; duration is arithmetic.
  *
