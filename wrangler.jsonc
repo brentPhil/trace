@@ -4,10 +4,20 @@
   "main": "dist/server/server.js",
   "compatibility_date": "2026-08-12",
   "compatibility_flags": ["nodejs_compat"],
+  // Runtime vars for the SSR server (src/lib/auth-server.ts reads them from
+  // process.env per request). Versioned here rather than set in the dashboard
+  // because dashboard vars belong to a Worker by name — renaming the Worker
+  // (trace → chroneli) silently orphaned them, which took the site down with
+  // error 1101. These are public URLs, not secrets: the same values are
+  // inlined into the client bundle at build time.
+  "vars": {
+    "VITE_CONVEX_URL": "https://acoustic-ibis-909.convex.cloud",
+    "VITE_CONVEX_SITE_URL": "https://acoustic-ibis-909.convex.site",
+  },
   "assets": {
-    "directory": "dist/client"
+    "directory": "dist/client",
   },
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }
