@@ -238,24 +238,28 @@ export function boundsOf(range: CalendarRange): {
 /**
  * The figure under the stepper's arrows: the sum of the DRAWN columns' totals.
  *
+ * TAKES THE MAP, not the entries. It used to take the entries and call
+ * `dayTotals` itself, and that is what made /timer build the map twice a second
+ * — once here for the total and once inside `CalendarPanel` for the column
+ * headers, from the same array, with only the panel's copy guarded against the
+ * clock. The page now builds it once and both readings come off that one map;
+ * see the guard in `src/routes/_authed/timer.tsx`.
+ *
  * A function rather than three lines in the page, because the assertion that
  * holds it is "this equals the sum of the numbers in the column headers" and
  * that assertion has to be made against the same code the page runs — see
  * `calendar-range-label.test.tsx`, which renders the real grid, reads the
  * figures off it, and calls this.
  *
- * `days` is the list the GRID reported. Summing `dayTotals`'s values instead
- * sums every day the QUERY covers, and the two differ whenever a view hides a
+ * `days` is the list the GRID reported. Summing the map's VALUES instead sums
+ * every day the QUERY covers, and the two differ whenever a view hides a
  * weekday inside its own range: a header total describing days that have no
  * column, on a tool people invoice from.
  */
-export function rangeTotal(
-  entries: Array<Doc<"timeEntries">>,
-  timeZone: string,
-  nowMs: number,
+export function totalOverDays(
+  totals: Map<DayString, number>,
   days: Array<DayString>
 ): number {
-  const totals = dayTotals(entries, timeZone, nowMs)
   let sum = 0
   for (const day of days) {
     sum += totals.get(day) ?? 0

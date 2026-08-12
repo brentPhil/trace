@@ -3,7 +3,7 @@ import Calendar from "@fullcalendar/react"
 import timeGridPlugin from "@fullcalendar/react/timegrid"
 import { CalendarEntryPopover } from "@/components/calendar/calendar-entry-popover"
 import { ProjectDot } from "@/components/classifiers/project-dot"
-import { MIN_SPAN_MS, calendarEvents, dayTotals, drawnDays } from "@/lib/calendar-events"
+import { MIN_SPAN_MS, calendarEvents, drawnDays } from "@/lib/calendar-events"
 import { formatTimeOfInstant, formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
@@ -14,6 +14,7 @@ import type {
   CalendarRange,
 } from "@/lib/calendar-events"
 import type { EntryActions } from "@/hooks/use-entry-actions"
+import type { DayString } from "@shared/day"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { EventApi } from "@fullcalendar/react"
 import type { Doc } from "../../../convex/_generated/dataModel"
@@ -268,6 +269,7 @@ export function CalendarPanel({
   use12Hour,
   display,
   nowMs,
+  dayTotals,
   projects,
   projectsById,
   tags,
@@ -293,6 +295,18 @@ export function CalendarPanel({
   use12Hour: boolean
   display: DurationDisplay
   nowMs: number
+  /**
+   * Milliseconds tracked per local day, for the column headers.
+   *
+   * COMPUTED BY THE PAGE, not here. This component used to build it from
+   * `entries` with `calendar-events.ts`'s `dayTotals`, behind a guard that
+   * pinned the clock while nothing was running — and /timer then built the
+   * identical map from the identical array to sum "Range total", against the
+   * raw once-a-second clock, defeating the guard one level up and doing the
+   * work twice per tick. One pass now, in the page, guarded there, read here
+   * per column and summed there for the figure above the columns.
+   */
+  dayTotals: Map<DayString, number>
   /** The pickers' options. `projectsById` is the same list keyed for the render
    *  hooks, which look a block's project up once per block per render. */
   projects: Array<Doc<"projects">>
@@ -311,18 +325,16 @@ export function CalendarPanel({
   /*
    * THE CLOCK, ADMITTED ONLY WHEN SOMETHING IS ACTUALLY RUNNING.
    *
-   * `nowMs` advances once a second for the life of the tab, and both memos
-   * below take it — so both re-ran every second, reallocating the whole events
-   * array (two `Date`s per entry) and rebuilding the whole totals map, once a
-   * second, forever. On a page this product describes as an always-open desktop
-   * companion.
+   * `nowMs` advances once a second for the life of the tab, and the memo below
+   * takes it — so it re-ran every second, reallocating the whole events array
+   * (two `Date`s per entry), forever. On a page this product describes as an
+   * always-open desktop companion.
    *
    * But `nowMs` only ever REACHES the output through a running entry: it is
-   * where `calendarEvents` ends a block with no `endedAt`, and what
-   * `dayTotals` counts its elapsed time to. With nothing running — every past
-   * week, and the current one whenever the timer is stopped, which is the
-   * ordinary case — each tick rebuilt a result byte-identical to the one before
-   * it.
+   * where `calendarEvents` ends a block with no `endedAt`. With nothing running
+   * — every past week, and the current one whenever the timer is stopped, which
+   * is the ordinary case — each tick rebuilt an array byte-identical to the one
+   * before it.
    *
    * So the clock is pinned to `0` unless an entry in view has no end. Pinning
    * rather than dropping it from the dependency list: a deliberately incomplete
@@ -332,8 +344,10 @@ export function CalendarPanel({
    * that would read it is the `entry.endedAt ?? nowMs` branch that this flag
    * says nothing takes.
    *
-   * The `some` scan is O(n) over one boolean per render and touches no `Intl`,
-   * which is the whole cost this replaces `n` day-lookups per second with.
+   * THE DAY TOTALS USED TO BE GUARDED HERE TOO, and that guard was undone by
+   * the page above: /timer built the same map from the same array against the
+   * raw `nowMs` to sum "Range total". Both the guard and the single pass live
+   * in `timer.tsx` now, and the map arrives as `dayTotals`.
    */
   const clockMs = entries.some((entry) => entry.endedAt === null) ? nowMs : 0
 
@@ -382,11 +396,6 @@ export function CalendarPanel({
       : (entries.find((entry) => entry._id === selected.entryId) ?? null)
 
   const events = useMemo(() => calendarEvents(entries, clockMs), [entries, clockMs])
-
-  const totals = useMemo(
-    () => dayTotals(entries, timeZone, clockMs),
-    [entries, timeZone, clockMs]
-  )
 
   /*
    * NAVIGATION, and the one hazard this prop carries.
@@ -717,7 +726,7 @@ export function CalendarPanel({
         // Through `dayOf`, so the column header and the same day's header in
         // the list are computed by one function and cannot disagree.
         const day = dayOf(info.date.getTime(), timeZone)
-        const total = totals.get(day) ?? 0
+        const total = dayTotals.get(day) ?? 0
         const isToday = day === today
         return (
           /*

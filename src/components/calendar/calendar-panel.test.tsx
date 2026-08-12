@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
-import { rangeOf } from "@/lib/calendar-events"
+import { dayTotals, rangeOf } from "@/lib/calendar-events"
 import { noEntryActions } from "@/test-utils/fixtures"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { CalendarSize } from "@/lib/calendar-label"
@@ -112,6 +112,16 @@ function buildProps(over: Harness): PanelProps {
     tags: [],
     actions: noEntryActions,
     range: rangeOf(anchor, size, weekStartDay, timeZone),
+    /*
+     * The column totals, built here the way /timer builds them — the panel is
+     * handed the map rather than computing it, so that the page can sum the
+     * same one for "Range total" instead of making a second pass per tick.
+     *
+     * Through the real `dayTotals` and the real `nowMs`, so the assertions on
+     * the day headers below still exercise attribution-by-start and the
+     * running entry's elapsed time rather than a table typed out here.
+     */
+    dayTotals: dayTotals(rest.entries ?? [], timeZone, rest.nowMs ?? NOW),
     // Last, so an explicit `range` in a case beats the derived one.
     ...rest,
   }

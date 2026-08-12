@@ -16,7 +16,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
 import { useEntryActions } from "@/hooks/use-entry-actions"
-import { boundsOf, rangeOf, rangeTotal } from "@/lib/calendar-events"
+import { boundsOf, dayTotals, rangeOf, totalOverDays } from "@/lib/calendar-events"
 import { groupByDay } from "@/lib/group-entries"
 import { periodTotals } from "@/lib/period-totals"
 import {
@@ -320,6 +320,50 @@ export function Timer() {
   const listRows = range === null ? results : (rangeQuery.data ?? [])
 
   /*
+   * THE CLOCK, ADMITTED ONLY WHEN SOMETHING IS ACTUALLY RUNNING.
+   *
+   * `nowMs` advances once a second for the life of the tab, and the map below
+   * takes it — so without this it rebuilt every second, forever, on a page this
+   * product describes as an always-open desktop companion. `dayTotals` calls
+   * `dayOf` once per entry, and `dayOf` is an
+   * `Intl.DateTimeFormat.formatToParts()` plus a handful of array scans
+   * (`convex/lib/day.ts`), so the cost is `n` zone lookups a second whether or
+   * not a timer is running.
+   *
+   * But `nowMs` only ever REACHES the output through a running entry: it is
+   * what `dayTotals` counts an unfinished entry's elapsed time to. With nothing
+   * running — every past week, and the current one whenever the timer is
+   * stopped, which is the ordinary case — each tick rebuilt a map
+   * byte-identical to the one before it.
+   *
+   * So the clock is pinned to `0` unless an entry in view has no end. Pinning
+   * rather than dropping it from the dependency list: a deliberately incomplete
+   * dependency array is a stale closure waiting for the next reader to trip
+   * over, whereas passing a value that provably cannot be read keeps the memo
+   * honest and the lint rule satisfied. `0` is never observable — the only code
+   * that would read it is the `entry.endedAt ?? nowMs` branch that this flag
+   * says nothing takes.
+   *
+   * The `some` scan is O(n) over one boolean per render and touches no `Intl`,
+   * which is the whole cost this replaces `n` day-lookups per second with.
+   *
+   * THIS GUARD USED TO LIVE IN `CalendarPanel` AND WAS DEFEATED FROM HERE. The
+   * panel guarded its own copy of the map correctly; this page then built the
+   * SAME map from the SAME array against the raw `nowMs`, once a second, for
+   * the range total. Two passes per tick, one of them unguarded. The map is
+   * built once here now and handed down, so there is one computation and one
+   * guard over it.
+   */
+  const calendarClockMs = calendarEntries.some((entry) => entry.endedAt === null)
+    ? nowMs
+    : 0
+
+  const calendarTotals = useMemo(
+    () => dayTotals(calendarEntries, settings.timezone, calendarClockMs),
+    [calendarEntries, settings.timezone, calendarClockMs]
+  )
+
+  /*
    * The RANGE's total, for the bar beside the grid — never for `TotalsRow`,
    * which stays on today and this week.
    *
@@ -333,14 +377,8 @@ export function Timer() {
    * invoice from.
    */
   const calendarTotalMs = useMemo(
-    () =>
-      rangeTotal(
-        calendarEntries,
-        settings.timezone,
-        nowMs,
-        plan.range.days
-      ),
-    [calendarEntries, plan.range.days, settings.timezone, nowMs]
+    () => totalOverDays(calendarTotals, plan.range.days),
+    [calendarTotals, plan.range.days]
   )
 
   /*
@@ -603,6 +641,11 @@ export function Timer() {
               use12Hour={settings.timeFormat === "12"}
               display={settings.durationDisplay}
               nowMs={nowMs}
+              // Built above, behind the running-entry guard, and summed there
+              // for "Range total" as well — so the columns and the figure over
+              // them are one pass over one array rather than two that agree by
+              // coincidence.
+              dayTotals={calendarTotals}
               projects={projects}
               projectsById={projectsById}
               tags={tags}

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
 import { RangeBar } from "@/components/timer/range-bar"
-import { boundsOf, rangeOf, rangeTotal } from "@/lib/calendar-events"
+import { boundsOf, dayTotals, rangeOf, totalOverDays } from "@/lib/calendar-events"
 import { calendarLabel } from "@/lib/calendar-label"
 import { rangePillLabel } from "@/lib/timer-range"
 import { noEntryActions } from "@/test-utils/fixtures"
@@ -88,6 +88,10 @@ function Harness({
 }) {
   const range = rangeOf(anchor, size, weekStartDay, MANILA)
   const bounds = boundsOf(range)
+  // ONE map, exactly as /timer builds it: the grid reads it per column and the
+  // bar sums it over the drawn days. A harness that computed the two halves
+  // separately could not catch them disagreeing.
+  const totals = dayTotals(entries, MANILA, NOW)
 
   return (
     <>
@@ -99,6 +103,7 @@ function Harness({
         use12Hour={false}
         display="hms"
         nowMs={NOW}
+        dayTotals={totals}
         projects={[]}
         projectsById={new Map()}
         tags={[]}
@@ -115,7 +120,7 @@ function Harness({
           size={size}
           today={TODAY}
           weekStartDay={weekStartDay}
-          rangeMs={rangeTotal(entries, MANILA, NOW, range.days)}
+          rangeMs={totalOverDays(totals, range.days)}
           display="hms"
           onStep={() => {}}
           onRangeChange={() => {}}
