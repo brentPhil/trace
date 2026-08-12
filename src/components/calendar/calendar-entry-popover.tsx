@@ -214,6 +214,31 @@ export function CalendarEntryPopover({
               value={entry.billable}
               onChange={(billable) => actions.onClassify(entry, { billable })}
             />
+
+            {/*
+              THE DURATION SITS UP HERE, not down in the time row.
+
+              It shares this line with the classifiers because the classifier
+              cluster is three icons wide and left half the row empty, while the
+              row below had to carry a start, an arrow, an end, this, AND Save —
+              five things, which is what pushed the meridiem onto a second line
+              in a narrow popover. Moving one item up balances both rows and
+              gives the footer back to the two controls that belong there: what
+              the times ARE, and the button that dismisses the panel.
+
+              It is also the right neighbour. `1:30:00` is a fact ABOUT the
+              entry in the same way its project and its billable mark are —
+              what it was, how long it took — where the row below is the two
+              instants that bound it. `ml-auto` pins the digits right, which is
+              where the log's own duration column puts them, so the eye finds
+              them in the same place on a row and in this panel.
+            */}
+            <div className="ml-auto pl-2">
+              <EditableDuration
+                entry={entry}
+                onCommit={(ms) => actions.onDurationChange(entry, ms)}
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -277,18 +302,12 @@ export function CalendarEntryPopover({
             />
 
             {/*
-              The duration, editable on a completed entry and LIVE on a running
-              one — `EditableDuration` already draws that distinction, because
-              editing it while running would move the start rather than the
-              end. `ml-auto` so the digits pin to the right of the row, which is
-              where the log's own duration column puts them.
+              THE FOOTER IS TWO THINGS NOW: what the times are, and the way
+              out. The duration moved up to the classifier row — see the comment
+              there — because five items on this line is what wrapped "1:00 PM"
+              onto a second row in a narrow popover.
             */}
             <div className="ml-auto flex items-center gap-2">
-              <EditableDuration
-                entry={entry}
-                onCommit={(ms) => actions.onDurationChange(entry, ms)}
-              />
-
               {/*
                 SAVE CLOSES; IT DOES NOT WRITE, and that is not a dead control.
                 Every field above commits on Enter and on blur — the discipline

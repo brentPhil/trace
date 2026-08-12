@@ -668,10 +668,48 @@ export function CalendarPanel({
        * same step the log's own hovered rows use, and it is the ramp rather
        * than a hue — `enlarger` here would say A TIMER IS RUNNING about a day.
        */
+      /*
+       * `px-2! py-2!` — THE `!` AGAIN, and for the third time in this file the
+       * same cause.
+       *
+       * `skeleton.css` is imported unlayered and zeroes cell padding with
+       * `!important`; unlayered rules beat `@layer utilities` whatever their
+       * specificity, so a plain `py-2` here computed to `0px` on all four
+       * sides. Measured in Chrome: `padding: 0px 0px 0px 0px` on a 144px cell.
+       * The sticky header's `top` and `.hatch-empty` lose the same way — if a
+       * class on this component looks ignored, this is why.
+       *
+       * Horizontal padding as well as vertical, which the old rule never had:
+       * without it a column's label sits flush against the rule dividing it
+       * from the next column, and at narrow widths the weekday of one day and
+       * the total of the next touch.
+       */
       dayHeaderClass={(info) =>
         cn(
           COLUMN_RULE,
-          "py-2",
+          /*
+           * `justify-center` BELONGS HERE, not on the content.
+           *
+           * The cell is already `display: flex`, and FullCalendar inserts its
+           * own wrapper between this element and whatever `dayHeaderContent`
+           * returns. That wrapper is a flex ITEM, so it shrinks to fit — 50px
+           * inside a 144px column — and any `w-full`/`items-center` on the
+           * content below resolves against those 50px and centres the label
+           * within itself. Measured 38px left of the column's centre with the
+           * content trying to do it. Centring the wrapper is the only place the
+           * column's real width is known.
+           */
+          /*
+           * AND THE AXIS IS COLUMN, which is the part worth writing down. The
+           * cell is `flex-direction: column`, so `justify-*` is the VERTICAL
+           * axis here and `items-*` is the horizontal one — the opposite of the
+           * reflex. `justify-center` alone moved nothing sideways: the label
+           * stayed 38px left because `align-items: flex-start` was holding it
+           * there. Both are kept — `justify-center` for the vertical and
+           * `items-center!` for the horizontal, the `!` because skeleton.css
+           * sets that one too.
+           */
+          "items-center! justify-center px-2! py-2!",
           dayOf(info.date.getTime(), timeZone) === today && "bg-surface-raised"
         )
       }
@@ -692,6 +730,9 @@ export function CalendarPanel({
            * pair above says which column this is, and the figure says what is
            * in it.
            */
+          /* Centred by the CELL's `justify-center`, not from in here — see the
+             comment on `dayHeaderClass`. This box only stacks its own two
+             rows. */
           <div className="flex flex-col items-center gap-1">
             <div className="flex items-center gap-1.5">
               {/* FullCalendar has already formatted both of these, in the

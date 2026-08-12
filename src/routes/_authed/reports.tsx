@@ -330,19 +330,28 @@ export function Reports() {
         className="gap-0"
       >
         {/*
-          The `line` variant, and `rounded-md` over base-luma's `rounded-full`.
-          DESIGN.md: crisp, not pill — a pill on a 32px control is the
-          rounded-everything look this system rejects, and it is the focus ring
-          that makes it visible. The active tab is marked by an underline at
-          full-contrast ink, which is a boundary rather than a fill tint (The
-          Boundary Rule).
+          THE SEGMENTED VARIANT, matching /timer's Calendar | List.
+
+          This was the `line` variant — an underline on the active tab, with a
+          full-width hairline under the pair. Two things were wrong with it
+          here. The rule ran the width of the page and read as a section
+          divider, so the tabs looked like a heading ABOVE a horizon rather
+          than a control sitting on one; and the same product was drawing the
+          same gesture — two alternative views of one set of rows — two
+          different ways on two pages, which is the drift `Page` was extracted
+          to stop.
+
+          Summary and Detailed are alternative views of one thing rather than
+          sections of a document, and a filled cell is what that reads as.
+          Selection is not carried by colour alone: the fill is a fill, and
+          Base UI puts `aria-selected` on the trigger regardless.
+
+          `w-fit` so the group is as wide as its two cells — a segmented
+          control stretched across the page is a nav bar, not a switch.
         */}
-        <TabsList
-          variant="line"
-          className="mx-4 h-auto border-b border-edge-soft pb-1.5"
-        >
+        <TabsList variant="segmented" className="mx-4 w-fit">
           {VIEWS.map((item) => (
-            <TabsTrigger key={item.value} value={item.value} className="rounded-md px-3">
+            <TabsTrigger key={item.value} value={item.value}>
               {item.label}
             </TabsTrigger>
           ))}
