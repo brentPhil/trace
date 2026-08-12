@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
-import { CalendarHeader } from "@/components/calendar/calendar-header"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
+import { RangeBar } from "@/components/timer/range-bar"
 import { rangeEndpoints, rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { calendarLabel } from "@/lib/calendar-label"
+import { rangePillLabel } from "@/lib/timer-range"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
@@ -106,15 +107,17 @@ function Harness({
           data-first={days.firstDay}
           data-last={days.lastDay}
         >
-          <CalendarHeader
-            firstDay={days.firstDay}
-            lastDay={days.lastDay}
+          <RangeBar
+            view="calendar"
+            range={{ from: days.firstDay, to: days.lastDay }}
             size={size}
             today={TODAY}
+            weekStartDay={weekStartDay}
             rangeMs={rangeTotal(entries, MANILA, NOW, range.days)}
             display="hms"
             onStep={() => {}}
-            onToday={() => {}}
+            onRangeChange={() => {}}
+            onPresetChange={() => {}}
             onSizeChange={() => {}}
           />
         </div>
@@ -171,15 +174,22 @@ function measure(anchor: string, size: CalendarSize, weekStartDay: number) {
   )
   const columns = columnDates(container)
   const bar = screen.getByTestId("range-bar")
-  // [ ← , the label, → ] — the label is a button because pressing the thing
-  // that says "This week" is how people go back to this week.
-  const label = within(bar).getAllByRole("button")[1]?.textContent ?? ""
+  /*
+   * [ ‹ , the pill, › ]. The pill is the range picker's trigger, and it carries
+   * TWO statements about the same range: the digits it prints — the format this
+   * product puts on invoices — and the prose a screen reader gets instead. Both
+   * are compared against the columns below, because a bar that named one week
+   * over another week's columns is the whole reason this file exists, and it
+   * would be no better for happening only in the accessible name.
+   */
+  const trigger = within(bar).getAllByRole("button")[1]
   return {
     columns,
     derived: [bar.dataset.first, bar.dataset.last],
     /** What the page ASKED for — the whole list, not only its two ends. */
     expected: rangeOf(anchor, size, weekStartDay, MANILA).days,
-    label,
+    label: trigger.getAttribute("aria-label") ?? "",
+    pillText: trigger.textContent,
   }
 }
 
@@ -256,7 +266,7 @@ describe("the header's label and the grid's own columns", () => {
   describe.each(WEEK_STARTS)("weekStartDay %i", (weekStartDay) => {
     it("names the first and last column the week view actually drew", () => {
       for (const anchor of ANCHORS) {
-        const { columns, derived, expected, label } = measure(
+        const { columns, derived, expected, label, pillText } = measure(
           anchor,
           "week",
           weekStartDay
@@ -275,12 +285,19 @@ describe("the header's label and the grid's own columns", () => {
         })
         expect({ anchor, label }).toEqual({
           anchor,
-          label: calendarLabel(
+          label: `Date range — ${calendarLabel(
             columns[0],
             columns[columns.length - 1],
             "week",
             TODAY
-          ),
+          )}`,
+        })
+        expect({ anchor, pillText }).toEqual({
+          anchor,
+          pillText: rangePillLabel({
+            from: columns[0],
+            to: columns[columns.length - 1],
+          }),
         })
 
         cleanup()
@@ -317,7 +334,7 @@ describe("the header's label and the grid's own columns", () => {
       ]
 
       for (const anchor of ANCHORS) {
-        const { columns, derived, expected, label } = measure(
+        const { columns, derived, expected, label, pillText } = measure(
           anchor,
           "5day",
           weekStartDay
@@ -333,12 +350,19 @@ describe("the header's label and the grid's own columns", () => {
         })
         expect({ anchor, label }).toEqual({
           anchor,
-          label: calendarLabel(
+          label: `Date range — ${calendarLabel(
             columns[0],
             columns[columns.length - 1],
             "5day",
             TODAY
-          ),
+          )}`,
+        })
+        expect({ anchor, pillText }).toEqual({
+          anchor,
+          pillText: rangePillLabel({
+            from: columns[0],
+            to: columns[columns.length - 1],
+          }),
         })
 
         cleanup()
@@ -380,7 +404,7 @@ describe("the header's label and the grid's own columns", () => {
     // One column, so both ends are the same day — and `toMs - 1` has to land
     // back on it rather than on the midnight that opens the next one.
     for (const anchor of ANCHORS) {
-      const { columns, derived, label } = measure(anchor, "day", 1)
+      const { columns, derived, label, pillText } = measure(anchor, "day", 1)
 
       expect(columns).toEqual([anchor])
       expect({ anchor, days: derived }).toEqual({
@@ -389,7 +413,11 @@ describe("the header's label and the grid's own columns", () => {
       })
       expect({ anchor, label }).toEqual({
         anchor,
-        label: calendarLabel(anchor, anchor, "day", TODAY),
+        label: `Date range — ${calendarLabel(anchor, anchor, "day", TODAY)}`,
+      })
+      expect({ anchor, pillText }).toEqual({
+        anchor,
+        pillText: rangePillLabel({ from: anchor, to: anchor }),
       })
 
       cleanup()

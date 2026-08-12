@@ -4,6 +4,7 @@ import {
   LIST_PRESETS,
   RANGE_PLACEHOLDER,
   activePreset,
+  boundsOf,
   calendarSnap,
   instantsOf,
   presetRange,
@@ -187,21 +188,41 @@ describe("stepping by the range's own width", () => {
 })
 
 describe("snapping a selection onto the grid", () => {
-  it("leaves a selection the size already draws alone", () => {
-    expect(
-      calendarSnap({ from: "2026-08-10", to: "2026-08-16" }, "week", TODAY, MONDAY, UTC)
-    ).toEqual({
+  /** The snapped size and the two ends it drew, which is what the bar shows. */
+  const snap = (
+    selection: Parameters<typeof calendarSnap>[0],
+    size: Parameters<typeof calendarSnap>[1],
+    weekStartDay = MONDAY
+  ) => {
+    const result = calendarSnap(selection, size, TODAY, weekStartDay, UTC)
+    return { size: result.size, ...boundsOf(result.range) }
+  }
+
+  it("draws a selection of a week or less at the size that is current", () => {
+    expect(snap({ from: "2026-08-10", to: "2026-08-16" }, "week")).toEqual({
       size: "week",
-      range: { from: "2026-08-10", to: "2026-08-16" },
+      from: "2026-08-10",
+      to: "2026-08-16",
     })
-    expect(
-      calendarSnap({ from: TODAY, to: TODAY }, "day", TODAY, MONDAY, UTC)
-    ).toEqual({ size: "day", range: { from: TODAY, to: TODAY } })
-    expect(
-      calendarSnap({ from: "2026-08-10", to: "2026-08-14" }, "5day", TODAY, MONDAY, UTC)
-    ).toEqual({
+    expect(snap({ from: TODAY, to: TODAY }, "day")).toEqual({
+      size: "day",
+      from: TODAY,
+      to: TODAY,
+    })
+    expect(snap({ from: "2026-08-10", to: "2026-08-14" }, "5day")).toEqual({
       size: "5day",
-      range: { from: "2026-08-10", to: "2026-08-14" },
+      from: "2026-08-10",
+      to: "2026-08-14",
+    })
+  })
+
+  it("does not widen a narrower size the user deliberately chose", () => {
+    // Day view holding a week-long selection draws the first day of it, which
+    // is what someone who reached for "Day view" asked for.
+    expect(snap({ from: "2026-08-10", to: "2026-08-16" }, "day")).toEqual({
+      size: "day",
+      from: "2026-08-10",
+      to: "2026-08-10",
     })
   })
 
@@ -212,35 +233,52 @@ describe("snapping a selection onto the grid", () => {
      * constraint is expressed here, where it can be asserted, rather than by
      * leaving "Last 30 days" out of an array and hoping the state never arrives.
      */
-    expect(
-      calendarSnap({ from: "2026-07-14", to: "2026-08-12" }, "week", TODAY, MONDAY, UTC)
-    ).toEqual({
+    expect(snap({ from: "2026-07-14", to: "2026-08-12" }, "week")).toEqual({
       size: "week",
-      range: { from: "2026-07-13", to: "2026-07-19" },
+      from: "2026-07-13",
+      to: "2026-07-19",
     })
   })
 
   it("widens the SIZE too, so the next arrow click steps the right distance", () => {
     // A day view holding a 30-day selection would otherwise step one day at a
     // time through a month the user asked to see at once.
-    expect(
-      calendarSnap({ from: "2026-07-14", to: "2026-08-12" }, "day", TODAY, MONDAY, UTC)
-    ).toEqual({
+    expect(snap({ from: "2026-07-14", to: "2026-08-12" }, "day")).toEqual({
       size: "week",
-      range: { from: "2026-07-13", to: "2026-07-19" },
+      from: "2026-07-13",
+      to: "2026-07-19",
     })
   })
 
   it("puts All dates on the week containing today", () => {
-    expect(calendarSnap(null, "day", TODAY, MONDAY, UTC)).toEqual({
+    expect(snap(null, "day")).toEqual({
       size: "week",
-      range: { from: "2026-08-10", to: "2026-08-16" },
+      from: "2026-08-10",
+      to: "2026-08-16",
     })
   })
 
+  it("hands back the whole window, not two ends to re-expand", () => {
+    // The page gives `range` straight to `CalendarPanel` as its `visibleRange`
+    // and keys its Convex query on the same two instants. Anything the page had
+    // to recompute here would be the second derivation this whole feature was
+    // reshaped to remove.
+    const { range } = calendarSnap(null, "week", TODAY, MONDAY, UTC)
+    expect(range.days).toEqual([
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-15",
+      "2026-08-16",
+    ])
+    expect(range).toEqual(rangeOf("2026-08-10", "week", MONDAY, UTC))
+  })
+
   it("always returns something the grid can actually draw", () => {
-    // The invariant, stated directly: whatever comes back is the endpoints of
-    // `rangeOf` for the same size — the one function the panel is handed.
+    // The invariant, stated directly: whatever comes back IS `rangeOf` for the
+    // size it returns — the one function the panel is handed.
     for (const selection of [
       null,
       { from: "2026-08-12", to: "2026-08-12" },
@@ -249,13 +287,13 @@ describe("snapping a selection onto the grid", () => {
     ]) {
       for (const size of ["day", "5day", "week"] as const) {
         for (const weekStartDay of [0, 1, 2, 3, 4, 5, 6]) {
-          const snapped = calendarSnap(selection, size, TODAY, weekStartDay, UTC)
-          const days = rangeOf(snapped.range.from, snapped.size, weekStartDay, UTC).days
-          expect({ selection, size, weekStartDay, ends: [days[0], days.at(-1)] }).toEqual({
+          const result = calendarSnap(selection, size, TODAY, weekStartDay, UTC)
+          const bounds = boundsOf(result.range)
+          expect({ selection, size, weekStartDay, drew: result.range }).toEqual({
             selection,
             size,
             weekStartDay,
-            ends: [snapped.range.from, snapped.range.to],
+            drew: rangeOf(bounds.from, result.size, weekStartDay, UTC),
           })
         }
       }

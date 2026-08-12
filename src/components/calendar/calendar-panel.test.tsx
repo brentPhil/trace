@@ -4,6 +4,9 @@ import { CalendarPanel } from "@/components/calendar/calendar-panel"
 import { rangeOf } from "@/lib/calendar-events"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { Doc } from "../../../convex/_generated/dataModel"
+import type * as CalendarEventsModuleType from "@/lib/calendar-events"
+
+type CalendarEventsModule = typeof CalendarEventsModuleType
 
 /*
  * `drawnDays` runs once per `datesSet`, and nowhere else in this component —
@@ -15,8 +18,11 @@ import type { Doc } from "../../../convex/_generated/dataModel"
 const { datesSetCount } = vi.hoisted(() => ({ datesSetCount: { n: 0 } }))
 
 vi.mock("@/lib/calendar-events", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/lib/calendar-events")>()
+  // The module's type is pulled in at the top of the file rather than written
+  // as an inline `import()` annotation here: `consistent-type-imports` forbids
+  // the inline form, and `vi.mock`'s factory is hoisted above the imports so
+  // only a TYPE may be closed over.
+  const actual = await importOriginal<CalendarEventsModule>()
   return {
     ...actual,
     drawnDays: (...args: Parameters<typeof actual.drawnDays>) => {

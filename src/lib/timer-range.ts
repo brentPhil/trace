@@ -4,6 +4,7 @@ import { formatDayRange } from "@/lib/date-range-picker"
 import { daysBetween } from "@/lib/history-filters"
 import { usDate } from "@/lib/us-date"
 import { addDays, dayWindow, weekStartOf } from "@shared/day"
+import type { CalendarRange } from "@/lib/calendar-events"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { DayString } from "@shared/day"
 
@@ -80,11 +81,6 @@ export const LIST_PRESETS: ReadonlyArray<TimerPreset> = [
 
 export function presetsFor(view: "calendar" | "list"): ReadonlyArray<TimerPreset> {
   return view === "calendar" ? CALENDAR_PRESETS : LIST_PRESETS
-}
-
-/** How many columns a size draws. See `rangeOf` for where the days come from. */
-export function sizeWidth(size: CalendarSize): number {
-  return size === "day" ? 1 : size === "5day" ? 5 : 7
 }
 
 /** The days a preset means, or `null` for the unbounded one. */
@@ -183,24 +179,42 @@ export function stepRange(
 }
 
 /**
- * The selection, made drawable.
+ * The widest selection a time grid is allowed to be asked to draw.
+ *
+ * A week, because the grid is a picture of a day at a fixed pixels-per-hour —
+ * 48px, a full 24-hour axis — and the columns share whatever width the page
+ * has. Seven of them is the density every shipping calendar converged on;
+ * thirty is not a smaller version of the same thing, it is a different and
+ * unreadable object.
+ */
+export const MAX_CALENDAR_SPAN_DAYS = 7
+
+/**
+ * The selection, made drawable — and the window the grid is then handed.
  *
  * THE CONSTRAINT, NOT A SUGGESTION. The Calendar view can only ever show what
- * `rangeOf` produces for some (anchor, size) — that is the whole point of the
+ * `rangeOf` produces for some (anchor, size): that is the whole point of the
  * inversion this feature was rebuilt around, where the page computes the window
- * and the grid is told to draw it. So a selection arriving from List that no
- * size can express is snapped here, in one place, rather than handed to a grid
- * that would silently draw something else.
+ * and the grid is told to draw it. So a selection made in List that no size can
+ * express is resolved here, in one place, rather than handed to a grid that
+ * would quietly draw something else and report it back.
  *
- * The rule: keep the current size when the selection FITS inside it, and fall
- * back to the week containing the selection's start when it does not. "Last 30
- * days" and "All dates" both land on that fallback, which is the readable thing
- * a time grid can actually say about a wide span — thirty columns at 48px an
- * hour is not.
+ * The rule is one line: a selection wider than a week collapses to the WEEK
+ * CONTAINING ITS START, and everything else is drawn at whatever size is
+ * current. "Last 30 days" and "All dates" both land on that fallback — the
+ * readable thing a time grid can say about a wide span is one week of it, and
+ * the arrows are right there to walk the rest.
  *
- * Returns the size as well as the range because the two must change together:
- * the size is what the arrows step by, and a size left over from a selection it
- * cannot draw would step the wrong distance on the very next click.
+ * A NARROWER size is deliberately not widened: Day view holding a week-long
+ * selection draws the first day of it, which is exactly what someone who
+ * reached for "Day view" asked for.
+ *
+ * The size travels back with the window because the two must agree: the size is
+ * what the arrows step by, and one left over from a selection it cannot draw
+ * would step the wrong distance on the very next click. The window is the whole
+ * `CalendarRange` — instants and columns — so that the page's query key, its
+ * label and the grid's `visibleRange` are one computation rather than three
+ * that agree by coincidence.
  */
 export function calendarSnap(
   range: TimerRange,
@@ -208,16 +222,24 @@ export function calendarSnap(
   today: DayString,
   weekStartDay: number,
   timeZone: string
-): { size: CalendarSize; range: DayRange } {
+): { size: CalendarSize; range: CalendarRange } {
   const anchor = range?.from ?? today
   const span =
     range === null ? Number.POSITIVE_INFINITY : daysBetween(range.from, range.to) + 1
-  const drawn = span > sizeWidth(size) ? "week" : size
-  const days = rangeOf(anchor, drawn, weekStartDay, timeZone).days
-  return {
-    size: drawn,
-    range: { from: days[0], to: days[days.length - 1] },
-  }
+  const drawn = span > MAX_CALENDAR_SPAN_DAYS ? "week" : size
+  return { size: drawn, range: rangeOf(anchor, drawn, weekStartDay, timeZone) }
+}
+
+/**
+ * The two ends of a drawn window, which is what the bar SELECTS.
+ *
+ * Never empty — `rangeOf` always produces at least one day — so unlike
+ * `rangeEndpoints` this needs no `null` case for the caller to unwrap. It reads
+ * `days` for the same reason that one does: the columns are the range, and
+ * deriving the ends from `toMs - 1` instead would be a second answer.
+ */
+export function boundsOf(range: CalendarRange): DayRange {
+  return { from: range.days[0], to: range.days[range.days.length - 1] }
 }
 
 /** The instants a bounded range means, for `entries.listRange`. Half-open. */

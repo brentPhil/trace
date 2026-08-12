@@ -1,33 +1,39 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
-import { CalendarHeader } from "@/components/calendar/calendar-header"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
 import { TotalsRow } from "@/components/entries/totals-row"
-import { FilterBand } from "@/components/history/filter-band"
-import { FilterControls } from "@/components/history/filter-controls"
+import { RangeBar } from "@/components/timer/range-bar"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
-import { rangeEndpoints, rangeOf, rangeTotal } from "@/lib/calendar-events"
+import { rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { groupByDay } from "@/lib/group-entries"
-import { hasClientSideFilter, matches } from "@/lib/history-filters"
 import { periodTotals } from "@/lib/period-totals"
+import {
+  boundsOf,
+  calendarSnap,
+  instantsOf,
+  presetRange,
+  presetSize,
+  stepRange,
+} from "@/lib/timer-range"
+import { readStoredView, writeStoredView } from "@/lib/timer-view"
 import { cn } from "@/lib/utils"
-import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
+import { dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
 
 import type { CalendarSize } from "@/lib/calendar-label"
-import type { QuickFilters } from "@/lib/history-filters"
-import type { DayString } from "@shared/day"
+import type { DayRange, TimerPreset, TimerRange } from "@/lib/timer-range"
+import type { TimerView } from "@/lib/timer-view"
 
 const PAGE_SIZE = 50
 
@@ -86,96 +92,174 @@ export function Timer() {
     convexQuery(api.entries.listRange, weekRange)
   )
 
-  // The log itself, all the way back. `toMs` is the end of today rather than
-  // Infinity so a clock-skewed future entry cannot sit permanently on top.
-  // Named distinctly from the real `api.entries.listRange` call just above —
-  // these are the args to `listPage`, not to `listRange`.
-  const logRange = useMemo(
-    () => ({ fromMs: 0, toMs: dayWindow(today, settings.timezone).toMs }),
-    [today, settings.timezone]
-  )
-
-  const { results, status, loadMore } = usePaginatedQuery(
-    api.entries.listPage,
-    logRange,
-    { initialNumItems: PAGE_SIZE }
-  )
-
-  const { projects, projectsById } = useClassifiers()
+  const { projectsById } = useClassifiers()
 
   // Reached for rather than passed in, exactly as `EntryLog` does: this page
   // raises one toast of its own, for a calendar block whose row is not there
   // to focus. See `onEntryClick` below.
   const toasts = Toast.useToastManager()
 
-  // Text, project and billable — never a date range, preset chip, or period
-  // step. Those stay exclusive to Reports: Timer's range is `fromMs: 0`, all
-  // of history, so it has no bounded period for a preset or a step to act on.
-  // See FilteredLogStatus below for the consequence of that: a filter here
-  // can only ever search what has already been paginated in.
-  const [filters, setFilters] = useState<QuickFilters>(() => ({
-    projectId: null,
-    billableOnly: false,
-    text: "",
-  }))
-
   /*
-   * The calendar's view and its anchor.
+   * THE THREE PIECES OF STATE, and nothing derived stored beside them.
    *
-   * `useState` beside `filters`, not in the URL — Reports does not put its
-   * period in the URL either, and one page inventing a second convention for
-   * the same kind of state is how the two come to disagree.
+   * `range` is the SELECTION — what the user asked to see — and `null` is "All
+   * dates", the default and the behaviour /timer has always had: the whole log,
+   * paginated newest first. It is not a very wide range, because it selects a
+   * different query (see `listRows` below), and a user who never touches the
+   * control must get exactly what this page did before it existed.
    *
-   * This gives /timer a bounded PERIOD, which the comment on `filters` above
-   * says it does not have. That comment is still true of the LIST, whose range
-   * is `fromMs: 0` and always will be. The period belongs to the calendar
-   * view, and presets and a date-range picker stay exclusive to Reports: a
-   * stepper over a fixed-width window is a different control answering a
-   * different question.
+   * `size` is the calendar's column width, which is also the distance its
+   * arrows step. `view` is which of the two is on screen.
+   *
+   * `useState`, not the URL — /reports does not put its period in the URL
+   * either, and one page inventing a second convention for the same kind of
+   * state is how the two come to disagree.
    */
-  const [view, setView] = useState<"calendar" | "list">("list")
+  const [view, setView] = useState<TimerView>("list")
   const [size, setSize] = useState<CalendarSize>("week")
-  const [anchor, setAnchor] = useState<DayString>(today)
+  const [range, setRange] = useState<TimerRange>(null)
 
   /*
-   * THE WINDOW, COMPUTED HERE AND HANDED DOWN.
+   * THE STORED VIEW, ADOPTED AFTER THE FIRST PAINT.
+   *
+   * Not in the `useState` initializer above: this app server-renders, and
+   * `localStorage` does not exist on the server — so reading it during render
+   * makes the server's HTML and the browser's first render disagree, which is
+   * a hydration mismatch rather than a preference. `src/lib/timer-view.ts` has
+   * the long version, including why the sidebar's cookie could not be swapped
+   * for this and this could not be swapped for a cookie.
+   *
+   * The ref, and not an empty dependency array with a lint suppression: this
+   * must run once for the life of the component, and saying so with a flag is
+   * honest where a lie about the dependencies is not.
+   */
+  const adopted = useRef(false)
+  useEffect(() => {
+    if (adopted.current) return
+    adopted.current = true
+    const stored = readStoredView()
+    if (stored !== null) setView(stored)
+  }, [])
+
+  const changeView = useCallback((next: TimerView) => {
+    setView(next)
+    // Written here rather than in an effect on `view`: an effect would also
+    // fire for the adoption above and write back the value it had just read.
+    writeStoredView(next)
+  }, [])
+
+  /*
+   * THE WINDOW THE GRID DRAWS, COMPUTED HERE AND HANDED DOWN.
    *
    * This used to run the other way: the grid decided its own span from
    * `firstDay` and `hiddenDays`, reported it back through `datesSet`, and the
-   * page labelled and queried whatever arrived — `null` until the first report.
-   * That could only work while the range lived in Calendar view. The range bar
-   * is on screen in List too now, and in List no grid is mounted to report
-   * anything, so the page has to know the answer without one.
+   * page labelled and queried whatever arrived. `rangeOf` is the answer now,
+   * and it is the ONLY one — the grid is told to draw it (`visibleRange`), the
+   * pill names it, the query fetches it, and "Range total" sums its days. A
+   * second derivation anywhere is the defect that cost this feature two review
+   * cycles; see `calendar-range-label.test.tsx`.
    *
-   * `rangeOf` is that answer, and it is the ONLY one: the grid is told to draw
-   * it (`visibleRange`), the label names it, the query fetches it, and "Range
-   * total" sums its days. A second derivation anywhere is the defect that cost
-   * this feature two review cycles — see `calendar-range-label.test.tsx`.
+   * `calendarSnap` is what stands between a selection and a grid that cannot
+   * draw it. A selection wider than a week — "Last 30 days", "All dates", any
+   * custom span — resolves to the week containing its start, because a time
+   * grid is a picture of a day at 48px an hour and thirty columns of that is
+   * not a smaller version of the same thing.
    *
-   * Never `null` now, so the query below needs no enabled-guard for it and the
-   * range bar has real days from the first paint.
+   * DERIVED, NOT COPIED INTO STATE. Switching to Calendar and back therefore
+   * cannot lose the selection the List was showing: the snap is what the grid
+   * is looking at, not an edit to what the user asked for. Only the controls
+   * that genuinely navigate — the arrows, the presets, the size select — write
+   * `range` back.
    */
-  const calendarRange = useMemo(
-    () => rangeOf(anchor, size, settings.weekStartDay, settings.timezone),
-    [anchor, size, settings.weekStartDay, settings.timezone]
+  const plan = useMemo(
+    () =>
+      calendarSnap(
+        range,
+        size,
+        today,
+        settings.weekStartDay,
+        settings.timezone
+      ),
+    [range, size, today, settings.weekStartDay, settings.timezone]
+  )
+
+  /** The two ends the bar shows: the grid's window in Calendar, the selection
+   *  itself in List — so the pill can never name a span other than the one on
+   *  screen. */
+  const shownRange: TimerRange = view === "calendar" ? boundsOf(plan.range) : range
+
+  const step = useCallback(
+    (delta: -1 | 1) => {
+      if (shownRange === null) return
+      // In Calendar the stride belongs to the SIZE (5 columns step a whole
+      // week, because the weekend between them is hidden rather than absent);
+      // in List there is no grid, and a range steps by its own span.
+      setRange(stepRange(shownRange, view === "calendar" ? plan.size : null, delta))
+    },
+    [shownRange, view, plan.size]
+  )
+
+  const applyPreset = useCallback(
+    (preset: TimerPreset) => {
+      // A preset sets WHERE and HOW WIDE together: "Today" on a grid means one
+      // column, not this week with today somewhere inside it. The two List-only
+      // presets have no width a grid could draw and leave `size` alone — the
+      // snap above decides what the calendar makes of them.
+      const width = presetSize(preset)
+      if (width !== null) setSize(width)
+      setRange(presetRange(preset, today, settings.weekStartDay))
+    },
+    [today, settings.weekStartDay]
+  )
+
+  const changeSize = useCallback(
+    (next: CalendarSize) => {
+      setSize(next)
+      // Changing the columns BOUNDS the selection to what is now drawn, exactly
+      // as an arrow click does. Without it a wide selection would keep
+      // collapsing to a week and the select would spring back to "Week view"
+      // the moment it was set to anything else.
+      setRange(
+        boundsOf(
+          rangeOf(
+            boundsOf(plan.range).from,
+            next,
+            settings.weekStartDay,
+            settings.timezone
+          )
+        )
+      )
+    },
+    [plan.range, settings.weekStartDay, settings.timezone]
   )
 
   /*
-   * The two instants ALONE, because they are the query's whole argument list.
-   * `calendarRange` also carries the drawn days, and `listRange`'s validator
-   * takes `fromMs`/`toMs` and nothing else — spreading the range straight in
-   * would send a third field the backend rejects. The memo keeps the query key
-   * referentially stable between renders so the subscription is not rebuilt on
-   * every tick.
+   * ONE QUERY, ONE RANGE, BOTH VIEWS.
+   *
+   * The grid and a bounded list are the same question — "every entry between
+   * these two instants" — so they are the same subscription, and switching
+   * between the views costs no round trip because the key does not change.
+   *
+   * The args are always a REAL range (the grid's, when the list is unbounded)
+   * rather than a placeholder pair, so no key is minted for a query that is
+   * switched off. `listRange`'s validator takes `fromMs`/`toMs` and nothing
+   * else — spreading a `CalendarRange` straight in would send `days` too, which
+   * the backend rejects — and the memo keeps the key referentially stable
+   * between the once-a-second re-renders.
    */
-  const calendarArgs = useMemo(
-    () => ({ fromMs: calendarRange.fromMs, toMs: calendarRange.toMs }),
-    [calendarRange]
+  const rangeArgs = useMemo(
+    () =>
+      view === "list" && range !== null
+        ? instantsOf(range, settings.timezone)
+        : { fromMs: plan.range.fromMs, toMs: plan.range.toMs },
+    [view, range, settings.timezone, plan.range]
   )
 
-  const calendarQuery = useQuery({
-    ...convexQuery(api.entries.listRange, calendarArgs),
-    enabled: view === "calendar",
+  const rangeEnabled = view === "calendar" || range !== null
+
+  const rangeQuery = useQuery({
+    ...convexQuery(api.entries.listRange, rangeArgs),
+    enabled: rangeEnabled,
     /*
      * The convention `reports.tsx` sets, for the same reason it sets it: the
      * range is part of the query key, so every arrow click mints a key with
@@ -185,153 +269,113 @@ export function Timer() {
      *
      * What that buys has to be paid for honestly, and `isPlaceholderData` is
      * the payment: while it is true the total belongs to the PREVIOUS range
-     * and the label above it already names the new one, which is precisely the
-     * defect `rangeEndpoints` exists to prevent. It is handed to
-     * `CalendarHeader` as `isStale`, which dims it and says "Updating…".
+     * and the pill above it already names the new one. It is handed to
+     * `RangeBar` as `isStale`, which dims it and says "Updating…".
      */
     placeholderData: (previous) => previous,
   })
 
-  const filtering = hasClientSideFilter(filters)
-
-  const nameOf = useCallback(
-    (id: string | undefined) => (id === undefined ? "" : (projectsById.get(id)?.name ?? "")),
-    [projectsById]
-  )
-
   /*
-   * The pass is SKIPPED, not merely memoised, when nothing is filtering.
+   * The unbounded log, exactly as before: all the way back, 50 rows at a time.
+   * `toMs` is the end of today rather than Infinity so a clock-skewed future
+   * entry cannot sit permanently on top.
    *
-   * With no filter set — every state until somebody types in the search box —
-   * `matches` returns true for every row, so the whole scan can only ever
-   * rebuild an array equal to the one it started from. This page re-renders
-   * once a second (`useSecond` above), and `nameOf`'s dependency was a `Map`
-   * that `useClassifiers` rebuilt every render, so the memo below missed on
-   * every tick and ran that guaranteed-identity scan over the entire
-   * paginated log once a second, forever.
-   *
-   * The memo is kept for the case that does do work: `projectsById` is stable
-   * now, so a real filter is re-evaluated when the rows or the filters change
-   * rather than when the clock does.
+   * `"skip"` once a range is selected. The bounded list reads `listRange`
+   * instead — one query for one range, shared with the grid — so there is no
+   * page left to fetch and no subscription worth holding open.
    */
-  const filtered = useMemo(
-    () =>
-      filtering ? results.filter((entry) => matches(entry, filters, nameOf)) : results,
-    [filtering, results, filters, nameOf]
+  const logRange = useMemo(
+    () => ({ fromMs: 0, toMs: dayWindow(today, settings.timezone).toMs }),
+    [today, settings.timezone]
+  )
+
+  const { results, status, loadMore } = usePaginatedQuery(
+    api.entries.listPage,
+    range === null ? logRange : "skip",
+    { initialNumItems: PAGE_SIZE }
   )
 
   /*
-   * ONE filter, both views.
-   *
-   * The same `filters` state and the same `matches` the list uses, one memo
-   * above. Hiding the band with the list was the alternative and it silently
-   * drops a filter the user set — a control disappearing is indistinguishable
-   * from the data changing, which is the one impression a billing tool cannot
-   * afford.
+   * The rows the GRID draws.
    *
    * NOT `groupByDay`. That deliberately keeps a running entry out of its
    * `entries` (it is already on screen in the timer bar, larger and live), and
    * a view whose whole purpose is the shape of the day has to show what is
    * running — so the calendar takes the rows straight.
-   */
-  const calendarEntries = useMemo(() => {
-    const rows = calendarQuery.data ?? []
-    if (!filtering) return rows
-    return rows.filter((entry) => matches(entry, filters, nameOf))
-  }, [calendarQuery.data, filtering, filters, nameOf])
-
-  /*
-   * The days the header labels, taken from the range the GRID reported.
    *
-   * `null` until the first `datesSet` — see the branch that renders
-   * `CalendarHeader` for what is drawn in that gap and why it is not a
-   * computed fallback.
+   * Empty in List, so "Range total" cannot be computed from a list's rows over
+   * a grid's columns while nobody is looking at either.
    */
-  const calendarDays = useMemo(
-    () => (calendarRange === null ? null : rangeEndpoints(calendarRange)),
-    [calendarRange]
+  const calendarEntries = useMemo(
+    () => (view === "calendar" ? (rangeQuery.data ?? []) : []),
+    [view, rangeQuery.data]
   )
 
+  /** The rows the LIST draws: the page it paginated, or the range it asked for. */
+  const listRows = range === null ? results : (rangeQuery.data ?? [])
+
   /*
-   * The RANGE's total, for the calendar's own header — never for `TotalsRow`,
+   * The RANGE's total, for the bar beside the grid — never for `TotalsRow`,
    * which stays on today and this week.
    *
    * SUMMED OVER THE DRAWN COLUMNS, not over every key `dayTotals` produced.
    * `CalendarPanel` looks that same map up once per column, so summing its
    * values instead counted days that have no column — the two sets coincide
    * only while the query range and the columns are the same days, which is
-   * precisely the assumption the 5-day view broke. Measured before the fix, with
-   * `weekStartDay: 2` and a two-hour entry on Saturday: `Range total 2:00:00`
-   * above five columns showing nothing, on a tool people invoice from. It is the
-   * same defect class as a header total belonging to a range other than the one
-   * drawn, which this branch has already shipped once.
-   *
-   * So the number under the arrows is the sum of the numbers in the column
-   * headers BY CONSTRUCTION rather than by coincidence: same map, same keys.
+   * precisely the assumption the 5-day view broke. Measured before the fix,
+   * with `weekStartDay: 2` and a two-hour entry on Saturday:
+   * `Range total 2:00:00` above five columns showing nothing, on a tool people
+   * invoice from.
    */
   const calendarTotalMs = useMemo(
     () =>
-      calendarRange === null
-        ? 0
-        : rangeTotal(
-            calendarEntries,
-            settings.timezone,
-            nowMs,
-            calendarRange.days
-          ),
-    [calendarEntries, calendarRange, settings.timezone, nowMs]
+      rangeTotal(
+        calendarEntries,
+        settings.timezone,
+        nowMs,
+        plan.range.days
+      ),
+    [calendarEntries, plan.range.days, settings.timezone, nowMs]
   )
 
   /*
-   * WHY THE GRID IS BLANK, for the two cases that are not an error.
+   * WHY THE GRID IS BLANK, for the case that is not an error.
    *
-   * `calendarQuery.isError` already argues this at length: an empty grid and a
+   * `rangeQuery.isError` already argues this at length: an empty grid and a
    * `0:00:00` range total are "indistinguishable from a week nobody tracked
    * anything in, on a product whose stated principle is never to lose time".
-   * That argument was applied to one branch of three. Two others reach exactly
-   * the same blank grid and said nothing at all:
+   * An EMPTY RANGE reaches exactly the same blank grid and used to say nothing
+   * at all.
    *
-   *   - an EMPTY RANGE, which the plan promises "one quiet line of copy" for;
-   *   - a FILTER THAT MATCHED NOTHING, which in List is the whole subject of
-   *     `FilteredLogStatus` — it goes as far as distinguishing "no matches" from
-   *     "no matches yet" — and which the calendar branch does not render at all,
-   *     because that component describes the LIST's pagination. So a project
-   *     filter matching nothing gave a blank grid and `Range total 0:00:00` with
-   *     nothing on screen saying a filter was responsible. That is the
-   *     cross-view asymmetry the "one filter, both views" decision exists to
-   *     close.
-   *
-   * TWO SENTENCES, NOT ONE. "Nothing was tracked" and "nothing matched" are
-   * different claims and only one of them is true at a time — the same
-   * distinction `FilteredLogStatus` draws, for the same reason.
-   *
-   * `null` while the answer is not known: `data` is `undefined` before the first
-   * range has resolved, and while a step is in flight `placeholderData` holds
-   * the previous range's rows, so neither state can flash a claim about a range
-   * nobody has answered for yet. The error branch owns its own case.
+   * `null` while the answer is not known: `data` is `undefined` before the
+   * first range has resolved, and while a step is in flight `placeholderData`
+   * holds the previous range's rows, so neither state can flash a claim about a
+   * range nobody has answered for yet. The error branch owns its own case.
    */
   const calendarNotice =
-    calendarQuery.isError || calendarQuery.data === undefined
+    rangeQuery.isError || rangeQuery.data === undefined
       ? null
       : calendarEntries.length > 0
         ? null
-        : filtering
-          ? "No entries in this range match these filters."
-          : "Nothing was tracked in this range."
+        : "Nothing was tracked in this range."
 
   const groups = useMemo(
-    () => groupByDay(filtered, settings.timezone, nowMs),
-    [filtered, settings.timezone, nowMs]
+    () => groupByDay(listRows, settings.timezone, nowMs),
+    [listRows, settings.timezone, nowMs]
   )
 
   /*
    * Rows, not groups. `groupByDay` keeps a running entry out of `entries` but
    * still opens a day for it (its elapsed time belongs in that day's total),
    * so a group count answers "how many days are on screen", not "how many
-   * entries matched" — and those differ by exactly the entry the log
+   * entries there are" — and those differ by exactly the entry the log
    * deliberately never draws.
    */
   const rowCount = groups.reduce((n, group) => n + group.entries.length, 0)
+
+  /** The last instant the LIST reaches: the end of today when unbounded, the
+   *  end of the selected range when it is not. */
+  const listEndMs = range === null ? logRange.toMs : instantsOf(range, settings.timezone).toMs
 
   /**
    * A block on the grid, clicked.
@@ -344,33 +388,35 @@ export function Timer() {
    * The switch has to happen first and the focus after paint, because the row
    * is not mounted until List renders.
    *
-   * IT SWITCHES ONLY WHEN THERE IS A ROW TO SWITCH TO. Two kinds of block on
-   * this grid have no row behind them, and both are one click away:
+   * IT SWITCHES ONLY WHEN THERE IS A ROW TO SWITCH TO. Three kinds of block on
+   * this grid have no row behind them, and all are one click away:
    *
    *   - the RUNNING entry, which the grid draws deliberately and `groupByDay`
    *     deliberately keeps out of its rows (it is already on screen, live and
    *     larger, in the timer bar);
-   *   - anything OUTSIDE the loaded pages — the list paginates 50 at a time,
-   *     newest first, while the grid steps to any week in history;
-   *   - anything dated AFTER TODAY. `logRange.toMs` is pinned to the end of
-   *     today so a clock-skewed entry cannot sit permanently on top of the log,
-   *     while the calendar's range routinely includes the rest of the current
-   *     week — so a Friday entry is drawn on Wednesday's grid and is outside
-   *     the list's range by construction, not merely unpaginated.
+   *   - anything OUTSIDE what the list is showing — with "All dates" that is
+   *     the pages it has not paginated yet, since the list walks back 50 at a
+   *     time while the grid steps to any week in history;
+   *   - anything dated AFTER the list's last instant. With "All dates" that is
+   *     the end of today, pinned there so a clock-skewed entry cannot sit
+   *     permanently on top of the log, while the calendar's range routinely
+   *     includes the rest of the current week — so a Friday entry is drawn on
+   *     Wednesday's grid and is outside the list by construction.
    *
    * Switching anyway flipped the view to a log of recent rows and focused
    * nothing, which is worse than a no-op: the week the user was reading is gone
    * and nothing says why. So the miss is REPORTED instead, in the same toast
    * vocabulary the rest of the page answers with, and the grid stays put.
    *
-   * THE THREE MESSAGES SAY THREE DIFFERENT TRUE THINGS. Telling someone to press
-   * "Load earlier entries" to reach a future entry is advice that cannot work —
-   * loading earlier only ever walks backwards. The reachable way to get a future
-   * date is the `+` dialog's Day field, an unbounded `<input type="date">` where
-   * a mistyped month lands an entry months out, and noticing that is exactly
-   * what a calendar is good for.
+   * THE MESSAGES SAY DIFFERENT TRUE THINGS. Telling someone to press "Load
+   * earlier entries" to reach a future entry is advice that cannot work —
+   * loading earlier only ever walks backwards — and the button is not even
+   * there when a bounded range is selected. The reachable way to get a future
+   * date is the `+` dialog's Day field, an unbounded `<input type="date">`
+   * where a mistyped month lands an entry months out, and noticing that is
+   * exactly what a calendar is good for.
    *
-   * `groups` decides, not `results`: `groups` is what the list actually draws,
+   * `groups` decides, not `listRows`: `groups` is what the list actually draws,
    * and the running entry is in one and not the other.
    */
   const onEntryClick = useCallback(
@@ -383,22 +429,24 @@ export function Timer() {
         const clicked = calendarEntries.find((e) => e._id === entryId)
         const title = (clicked?.title ?? "").trim()
         const label = title === "" ? "That entry" : `“${title}”`
-        // `toMs` is exclusive — the midnight that ends today — so anything at or
-        // past it starts on a later day than the log will ever reach.
-        const future =
-          clicked !== undefined && clicked.startedAt >= logRange.toMs
+        // `listEndMs` is exclusive — the midnight that ends the last day the
+        // list reaches — so anything at or past it starts later than the list
+        // will ever go.
+        const future = clicked !== undefined && clicked.startedAt >= listEndMs
         toasts.add({
           title:
             clicked?.endedAt === null
               ? `${label} is still running, so the log has no row for it — it is in the timer bar above.`
               : future
-                ? `${label} starts after today, and the log ends with today — so there is no row for it. A day typed wrong in the add-entry dialog is what that usually is.`
-                : `${label} has not been loaded into the list yet. Use “Load earlier entries” at the foot of the list to reach it.`,
+                ? `${label} starts after the dates the list is showing, so there is no row for it. A day typed wrong in the add-entry dialog is what that usually is.`
+                : range === null
+                  ? `${label} has not been loaded into the list yet. Use “Load earlier entries” at the foot of the list to reach it.`
+                  : `${label} is outside the dates the list is showing, so there is no row for it.`,
         })
         return
       }
 
-      setView("list")
+      changeView("list")
       requestAnimationFrame(() => {
         const element = document.querySelector<HTMLElement>(
           `[data-entry-id="${entryId}"]`
@@ -407,28 +455,41 @@ export function Timer() {
         element?.focus()
       })
     },
-    [groups, calendarEntries, logRange.toMs, toasts]
+    [groups, calendarEntries, listEndMs, range, toasts, changeView]
   )
 
   const totals = periodTotals(weekEntries, settings.timezone, today, nowMs)
+
+  /*
+   * The skeleton's condition, for whichever source the list is reading.
+   *
+   * It is checked before the log because `groups` reads as `[]` for the whole
+   * first round trip either way — and an empty array used to fall straight into
+   * "nothing tracked yet", flashing the onboarding copy at a freelancer whose
+   * day is fully logged, for as long as that fetch took.
+   */
+  const listPending =
+    range === null
+      ? status === "LoadingFirstPage"
+      : rangeQuery.data === undefined && !rangeQuery.isError
 
   return (
     /*
       THE TOP OF THIS PAGE STAYS PUT — `sticky`, which `Page` defaults to false
       and which every caller has to argue. What the timer bar above it is for —
-      the numbers you check and the filter you type into — is useless once it
-      has scrolled past the log it describes, and this is the one page whose
-      whole body is a scroll. Both halves of the header are readouts of, or
-      controls over, exactly the rows underneath them, which is Page's stated
-      test for pinning. `Page` owns how that is done and what the day headers
-      below then stick to.
+      the numbers you check and the range you set — is useless once it has
+      scrolled past the log it describes, and this is the one page whose whole
+      body is a scroll. Both halves of the header are readouts of, or controls
+      over, exactly the rows underneath them, which is Page's stated test for
+      pinning. `Page` owns how that is done and what the day headers below then
+      stick to.
 
       `titleHidden`, and the heading is NEW. This page had no `<h1>` at all,
       which is a document-structure gap rather than a style: a screen reader's
       heading list is how a page is skimmed without sight, and this one offered
       nothing to skim. It stays out of SIGHT because the header directly beneath
-      it already says what the page is, twice over — a week's totals and a
-      filter over a log — and a `text-sm` word "Timer" above them would push the
+      it already says what the page is, twice over — a week's totals and a range
+      over a log — and a `text-sm` word "Timer" above them would push the
       running timer down the screen to label something already labelled.
     */
     <Page
@@ -465,22 +526,29 @@ export function Timer() {
             {/*
               TABS, NOT TWO ROUTES — reports.tsx settled this argument for
               Summary and Detailed and it holds here for the same reason: the
-              filter band below is ONE control governing both views. A
-              freelancer narrows to a client and then looks at the shape of the
-              week and at the rows behind the shape; a second page would mean
-              setting the filter twice and would let the two drift apart with
-              nothing on screen to say so.
+              range bar below is ONE control governing both views. A freelancer
+              narrows to a fortnight and then looks at the shape of it and at
+              the rows behind the shape; a second page would mean setting the
+              range twice and would let the two drift apart with nothing on
+              screen to say so.
+
+              A SEGMENTED GROUP rather than the underline this used to draw.
+              The two are alternative views of one thing rather than sections
+              of a document, and a filled cell is what that reads as. Selection
+              is not carried by colour alone — the fill is a fill, and Base UI
+              puts `aria-selected` on the tab regardless. See ui/tabs.tsx for
+              why `segmented` is its own variant and not the stock pill.
 
               The totals to the left do NOT belong to either view. They are
-              ambient facts about the clock — see CalendarHeader for the range
-              total, which is the number that follows the arrows.
+              ambient facts about the clock — see RangeBar for the range total,
+              which is the number that follows the arrows.
             */}
             <Tabs
               value={view}
-              onValueChange={(next) => setView(next as "calendar" | "list")}
+              onValueChange={(next) => changeView(next as TimerView)}
               className="ml-auto"
             >
-              <TabsList variant="line">
+              <TabsList variant="segmented">
                 <TabsTrigger value="calendar">Calendar</TabsTrigger>
                 <TabsTrigger value="list">List</TabsTrigger>
               </TabsList>
@@ -488,79 +556,47 @@ export function Timer() {
           </div>
 
           {/*
-            The stepper sticks with the totals, because it is a control over
+            The range bar sticks with the totals, because it is a control over
             what scrolls beneath it — Page's stated test for what belongs in
             this slot. It is inside the measured element, so `Page` accounts
             for its height without this file measuring anything.
 
-            NOTHING AT ALL BEFORE THE GRID HAS REPORTED, which is the whole of
-            the answer to "what about the first render". Until `datesSet` fires
-            there is no range, and therefore no honest label and no honest
-            total — and the only other way to produce them is to compute the
-            span here, which is exactly the bug this replaced: a second
-            derivation that disagreed with the grid for 31 of the 49
-            (weekStartDay × anchor) combinations. A bar that appears a commit
-            late is a smaller cost than a bar that is confidently wrong.
-            FullCalendar fires `datesSet` from its own mount effect, so in
-            practice the gap is not painted.
+            ON SCREEN IN BOTH VIEWS, which is the change this bar was reshaped
+            for. It used to appear only with the grid, because only the grid
+            had a range; the range bounds the LIST now too, so a control that
+            came and went with the tab would be a filter silently dropped.
           */}
-          {view === "calendar" && calendarDays !== null ? (
-            <div className="w-full px-4 pb-3">
-              <CalendarHeader
-                firstDay={calendarDays.firstDay}
-                lastDay={calendarDays.lastDay}
-                size={size}
-                today={today}
-                rangeMs={calendarTotalMs}
-                display={settings.durationDisplay}
-                isStale={calendarQuery.isPlaceholderData}
-                onStep={(delta) =>
-                  setAnchor((current) =>
-                    addDays(current, size === "day" ? delta : delta * 7)
-                  )
-                }
-                onToday={() => setAnchor(today)}
-                onSizeChange={setSize}
-              />
-            </div>
-          ) : null}
-
-          {/*
-            The band's chrome — the full bleed, the Surface fill, the two
-            hairlines and the `px-4` the controls take so the search box starts
-            on the same pixel as the entry titles below it and the totals above
-            it — was spelt out here, and only here. /reports drew this same
-            `FilterControls` on bare ground because that spelling was not
-            something a second page could render. It is `FilterBand` now, which
-            is where that argument lives.
-          */}
-          <FilterBand>
-            <FilterControls filters={filters} projects={projects} onChange={setFilters} />
-          </FilterBand>
+          <div className="w-full px-4 pb-3">
+            <RangeBar
+              view={view}
+              range={shownRange}
+              size={plan.size}
+              today={today}
+              weekStartDay={settings.weekStartDay}
+              rangeMs={calendarTotalMs}
+              display={settings.durationDisplay}
+              isStale={rangeQuery.isPlaceholderData}
+              onStep={step}
+              onRangeChange={(picked: DayRange) => setRange(picked)}
+              onPresetChange={applyPreset}
+              onSizeChange={changeSize}
+            />
+          </div>
         </>
       }
     >
       <div className="flex-1">
         {/*
-          The calendar is checked first and is its own whole branch: it reads
-          a different query (bounded to the visible window) and paginates
-          nothing, so neither the skeleton nor `FilteredLogStatus` — both of
-          which describe the LIST's pagination — has anything to say while it
-          is showing.
+          The calendar is checked first and is its own whole branch: it
+          paginates nothing, so neither the skeleton nor `FilteredLogStatus` —
+          both of which describe the LIST's pagination — has anything to say
+          while it is showing.
 
-          Within the list, `status === "LoadingFirstPage"` is checked before
-          the log, because `groups` reads as `[]` for the entire first round
-          trip regardless of whether a filter is active — and an empty array
-          used to fall straight into "nothing tracked yet", flashing the
-          onboarding copy at a freelancer whose day is fully logged, for as
-          long as that fetch took.
-
-          Everything after that is ONE branch, not two: `EntryLog` is always
-          rendered and only its `empty` slot changes. A filter that matches
-          nothing here does not mean nothing is tracked, so the onboarding
-          copy would be flatly false under an active search — but the answer
-          is to draw nothing inside the log, not to take the log away. See the
-          `empty` prop below for what removing it used to cost.
+          Within the list, the loading state is checked before the log, because
+          `groups` reads as `[]` for the entire first round trip — and an empty
+          array used to fall straight into "nothing tracked yet", flashing the
+          onboarding copy at a freelancer whose day is fully logged, for as long
+          as that fetch took.
         */}
         {view === "calendar" ? (
           /*
@@ -576,56 +612,24 @@ export function Timer() {
             `height="auto"` and this element simply lets it be as tall as it is.
 
             NO GUTTER, deliberately, against DESIGN.md's usual `px-4`. That rule
-            exists so entry titles, day headers, totals and the search box all
+            exists so entry titles, day headers, totals and the range bar all
             start on the same pixel — it is about a COLUMN OF TEXT lining up. A
             time grid is not text in a column; it is a measuring surface whose
             own first column is an hour rail that lines up with nothing above it.
             Inset by 16px it read as a card floating on the page, which is what
             DESIGN.md's flat, tonal-depth section rules out. Full-bleed it reads
-            as a band of the page, exactly as the filter band above it does, and
-            the wider columns are the point of a wider window.
+            as a band of the page, and the wider columns are the point of a
+            wider window.
           */
           <div className="flex w-full flex-col">
-            {/*
-              A FAILED RANGE QUERY IS NOT AN EMPTY WEEK.
-
-              Without this the grid simply draws seven empty columns and a
-              0:00:00 range total — indistinguishable from a week nobody
-              tracked anything in, on a product whose stated principle is never
-              to lose time. `role="alert"` because it appears in place of an
-              answer the user just asked for, and the retry is here rather than
-              in a step-away-and-back gesture because that gesture also changes
-              the range, which is not what they wanted.
-            */}
-            {calendarQuery.isError ? (
-              <p
-                role="alert"
-                className={cn(
-                  // `mx-4`, not the parent's gutter: the grid below is
-                  // full-bleed, so this element carries its own alignment with
-                  // the filter band above rather than inheriting one.
-                  "mx-4 mb-3 flex flex-wrap items-center gap-3 rounded-md",
-                  "border border-alarm px-3 py-2 text-sm text-alarm"
-                )}
-              >
-                This range could not be loaded, so the grid below is empty for
-                that reason and not because nothing was tracked.
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void calendarQuery.refetch()}
-                >
-                  Try again
-                </Button>
-              </p>
-            ) : null}
+            {rangeQuery.isError ? <RangeError what="grid" onRetry={() => void rangeQuery.refetch()} /> : null}
 
             {/*
               ALWAYS MOUNTED, and only its text changes — the discipline
               `filtered-log-status.tsx` spells out. A live region inserted into
               the DOM already holding its text is not reliably announced;
               NVDA, JAWS and VoiceOver all watch a region they already know
-              about for CHANGES. Typing a filter that empties the grid has to
+              about for CHANGES. Stepping to a week with nothing in it has to
               say so, and this is the element that can.
             */}
             <p
@@ -643,7 +647,7 @@ export function Timer() {
 
             <CalendarPanel
               entries={calendarEntries}
-              range={calendarRange}
+              range={plan.range}
               timeZone={settings.timezone}
               weekStartDay={settings.weekStartDay}
               use12Hour={settings.timeFormat === "12"}
@@ -653,25 +657,49 @@ export function Timer() {
               onEntryClick={onEntryClick}
             />
           </div>
-        ) : status === "LoadingFirstPage" ? (
+        ) : listPending ? (
           <LogSkeleton />
         ) : (
+          /*
+            ONE `EntryLog` ELEMENT FOR BOTH LIST MODES, deliberately.
+
+            `EntryLog` owns `NoteSheet`, and `NoteSheet` owns `draftsRef` — the
+            in-memory copy of a note whose save is still in flight or has
+            failed. Two sibling branches each rendering their own `EntryLog`
+            would put it at a different position in the tree per mode, so React
+            would unmount one and mount the other, and every held draft would go
+            with it. That is the regression `-timer.test.tsx` exists for, in a
+            new spelling: it used to be a filter keystroke, it would now be a
+            preset click. The conditional pieces are the alert above and the
+            load-more below; the log itself stays put.
+          */
           <>
+            {rangeQuery.isError && range !== null ? (
+              <RangeError what="list" onRetry={() => void rangeQuery.refetch()} />
+            ) : null}
+
             <EntryLog
               groups={groups}
               timeZone={settings.timezone}
               use12Hour={settings.timeFormat === "12"}
               weekStartDay={settings.weekStartDay}
               display={settings.durationDisplay}
-              // `null`, not omitted: draw nothing for zero groups rather than
-              // DayList's onboarding copy. Passing nothing here is what forced
-              // the previous version to swap `EntryLog` for `null` outright
-              // whenever a filter matched nothing — which unmounted `NoteSheet`
-              // with it, and with that every note draft it was holding for a
-              // save still in flight or already failed. One keystroke in the
-              // search box, and the promise note-sheet.tsx makes about exactly
-              // that case was gone.
-              empty={filtering ? null : undefined}
+              /*
+                NOT the onboarding copy, once a range is selected. "Nothing
+                tracked yet" means a new account, and it is flatly false of a
+                freelancer who has narrowed to a quiet fortnight — so the
+                bounded list borrows the sentence the grid shows for the same
+                range, and switching views does not change the claim. Unbounded,
+                an empty log really does mean an empty account, which is
+                `DayList`'s default and why this is `undefined` there.
+              */
+              empty={
+                range === null ? undefined : (
+                  <p className="px-4 py-4 text-sm text-muted-foreground">
+                    Nothing was tracked in this range.
+                  </p>
+                )
+              }
             />
 
             {/*
@@ -679,13 +707,25 @@ export function Timer() {
               this way, the day headers are sticky and auto-loading fights
               them, and a control the user presses is one they can also choose
               not to press.
+
+              GONE ENTIRELY once a range is selected: a bounded list reads
+              `listRange`, which answers with the whole range at once, so there
+              is nothing left to load and a button offering to load it would do
+              nothing.
+
+              `filtering` is permanently false now: /timer has no filter bar any
+              more — the range replaced it, and a search over history belongs on
+              /reports, which still has one. The prop stays because that page's
+              log status is the same component with the same signature.
             */}
-            <FilteredLogStatus
-              filtering={filtering}
-              matchCount={rowCount}
-              status={status}
-              onLoadMore={() => loadMore(PAGE_SIZE)}
-            />
+            {range === null ? (
+              <FilteredLogStatus
+                filtering={false}
+                matchCount={rowCount}
+                status={status}
+                onLoadMore={() => loadMore(PAGE_SIZE)}
+              />
+            ) : null}
           </>
         )}
       </div>
@@ -693,3 +733,41 @@ export function Timer() {
   )
 }
 
+/**
+ * A FAILED RANGE QUERY IS NOT AN EMPTY WEEK.
+ *
+ * Without this the grid simply draws seven empty columns and a 0:00:00 range
+ * total — indistinguishable from a week nobody tracked anything in, on a
+ * product whose stated principle is never to lose time. The bounded list has
+ * exactly the same problem and reads the same query, so it says the same thing.
+ *
+ * `role="alert"` because it appears in place of an answer the user just asked
+ * for, and the retry is here rather than in a step-away-and-back gesture
+ * because that gesture also changes the range, which is not what they wanted.
+ */
+function RangeError({
+  what,
+  onRetry,
+}: {
+  what: "grid" | "list"
+  onRetry: () => void
+}) {
+  return (
+    <p
+      role="alert"
+      className={cn(
+        // `mx-4`, not a parent gutter: the grid below is full-bleed, so this
+        // element carries its own alignment with the bar above rather than
+        // inheriting one.
+        "mx-4 mb-3 flex flex-wrap items-center gap-3 rounded-md",
+        "border border-alarm px-3 py-2 text-sm text-alarm"
+      )}
+    >
+      This range could not be loaded, so the {what} below is empty for that
+      reason and not because nothing was tracked.
+      <Button variant="outline" size="sm" onClick={onRetry}>
+        Try again
+      </Button>
+    </p>
+  )
+}
