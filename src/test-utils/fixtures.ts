@@ -1,3 +1,4 @@
+import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { Doc, Id } from "../../convex/_generated/dataModel"
 
 /**
@@ -24,6 +25,16 @@ export const SETTINGS = {
   tabTitleClock: false,
   currency: "USD",
 }
+
+/**
+ * "This component may not write anything."
+ *
+ * Empty rather than a set of spies, deliberately: a case that renders with this
+ * and then reaches one of the actions throws a TypeError naming the verb, which
+ * is a better failure than a silent no-op that lets a test claim a control
+ * works. A case that means to assert on a write states its own spies.
+ */
+export const noEntryActions = {} as EntryActions
 
 /** A one-hour completed entry starting at `NOW`. */
 export function makeEntry(

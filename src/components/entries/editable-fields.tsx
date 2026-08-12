@@ -18,9 +18,21 @@ const DURATION_HELP = "Try 1:30, 90m, or 1.5h."
 export function EditableTitle({
   entry,
   onCommit,
+  textClassName = "text-sm",
 }: {
   entry: Entry
   onCommit: (title: string) => Promise<void>
+  /**
+   * The type size, on the display span, the trigger and the input alike.
+   *
+   * One prop rather than three, because all three have to agree: the trigger
+   * establishes the line box (see `className` below) and a size set on only the
+   * text inside it makes the control taller than what it holds. The calendar's
+   * entry popover passes `text-base` — a popover is one entry at a time and its
+   * title is the heading of it, where a log row is one of fifty and `text-sm`
+   * is what fits a working day on a screen.
+   */
+  textClassName?: string
 }) {
   const title = entry.title.trim()
 
@@ -29,7 +41,8 @@ export function EditableTitle({
       display={
         <span
           className={cn(
-            "block truncate text-sm font-medium",
+            "block truncate font-medium",
+            textClassName,
             title === "" && "text-muted-foreground italic"
           )}
         >
@@ -47,12 +60,12 @@ export function EditableTitle({
       // The negative margins pay for the padding. Without them the hover target
       // adds four pixels to every row and the log loses a line per screen.
       //
-      // `text-sm` on the TRIGGER, not only on the text inside it. The button
-      // establishes its own line box, so without this it inherits the 16px base
-      // and reserves a 24px line for 20px of text — four wasted pixels on every
-      // row, which is a whole entry per screenful.
-      className="-mx-1 -my-0.5 min-w-0 px-1 py-0.5 text-sm"
-      inputClassName="text-sm font-medium"
+      // The size goes on the TRIGGER, not only on the text inside it. The
+      // button establishes its own line box, so without this it inherits the
+      // 16px base and reserves a 24px line for 20px of text — four wasted
+      // pixels on every row, which is a whole entry per screenful.
+      className={cn("-mx-1 -my-0.5 min-w-0 px-1 py-0.5", textClassName)}
+      inputClassName={cn("font-medium", textClassName)}
       grow
       parse={(raw) =>
         raw.length > MAX_TITLE_LENGTH

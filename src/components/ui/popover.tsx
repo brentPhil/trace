@@ -26,6 +26,13 @@ function Popup({
      own when the chosen side has no room. */
   side,
   sideOffset = 6,
+  /* WHAT THE POPUP HANGS OFF, when it is not a `Popover.Trigger`.
+     A block on the calendar grid is drawn by FullCalendar, so there is no
+     element of ours to make the trigger — the click hands us the block's own
+     node and this is how it reaches the positioner. Everything else about the
+     popup is unchanged: with no `anchor` Base UI falls back to the trigger, as
+     every other caller relies on. */
+  anchor,
   children,
   ...props
 }: ComponentProps<typeof BasePopover.Popup> & {
@@ -35,6 +42,7 @@ function Popup({
      took away. */
   side?: ComponentProps<typeof BasePopover.Positioner>["side"]
   sideOffset?: number
+  anchor?: ComponentProps<typeof BasePopover.Positioner>["anchor"]
 }) {
   return (
     <BasePopover.Portal>
@@ -42,6 +50,7 @@ function Popup({
         align={align}
         side={side}
         sideOffset={sideOffset}
+        anchor={anchor}
         className="z-50"
       >
         <BasePopover.Popup
