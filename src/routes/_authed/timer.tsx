@@ -522,36 +522,6 @@ export function Timer() {
               display={settings.durationDisplay}
             />
 
-            {/*
-              TABS, NOT TWO ROUTES — reports.tsx settled this argument for
-              Summary and Detailed and it holds here for the same reason: the
-              range bar below is ONE control governing both views. A freelancer
-              narrows to a fortnight and then looks at the shape of it and at
-              the rows behind the shape; a second page would mean setting the
-              range twice and would let the two drift apart with nothing on
-              screen to say so.
-
-              A SEGMENTED GROUP rather than the underline this used to draw.
-              The two are alternative views of one thing rather than sections
-              of a document, and a filled cell is what that reads as. Selection
-              is not carried by colour alone — the fill is a fill, and Base UI
-              puts `aria-selected` on the tab regardless. See ui/tabs.tsx for
-              why `segmented` is its own variant and not the stock pill.
-
-              The totals to the left do NOT belong to either view. They are
-              ambient facts about the clock — see RangeBar for the range total,
-              which is the number that follows the arrows.
-            */}
-            <Tabs
-              value={view}
-              onValueChange={(next) => changeView(next as TimerView)}
-              className="ml-auto"
-            >
-              <TabsList variant="segmented">
-                <TabsTrigger value="calendar">Calendar</TabsTrigger>
-                <TabsTrigger value="list">List</TabsTrigger>
-              </TabsList>
-            </Tabs>
           </div>
 
           {/*
@@ -565,21 +535,59 @@ export function Timer() {
             had a range; the range bounds the LIST now too, so a control that
             came and went with the tab would be a filter silently dropped.
           */}
-          <div className="w-full px-4 pb-3">
-            <RangeBar
-              view={view}
-              range={shownRange}
-              size={plan.size}
-              today={today}
-              weekStartDay={settings.weekStartDay}
-              rangeMs={calendarTotalMs}
-              display={settings.durationDisplay}
-              isStale={rangeQuery.isPlaceholderData}
-              onStep={step}
-              onRangeChange={(picked: DayRange) => setRange(picked)}
-              onPresetChange={applyPreset}
-              onSizeChange={changeSize}
-            />
+          <div className="flex w-full flex-wrap items-center gap-3 px-4 pb-3">
+            {/* `flex-1 min-w-0` so the bar keeps its own internal `ml-auto` —
+                the range total still pins to the right of the BAR — while the
+                switcher sits beyond it rather than being pushed off the row. */}
+            <div className="min-w-0 flex-1">
+              <RangeBar
+                view={view}
+                range={shownRange}
+                size={plan.size}
+                today={today}
+                weekStartDay={settings.weekStartDay}
+                rangeMs={calendarTotalMs}
+                display={settings.durationDisplay}
+                isStale={rangeQuery.isPlaceholderData}
+                onStep={step}
+                onRangeChange={(picked: DayRange) => setRange(picked)}
+                onPresetChange={applyPreset}
+                onSizeChange={changeSize}
+              />
+            </div>
+
+            {/*
+              TABS, NOT TWO ROUTES — reports.tsx settled this argument for
+              Summary and Detailed and it holds here for the same reason: the
+              range bar beside it is ONE control governing both views. A
+              freelancer narrows to a fortnight and then looks at the shape of
+              it and at the rows behind the shape; a second page would mean
+              setting the range twice and would let the two drift apart with
+              nothing on screen to say so.
+
+              ON THE RANGE BAR'S ROW, not up with the totals. The switcher and
+              the range are the two halves of one question — WHICH entries, and
+              HOW to look at them — so they read as one control strip. The
+              totals above are neither: they are ambient facts about the clock
+              and belong to no view, which is exactly why they must not sit in
+              the same cluster as something that changes what is on screen.
+
+              A SEGMENTED GROUP rather than the underline this used to draw.
+              The two are alternative views of one thing rather than sections
+              of a document, and a filled cell is what that reads as. Selection
+              is not carried by colour alone — the fill is a fill, and Base UI
+              puts `aria-selected` on the tab regardless. See ui/tabs.tsx for
+              why `segmented` is its own variant and not the stock pill.
+            */}
+            <Tabs
+              value={view}
+              onValueChange={(next) => changeView(next as TimerView)}
+            >
+              <TabsList variant="segmented">
+                <TabsTrigger value="calendar">Calendar</TabsTrigger>
+                <TabsTrigger value="list">List</TabsTrigger>
+              </TabsList>
+            </Tabs>
           </div>
         </>
       }

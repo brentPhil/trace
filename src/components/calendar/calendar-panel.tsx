@@ -59,7 +59,22 @@ const EVENT_MIN_HEIGHT = 18
  * Edge Soft throughout: these are dividers between passive content, where no
  * contrast floor applies.
  */
-const HOUR_RULE = "border border-edge-soft"
+/*
+ * `h-12` IS THE ROW HEIGHT, because `slotMinHeight` does not survive here.
+ *
+ * The prop is passed and typed and FullCalendar accepts it, and the rows still
+ * came out ~21px — measured in the browser, 24 slots inside a 564px grid. It is
+ * a MINIMUM, and it is only consulted on the path that expands rows to fill a
+ * definite height; with `height="auto"` there is no height to fill, so the
+ * table simply sizes to its content and the minimum is never asked about.
+ *
+ * 48px an hour is the density every shipping calendar has converged on, and it
+ * is the difference between a half-hour entry being a readable block and being
+ * a 10px sliver. So the row states its own height rather than asking for a
+ * floor: `h-12` is exactly the 48 `SLOT_MIN_HEIGHT` names, and that constant is
+ * still what `slotMinHeight` is given, so the two cannot drift.
+ */
+const HOUR_RULE = "h-12 border border-edge-soft"
 const COLUMN_RULE = "border border-edge-soft"
 /** The hour rail's own boundary. No cell border can draw it — the first
  *  column's are all stripped — so this divider element is what separates the
@@ -308,7 +323,21 @@ export function CalendarPanel({
        * asked for. `bg-surface` alone is what separates the grid from the ground
        * behind it, which is the tonal step DESIGN.md asks for.
        */
-      viewClass="overflow-hidden bg-surface"
+      /*
+       * NO `overflow-hidden` HERE, and that is not a tidy-up — it is what makes
+       * the sticky day-header row work at all.
+       *
+       * `position: sticky` pins against the nearest SCROLLING ancestor. An
+       * ancestor with `overflow: hidden` becomes that ancestor, and this one
+       * never scrolls — so the header had a correct `top` of 184px, was
+       * correctly `position: sticky`, and still slid straight off the screen,
+       * because it was pinning inside a box that does not move. Measured at
+       * -329px while the page had scrolled 697.
+       *
+       * It was only ever here to clip the `rounded-lg` corners, and those went
+       * when the grid became full-bleed. Nothing needs clipping now.
+       */
+      viewClass="bg-surface"
       tableClass="bg-surface"
       /*
        * THE DAY HEADERS STAY PUT, pinned by CSS rather than by the library.
@@ -330,7 +359,24 @@ export function CalendarPanel({
        * `bg-surface`, opaque, and a `border-b`: rows scroll under this, and a
        * transparent sticky element is a window onto them.
        */
-      tableHeaderClass="sticky top-(--log-sticky-top) z-10 border-b border-edge-soft bg-surface"
+      /*
+       * `top-…!` IS LOAD-BEARING, and the `!` is the whole fix.
+       *
+       * `skeleton.css` already makes this row `position: sticky; top: 0`, and
+       * it is imported as a plain stylesheet — UNLAYERED. Unlayered rules beat
+       * anything in `@layer utilities`, which is where Tailwind puts its
+       * classes, regardless of specificity or source order. So
+       * `top-(--log-sticky-top)` lost silently: the computed `top` stayed
+       * `0px`, the row pinned to the very top of the VIEWPORT, and the page
+       * header — `z-20` against this row's `z-10` — drew straight over it. The
+       * dates vanished under the range bar the moment you scrolled, which
+       * reads as "the header does not stick" even though it was sticking
+       * perfectly, just to the wrong line.
+       *
+       * `.hatch-empty` in `styles.css` is unlayered for the same reason and
+       * wins the same way; it is worth knowing this file has two of them.
+       */
+      tableHeaderClass="sticky top-(--log-sticky-top)! z-10 border-b border-edge-soft bg-surface"
       tableBodyClass="bg-surface"
       slotLaneClass={HOUR_RULE}
       slotHeaderClass={HOUR_RULE}

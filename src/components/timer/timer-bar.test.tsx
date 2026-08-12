@@ -462,61 +462,23 @@ describe("a failed write is reported rather than swallowed", () => {
     expect(onError).toHaveBeenCalledTimes(1)
   })
 
-  it("reports a discard that rejected", async () => {
-    const onError = vi.fn()
-    const { actions } = makeActions({ discard: vi.fn(boom) })
-    render(
-      <Bar
-        running={entry({ clientKey: "k1", _id: REAL_ID })}
-        actions={actions}
-        onError={onError}
-      />
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: /Discard/ }))
-    await vi.advanceTimersByTimeAsync(0)
-
-    expect(onError).toHaveBeenCalledTimes(1)
-  })
-
-  /**
-   * The announcement used to be made BEFORE the write was sent, so a discard
-   * that failed told a screen-reader user the timer was discarded while it was
-   * still running. Nothing in the visual UI says otherwise either — the row
-   * simply stays. This asserts the write is what triggers the claim.
+  /*
+   * TWO DISCARD TESTS WERE DELETED HERE on 2026-08-12, with the control they
+   * described: "reports a discard that rejected" and "does not claim the timer
+   * was discarded until the write lands".
+   *
+   * The second is the loss worth naming. It pinned a real fixed bug — the
+   * announcement used to be made BEFORE the write was sent, so a discard that
+   * failed told a screen-reader user the timer was discarded while it was in
+   * fact still running. That ordering rule is not tested anywhere now, because
+   * the only control that exercised it is gone from this component.
+   *
+   * `TimerBarActions.discard` is still declared and still wired from the shell,
+   * and `RunawayBanner` still offers Discard for a timer left running past its
+   * threshold. WHICHEVER COMPONENT NEXT GROWS A DISCARD BUTTON should carry
+   * these two assertions with it: announce only after the write resolves, and
+   * report a rejection rather than swallowing it.
    */
-  it("does not claim the timer was discarded until the write lands", async () => {
-    // Held on an object rather than in a `let`: control-flow analysis cannot
-    // see the assignment inside a promise executor, so a bare variable narrows
-    // to `never` at the call below.
-    const deferred = { settle: () => {} }
-    const discard = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          deferred.settle = resolve
-        })
-    )
-    const { actions } = makeActions({ discard })
-    // Wrapped in the real Announcer: `useAnnounce` falls back to a no-op
-    // without a provider, so an unwrapped render would make both assertions
-    // below pass no matter what the component did.
-    render(
-      <Announcer>
-        <Bar running={entry({ clientKey: "k1", _id: REAL_ID })} actions={actions} />
-      </Announcer>
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: /Discard/ }))
-    await vi.advanceTimersByTimeAsync(0)
-
-    expect(discard).toHaveBeenCalledTimes(1)
-    // In flight: the claim has not been made yet.
-    expect(screen.queryByText(/Timer discarded/)).toBeNull()
-
-    deferred.settle()
-    await vi.advanceTimersByTimeAsync(0)
-    expect(screen.getByText(/Timer discarded/)).toBeTruthy()
-  })
 })
 
 /*

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { Clock, Play, Square, Trash2 } from "lucide-react"
+import { Clock, Play, Square } from "lucide-react"
 import {
   BillableToggle,
   ProjectPicker,
@@ -34,7 +34,12 @@ const TITLE_DEBOUNCE_MS = 400
  *
  *   Running is never carried by colour alone. Cold light marks it (The Cold
  *   Light Rule), and so do the icon changing from play to stop, the boundary
- *   brightening, and the word "Recording" for a screen reader.
+ *   brightening, and the control's accessible name changing from "Start timer"
+ *   to "Stop timer".
+ *
+ *   The word "Recording" used to be the fourth carrier, in a strip below the
+ *   bar that also held Discard. Both were removed on 2026-08-12 — see the
+ *   comment where that strip used to be, near the bottom of this file.
  */
 /**
  * What the bar is allowed to do.
@@ -170,7 +175,7 @@ export function TimerBar({
     endedAt: number
   }) => Promise<unknown>
 }) {
-  const { start, stop, discard, setTitle, classify } = actions
+  const { start, stop, setTitle, classify } = actions
   const [pending, setPending] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const announce = useAnnounce()
@@ -800,53 +805,28 @@ export function TimerBar({
         ) : null}
       </div>
 
-      {isRunning ? (
-        <div className="flex items-center justify-between gap-3 border-t border-edge-soft px-4 py-1.5">
-          <span className="flex items-center gap-2 text-xs">
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-enlarger" />
-            <span className="text-enlarger">Recording</span>
-          </span>
-          {/*
-            Discard is a different verb from delete and gets its own control:
-            killing a timer started by accident and destroying recorded history
-            carry different risk. Toggl conflates them behind one menu item.
-          */}
-          <button
-            type="button"
-            onClick={() => {
-              // Same re-entrancy guard as onToggle. Discard is idempotent on
-              // the server, so a second press does not discard twice — but it
-              // does send a second mutation and announce the result twice, and
-              // a screen-reader user hearing "Timer discarded" repeated has no
-              // way to tell that from two timers having gone.
-              if (pending) return
-              setPending(true)
-              void discard()
-                .then(() => {
-                  // Announced AFTER the write lands, not before. Announcing
-                  // first told a screen-reader user the timer was discarded
-                  // while it was in fact still running, if the write failed.
-                  announce("Timer discarded. Nothing was recorded.")
-                  // This whole row unmounts on success, taking the focused
-                  // button with it — focus falls to <body> and the next Tab
-                  // restarts from the top of the document. Hand it to the title
-                  // field, which is where someone who just discarded a timer is
-                  // going next anyway.
-                  inputRef.current?.focus()
-                })
-                .catch((thrown: unknown) => {
-                  announce("The timer was not discarded. It is still running.")
-                  onError?.(thrown)
-                })
-                .finally(() => setPending(false))
-            }}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" />
-            Discard
-          </button>
-        </div>
-      ) : effectiveStagedStartAt !== null ? (
+      {/*
+        THE RECORDING STRIP IS GONE, at the user's request (2026-08-12).
+
+        It was a second row under the bar carrying the word "Recording" and a
+        Discard button, and it appeared only while a timer ran — so the bar
+        changed height on start and stop, nudging the whole page down by 29px
+        at the two moments a user is most likely to be reading it.
+
+        What it was carrying is not lost. Running state is still on screen
+        three ways that are not colour: the control's icon changes from play to
+        stop, its accessible name changes from "Start timer" to "Stop timer",
+        and the bar's own boundary brightens to cold light. The doc comment at
+        the top of this file lists those, and no longer claims the word.
+
+        DISCARD WENT WITH IT, and that is the real cost of this change: killing
+        a timer started by accident now means stopping it and deleting the row,
+        which is two gestures and a different verb. `RunawayBanner` still
+        offers Discard for the case that most needs it — a timer left running
+        past its threshold — and `TimerBarActions.discard` is still wired, so
+        restoring a control for it is a matter of choosing where it lives.
+      */}
+      {effectiveStagedStartAt !== null ? (
         /*
          * The armed indicator. Staging a start has no affordance of its own
          * inside the popover once closed, and an armed backdate you cannot
