@@ -368,7 +368,9 @@ export function Reports() {
           {/*
             `PresetChips` — No project / No note / Under a minute — was the
             second row in here and was removed on 2026-08-12 at the user's
-            request. It offered three canned filters for hunting anomalies; the
+            request. The component itself is DELETED, not merely unrendered: it
+            sat in `src/components/history/preset-chips.tsx` with no caller left
+            anywhere. It offered three canned filters for hunting anomalies; the
             two that remain in `FilterControls` (project, billable) plus the
             search box are what the page keeps.
 

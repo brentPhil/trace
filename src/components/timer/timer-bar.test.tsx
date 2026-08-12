@@ -49,7 +49,6 @@ function makeActions(over: Partial<TimerBarActions> = {}) {
   const actions: TimerBarActions = {
     start: vi.fn(async () => {}),
     stop: vi.fn(async () => ({ stoppedEntryIds: [], serverNow: Date.now() })),
-    discard: vi.fn(async () => {}),
     setTitle,
     classify,
     createProject: vi.fn(async () => ({
@@ -473,8 +472,9 @@ describe("a failed write is reported rather than swallowed", () => {
    * fact still running. That ordering rule is not tested anywhere now, because
    * the only control that exercised it is gone from this component.
    *
-   * `TimerBarActions.discard` is still declared and still wired from the shell,
-   * and `RunawayBanner` still offers Discard for a timer left running past its
+   * `TimerBarActions.discard` has since gone too — a field the component never
+   * destructured — but `useEntryMutations().discard` is untouched and
+   * `RunawayBanner` still offers Discard for a timer left running past its
    * threshold. WHICHEVER COMPONENT NEXT GROWS A DISCARD BUTTON should carry
    * these two assertions with it: announce only after the write resolves, and
    * report a rejection rather than swallowing it.

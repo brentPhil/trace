@@ -1204,14 +1204,20 @@ describe("Reports — Create invoice", () => {
    * It clicked the "No project" preset chip and asserted the Create-invoice
    * link then carried `presets: ["no-project"]` into /invoices/new — i.e. that
    * the page bills exactly the rows it is showing. `PresetChips` was removed at
-   * the user's request, so there is no longer a way to set a preset from this
-   * page's UI, and a test cannot drive what is not on screen.
+   * the user's request and its component file has since been deleted, so there
+   * is no longer a way to set a preset from this page's UI, and a test cannot
+   * drive what is not on screen.
    *
    * THE BEHAVIOUR IS NOT GONE, only unreachable from here: `filters.presets`
    * still exists, `hasClientSideFilter` and `entryFilterOf` still honour it,
    * `invoiceSearchOf` still carries it, and `invoice-search.test.ts` still pins
-   * the round trip through the URL. What is no longer asserted anywhere is the
-   * INTEGRATION — that this page's live filter reaches that link. If preset
+   * the round trip through the URL.
+   *
+   * WHAT IS UNCOVERED IS THE PRESET LEG SPECIFICALLY, and only that. The
+   * integration itself — this page's live filter reaching that link — is
+   * asserted directly below, over the search text and the project picker. It is
+   * `presets` alone that no control on this page can set, so it is `presets`
+   * alone that nothing carries into `/invoices/new` under test. If preset
    * filtering ever returns to /reports, this test should return with it.
    */
 

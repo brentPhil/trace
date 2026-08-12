@@ -11,6 +11,7 @@ import { convexQuery } from "@convex-dev/react-query"
 import { buttonVariants } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
 import { AuthShell } from "@/components/auth-shell"
+import { useAnnounce } from "@/components/a11y/announcer"
 import { AppShell } from "@/components/shell/app-shell"
 import { TimerBar } from "@/components/timer/timer-bar"
 import { RunawayBanner } from "@/components/timer/runaway-banner"
@@ -102,11 +103,39 @@ function AuthedLayout() {
     toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
   }
 
+  const announce = useAnnounce()
+
+  /**
+   * Discarding says so, and says it AFTER the write lands.
+   *
+   * Discarding a timer changes almost nothing on screen — the banner and the
+   * bar's cold light simply stop being there — so for anyone not watching the
+   * pixels the single most consequential action in the product happened in
+   * silence. The bar's own Discard button used to say this sentence and went
+   * with the control on 2026-08-12; `RunawayBanner`'s is the one that remains,
+   * and it inherited the silence rather than the announcement.
+   *
+   * THE ORDER IS THE POINT. Announcing first would claim a discard that the
+   * server may still refuse — a screen-reader user told the timer was gone
+   * while it is in fact still running, which is the exact bug
+   * `timer-bar.test.tsx` records having fixed once already. The rejection path
+   * announces nothing and reports through `report`, so the user hears the
+   * error rather than a contradiction.
+   */
+  const discardRunning = () => {
+    void entryMutations
+      .discard()
+      .then(() => announce("Timer discarded. Nothing was recorded."))
+      .catch(report)
+  }
+
   const timerActions: TimerBarActions = useMemo(
     () => ({
       start: entryMutations.start,
       stop: entryMutations.stop,
-      discard: entryMutations.discard,
+      // No `discard`: the bar's Discard control went on 2026-08-12 and the
+      // field went with it. `RunawayBanner` below takes its own `onDiscard`,
+      // which is the only surviving caller of the mutation.
       setTitle: entryMutations.setTitle,
       classify: async (entryId, change) => {
         await editMutations.update({
@@ -157,7 +186,7 @@ function AuthedLayout() {
             running={running}
             thresholdMs={settings.runawayThresholdMs}
             onStop={() => void entryMutations.stop().catch(report)}
-            onDiscard={() => void entryMutations.discard().catch(report)}
+            onDiscard={discardRunning}
           />
         </>
       }

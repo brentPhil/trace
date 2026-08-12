@@ -74,7 +74,14 @@ export type TimerBarActions = {
     stoppedEntryIds: Array<Id<"timeEntries">>
     serverNow: number
   }>
-  discard: () => Promise<unknown>
+  /*
+   * NO `discard` HERE. It was declared and wired long after the control that
+   * read it was removed, so the shell passed a mutation into an object nothing
+   * destructured — a field written and never read, which is a claim the code
+   * does not keep. `entryMutations.discard` is untouched and `RunawayBanner`
+   * takes its own `onDiscard`, so restoring a control in this bar is a matter
+   * of adding the field back beside the button that reads it.
+   */
   setTitle: (entryId: Id<"timeEntries">, title: string) => Promise<void>
   /** Applies a classifier change to the entry already running. */
   classify: (entryId: Id<"timeEntries">, change: Partial<Classification>) => Promise<void>
@@ -823,8 +830,9 @@ export function TimerBar({
         a timer started by accident now means stopping it and deleting the row,
         which is two gestures and a different verb. `RunawayBanner` still
         offers Discard for the case that most needs it — a timer left running
-        past its threshold — and `TimerBarActions.discard` is still wired, so
-        restoring a control for it is a matter of choosing where it lives.
+        past its threshold — and `useEntryMutations().discard` is still there,
+        so restoring a control for it is a matter of choosing where it lives
+        and adding the field back to `TimerBarActions` beside it.
       */}
       {effectiveStagedStartAt !== null ? (
         /*
