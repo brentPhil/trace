@@ -53,16 +53,6 @@ describe("pageTitle", () => {
   it("is the product name alone when there is no page", () => {
     expect(pageTitle()).toBe(APP_NAME)
   })
-
-  it("uses an em dash with spaces, not a hyphen", () => {
-    expect(pageTitle("Reports")).toContain(" — ")
-  })
-})
-
-describe("brand constants", () => {
-  it("names the product", () => {
-    expect(APP_NAME).toBe("Chroneli")
-  })
 })
 ```
 
@@ -108,7 +98,9 @@ export function pageTitle(page?: string) {
 pnpm vitest run convex/lib/brand.test.ts
 ```
 
-Expected: PASS, 5 tests.
+Expected: PASS, 2 tests.
+
+The first test pins both binding values — the exact name and the em-dash separator — through behaviour rather than by restating the implementation.
 
 - [ ] **Step 5: Commit**
 
