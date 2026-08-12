@@ -4,7 +4,6 @@ import {
   LIST_PRESETS,
   RANGE_PLACEHOLDER,
   activePreset,
-  boundsOf,
   calendarSnap,
   instantsOf,
   presetRange,
@@ -13,7 +12,7 @@ import {
   rangeSpokenLabel,
   stepRange,
 } from "@/lib/timer-range"
-import { rangeOf } from "@/lib/calendar-events"
+import { boundsOf, rangeOf } from "@/lib/calendar-events"
 import { dayWindow } from "@shared/day"
 
 /*

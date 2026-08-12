@@ -230,17 +230,6 @@ export function calendarSnap(
   return { size: drawn, range: rangeOf(anchor, drawn, weekStartDay, timeZone) }
 }
 
-/**
- * The two ends of a drawn window, which is what the bar SELECTS.
- *
- * Never empty — `rangeOf` always produces at least one day — so unlike
- * `rangeEndpoints` this needs no `null` case for the caller to unwrap. It reads
- * `days` for the same reason that one does: the columns are the range, and
- * deriving the ends from `toMs - 1` instead would be a second answer.
- */
-export function boundsOf(range: CalendarRange): DayRange {
-  return { from: range.days[0], to: range.days[range.days.length - 1] }
-}
 
 /** The instants a bounded range means, for `entries.listRange`. Half-open. */
 export function instantsOf(

@@ -201,7 +201,8 @@ export function dayTotals(
 }
 
 /**
- * The first and last day the grid drew, for the label between the arrows.
+ * The first and last day of a window — what the range bar SELECTS, and what the
+ * label between its arrows is read off.
  *
  * READS `days`, and deliberately does not recompute the ends from `fromMs` and
  * `toMs`. Those two happen to give the same answer today, because for every
@@ -213,15 +214,18 @@ export function dayTotals(
  * disagree with the columns silently, which is exactly the defect this file's
  * `rangeTotal` comment describes shipping once already.
  *
- * `null` for an empty list, so a caller cannot read `days[0]` off the end.
+ * NO `null` CASE. It had one, for a `days` that could be empty — and `rangeOf`
+ * is the only thing that builds a `CalendarRange`, and it never produces fewer
+ * than one day. The branch was unreachable and every caller paid for it with an
+ * unwrap.
  */
-export function rangeEndpoints(
-  range: CalendarRange
-): { firstDay: DayString; lastDay: DayString } | null {
-  if (range.days.length === 0) return null
+export function boundsOf(range: CalendarRange): {
+  from: DayString
+  to: DayString
+} {
   return {
-    firstDay: range.days[0],
-    lastDay: range.days[range.days.length - 1],
+    from: range.days[0],
+    to: range.days[range.days.length - 1],
   }
 }
 

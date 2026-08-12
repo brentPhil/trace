@@ -15,11 +15,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
-import { rangeOf, rangeTotal } from "@/lib/calendar-events"
+import { boundsOf, rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { groupByDay } from "@/lib/group-entries"
 import { periodTotals } from "@/lib/period-totals"
 import {
-  boundsOf,
   calendarSnap,
   instantsOf,
   presetRange,

@@ -9,15 +9,28 @@ import { cn } from "@/lib/utils"
 type LogStatus = "LoadingFirstPage" | "LoadingMore" | "CanLoadMore" | "Exhausted"
 
 /**
- * What sits below Timer's log while a client-side filter is active.
+ * What sits below a paginated log: the button that widens it, and — while a
+ * client-side filter is active — the caveat that a conclusion drawn from a
+ * partially-loaded set is not a conclusion.
  *
- * Timer's range is all of history (`fromMs: 0`), so unlike Reports it cannot
- * pull the rest of the range before drawing a conclusion from a filter — that
- * would mean loading a freelancer's entire history on a keystroke. A filter
- * here can only ever describe the entries paginated in so far, and this is
- * the one place that says so: the caveat renders exactly while that is true
- * (a filter is active and `status` is not yet `"Exhausted"`), and disappears
- * the instant it stops being true, because the result is then complete.
+ * TIMER PASSES `filtering: false` NOW, and only ever renders this while its
+ * range is "All dates". Its filter bar is gone: a text search over a log whose
+ * range was all of history could only describe the entries paginated in so far,
+ * which is what the caveat below existed to admit, and /timer answers "which
+ * dates" with a range picker instead. Bounded, it reads `entries.listRange` and
+ * has nothing left to load, so this component is not rendered at all.
+ *
+ * The filtered half is kept rather than deleted because it is the correct
+ * behaviour for a paginated log with a filter over it, it is fully tested, and
+ * the next such log is a page away. What follows describes it.
+ *
+ * A log whose range is unbounded (`fromMs: 0`) cannot pull the rest of that
+ * range before drawing a conclusion from a filter — that would mean loading a
+ * freelancer's entire history on a keystroke. A filter there can only ever
+ * describe the entries paginated in so far, and this is the one place that says
+ * so: the caveat renders exactly while that is true (a filter is active and
+ * `status` is not yet `"Exhausted"`), and disappears the instant it stops being
+ * true, because the result is then complete.
  *
  * WHEN A COUNT IS ALLOWED, AND WHEN IT IS NOT. Exactly one state can state a
  * number: `Exhausted`, where every entry that could match has been looked at.

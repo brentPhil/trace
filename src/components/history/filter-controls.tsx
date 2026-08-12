@@ -6,16 +6,18 @@ import type { QuickFilters } from "@/lib/history-filters"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 /**
- * The three filters every filterable list offers: text, project, billable.
+ * The three filters a filterable list offers: text, project, billable.
  *
- * Reports wraps these in a date range and preset chips it alone needs; Timer
- * has no bounded range to build either on top of, so this is its entire bar.
- * Pulled out once so there is one rendering of these three controls rather
- * than two that could drift — the same reasoning `matches` in
- * `history-filters.ts` exists for.
+ * ONE PAGE DRAWS THIS NOW. /timer used to as well — the same three controls in
+ * a Surface band — and it does not any more: a text search over a log whose
+ * range was all of history could only ever describe the pages already
+ * paginated in, and `FilteredLogStatus` existed to keep saying so. /timer has a
+ * date range instead, and a search over history is what /reports is for.
  *
- * Generic over `T` so either page's filter state works: Reports threads its
- * full `Filters` through unchanged, Timer threads its narrower `QuickFilters`.
+ * Still separate from the band and still generic over `T`, because the split is
+ * what let the two pages compose these controls differently in the first place
+ * — and `QuickFilters` is still the honest lower bound on what this reads: the
+ * three fields it touches, not a whole `Filters` with a period in it.
  */
 export function FilterControls<T extends QuickFilters>({
   filters,

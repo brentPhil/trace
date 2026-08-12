@@ -52,11 +52,14 @@ export type Filters = {
 
 /**
  * The three filters that do not depend on a bounded range: text, project,
- * billable. Reports layers a date range and preset chips around these;
- * Timer's range is all of history, so these are all it can honestly offer.
+ * billable. Reports layers a date range and preset chips around these.
+ *
  * `Filters` satisfies this shape structurally, so `matches` and
- * `hasClientSideFilter` below accept either without Timer having to carry a
- * period it has no UI for and cannot express.
+ * `hasClientSideFilter` below accept either — and `FilterControls` is generic
+ * over it, so a caller with only these three fields can render the bar without
+ * fabricating a period it has no UI for. /timer was that caller until its
+ * filter bar was replaced by a date range; the type stays because it is the
+ * honest statement of what those functions actually read.
  */
 export type QuickFilters = {
   projectId: string | null

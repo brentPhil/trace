@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
 import { RangeBar } from "@/components/timer/range-bar"
-import { rangeEndpoints, rangeOf, rangeTotal } from "@/lib/calendar-events"
+import { boundsOf, rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { calendarLabel } from "@/lib/calendar-label"
 import { rangePillLabel } from "@/lib/timer-range"
 import type { CalendarSize } from "@/lib/calendar-label"
@@ -86,7 +86,7 @@ function Harness({
   entries?: Array<Doc<"timeEntries">>
 }) {
   const range = rangeOf(anchor, size, weekStartDay, MANILA)
-  const days = rangeEndpoints(range)
+  const bounds = boundsOf(range)
 
   return (
     <>
@@ -101,27 +101,25 @@ function Harness({
         projectsById={new Map()}
         onEntryClick={() => {}}
       />
-      {days === null ? null : (
-        <div
-          data-testid="range-bar"
-          data-first={days.firstDay}
-          data-last={days.lastDay}
-        >
-          <RangeBar
-            view="calendar"
-            range={{ from: days.firstDay, to: days.lastDay }}
-            size={size}
-            today={TODAY}
-            weekStartDay={weekStartDay}
-            rangeMs={rangeTotal(entries, MANILA, NOW, range.days)}
-            display="hms"
-            onStep={() => {}}
-            onRangeChange={() => {}}
-            onPresetChange={() => {}}
-            onSizeChange={() => {}}
-          />
-        </div>
-      )}
+      <div
+        data-testid="range-bar"
+        data-first={bounds.from}
+        data-last={bounds.to}
+      >
+        <RangeBar
+          view="calendar"
+          range={bounds}
+          size={size}
+          today={TODAY}
+          weekStartDay={weekStartDay}
+          rangeMs={rangeTotal(entries, MANILA, NOW, range.days)}
+          display="hms"
+          onStep={() => {}}
+          onRangeChange={() => {}}
+          onPresetChange={() => {}}
+          onSizeChange={() => {}}
+        />
+      </div>
     </>
   )
 }
