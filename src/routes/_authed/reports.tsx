@@ -18,12 +18,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { groupByDay } from "@/lib/group-entries"
 import {
-  defaultFilters,
   entryFilterOf,
   hasClientSideFilter,
   matches,
   rangeOf,
 } from "@/lib/history-filters"
+import { reportsDefaultFilters } from "@/lib/date-range-picker"
 import { staleProps } from "@/lib/stale"
 import {
   exportDisabledReason,
@@ -114,7 +114,7 @@ export const Route = createFileRoute("/_authed/reports")({
      * with an honest "Updating…" already wired up for it.
      */
     const today = dayOf(Date.now(), settings.timezone)
-    const filters = defaultFilters(today, settings.weekStartDay)
+    const filters = reportsDefaultFilters(today, settings.weekStartDay)
     const range = rangeOf(filters, settings.timezone)
     await context.queryClient.ensureQueryData(
       convexQuery(
@@ -139,8 +139,15 @@ export function Reports() {
   const { projects } = useClassifiers()
 
   const today = dayOf(Date.now(), settings.timezone)
+  /*
+   * THE CURRENT QUARTER, not the current week — see `REPORTS_DEFAULT_PRESET`.
+   * A week is the span you check a timer against; a quarter is the one this
+   * page's charts, its export and its Create invoice button are for. The rail
+   * inside the range picker badges the same preset "Default", off the same
+   * constant, so the two cannot drift.
+   */
   const [filters, setFilters] = useState<Filters>(() =>
-    defaultFilters(today, settings.weekStartDay)
+    reportsDefaultFilters(today, settings.weekStartDay)
   )
   const [view, setView] = useState<View>("summary")
 

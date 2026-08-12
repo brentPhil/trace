@@ -22,8 +22,11 @@ afterEach(cleanup)
 
 const TODAY = "2026-08-06"
 
-function Harness() {
-  const [filters, setFilters] = useState<Filters>(() => defaultFilters(TODAY, 1))
+function Harness({ filters: seed }: { filters?: Partial<Filters> } = {}) {
+  const [filters, setFilters] = useState<Filters>(() => ({
+    ...defaultFilters(TODAY, 1),
+    ...seed,
+  }))
   return (
     <div>
       <PeriodControls
@@ -98,5 +101,110 @@ describe("PeriodControls' date range picker", () => {
 
     const after = JSON.parse(screen.getByTestId("state").textContent)
     expect(after).toEqual(before)
+  })
+})
+
+describe("PeriodControls' preset rail", () => {
+  /*
+   * /reports' OWN list, which is not /timer's. The two share one picker and
+   * one `presets` prop, and what each page offers is the page's business —
+   * quarters and years are the spans this one reports and invoices on, and it
+   * has no "All dates" because there is no unbounded scan behind it.
+   *
+   * The ranges themselves are proved in date-range-picker.test.ts. What is
+   * only provable here is the WIRING: that a chip reaches `Filters`, and that
+   * the badge names the range the page actually opened on.
+   */
+  function openRail() {
+    render(<Harness />)
+    fireEvent.click(screen.getByRole("button", { name: /date range/i }))
+  }
+
+  it("offers /reports' seven spans and none of /timer's", () => {
+    openRail()
+
+    for (const label of [
+      "Today",
+      "This week",
+      "This month",
+      "This year",
+      "Last week",
+      "Last month",
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeTruthy()
+    }
+    expect(screen.getByRole("button", { name: /^This quarter/ })).toBeTruthy()
+    // /timer's two, which this page cannot express.
+    expect(screen.queryByRole("button", { name: "All dates" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Last 30 days" })).toBeNull()
+  })
+
+  it("badges the default in the chip's own accessible name", () => {
+    // Not an `aria-hidden` decoration: which preset the page opens on is the
+    // point of the badge, and a reader that skipped it would learn which chip
+    // is pressed but never which one is home.
+    openRail()
+    expect(
+      screen.getByRole("button", { name: "This quarter, Default" })
+    ).toBeTruthy()
+  })
+
+  it("applies a preset's range and its period to the filters", () => {
+    openRail()
+    fireEvent.click(screen.getByRole("button", { name: "Last month" }))
+
+    const state = JSON.parse(screen.getByTestId("state").textContent)
+    // TODAY is 2026-08-06.
+    expect({ from: state.from, to: state.to, period: state.period }).toEqual({
+      from: "2026-07-01",
+      to: "2026-07-31",
+      period: "month",
+    })
+  })
+
+  it("marks a quarter custom, because Period has no case for one", () => {
+    openRail()
+    fireEvent.click(screen.getByRole("button", { name: /^This quarter/ }))
+
+    const state = JSON.parse(screen.getByTestId("state").textContent)
+    expect(state.period).toBe("custom")
+    expect({ from: state.from, to: state.to }).toEqual({
+      from: "2026-07-01",
+      to: "2026-09-30",
+    })
+  })
+
+  it("keeps every filter a preset is not about", () => {
+    // A date control that quietly cleared the search box would be a filter bar
+    // that forgets what it was asked, one click at a time.
+    render(<Harness filters={{ text: "invoice", billableOnly: true }} />)
+    fireEvent.click(screen.getByRole("button", { name: /date range/i }))
+    fireEvent.click(screen.getByRole("button", { name: "This year" }))
+
+    const state = JSON.parse(screen.getByTestId("state").textContent)
+    expect(state.text).toBe("invoice")
+    expect(state.billableOnly).toBe(true)
+    expect({ from: state.from, to: state.to }).toEqual({
+      from: "2026-01-01",
+      to: "2026-12-31",
+    })
+  })
+
+  it("stops naming a preset once the arrows step the range off it", () => {
+    // Computed, never stored — see `activeReportsPreset`. The rail has to stop
+    // claiming "This quarter" the instant the range is no longer one.
+    openRail()
+    fireEvent.click(screen.getByRole("button", { name: /^This quarter/ }))
+
+    fireEvent.click(screen.getByRole("button", { name: /date range/i }))
+    expect(
+      screen.getByRole("button", { name: /^This quarter/ }).getAttribute("aria-pressed")
+    ).toBe("true")
+
+    fireEvent.click(screen.getByRole("button", { name: /previous period/i }))
+    fireEvent.click(screen.getByRole("button", { name: /date range/i }))
+    expect(
+      screen.getByRole("button", { name: /^This quarter/ }).getAttribute("aria-pressed")
+    ).toBe("false")
   })
 })

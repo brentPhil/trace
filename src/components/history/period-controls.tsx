@@ -2,9 +2,17 @@ import { useEffect } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Chip } from "@/components/history/filter-controls"
 import { DateRangePicker } from "@/components/history/date-range-picker"
-import { rangeTriggerLabel } from "@/lib/date-range-picker"
+import {
+  REPORTS_DEFAULT_PRESET,
+  REPORTS_PRESETS,
+  REPORTS_PRESET_LABELS,
+  activeReportsPreset,
+  rangeTriggerLabel,
+  reportsPresetFilters,
+} from "@/lib/date-range-picker"
 import { periodFilters, stepPeriod } from "@/lib/history-filters"
 import { cn } from "@/lib/utils"
+import type { ReportsPreset } from "@/lib/date-range-picker"
 import type { Filters } from "@/lib/history-filters"
 
 /**
@@ -95,12 +103,19 @@ export function PeriodControls({
 
       {/* The trigger's WORDS are this page's, not the picker's: /reports names
           the active period ("This week") where /timer prints US dates. See
-          `date-range-picker.tsx` for why that moved out to the callers. */}
+          `date-range-picker.tsx` for why that moved out to the callers.
+
+          The RAIL is this page's for the same reason, and it is a different
+          list from /timer's: quarters and years are the spans a freelancer
+          reports and invoices on, and "All dates" is not a range this page
+          can scan. Two months and the week numbers because there is room for
+          them here — /timer forces one month to leave the rail its width. */}
       <DateRangePicker
         from={filters.from}
         to={filters.to}
         today={today}
         weekStartDay={weekStartDay}
+        showWeekNumber
         label={rangeTriggerLabel(
           filters.period,
           filters.from,
@@ -108,6 +123,18 @@ export function PeriodControls({
           today,
           weekStartDay
         )}
+        presets={{
+          items: REPORTS_PRESETS.map((preset) => ({
+            value: preset,
+            label: REPORTS_PRESET_LABELS[preset],
+            badge: preset === REPORTS_DEFAULT_PRESET ? "Default" : undefined,
+          })),
+          active: activeReportsPreset(filters.from, filters.to, today, weekStartDay),
+          onSelect: (value) =>
+            onChange((f) =>
+              reportsPresetFilters(value as ReportsPreset, today, weekStartDay, f)
+            ),
+        }}
         onChange={(range) => onChange((f) => ({ ...f, period: "custom", ...range }))}
       />
     </div>

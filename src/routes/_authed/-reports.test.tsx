@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Reports, breakdownArgs } from "@/routes/_authed/reports"
 import { Toast, ToastViewport } from "@/components/ui/toast"
-import { defaultFilters, rangeOf, stepPeriod } from "@/lib/history-filters"
+import { rangeOf, stepPeriod } from "@/lib/history-filters"
+import { reportsDefaultFilters } from "@/lib/date-range-picker"
 import { parseInvoiceSearch } from "@/lib/invoice-search"
 import { SET_A_RATE_NOTE } from "@/lib/export/report-rows"
 import {
@@ -228,7 +229,7 @@ function seedStable(queryClient: QueryClient) {
  */
 function seedBreakdown(
   queryClient: QueryClient,
-  filters: ReturnType<typeof defaultFilters>,
+  filters: ReturnType<typeof reportsDefaultFilters>,
   value: Breakdown = EMPTY_BREAKDOWN
 ) {
   queryClient.setQueryData(
@@ -268,7 +269,10 @@ function renderReports(
   seedStable(queryClient)
   // The default range's breakdown, always — Reports opens on Summary, so this
   // query runs on mount before any test gets to say which tab it cares about.
-  seedBreakdown(queryClient, defaultFilters(dayOf(NOW, SETTINGS.timezone), SETTINGS.weekStartDay))
+  seedBreakdown(
+    queryClient,
+    reportsDefaultFilters(dayOf(NOW, SETTINGS.timezone), SETTINGS.weekStartDay)
+  )
   seedInitialSummary(queryClient)
   render(
     <QueryClientProvider client={queryClient}>
@@ -332,7 +336,7 @@ describe("Reports — the filter band", () => {
 describe("Reports — changing the range", () => {
   it("keeps the previous rows on screen while the new range's query is in flight", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const initialFilters = defaultFilters(today, SETTINGS.weekStartDay)
+    const initialFilters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const initialRange = rangeOf(initialFilters, SETTINGS.timezone)
     const nextFilters = stepPeriod(initialFilters, 1)
     const nextRange = rangeOf(nextFilters, SETTINGS.timezone)
@@ -402,7 +406,7 @@ describe("Reports — changing the range", () => {
 
   it("marks the range total as stale while it is carried over, and unmarks it once the new one lands", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const initialFilters = defaultFilters(today, SETTINGS.weekStartDay)
+    const initialFilters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const initialRange = rangeOf(initialFilters, SETTINGS.timezone)
     const nextFilters = stepPeriod(initialFilters, 1)
     const nextRange = rangeOf(nextFilters, SETTINGS.timezone)
@@ -466,7 +470,7 @@ describe("Reports — the log's own staleness", () => {
    */
   it("does not flash the empty sentence when the range changes before the first page lands", () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const initialFilters = defaultFilters(today, SETTINGS.weekStartDay)
+    const initialFilters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const initialRange = rangeOf(initialFilters, SETTINGS.timezone)
 
     // Neither range's page is resolved: this is the cold-load window.
@@ -495,7 +499,7 @@ describe("Reports — the log's own staleness", () => {
 
   it("marks the log busy, not just dimmed, while it shows the previous range's rows", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const initialFilters = defaultFilters(today, SETTINGS.weekStartDay)
+    const initialFilters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const initialRange = rangeOf(initialFilters, SETTINGS.timezone)
 
     const alpha = makeEntry({
@@ -539,7 +543,7 @@ describe("Reports — the log's own staleness", () => {
 describe("Reports — the billable amount", () => {
   it("shows an amount for billable time, formatted in the user's currency", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+    const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
 
     resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
 
@@ -563,7 +567,7 @@ describe("Reports — the billable amount", () => {
 
   it("does not show a billable amount when nothing is billable", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+    const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
 
     resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
 
@@ -595,7 +599,7 @@ describe("Reports — the billable amount", () => {
    */
   it("shows no amount at all when none of the billable time could be priced", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+    const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
 
     resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
 
@@ -623,7 +627,7 @@ describe("Reports — the billable amount", () => {
 
   it("says how much is unpriced when only some of the billable time could be valued", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+    const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
 
     resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
 
@@ -658,7 +662,7 @@ describe("Reports — the billable amount", () => {
    */
   it("still shows $0.00 for pro bono work, where a rate of zero really was set", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+    const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
 
     resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
 
@@ -685,7 +689,7 @@ describe("Reports — the billable amount", () => {
 
   it("says the billable amount is also a floor when the range is truncated", async () => {
     const today = dayOf(NOW, SETTINGS.timezone)
-    const range = rangeOf(defaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+    const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
 
     resolvePage(paginatedKey(api.entries.listPage, range), { page: [], isDone: true })
 
@@ -722,7 +726,10 @@ describe("Reports — the Detailed tab's first paint", () => {
    * it does not make a fabricated one true.
    */
   it("says it is still totalling rather than showing a zero it does not believe", () => {
-    const filters = defaultFilters(dayOf(NOW, SETTINGS.timezone), SETTINGS.weekStartDay)
+    const filters = reportsDefaultFilters(
+      dayOf(NOW, SETTINGS.timezone),
+      SETTINGS.weekStartDay
+    )
     const range = rangeOf(filters, SETTINGS.timezone)
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
 
@@ -750,7 +757,7 @@ describe("Reports — the Summary tab", () => {
   const today = dayOf(NOW, SETTINGS.timezone)
 
   it("reads its figures off the breakdown, not off whatever the log has loaded", () => {
-    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const filters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
 
     renderReports((queryClient) => {
@@ -787,7 +794,7 @@ describe("Reports — the Summary tab", () => {
    * second is how eight hours of unbilled work reach an invoice as free.
    */
   it("shows no amount at all when none of the billable time could be priced", () => {
-    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const filters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
 
     renderReports((queryClient) => {
@@ -829,7 +836,7 @@ describe("Reports — the Summary tab", () => {
   })
 
   it("says the BARS are a floor too when the range was too large to total", () => {
-    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const filters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
 
     renderReports((queryClient) => {
@@ -859,7 +866,7 @@ describe("Reports — the Summary tab", () => {
   })
 
   it("keeps the range when the user moves between the two tabs", async () => {
-    const filters = defaultFilters(today, SETTINGS.weekStartDay)
+    const filters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
     const next = stepPeriod(filters, 1)
     const nextRange = rangeOf(next, SETTINGS.timezone)
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
@@ -924,7 +931,7 @@ describe("Reports — the Summary tab", () => {
  */
 describe("Reports — Create invoice", () => {
   const today = dayOf(NOW, SETTINGS.timezone)
-  const filters = defaultFilters(today, SETTINGS.weekStartDay)
+  const filters = reportsDefaultFilters(today, SETTINGS.weekStartDay)
   const range = rangeOf(filters, SETTINGS.timezone)
 
   /**

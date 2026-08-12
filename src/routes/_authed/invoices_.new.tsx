@@ -124,11 +124,15 @@ export function NewInvoicePage({
    * A LINK WITH NO READABLE PERIOD BILLS THE CURRENT WEEK, and says so.
    *
    * `parseInvoiceSearch` drops a range it cannot read rather than objecting to
-   * it, so this is where the absence acquires a meaning — the same
-   * `defaultFilters` window /reports itself opens on, because "this week" is
-   * the range this product's own pages default to and a user who lands here
-   * from a mangled link should find the page they would have got by pressing
-   * the button.
+   * it, so this is where the absence acquires a meaning — `defaultFilters`'
+   * own week.
+   *
+   * DELIBERATELY NOT /reports' opening range, which is the current QUARTER
+   * (see `reportsDefaultFilters`). The two used to be the same call and are
+   * not any more, on purpose: a fallback here is a guess about what a mangled
+   * link meant, and the smallest sensible guess is the right one when the
+   * consequence of guessing wide is a draft invoice covering three months of
+   * work nobody asked to bill.
    *
    * The alternative — refusing to draw anything until a period arrives — makes
    * a truncated paste a dead end, and the fallback is not a silent one: the
