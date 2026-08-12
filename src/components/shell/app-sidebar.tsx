@@ -15,6 +15,7 @@ import {
   sidebarMenuButtonVariants,
 } from "@/components/ui/sidebar"
 import { cn } from "@/lib/utils"
+import { APP_NAME } from "@shared/brand"
 import type { LucideIcon } from "lucide-react"
 
 /**
@@ -155,12 +156,12 @@ export function AppSidebar({
             link always points at whatever the first nav destination is.
 
             `aria-label` rather than letting the glyphs below name it: the
-            wordmark collapses to its initial, and "T" is not a destination
+            wordmark collapses to its initial, and "C" is not a destination
             anybody can act on. Both spans are decorative here, which also
             makes the name identical in jsdom (no CSS) and in a browser. */}
         <Link
           to={NAV_ITEMS[0].to}
-          aria-label="Trace"
+          aria-label={APP_NAME}
           // The nav button's own geometry, not a second copy of it: the 36px
           // row, the 44px collapsed target and the centring that puts it on
           // the rail's centre line are all decided once, in the cva, and were
@@ -180,10 +181,10 @@ export function AppSidebar({
               one glyph a collapsed rail has to keep. Only ever one of the two
               is displayed, so the order is invisible. */}
           <span aria-hidden="true" className="hidden group-data-[collapsible=icon]:inline">
-            T
+            {APP_NAME[0]}
           </span>
           <span aria-hidden="true" className="group-data-[collapsible=icon]:hidden">
-            Trace
+            {APP_NAME}
           </span>
         </Link>
       </SidebarHeader>

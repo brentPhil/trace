@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
+import { APP_NAME } from "@shared/brand"
 
 /** Stable id so inputs can point at the error via aria-describedby. */
 export const AUTH_ERROR_ID = "auth-form-error"
@@ -34,7 +35,7 @@ export function AuthShell({
   return (
     <div className={cn("rise flex flex-col gap-8", className)} {...props}>
       <div className="flex flex-col gap-2">
-        <span className="text-base font-medium tracking-tight">Trace</span>
+        <span className="text-base font-medium tracking-tight">{APP_NAME}</span>
         <h1
           ref={headingRef}
           tabIndex={focusHeading ? -1 : undefined}

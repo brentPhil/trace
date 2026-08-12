@@ -1,6 +1,7 @@
 import { Link, createFileRoute, redirect } from "@tanstack/react-router"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { APP_NAME } from "@shared/brand"
 
 export const Route = createFileRoute("/")({
   /**
@@ -35,7 +36,7 @@ function App() {
   return (
     <main className="flex min-h-svh items-center justify-center p-6">
       <div className="flex w-full max-w-sm flex-col gap-6">
-        <span className="text-base font-medium tracking-tight">Trace</span>
+        <span className="text-base font-medium tracking-tight">{APP_NAME}</span>
 
         <p className="text-sm text-muted-foreground">
           Track what you worked on, and what you got done.
