@@ -277,19 +277,19 @@ export function Reports() {
           */}
           <div className="flex w-full flex-wrap items-start justify-between gap-3 px-4 py-3">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-              <PeriodControls
-                filters={filters}
-                today={today}
-                weekStartDay={settings.weekStartDay}
-                onChange={setFilters}
-              />
-
               {/*
-                THE SWITCHER, BESIDE THE RANGE IT APPLIES TO — the same
-                arrangement /timer uses for Calendar | List, and the same
-                argument: the range and the view are the two halves of one
-                question, WHICH rows and HOW to look at them, so they read as
-                one control strip.
+                THE SWITCHER FIRST, THEN THE RANGE — the two halves of one
+                question, in the order they are decided. WHICH view you want is
+                the coarser choice and the one that changes the whole page;
+                WHEN narrows whichever view you landed on. Reading left to
+                right, that is "show me the summary — of this quarter", which is
+                the sentence a person actually forms.
+
+                It also puts the least volatile control on the left. The range
+                pill's width changes with the range it names (`1 Jul – 30 Sep
+                2026` against `Today`), so with the pill first the switcher slid
+                sideways every time the range changed — a control that moves
+                when you change something else is one you have to re-find.
 
                 It sat below the filter band until 2026-08-12, between the band
                 and the figures, which put the control that CHOOSES what is on
@@ -315,6 +315,13 @@ export function Reports() {
                   </TabsTrigger>
                 ))}
               </TabsList>
+
+              <PeriodControls
+                filters={filters}
+                today={today}
+                weekStartDay={settings.weekStartDay}
+                onChange={setFilters}
+              />
             </div>
             {/*
               TWO CONTROLS, side by side, in that order: `[ Create invoice ]
