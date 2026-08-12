@@ -95,12 +95,18 @@ export function Timer() {
   const { projects, tags, projectsById } = useClassifiers()
 
   /*
-   * WHAT A BLOCK'S POPOVER MAY DO, reached for here and handed down.
+   * WHAT AN ENTRY MAY HAVE DONE TO IT ON THIS PAGE — reached for once, here,
+   * and handed to both surfaces that write.
    *
-   * The same hook `EntryLog` uses, so the grid's editor and the log's rows
-   * write through one implementation of every edit — one undo window, one
-   * error posture, one sentence per event. The panel takes it as a prop for
-   * the reason `EntryRow` does: it stays renderable against fixtures.
+   * ONE INSTANCE, which is the point. `EntryLog` used to call the hook itself,
+   * so in List view — the default — two full sets of
+   * `useConvexMutation(...).withOptimisticUpdate(...)` closures existed and one
+   * of them was never read, rebuilt on every tick of the clock above. The
+   * hook's stated goal is one place where an entry changes; this is what makes
+   * that literally true for this page.
+   *
+   * Both take it as a prop for the reason `EntryRow` does: they stay renderable
+   * against fixtures with no backend anywhere near them.
    */
   const entryActions = useEntryActions(settings.timezone)
 
@@ -675,6 +681,9 @@ export function Timer() {
 
             <EntryLog
               groups={groups}
+              // The same instance the grid's popover is handed above — one set
+              // of mutation closures for this page, not one per surface.
+              actions={entryActions}
               timeZone={settings.timezone}
               use12Hour={settings.timeFormat === "12"}
               weekStartDay={settings.weekStartDay}

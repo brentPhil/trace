@@ -2,10 +2,10 @@ import { useState } from "react"
 import { DayList } from "@/components/entries/day-list"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { useClassifiers } from "@/hooks/use-classifiers"
-import { useEntryActions } from "@/hooks/use-entry-actions"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import type { ReactNode } from "react"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayGroup, Entry } from "@/lib/group-entries"
 
@@ -34,6 +34,7 @@ export function EntryLog({
   weekStartDay,
   display,
   empty,
+  actions: entryActions,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -44,10 +45,21 @@ export function EntryLog({
   /** Forwarded to `DayList` — see there for why the default isn't right for
    * every page that renders a log. */
   empty?: ReactNode
+  /**
+   * What a row may do to its entry, from `useEntryActions`.
+   *
+   * PASSED IN, not reached for — which is a change, and the reason is /timer.
+   * That page already calls the hook for the calendar popover's sake, and this
+   * component called it again: on the default List view both instances were
+   * live, only this one's was read, and a full set of
+   * `useConvexMutation(...).withOptimisticUpdate(...)` closures was rebuilt
+   * every second for the one nobody used. The hook's stated goal is one place
+   * where an entry changes, so there is now literally one instance per page.
+   */
+  actions: EntryActions
 }) {
   const { setNote } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
-  const entryActions = useEntryActions(timeZone)
 
   const [noteEntry, setNoteEntry] = useState<Entry | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)

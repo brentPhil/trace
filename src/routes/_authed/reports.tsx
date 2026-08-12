@@ -15,6 +15,7 @@ import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
+import { useEntryActions } from "@/hooks/use-entry-actions"
 import { groupByDay } from "@/lib/group-entries"
 import {
   entryFilterOf,
@@ -481,6 +482,11 @@ function SummaryTab({ filters, settings }: { filters: Filters; settings: Setting
 function DetailedTab({ filters, settings }: { filters: Filters; settings: Settings }) {
   const { projectsById } = useClassifiers()
 
+  /* Reached for here rather than inside `EntryLog`, the same way /timer does
+   * it: the hook is the one place an entry changes, and one instance per page
+   * is what makes that literally rather than nominally true. */
+  const entryActions = useEntryActions(settings.timezone)
+
   const range = useMemo(
     () => rangeOf(filters, settings.timezone),
     [filters, settings.timezone]
@@ -846,6 +852,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
         ) : (
           <EntryLog
             groups={groups}
+            actions={entryActions}
             timeZone={settings.timezone}
             use12Hour={settings.timeFormat === "12"}
             weekStartDay={settings.weekStartDay}

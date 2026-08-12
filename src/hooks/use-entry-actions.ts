@@ -1,4 +1,4 @@
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { Toast } from "@/components/ui/toast"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
@@ -169,43 +169,69 @@ export function useEntryActions(timeZone: string): EntryActions {
     [create, remove, toasts]
   )
 
-  return {
-    // Errors here are deliberately left to propagate: InlineEdit catches them
-    // and reopens the field with the rejected text still in it, which is a
-    // better place to report a bad time than a toast at the bottom of the page.
-    onTitleChange: async (entry, title) => {
-      await update({ entryId: entry._id, title })
-    },
-    onTimeChange: async (entry, field, instantMs) => {
-      await editTime(entry._id, field, instantMs)
-    },
-    onDayChange,
-    onDurationChange: async (entry, ms) => {
-      await editTime(entry._id, "duration", ms)
-    },
-    // Classifier changes are fire-and-forget with an optimistic update behind
-    // them, so the row reflects the choice immediately. A failure surfaces as a
-    // toast rather than reverting silently.
-    onClassify: (entry, change) => {
-      void update({
-        entryId: entry._id,
-        ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
-        ...(change.tagIds !== undefined ? { tagIds: change.tagIds } : {}),
-        ...(change.billable !== undefined ? { billable: change.billable } : {}),
-      }).catch((thrown: unknown) => {
-        toasts.add({ title: errorMessage(thrown), priority: "high" })
-      })
-    },
-    onCreateProject: createProject,
-    onCreateTag: ensureTag,
-    onRemove,
-    onResume: (entry) => {
-      void resume(entry).catch((thrown: unknown) => {
-        toasts.add({ title: errorMessage(thrown), priority: "high" })
-      })
-    },
-    onDuplicate,
-  }
+  /*
+   * ONE OBJECT, STABLE WHILE ITS INPUTS ARE — the half this hook was missing.
+   *
+   * Four of the members went through `useCallback` and the returned object was
+   * a fresh literal every render with five fresh arrows in it, so the identity
+   * that actually crosses the prop boundary changed on every tick anyway and
+   * the four bought nothing. On /timer that is once a second. The failure that
+   * makes it worth fixing rather than deleting is the quiet one: the moment a
+   * consumer is wrapped in `memo`, the four look like they are doing the job
+   * and are not.
+   *
+   * So all of it is memoised, and the object is what callers may compare.
+   */
+  return useMemo(
+    () => ({
+      // Errors here are deliberately left to propagate: InlineEdit catches them
+      // and reopens the field with the rejected text still in it, which is a
+      // better place to report a bad time than a toast at the bottom of the page.
+      onTitleChange: async (entry, title) => {
+        await update({ entryId: entry._id, title })
+      },
+      onTimeChange: async (entry, field, instantMs) => {
+        await editTime(entry._id, field, instantMs)
+      },
+      onDayChange,
+      onDurationChange: async (entry, ms) => {
+        await editTime(entry._id, "duration", ms)
+      },
+      // Classifier changes are fire-and-forget with an optimistic update behind
+      // them, so the row reflects the choice immediately. A failure surfaces as a
+      // toast rather than reverting silently.
+      onClassify: (entry, change) => {
+        void update({
+          entryId: entry._id,
+          ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
+          ...(change.tagIds !== undefined ? { tagIds: change.tagIds } : {}),
+          ...(change.billable !== undefined ? { billable: change.billable } : {}),
+        }).catch((thrown: unknown) => {
+          toasts.add({ title: errorMessage(thrown), priority: "high" })
+        })
+      },
+      onCreateProject: createProject,
+      onCreateTag: ensureTag,
+      onRemove,
+      onResume: (entry) => {
+        void resume(entry).catch((thrown: unknown) => {
+          toasts.add({ title: errorMessage(thrown), priority: "high" })
+        })
+      },
+      onDuplicate,
+    }),
+    [
+      update,
+      editTime,
+      resume,
+      createProject,
+      ensureTag,
+      onDayChange,
+      onRemove,
+      onDuplicate,
+      toasts,
+    ]
+  )
 }
 
 /** How a toast names an entry. Starting the timer never requires a title, so

@@ -84,6 +84,17 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   }
 })
 
+/*
+ * Every member of this is a `useConvexMutation`, which throws without a real
+ * `ConvexReactClient` in the tree — and there is none here. The page reaches
+ * for it so it can hand ONE instance to the log rather than letting the log
+ * build a second (see `use-entry-actions.ts`); the log itself is stubbed
+ * below, so nothing in this file can press one of them.
+ */
+vi.mock("@/hooks/use-entry-actions", () => ({
+  useEntryActions: () => ({}),
+}))
+
 vi.mock("@/components/entries/entry-log", () => ({
   EntryLog: ({
     groups,
