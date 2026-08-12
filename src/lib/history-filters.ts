@@ -216,11 +216,29 @@ export function daysBetween(from: DayString, to: DayString): number {
   )
 }
 
-function monthStart(day: DayString): DayString {
+/*
+ * CALENDAR-MONTH ARITHMETIC, and the one copy of it.
+ *
+ * Exported because `date-range-picker.ts` had its own `firstOfMonth`/
+ * `lastOfMonth` pair doing exactly this — in a file that already imports from
+ * here — on the stated ground that a local `Date` cannot be trusted with
+ * `getMonth`/`getFullYear`. That ground does not apply: nothing below reads a
+ * local field. The `Date` is seeded in UTC and every write and read goes
+ * through `setUTCFullYear` and `dayOf(…, "UTC")`, so the browser's zone never
+ * enters the calculation and the DST/offset hazard the picker was avoiding is
+ * not present to avoid.
+ *
+ * The same class the branch already deduplicated for month NAMES
+ * (`date-names.ts`); this is the arithmetic it missed.
+ */
+
+/** The first day of the month `day` falls in. */
+export function monthStart(day: DayString): DayString {
   return `${day.slice(0, 7)}-01`
 }
 
-function monthEnd(day: DayString): DayString {
+/** The last day of the month `day` falls in. */
+export function monthEnd(day: DayString): DayString {
   const [year, month] = day.split("-").map(Number)
   // Day 0 of the NEXT month is the last day of this one, and it is correct for
   // February in a leap year without a table.
@@ -229,7 +247,8 @@ function monthEnd(day: DayString): DayString {
   return dayOf(last.getTime(), "UTC")
 }
 
-function shiftMonth(day: DayString, direction: -1 | 1): DayString {
+/** The same day-of-month one calendar month either side, clamped to the 1st. */
+export function shiftMonth(day: DayString, direction: -1 | 1): DayString {
   const [year, month] = day.split("-").map(Number)
   const shifted = new Date(Date.UTC(2000, 0, 1))
   // Day 1 of the shifted month, so a 31st never overflows into the month after.

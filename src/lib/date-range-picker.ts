@@ -1,5 +1,11 @@
 import { MONTH_ABBR } from "@/lib/date-names"
-import { defaultFilters, periodWindow } from "@/lib/history-filters"
+import {
+  defaultFilters,
+  monthEnd,
+  monthStart,
+  periodWindow,
+  shiftMonth,
+} from "@/lib/history-filters"
 import { addDays, parseDayString, weekStartOf } from "@shared/day"
 import type { Filters, Period } from "@/lib/history-filters"
 import type { DayString } from "@shared/day"
@@ -114,11 +120,14 @@ export function rangeTriggerLabel(
  * Neither page can express the other's, which is exactly why `presets` is a
  * prop and there is still only one picker component.
  *
- * Every boundary below goes through `@shared/day`. There is no `new Date`
- * arithmetic and no `getMonth`/`getFullYear` on a local `Date` anywhere in
- * this half of the file: a quarter that starts a day early once a year is the
- * defect `convex/lib/day.ts` exists to prevent, and it is invisible until an
- * invoice is raised across the seam.
+ * Every boundary below goes through `@shared/day`, or through the calendar-month
+ * helpers in `history-filters.ts` — which are UTC-seeded and read back with
+ * `dayOf(…, "UTC")`, so no local `Date` field is ever consulted. That
+ * distinction is the whole rule: a quarter that starts a day early once a year
+ * is the defect `convex/lib/day.ts` exists to prevent, and it is invisible until
+ * an invoice is raised across the seam. What the rule forbids is `getMonth`/
+ * `getFullYear` on a LOCAL `Date`, not `new Date` as such — which is why this
+ * file's own second copy of that arithmetic was deleted rather than kept.
  */
 export type ReportsPreset =
   | "today"
@@ -188,10 +197,11 @@ export function reportsPresetWindow(
     case "this-month":
       return periodWindow("month", today, weekStartDay)
     case "last-month": {
-      const { year, month } = parseDayString(today)
-      const first =
-        month === 1 ? firstOfMonth(year - 1, 12) : firstOfMonth(year, month - 1)
-      return { from: first, to: lastOfMonth(first) }
+      // `shiftMonth` already lands on day 1 of the previous month and already
+      // rolls January back into December, so there is no year branch to get
+      // wrong here — see `history-filters.ts`, which owns this arithmetic.
+      const month = shiftMonth(today, -1)
+      return { from: monthStart(month), to: monthEnd(month) }
     }
     case "this-quarter":
       return quarterWindow(today)
@@ -213,7 +223,9 @@ export function quarterWindow(day: DayString): { from: DayString; to: DayString 
   const firstMonth = month - ((month - 1) % 3)
   return {
     from: firstOfMonth(year, firstMonth),
-    to: lastOfMonth(firstOfMonth(year, firstMonth + 2)),
+    // `firstMonth + 2` is 12 at the most, so it cannot roll the year, and
+    // `monthEnd` supplies the month's length — February's leap years included.
+    to: monthEnd(firstOfMonth(year, firstMonth + 2)),
   }
 }
 
@@ -236,8 +248,11 @@ export function yearWindow(day: DayString): { from: DayString; to: DayString } {
  * case for them, and a custom range steps by its own span — the behaviour
  * `stepPeriod` already documents and the one the trigger already labels with
  * plain dates rather than a period name.
+ *
+ * Module-private: `reportsPresetFilters` below is the only caller, and it is
+ * the one this page reaches for. Tested through it rather than directly.
  */
-export function reportsPresetPeriod(preset: ReportsPreset): Period {
+function reportsPresetPeriod(preset: ReportsPreset): Period {
   switch (preset) {
     case "today":
       return "day"
@@ -309,21 +324,21 @@ function pad4(year: number): string {
   return String(year).padStart(4, "0")
 }
 
+/**
+ * A (year, month) pair spelled as the first of that month.
+ *
+ * FORMATTING, not arithmetic — which is why this survived and its former
+ * partner `lastOfMonth` did not. That one WAS arithmetic ("the day before the
+ * first of the next month, and December rolls the year"), and it was a second
+ * implementation of `monthEnd` in a file that already imports from
+ * `history-filters.ts`; the same is true of the `last-month` case's hand-rolled
+ * January branch. Both go through the exported `monthStart`/`monthEnd`/
+ * `shiftMonth` now.
+ *
+ * `monthStart` cannot stand in here: it takes a `DayString` and this takes the
+ * two numbers `parseDayString` hands back, which is what `quarterWindow` is
+ * working in.
+ */
 function firstOfMonth(year: number, month: number): DayString {
   return `${pad4(year)}-${String(month).padStart(2, "0")}-01`
-}
-
-/**
- * The last day of the month `day` falls in.
- *
- * The day before the first of the next month, through `@shared/day`'s
- * `addDays` — so February's length, leap years included, is decided by the one
- * date library this app trusts rather than by a table typed out here. The only
- * arithmetic left is "December rolls the year", which is visible in one line.
- */
-function lastOfMonth(day: DayString): DayString {
-  const { year, month } = parseDayString(day)
-  const nextMonthFirst =
-    month === 12 ? firstOfMonth(year + 1, 1) : firstOfMonth(year, month + 1)
-  return addDays(nextMonthFirst, -1)
 }

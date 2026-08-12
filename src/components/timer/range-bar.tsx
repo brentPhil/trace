@@ -16,11 +16,29 @@ import type { DurationDisplay } from "@/lib/format-total"
 import type { DayRange, TimerPreset, TimerRange } from "@/lib/timer-range"
 import type { DayString } from "@shared/day"
 
-const SIZES: Array<{ value: CalendarSize; label: string; unit: string }> = [
-  { value: "week", label: "Week view", unit: "week" },
-  { value: "5day", label: "5 days view", unit: "week" },
-  { value: "day", label: "Day view", unit: "day" },
+/** The size select's options, in the order it lists them. */
+const SIZES: Array<{ value: CalendarSize; label: string }> = [
+  { value: "week", label: "Week view" },
+  { value: "5day", label: "5 days view" },
+  { value: "day", label: "Day view" },
 ]
+
+/**
+ * What each size's arrows step by, in the word a screen reader hears.
+ *
+ * A `Record`, so the type checker requires every `CalendarSize` to have one and
+ * the lookup is exact. It was a `.find()` over the list above with a
+ * `?? "week"` fallback — a scan for a key that is always present, and a branch
+ * that could not be reached or tested. Adding a fourth size now fails the
+ * typecheck here rather than silently defaulting to "week".
+ */
+const STEP_UNIT: Record<CalendarSize, string> = {
+  week: "week",
+  // Mon–Fri is the week with its weekend hidden, so its arrows move seven days.
+  // See `stepRange`.
+  "5day": "week",
+  day: "day",
+}
 
 /**
  * /timer's range bar: `‹ [📅 08/10/2026 - 08/16/2026] ›`, plus what the
@@ -85,8 +103,7 @@ export function RangeBar({
    * (see `stepRange`). In List there is no grid and no size: the thing that
    * moves is the range itself, whatever span the user picked.
    */
-  const unit =
-    view === "calendar" ? (SIZES.find((s) => s.value === size)?.unit ?? "week") : "range"
+  const unit = view === "calendar" ? STEP_UNIT[size] : "range"
 
   // No range, nothing to step. "All dates" already reaches every entry in both
   // directions, so an arrow here would either do nothing or silently bound a

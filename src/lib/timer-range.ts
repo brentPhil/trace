@@ -186,8 +186,12 @@ export function stepRange(
  * has. Seven of them is the density every shipping calendar converged on;
  * thirty is not a smaller version of the same thing, it is a different and
  * unreadable object.
+ *
+ * Module-private: `calendarSnap` is the only thing that has ever consulted it,
+ * and the rule is observable through that function's output. Exporting a
+ * threshold invites a second place to compare against it.
  */
-export const MAX_CALENDAR_SPAN_DAYS = 7
+const MAX_CALENDAR_SPAN_DAYS = 7
 
 /**
  * The selection, made drawable — and the window the grid is then handed.
@@ -229,7 +233,6 @@ export function calendarSnap(
   const drawn = span > MAX_CALENDAR_SPAN_DAYS ? "week" : size
   return { size: drawn, range: rangeOf(anchor, drawn, weekStartDay, timeZone) }
 }
-
 
 /** The instants a bounded range means, for `entries.listRange`. Half-open. */
 export function instantsOf(
