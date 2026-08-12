@@ -5,6 +5,7 @@ import { Page } from "@/components/shell/page"
 import { Empty } from "@/components/ui/empty"
 import { format } from "@/lib/report-series"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@shared/brand"
 import { dayOf } from "@shared/day"
 import { sumByCurrency } from "@shared/invoiceMath"
 import { formatMoney } from "@shared/money"
@@ -15,7 +16,7 @@ import type { FunctionReturnType } from "convex/server"
 type InvoiceRow = FunctionReturnType<typeof api.invoices.list>["invoices"][number]
 
 export const Route = createFileRoute("/_authed/invoices")({
-  head: () => ({ meta: [{ title: "Invoices — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Invoices") }] }),
   component: Invoices,
 })
 

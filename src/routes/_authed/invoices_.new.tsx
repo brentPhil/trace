@@ -19,6 +19,7 @@ import {
 } from "@/lib/invoice-draft"
 import { parseInvoiceSearch } from "@/lib/invoice-search"
 import { format } from "@/lib/report-series"
+import { pageTitle } from "@shared/brand"
 import { dayOf } from "@shared/day"
 import { NO_PROJECT_FILTER } from "@shared/entryFilter"
 import { NO_PROJECT_LABEL } from "@shared/labels"
@@ -46,7 +47,7 @@ import type { Id } from "../../../convex/_generated/dataModel"
  * renders the wrong component at a URL that still looks right.
  */
 export const Route = createFileRoute("/_authed/invoices_/new")({
-  head: () => ({ meta: [{ title: "New invoice — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("New invoice") }] }),
   /*
    * THE FIRST ROUTE IN THIS APP WITH SEARCH PARAMS, so this is the pattern.
    *
@@ -536,7 +537,7 @@ function SourceStrip({
       */}
       {rangeGiven ? null : (
         <p role="status" className="max-w-prose text-xs text-muted-foreground">
-          This link carried no period Trace could read, so the preview below
+          This link carried no period Chroneli could read, so the preview below
           covers the current week. Choose the period on{" "}
           <Link to="/reports" className="underline underline-offset-2">
             Reports

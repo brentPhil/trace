@@ -841,7 +841,7 @@ describe("/invoices/new — the filter it was handed", () => {
 describe("the /invoices/new route", () => {
   it("names the page in the tab title", () => {
     const head = Route.options.head as () => { meta: Array<{ title: string }> }
-    expect(head().meta[0]?.title).toBe("New invoice — Trace")
+    expect(head().meta[0]?.title).toBe("New invoice — Chroneli")
   })
 
   /*

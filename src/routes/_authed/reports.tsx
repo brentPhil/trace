@@ -30,6 +30,7 @@ import {
   invoiceDisabledReason,
 } from "@/lib/export/export-disabled-reason"
 import { invoiceSearchOf } from "@/lib/invoice-search"
+import { pageTitle } from "@shared/brand"
 import { dayOf } from "@shared/day"
 import { billableBucketsOf, invoiceLineDrafts } from "@shared/invoiceLines"
 import { unpriced } from "@/lib/format-money"
@@ -96,7 +97,7 @@ export function breakdownArgs(
 }
 
 export const Route = createFileRoute("/_authed/reports")({
-  head: () => ({ meta: [{ title: "Reports — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Reports") }] }),
   component: Reports,
   loader: async ({ context }) => {
     const settings = await context.queryClient.ensureQueryData(

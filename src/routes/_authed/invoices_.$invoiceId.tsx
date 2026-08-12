@@ -5,6 +5,7 @@ import { ExportPdfButton } from "@/components/invoices/export-pdf-button"
 import { InvoiceRecord } from "@/components/invoices/invoice-record"
 import { Page, PageBreadcrumb } from "@/components/shell/page"
 import { Empty } from "@/components/ui/empty"
+import { pageTitle } from "@shared/brand"
 import { traceErrorCode } from "@shared/codes"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
@@ -31,8 +32,8 @@ export const Route = createFileRoute("/_authed/invoices_/$invoiceId")({
    *
    * Two invoices open in two tabs are the ordinary way this page is used —
    * copying a figure from one onto another, or checking last month's against
-   * this month's — and "Invoice — Trace" twice makes the tab strip useless for
-   * exactly that. `loaderData` is undefined while the loader is still in
+   * this month's — and "Invoice — Chroneli" twice makes the tab strip useless
+   * for exactly that. `loaderData` is undefined while the loader is still in
    * flight, which is the only case the plain title is still right for.
    */
   /* The parameter is annotated because it cannot be inferred: `head` and
@@ -45,8 +46,8 @@ export const Route = createFileRoute("/_authed/invoices_/$invoiceId")({
       {
         title:
           loaderData === undefined
-            ? "Invoice — Trace"
-            : `Invoice #${loaderData.number} — Trace`,
+            ? pageTitle("Invoice")
+            : pageTitle(`Invoice #${loaderData.number}`),
       },
     ],
   }),

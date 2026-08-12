@@ -9,11 +9,12 @@ import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
 import { rateHelp } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@shared/brand"
 import { formatMoney, parseMoney, supportedCurrencies } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 
 export const Route = createFileRoute("/_authed/settings")({
-  head: () => ({ meta: [{ title: "Settings — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Settings") }] }),
   component: Settings,
   loader: async ({ context }) => {
     await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))

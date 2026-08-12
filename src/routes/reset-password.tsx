@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input"
 import { AUTH_ERROR_ID, AuthError, AuthShell } from "@/components/auth-shell"
 import { authClient } from "@/lib/auth-client"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@shared/brand"
 
 const MIN_PASSWORD_LENGTH = 8
 
 export const Route = createFileRoute("/reset-password")({
-  head: () => ({ meta: [{ title: "Choose a new password — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Choose a new password") }] }),
   // Better Auth validates the token server-side first, then redirects here
   // with ?token=... on success or ?error=INVALID_TOKEN on failure.
   validateSearch: (search: Record<string, unknown>) => ({

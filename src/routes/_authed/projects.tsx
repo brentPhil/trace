@@ -12,13 +12,14 @@ import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { errorMessage } from "@/lib/error-message"
 import { formatRate, rateHelp } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@shared/brand"
 import { PROJECT_COLORS } from "@shared/palette"
 import { parseMoney } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 export const Route = createFileRoute("/_authed/projects")({
-  head: () => ({ meta: [{ title: "Projects — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Projects") }] }),
   component: Projects,
 })
 
@@ -539,6 +540,5 @@ function Kbd({ children }: { children: React.ReactNode }) {
     </kbd>
   )
 }
-
 
 

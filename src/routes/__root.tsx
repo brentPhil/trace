@@ -19,6 +19,7 @@ import { ShortcutsOverlay } from "@/components/a11y/shortcuts-overlay"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import { authClient } from "@/lib/auth-client"
 import { getToken } from "@/lib/auth-server"
+import { pageTitle } from "@shared/brand"
 import appCss from "../styles.css?url"
 
 // Reads the session cookie on the server and exchanges it for a Convex token.
@@ -40,7 +41,7 @@ export const Route = createRootRouteWithContext<{
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "Trace",
+        title: pageTitle(),
       },
     ],
     links: [

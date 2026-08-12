@@ -28,6 +28,7 @@ import {
 } from "@/lib/timer-range"
 import { readStoredView, writeStoredView } from "@/lib/timer-view"
 import { cn } from "@/lib/utils"
+import { pageTitle } from "@shared/brand"
 import { dayOf, dayWindow, weekWindow } from "@shared/day"
 import { api } from "../../../convex/_generated/api"
 
@@ -38,7 +39,7 @@ import type { TimerView } from "@/lib/timer-view"
 const PAGE_SIZE = 50
 
 export const Route = createFileRoute("/_authed/timer")({
-  head: () => ({ meta: [{ title: "Timer — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Timer") }] }),
   component: Timer,
   loader: async ({ context }) => {
     // Settings first and awaited: every day boundary below depends on the

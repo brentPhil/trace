@@ -1,9 +1,10 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { AuthForm } from "@/components/auth-form"
 import { safeRedirect } from "@/lib/redirect"
+import { pageTitle } from "@shared/brand"
 
 export const Route = createFileRoute("/signup")({
-  head: () => ({ meta: [{ title: "Create your account — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Create your account") }] }),
   validateSearch: (search: Record<string, unknown>) => ({
     redirect: typeof search.redirect === "string" ? search.redirect : undefined,
   }),

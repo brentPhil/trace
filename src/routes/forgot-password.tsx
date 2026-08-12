@@ -10,9 +10,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { AUTH_ERROR_ID, AuthError, AuthShell } from "@/components/auth-shell"
 import { authClient } from "@/lib/auth-client"
+import { pageTitle } from "@shared/brand"
 
 export const Route = createFileRoute("/forgot-password")({
-  head: () => ({ meta: [{ title: "Reset your password — Trace" }] }),
+  head: () => ({ meta: [{ title: pageTitle("Reset your password") }] }),
   component: ForgotPasswordRoute,
 })
 

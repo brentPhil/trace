@@ -395,10 +395,10 @@ describe("the invoice route", () => {
     }) => { meta: Array<{ title: string }> }
 
     expect(head({ loaderData: { number: "072726-0013" } }).meta[0]?.title).toBe(
-      "Invoice #072726-0013 — Trace"
+      "Invoice #072726-0013 — Chroneli"
     )
     // Still in flight, so there is no number to name yet.
-    expect(head({}).meta[0]?.title).toBe("Invoice — Trace")
+    expect(head({}).meta[0]?.title).toBe("Invoice — Chroneli")
   })
 
   it("answers a missing invoice with a way back rather than a raw error", () => {
