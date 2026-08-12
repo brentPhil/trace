@@ -240,6 +240,26 @@ export function Reports() {
       something that has already introduced itself: the heading is here so the
       page has an OUTLINE, not so it has a caption.
     */
+    /*
+      `Tabs` WRAPS THE PAGE, and `display: contents` is what makes that free.
+
+      The switcher belongs in the header, beside the range it applies to — but
+      `TabsList` and `TabsContent` have to share one provider, and the header is
+      a PROP of `Page` while the panels are its children. Hoisting the provider
+      above `Page` is the only arrangement that puts them in one tree without
+      hand-rolling the roving focus and `aria-controls` wiring Base UI already
+      does correctly.
+
+      `contents` because this element must not be a box. `Page` measures its own
+      header for `--page-header-height` and composes a sticky offset from it; a
+      wrapper with a layout box between the route and `Page` is exactly the kind
+      of thing that silently changes what gets measured.
+    */
+    <Tabs
+      value={view}
+      onValueChange={(value) => setView(value as View)}
+      className="contents"
+    >
     <Page
       title="Reports"
       titleHidden
@@ -256,13 +276,45 @@ export function Reports() {
             a full-bleed fill cannot take its gutter from a caller.
           */}
           <div className="flex w-full flex-wrap items-start justify-between gap-3 px-4 py-3">
-            <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
               <PeriodControls
                 filters={filters}
                 today={today}
                 weekStartDay={settings.weekStartDay}
                 onChange={setFilters}
               />
+
+              {/*
+                THE SWITCHER, BESIDE THE RANGE IT APPLIES TO — the same
+                arrangement /timer uses for Calendar | List, and the same
+                argument: the range and the view are the two halves of one
+                question, WHICH rows and HOW to look at them, so they read as
+                one control strip.
+
+                It sat below the filter band until 2026-08-12, between the band
+                and the figures, which put the control that CHOOSES what is on
+                screen underneath two rows of the thing it was choosing. At the
+                top it is read before what it governs.
+
+                A SEGMENTED GROUP rather than the underline this used to draw.
+                Summary and Detailed are alternative views of one thing rather
+                than sections of a document, and a filled cell is what that
+                reads as; the old rule ran the page's full width and read as a
+                section divider, so the tabs looked like a heading above a
+                horizon rather than a switch sitting on one. Selection is not
+                carried by colour alone — the fill is a fill, and Base UI puts
+                `aria-selected` on the trigger regardless.
+
+                `w-fit` so the group is as wide as its two cells. A segmented
+                control stretched across a row is a nav bar, not a switch.
+              */}
+              <TabsList variant="segmented" className="w-fit">
+                {VIEWS.map((item) => (
+                  <TabsTrigger key={item.value} value={item.value}>
+                    {item.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </div>
             {/*
               TWO CONTROLS, side by side, in that order: `[ Create invoice ]
@@ -363,55 +415,14 @@ export function Reports() {
         </>
       }
     >
-      <Tabs
-        value={view}
-        onValueChange={(value) => setView(value as View)}
-        className="gap-0"
-      >
-        {/*
-          THE SEGMENTED VARIANT, matching /timer's Calendar | List.
-
-          This was the `line` variant — an underline on the active tab, with a
-          full-width hairline under the pair. Two things were wrong with it
-          here. The rule ran the width of the page and read as a section
-          divider, so the tabs looked like a heading ABOVE a horizon rather
-          than a control sitting on one; and the same product was drawing the
-          same gesture — two alternative views of one set of rows — two
-          different ways on two pages, which is the drift `Page` was extracted
-          to stop.
-
-          Summary and Detailed are alternative views of one thing rather than
-          sections of a document, and a filled cell is what that reads as.
-          Selection is not carried by colour alone: the fill is a fill, and
-          Base UI puts `aria-selected` on the trigger regardless.
-
-          `w-fit` so the group is as wide as its two cells — a segmented
-          control stretched across the page is a nav bar, not a switch.
-
-          `my-4` because the variant brought no vertical rhythm with it. The
-          `line` variant this replaced carried its own `pb-1.5` and a full-width
-          hairline, which held the tabs off the band above and the figures
-          below; a segmented group is just a box, so it sat flush against both
-          and read as part of the filter strip rather than as the control that
-          chooses what is under it. It is the only thing between two dense rows
-          and needs room on both sides to be either.
-        */}
-        <TabsList variant="segmented" className="mx-4 my-4 w-fit">
-          {VIEWS.map((item) => (
-            <TabsTrigger key={item.value} value={item.value}>
-              {item.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        <TabsContent value="summary">
-          <SummaryTab filters={filters} settings={settings} />
-        </TabsContent>
-        <TabsContent value="detailed">
-          <DetailedTab filters={filters} settings={settings} />
-        </TabsContent>
-      </Tabs>
+      <TabsContent value="summary">
+        <SummaryTab filters={filters} settings={settings} />
+      </TabsContent>
+      <TabsContent value="detailed">
+        <DetailedTab filters={filters} settings={settings} />
+      </TabsContent>
     </Page>
+    </Tabs>
   )
 }
 
