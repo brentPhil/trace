@@ -53,24 +53,51 @@ from /timer.
 
 ## Decisions taken, and why
 
-**Read, not draw.** Blocks are not draggable, and the calendar contains no
-editing of its own. Clicking a block **switches to List and focuses that
-entry's row**, where the editing already exists — `EntryTimePopover`,
-`NoteSheet`, the inline title. The calendar navigates to the editor; it is not
-one. A popover on the grid would be a second place to fix the same mistyped
-field, which is how two places come to disagree about it.
+**The grid is read-only as a SURFACE; a block is not.** Blocks are not
+draggable: nothing is created, moved or resized by dragging on the axis. The
+view exists to show the shape of a day, and drag-to-create is a second product
+with its own failure modes — an accidental 40-minute entry created by a stray
+drag is precisely the kind of silent data corruption "defensible by default"
+rules out. It can be added later on top of this layout model without a rewrite.
 
-The view exists to show the shape of a day, and drag-to-create is a second
-product with its own failure modes — an accidental 40-minute entry created by a
-stray drag is precisely the kind of silent data corruption "defensible by
-default" rules out. It can be added later on top of this layout model without a
-rewrite.
+**Clicking a block opens that entry's editor, anchored to the block.**
+`calendar-entry-popover.tsx`: a resume button, a duplicate, an overflow menu
+holding Delete, and a close ×; the title; the project, tag and billable
+pickers; then start → end, the duration, and Save.
 
-Two clicks are deliberately inert rather than misleading, because the row they
-would navigate to does not exist: the **running** entry (`groupByDay` keeps it
-out of the list on purpose) and any entry **outside the loaded pages** or dated
-in the **future** (the list's range is pinned to the end of today). Each says
-why instead of silently doing nothing.
+*This reverses what this document originally said*, which was that a click
+**switches to List and focuses that entry's row** — and the reversal is
+deliberate rather than a drift. The original argument was that a popover on the
+grid would be a second place to fix the same mistyped field, which is how two
+places come to disagree about it. What it cost in practice:
+
+- The most common reason to open the grid is noticing a block that starts half
+  an hour late. Fixing it threw away the week you were reading, and getting
+  back meant re-navigating.
+- For three kinds of block there was no row to land on at all — the **running**
+  entry (`groupByDay` keeps it out of the list on purpose), an entry **outside
+  the loaded pages**, and one dated in the **future** (the list's range is
+  pinned to the end of today). Each raised a toast explaining why the click had
+  done nothing. Three explanations for three flavours of dead end is a lot of
+  prose to defend a gesture that does not work.
+
+The objection is answered by **reuse rather than by refusal**. The popover
+mounts the log row's own controls — `EditableTitle`, `EditableDuration`,
+`EntryTimePopover` with its parsing, overnight and DST rules, the three
+classifier pickers — and every write goes through `useEntryActions`, which is
+the hook `EntryLog` was refactored to use at the same time. There is one
+implementation of each edit and one undo vocabulary; there are two places they
+are reachable from. The three dead ends are gone rather than explained: every
+block on the grid is editable, including the running one, which the log has
+never had a row for.
+
+Notes stay out. `NoteSheet` belongs to the log, which owns its unsaved drafts,
+and a grid is not where prose gets written.
+
+A click on the hatched **midnight tail** opens the same entry's popover as its
+head does. Both segments carry one `entryId`; the tail is a continuation, and
+an editor claiming it was a separate entry would break the Hatch Rule from the
+inside.
 
 **A tab, not a route.** [reports.tsx:49](../../../src/routes/_authed/reports.tsx)
 already settled this argument for Summary and Detailed: *tabs rather than two
@@ -185,6 +212,8 @@ src/lib/calendar-label.ts        range + size + today -> the stepper's text
 src/components/calendar/
   calendar-panel.tsx             the <Calendar>, every class-name prop
   calendar-header.tsx            ‹ label ›, size dropdown, range total
+  calendar-entry-popover.tsx     the editor a block opens (added later)
+src/hooks/use-entry-actions.ts   what may be done to an entry, for both surfaces
 ```
 
 Two pure modules and two components. What is left to hand-write is the mapping
@@ -329,8 +358,8 @@ what makes them auditable. The ones this feature sets:
 
 | prop                  | carries                                              |
 | --------------------- | ---------------------------------------------------- |
-| `columnEventClass`    | the block: `surface-raised` + `edge-raised`; `enlarger` while running; `hatch-empty` when `!isStart` |
-| `eventContent`        | title, `ProjectDot`, time — title suppressed on a tail |
+| `columnEventClass`    | the block: `surface-raised` + `edge-raised`; `enlarger` while running; `hatch-empty` when `!isStart`; `mx-0.5 mb-px` so two blocks read as two objects |
+| `eventContent`        | as many of title / time / `ProjectDot` as the block's height holds — title suppressed on a tail |
 | `slotLaneClass`       | the hour rules, `border-edge-soft`                    |
 | `slotHeaderClass` / `slotHeaderContent` | hour labels, `tabular`              |
 | `dayHeaderClass` / `dayHeaderContent` | weekday, date, and the day's total   |
@@ -388,16 +417,26 @@ removing the popover's fields would take a path someone may already be using.
   of the two views is the asymmetry "one filter, both views" exists to close.
   Both messages share one always-mounted `aria-live` region, because a live
   region inserted already holding its text is not reliably announced.
-- **A block whose entry has no row in the list** raises a toast and leaves the
-  grid where it is. Three cases, three different true sentences: the entry is
-  *running* (it is in the timer bar), it is *not yet paginated in* ("Load
-  earlier entries" reaches it), or it is *dated after today* — the log's range
-  ends with today, so no amount of loading earlier will ever reach it. The
-  reachable way to get one is a mistyped day in the add-entry dialog's unbounded
-  `<input type="date">`, and noticing that is exactly what a calendar is for.
+- **A block whose entry has no row in the list** is no longer a case. It was
+  three — running, not yet paginated in, dated after today — and each raised its
+  own toast explaining why clicking had done nothing. The popover edits the
+  entry the block was drawn from, and every block has one.
+- **The running entry's popover** shows its start, no end (an ellipsis, never
+  "now", which would be a value that looks recorded when it is not) and its live
+  elapsed clock. Resume and Duplicate are **absent** on it rather than disabled:
+  `entries.create` needs a definite `endedAt`, and starting a copy would stop the
+  very entry the popover is describing.
 - **An untitled entry** uses the same fallback the entry row uses.
-- **A block too short for text** shows nothing but its fill; its title is on the
-  `title` attribute and in its accessible name.
+- **A block too short for text** shows nothing but its fill; its title and times
+  are on the `title` attribute and in its accessible name. The content degrades
+  in rows of 16px + a 2px gap, over the 7px a block spends on its own margin,
+  borders and padding — so 29 minutes buys the title, 51 adds the times, 74 adds
+  the project and 96 lets the title take a second line. **The project line is
+  dropped rather than clipped**: it used to need 79 minutes and everything
+  shorter had it sliced through by the bottom edge, cleanly, because the block
+  is `overflow-hidden` — which is why it looked like a decision. Whatever is
+  dropped is spoken instead, on a `sr-only` line carrying only the parts that
+  are not drawn.
 - **More than 500 entries in one range** cannot happen for a week, but the
   `limit` is left at its default rather than raised, so the failure mode is a
   truncated grid rather than a slow query.
@@ -426,10 +465,28 @@ FullCalendar's `datesSet` range for a given anchor must equal
 is the only assertion standing between us and a grid that quietly disagrees with
 the day headers.
 
-Component tests: the switcher swaps views, a project filter narrows both views,
-and clicking a block switches to List and focuses that entry's row — *not* a
-popover on the grid; the calendar navigates and does not edit. Where there is no
-row to land on, it stays put and says which of the three reasons applies.
+Component tests: the switcher swaps views and a project filter narrows both
+(`-timer.test.tsx`, where the panel is stubbed).
+
+Clicking a block is tested in `calendar-panel.test.tsx`, against the real grid,
+because that is where the popover now lives: it opens on a click, shows the
+entry's title and times through the app's own formatters, commits a title edit
+and a time edit, reaches the classifiers, opens from a midnight tail onto the
+same entry, shows a running entry with no end and no un-writable verbs, and
+closes on Escape and on ×.
+
+The same file asserts **what a block draws at each height** — project line
+present at 90 minutes, dropped but spoken at 60, title only at 30, nothing but
+fill at the 18px minimum, two title lines at 120, and a midnight head measured
+against midnight rather than against its own end. Those are content assertions
+rather than geometry ones: the panel computes the height it is about to be given
+from the same two numbers FullCalendar uses, so what it chooses to render is
+checkable in jsdom even though jsdom lays nothing out.
+
+`-timer.test.tsx`'s "clicking a calendar block" suite is **deleted**, along with
+`day-list.test.tsx`'s "EntryRow — addressable from the calendar". The latter
+pinned `data-entry-id` and `tabIndex === -1` on the row, which existed for one
+caller: the view-switch that is gone. Both attributes went with it.
 
 `calendar-range-label.test.tsx` walks all seven `weekStartDay` values against
 the grid's own `data-date` columns, and asserts the 5-day view draws **exactly
