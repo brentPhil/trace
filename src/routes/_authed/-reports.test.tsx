@@ -326,10 +326,42 @@ describe("Reports — the page heading", () => {
  * cannot drift apart again without one of them going red.
  */
 describe("Reports — the filter band", () => {
+  // `"detailed"`: the band is Detailed-only now. The assertion is unchanged —
+  // where the controls sit when they are on screen is still the thing that
+  // drifted — only the tab that shows them has moved.
   it("puts the filter controls on the shared Surface strip, as /timer does", () => {
-    renderReports(() => {}, "summary")
+    renderReports(() => {}, "detailed")
 
     expectFilterControlsInBand()
+  })
+
+  /*
+   * The band is gone from Summary, and its filters are NOT — `breakdownArgs`
+   * carries them into the one query both tabs read. A chart narrowed by a
+   * control that is no longer on screen is the same defect class as a header
+   * total belonging to a range other than the one drawn, so the page has to
+   * say so. Asserted in both directions: silent when there is nothing to
+   * declare, and explicit when there is.
+   */
+  it("says nothing on Summary while no filter is set", () => {
+    renderReports(() => {}, "summary")
+
+    expect(screen.queryByPlaceholderText("Search titles, notes and projects")).toBeNull()
+    expect(screen.queryByText(/narrowed by a filter/)).toBeNull()
+  })
+
+  it("declares a filter carried over to Summary, and offers to clear it", () => {
+    renderReports(() => {}, "detailed")
+
+    fireEvent.change(screen.getByPlaceholderText("Search titles, notes and projects"), {
+      target: { value: "audit" },
+    })
+    fireEvent.click(screen.getByRole("tab", { name: "Summary" }))
+
+    expect(screen.getByText(/narrowed by a filter set on Detailed/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear it" }))
+    expect(screen.queryByText(/narrowed by a filter/)).toBeNull()
   })
 })
 
@@ -1180,10 +1212,14 @@ describe("Reports — Create invoice", () => {
     const searched = { ...filters, text: "audit & review" }
     const settled = { ...EMPTY_BREAKDOWN, ...PRICED }
 
+    // `"detailed"`, not `"summary"`: the filter band is Detailed-only now — a
+    // search box over Summary's charts offers to do something that view cannot
+    // show the result of. The Create-invoice link this asserts on lives in the
+    // page header above BOTH tabs, so it is reachable from either.
     renderReports((client) => {
       seedBreakdown(client, filters, settled)
       seedBreakdown(client, searched, settled)
-    }, "summary")
+    }, "detailed")
 
     fireEvent.change(screen.getByRole("textbox", { name: /Search titles/ }), {
       target: { value: "audit & review" },

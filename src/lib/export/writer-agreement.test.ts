@@ -165,14 +165,26 @@ describe("the three writers agree on the grand-total Amount", () => {
 })
 
 /** The PDF's grand-TOTAL row's Percent cell, as printed text. */
-function pdfTotalPercent(rows: ReportRows): string | undefined {
-  const pages = reportPages(rows)
-  const last = pages.at(-1)!
-  const op = last.ops.find(
-    (o): o is Extract<PdfOp, { kind: "text" }> =>
-      o.kind === "text" && o.x === COL.percent && o.size === TYPE.strong && o.align === "right"
-  )
-  return op?.text
+/*
+ * THE PDF NO LONGER PRINTS A PERCENT COLUMN, so there is no third reading to
+ * compare — see `COL` in report-doc.ts for why the column was cut (its 60pt
+ * went to DESCRIPTION, which was wrapping ticket titles into ~145pt).
+ *
+ * What survives here is the CSV/XLSX pair, and the distinctive fixture below is
+ * still the point: a writer that re-derives the percent from `totalMs` instead
+ * of reading the shared field cannot produce 42.
+ *
+ * What is NO LONGER GUARDED is the PDF against the other two. That is the exact
+ * shape of the defect this file was created for — three writers disagreeing
+ * about one number — so it is worth being plain that the risk did not go away,
+ * it went out of scope: the PDF cannot disagree about a figure it does not
+ * print. If the column ever returns, this helper returns with it.
+ */
+function pdfPrintsNoPercentColumn(rows: ReportRows): boolean {
+  return !("percent" in COL)
+    && reportPages(rows).every((page) =>
+      page.ops.every((o) => o.kind !== "text" || !o.text.endsWith("%"))
+    )
 }
 
 function csvTotalPercent(rows: ReportRows): string {
@@ -204,7 +216,10 @@ describe("the three writers agree on the grand-total Percent", () => {
 
     expect(csvTotalPercent(rows)).toBe("42")
     expect(xlsxTotalPercent(rows)).toBe(42)
-    expect(pdfTotalPercent(rows)).toBe("42%")
+    // And the PDF prints no percent at all — asserted rather than assumed, so
+    // that reintroducing the column without restoring its agreement check
+    // fails here rather than shipping a third, unguarded reading.
+    expect(pdfPrintsNoPercentColumn(rows)).toBe(true)
   })
 })
 
@@ -232,16 +247,12 @@ describe("the three writers agree on the grand-total Percent for an empty range"
     const breakdown = xlsxSheets(empty).find((s) => s.sheet === "Breakdown")!
     expect(breakdown.data.at(-1)![5]).toMatchObject({ value: 0 })
 
-    // No titles means no breakdown page is emitted (see reportPages) — put
-    // one nominal row in so the TOTAL row itself is drawn.
+    // The PDF's own reading of this is gone with its percent column. The
+    // hazard it guarded — a hardcoded "100%" that disagreed with both other
+    // writers on an empty range — is unreachable now for the same reason, and
+    // `report-doc.ts`'s TOTAL row carries a note so the literal does not come
+    // back if the column does.
     const withRow = rowsWithTotals({ ...totals, totalMs: 0, count: 0, percent: 0 })
-    const pages = reportPages(withRow)
-    const percentOp = pages
-      .at(-1)!
-      .ops.find(
-        (o): o is Extract<PdfOp, { kind: "text" }> =>
-          o.kind === "text" && o.x === COL.percent && o.size === TYPE.strong && o.align === "right"
-      )
-    expect(percentOp?.text).toBe("0%")
+    expect(pdfPrintsNoPercentColumn(withRow)).toBe(true)
   })
 })

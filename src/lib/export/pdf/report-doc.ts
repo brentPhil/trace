@@ -38,6 +38,25 @@ const BOTTOM = PAGE.margin
 // Exported so tests can assert the no-overlap geometry directly against the
 // same anchors this file draws with, instead of duplicating the numbers.
 //
+// THE `%` COLUMN IS GONE, and its 60pt went to DESCRIPTION.
+//
+// The complaint was that this table reads cramped horizontally, and the
+// measurement agreed: the description cell had ~145pt to wrap an imported
+// ticket title into, so a name like "[B-CB-326] Building Crew Training CSV and
+// PDF download" took three lines while four columns of numbers sat in 260pt
+// of the same row. Widening a cell is only possible by taking the room from
+// somewhere, so the question was which column earns its width least.
+//
+// PERCENT was the answer. On a per-row breakdown it is each row's share of the
+// whole range, which for a 500-row export is a column of "0%" and "1%" — the
+// figure is real but it is not what this document is read for. HOURS stays
+// even though it restates DURATION, because it restates it in the unit the
+// AMOUNT beside it is computed from: `7:51:34` → `7.86` → `$471.60` is the
+// arithmetic a client reconciles, and removing the middle term breaks the
+// audit trail on the one page that exists to survive being questioned. The
+// share-of-total still appears on the summary page, and the CSV and XLSX
+// writers keep every column — this is the human-readable cut, not the data.
+//
 // `description` sits at LEFT + 100, not the wider LEFT + 120 this used to be.
 // This app's own project names are short ("Sealogs", "No project" — see
 // NO_PROJECT_LABEL in report-series.ts) while descriptions are imported ticket
@@ -46,18 +65,17 @@ const BOTTOM = PAGE.margin
 // name like "Vessel Vanguard" (~78pt at the body size below) with room to
 // spare.
 //
-// The numeric columns' own gaps (60 / 60 / 80) are each sized to clear that
+// The numeric columns' own gaps (60 / 80) are each sized to clear that
 // COLUMN's own worst-case string at the body/TOTAL sizes below, not the
 // column to its left — HOURS is right-aligned, so it is HOURS's width that
 // must fit inside the duration→hours gap, and so on rightward. AMOUNT gets
 // the widest gap (80, not 60) because a formatted currency string
-// (`$99,999.99`) is the widest thing any of these four columns ever draws.
+// (`$99,999.99`) is the widest thing either of these columns ever draws.
 export const COL = {
   project: LEFT,
   description: LEFT + 100,
-  duration: RIGHT - 200,
-  hours: RIGHT - 140,
-  percent: RIGHT - 80,
+  duration: RIGHT - 140,
+  hours: RIGHT - 80,
   amount: RIGHT,
 } as const
 
@@ -342,7 +360,6 @@ function breakdownHeader(): Array<PdfOp> {
       color: PAPER.inkMuted,
     }),
     text({ x: COL.hours, y, text: "HOURS", size: TYPE.tick, align: "right", color: PAPER.inkMuted }),
-    text({ x: COL.percent, y, text: "%", size: TYPE.tick, align: "right", color: PAPER.inkMuted }),
     text({
       x: COL.amount,
       y,
@@ -448,38 +465,26 @@ function weekHeadingOp(label: string, y: number): PdfOp {
  * nothing else") that a near-miss had already shown could drift between them
  * — a fourth copy is how it actually would.
  *
- * `mutedPercent` is the one deliberate difference between call sites: a body
- * row and a week's subtotal both print % in muted ink because they are
- * subordinate to the page's real total, while the TOTAL row itself is left
- * at the row's own ink because it is already bold/`TYPE.strong` and reads as
- * the page's own emphasis, not a figure to de-emphasise further.
+ * The `%` column was removed on 2026-08-12 (see COL), and with it the
+ * `percent` and `mutedPercent` arguments this took: the only difference
+ * between the three call sites was how emphatic that column should be, so
+ * once it went the three became identical.
  */
 function numericColumnsOps(
   y: number,
   opts: {
     durationMs: number
-    percent: number
     billableCents: number
     currency: string
     unpriced: boolean
     size: number
     bold: boolean
-    mutedPercent: boolean
   }
 ): Array<PdfOp> {
-  const { durationMs, percent, billableCents, currency, unpriced, size, bold, mutedPercent } = opts
+  const { durationMs, billableCents, currency, unpriced, size, bold } = opts
   return [
     text({ x: COL.duration, y, text: formatClock(durationMs), size, bold, align: "right" }),
     text({ x: COL.hours, y, text: formatDecimalHours(durationMs), size, bold, align: "right" }),
-    text({
-      x: COL.percent,
-      y,
-      text: `${percent}%`,
-      size,
-      bold,
-      align: "right",
-      color: mutedPercent ? PAPER.inkMuted : undefined,
-    }),
     text({
       x: COL.amount,
       y,
@@ -507,13 +512,11 @@ function weekSubtotalOps(
     text({ x: COL.project, y, text: "Subtotal", size: TYPE.body, bold: true }),
     ...numericColumnsOps(y, {
       durationMs: week.subtotal.totalMs,
-      percent: week.subtotal.percent,
       billableCents: week.subtotal.billableCents,
       currency,
       unpriced: week.subtotal.unpriced,
       size: TYPE.body,
       bold: true,
-      mutedPercent: true,
     }),
   ]
 }
@@ -551,13 +554,11 @@ function breakdownRow(
   ops.push(
     ...numericColumnsOps(centerY, {
       durationMs: row.totalMs,
-      percent: row.percent,
       billableCents: row.billableCents,
       currency,
       unpriced: row.unpriced,
       size: TYPE.body,
       bold: false,
-      mutedPercent: true,
     })
   )
   return ops
@@ -699,22 +700,21 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
       ops.push(
         rect({ x: LEFT, y: ruleY - 2, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
         text({ x: COL.project, y, text: "TOTAL", size: TYPE.strong, bold: true }),
-        // `totals.percent` — the one derivation report-rows.ts computes (see
-        // `percentOf(totalMs, totalMs)` there) — not a hardcoded "100%",
-        // which disagreed with CSV/XLSX for an empty range, where there is
-        // no duration for 100% to be a share OF. `mutedPercent: false`
-        // because TOTAL is already the page's own emphasis (bold, strong
-        // size), not a subordinate figure the way a body row's or a week's
-        // subtotal's % is.
+        // `rows.totals.percent` used to be drawn here, and the comment that
+        // stood in this place is worth keeping the point of: it was deliberately
+        // the derivation `report-rows.ts` computes rather than a hardcoded
+        // "100%", because on an EMPTY range there is no duration for 100% to be
+        // a share of, and the hardcoded version disagreed with CSV and XLSX
+        // there. The field is still computed and still exported by both of
+        // those writers — only this column is gone. If % ever returns to the
+        // PDF, it comes back from `rows.totals.percent` and not from a literal.
         ...numericColumnsOps(y, {
           durationMs: rows.totals.totalMs,
-          percent: rows.totals.percent,
           billableCents: rows.totals.billableCents,
           currency,
           unpriced: rows.totals.unpriced,
           size: TYPE.strong,
           bold: true,
-          mutedPercent: false,
         })
       )
       cursor -= totalRowHeight

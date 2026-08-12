@@ -318,9 +318,48 @@ export function Reports() {
             understands them, so the capability is in the predicate even though
             nothing on screen reaches it now.
           */}
-          <FilterBand>
-            <FilterControls filters={filters} projects={projects} onChange={setFilters} />
-          </FilterBand>
+          {/*
+            DETAILED ONLY. These three narrow ROWS — a text search over titles
+            and notes, a project, a billable mark — and Summary has no rows. It
+            answers "where did this range go" with four figures and four charts,
+            and a search box over a bar chart is a control offering to do
+            something the view cannot show you the result of.
+
+            THE FILTERS STILL APPLY, which is the part that needs saying out
+            loud rather than hiding. `breakdownArgs` carries them into the one
+            query both tabs read, so a project chosen on Detailed still narrows
+            Summary's charts after the switch — correctly, since the two tabs
+            are two views of one question, but invisibly once the band is gone.
+            A silently-narrowed chart on a billing tool is the same defect class
+            as a header total belonging to another range, so when a filter is
+            set and the band is not on screen, the page says so instead.
+          */}
+          {view === "detailed" ? (
+            <FilterBand>
+              <FilterControls filters={filters} projects={projects} onChange={setFilters} />
+            </FilterBand>
+          ) : hasClientSideFilter(filters) ? (
+            <FilterBand>
+              <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                These figures are narrowed by a filter set on Detailed.
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() =>
+                    setFilters((current) => ({
+                      ...current,
+                      projectId: null,
+                      billableOnly: false,
+                      text: "",
+                      presets: [],
+                    }))
+                  }
+                >
+                  Clear it
+                </Button>
+              </p>
+            </FilterBand>
+          ) : null}
         </>
       }
     >
