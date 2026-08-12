@@ -2,6 +2,7 @@ import { Resend } from "@convex-dev/resend"
 import { components } from "./_generated/api"
 import type { GenericActionCtx } from "convex/server"
 import type { DataModel } from "./_generated/dataModel"
+import { APP_NAME } from "@shared/brand"
 
 /**
  * testMode defaults to true in this component, which silently restricts
@@ -15,11 +16,11 @@ export const resend = new Resend(components.resend, {
 
 // Resend requires a verified domain for real sending. onboarding@resend.dev
 // works without one but only delivers to your own Resend account address.
-const FROM = process.env.EMAIL_FROM ?? "Trace <onboarding@resend.dev>"
+const FROM = process.env.EMAIL_FROM ?? `${APP_NAME} <onboarding@resend.dev>`
 
 function resetEmail(url: string) {
   const text = [
-    "Reset your Trace password",
+    `Reset your ${APP_NAME} password`,
     "",
     "Open this link to choose a new password:",
     url,
@@ -33,7 +34,7 @@ function resetEmail(url: string) {
   // theme; it tries to be readable everywhere.
   const html = `
     <div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1a1a1a;max-width:480px">
-      <p style="margin:0 0 16px"><strong>Reset your Trace password</strong></p>
+      <p style="margin:0 0 16px"><strong>Reset your ${APP_NAME} password</strong></p>
       <p style="margin:0 0 24px">Choose a new password using the link below.</p>
       <p style="margin:0 0 24px">
         <a href="${url}" style="display:inline-block;padding:10px 16px;background:#1a1a1a;color:#ffffff;text-decoration:none;border-radius:6px">Set a new password</a>
@@ -99,7 +100,7 @@ export async function sendPasswordResetEmail(
     await resend.sendEmail(ctx, {
       from: FROM,
       to,
-      subject: "Reset your Trace password",
+      subject: `Reset your ${APP_NAME} password`,
       text,
       html,
     })
