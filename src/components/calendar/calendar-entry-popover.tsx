@@ -246,7 +246,16 @@ export function CalendarEntryPopover({
                     aria-hidden="true"
                     className="size-3.5 shrink-0 text-muted-foreground"
                   />
-                  <span className="tabular">
+                  {/*
+                    `whitespace-nowrap`, on both stamps below. "1:00 PM" is ONE
+                    reading, and the space inside it is the only break
+                    opportunity in the string — so in a narrow popover the
+                    meridiem wrapped to its own line and the row grew to two,
+                    which is what the trailing `…` and the `min-w-0` on this
+                    button between them made possible. A timestamp broken across
+                    lines is not a timestamp; it is two numbers.
+                  */}
+                  <span className="tabular whitespace-nowrap">
                     {formatTimeOfInstant(entry.startedAt, timeZone, use12Hour)}
                   </span>
                   <ArrowRight
@@ -258,7 +267,7 @@ export function CalendarEntryPopover({
                     value that looks recorded when it is not — the same
                     ellipsis `formatTimeRange` uses everywhere else.
                   */}
-                  <span className="tabular">
+                  <span className="tabular whitespace-nowrap">
                     {entry.endedAt === null
                       ? "…"
                       : formatTimeOfInstant(entry.endedAt, timeZone, use12Hour)}

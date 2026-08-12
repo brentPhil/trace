@@ -8,6 +8,7 @@ import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
 import { TotalsRow } from "@/components/entries/totals-row"
+import { FilterBand } from "@/components/history/filter-band"
 import { RangeBar } from "@/components/timer/range-bar"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
@@ -418,36 +419,25 @@ export function Timer() {
       header={
         <>
           {/*
-            The totals, and the switcher between the two views of them.
+            THE CONTROLS COME FIRST, directly under the timer bar.
 
-            "+ Add entry" used to sit here, and the comment this replaces
-            argued for it: the numbers to its left are what prompt "I forgot to
-            start the timer", so the control belonged next to them. That was
-            right while the button lived on this page — and the button living
-            on this page was the problem. Noticing a forgotten block happens on
-            /reports at least as often, and the control was not there.
+            This row and the totals below it were the other way round until
+            2026-08-12, and the swap is worth the note. A page's header should
+            open with what the reader ACTS on, not with what it reports: the
+            range and the view switcher decide what the rest of the page is
+            showing, while the totals are a readout OF it. Under the old order
+            the first thing beneath the timer bar was three numbers, and the
+            controls that governed everything below sat in the gap between them
+            and the grid, belonging to neither.
 
-            It is a `+` beside Play in the timer bar now, which sits in the
-            shell above the outlet and is therefore on every page. Same
-            argument about adjacency, applied to the control it is actually
-            adjacent to: the one that starts and stops the timer you forgot to
-            start.
-          */}
-          <div className="flex w-full flex-wrap items-center gap-4 px-4">
-            <TotalsRow
-              className="py-3"
-              todayMs={totals.todayMs}
-              weekMs={totals.weekMs}
-              billableMs={totals.billableMs}
-              display={settings.durationDisplay}
-            />
+            It also puts the two clocks as far apart as the header allows. The
+            timer bar's running duration and `TotalsRow`'s "Today" are different
+            questions — this session versus the whole day — and stacked
+            immediately against each other they read as one number restated.
 
-          </div>
-
-          {/*
-            The range bar sticks with the totals, because it is a control over
-            what scrolls beneath it — Page's stated test for what belongs in
-            this slot. It is inside the measured element, so `Page` accounts
+            The range bar sticks with the rest of the header, because it is a
+            control over what scrolls beneath it, which is Page's stated test
+            for this slot. It is inside the measured element, so `Page` accounts
             for its height without this file measuring anything.
 
             ON SCREEN IN BOTH VIEWS, which is the change this bar was reshaped
@@ -455,7 +445,7 @@ export function Timer() {
             had a range; the range bounds the LIST now too, so a control that
             came and went with the tab would be a filter silently dropped.
           */}
-          <div className="flex w-full flex-wrap items-center gap-3 px-4 pb-3">
+          <div className="flex w-full flex-wrap items-center gap-3 px-4 pt-3 pb-3">
             {/* `flex-1 min-w-0` so the bar keeps its own internal `ml-auto` —
                 the range total still pins to the right of the BAR — while the
                 switcher sits beyond it rather than being pushed off the row. */}
@@ -509,6 +499,39 @@ export function Timer() {
               </TabsList>
             </Tabs>
           </div>
+
+          {/*
+            THE TOTALS, in the band the filter bar used to have.
+
+            `FilterBand` is the shape, not a coincidence: a full-bleed strip of
+            Surface between two hairlines is how this product marks the boundary
+            between the page's chrome and the rows it is about — a day header
+            does the same. The filter bar was removed from this page, and the
+            band it left is exactly what the totals wanted, because they are the
+            LAST thing before the log and they summarise it.
+
+            "+ Add entry" used to sit beside these numbers, and the comment this
+            replaces argued for it: the totals are what prompt "I forgot to
+            start the timer", so the control belonged next to them. That was
+            right while the button lived on this page — and the button living on
+            this page was the problem. Noticing a forgotten block happens on
+            /reports at least as often, and the control was not there. It is a
+            `+` beside Play in the timer bar now, which sits in the shell above
+            the outlet and is therefore on every page: the same argument about
+            adjacency, applied to the control it is actually adjacent to.
+
+            `className` carries no `py-3` here — `FilterBand` supplies the
+            band's own vertical rhythm, and adding a second one would make this
+            strip taller than the identical band on /reports.
+          */}
+          <FilterBand>
+            <TotalsRow
+              todayMs={totals.todayMs}
+              weekMs={totals.weekMs}
+              billableMs={totals.billableMs}
+              display={settings.durationDisplay}
+            />
+          </FilterBand>
         </>
       }
     >
