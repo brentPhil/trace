@@ -614,19 +614,44 @@ export function CalendarPanel({
       /*
        * `top-…!` IS LOAD-BEARING, and the `!` is the whole fix.
        *
-       * `skeleton.css` already makes this row `position: sticky; top: 0`, and
-       * it is imported as a plain stylesheet — UNLAYERED. Unlayered rules beat
-       * anything in `@layer utilities`, which is where Tailwind puts its
-       * classes, regardless of specificity or source order. So
-       * `top-(--log-sticky-top)` lost silently: the computed `top` stayed
-       * `0px`, the row pinned to the very top of the VIEWPORT, and the page
-       * header — `z-20` against this row's `z-10` — drew straight over it. The
-       * dates vanished under the range bar the moment you scrolled, which
-       * reads as "the header does not stick" even though it was sticking
-       * perfectly, just to the wrong line.
+       * THE CANONICAL EXPLANATION FOR EVERY `!` IN THIS FILE. The other two
+       * sites — `px-2! py-2!` and `items-center!` on `dayHeaderClass` — point
+       * here rather than restating it, because the reasoning is easy to get
+       * subtly wrong and the wrong version invites a change that breaks all
+       * four at once.
        *
-       * `.hatch-empty` in `styles.css` is unlayered for the same reason and
-       * wins the same way; it is worth knowing this file has two of them.
+       * WHAT WENT WRONG. `skeleton.css` already makes this row
+       * `position: sticky; top: 0 !important`, and a plain
+       * `top-(--log-sticky-top)` lost to it: the computed `top` stayed `0px`,
+       * the row pinned to the very top of the VIEWPORT, and the page header —
+       * `z-20` against this row's `z-10` — drew straight over it. The dates
+       * vanished under the range bar the moment you scrolled, which reads as
+       * "the header does not stick" even though it was sticking perfectly,
+       * just to the wrong line.
+       *
+       * WHY IT LOST, precisely: an author `!important` declaration outranks
+       * every author NORMAL declaration, whatever layer either sits in and
+       * whatever their specificity. Layers never entered it. (It is separately
+       * true that unlayered NORMAL declarations beat layered ones — that is
+       * what makes our own unlayered `.hatch-empty` in `styles.css` win — but
+       * that is a different rule and it is not what happened here.)
+       *
+       * WHY THE `!` WINS. It makes ours important too, and for IMPORTANT
+       * declarations CSS Cascade 5 INVERTS the layer order: the earliest layer
+       * wins, and UNLAYERED-important is the WEAKEST of all. `skeleton.css` is
+       * imported as a plain stylesheet — unlayered — so its `top: 0 !important`
+       * is the weakest important declaration in the document, and Tailwind's
+       * `@layer utilities` important beats it. That inversion is the entire
+       * mechanism, and it is why the `!` modifiers are the MINIMAL CORRECT FIX
+       * rather than a blunt instrument.
+       *
+       * WHAT NOT TO DO, and it is the obvious tidy-up: moving `skeleton.css`
+       * into a low-priority `@layer vendor` would REVERSE this. Its ~130
+       * `!important` rules would stop being unlayered — the weakest — and
+       * become the strongest important declarations in the sheet, since a
+       * layer declared before `utilities` wins the inverted ordering. All four
+       * `!` sites in this file would break at once, silently, with the class
+       * lists still reading correctly.
        */
       tableHeaderClass="sticky top-(--log-sticky-top)! z-10 border-b border-edge-soft bg-surface"
       tableBodyClass="bg-surface"
@@ -678,15 +703,13 @@ export function CalendarPanel({
        * than a hue — `enlarger` here would say A TIMER IS RUNNING about a day.
        */
       /*
-       * `px-2! py-2!` — THE `!` AGAIN, and for the third time in this file the
-       * same cause.
-       *
-       * `skeleton.css` is imported unlayered and zeroes cell padding with
-       * `!important`; unlayered rules beat `@layer utilities` whatever their
-       * specificity, so a plain `py-2` here computed to `0px` on all four
-       * sides. Measured in Chrome: `padding: 0px 0px 0px 0px` on a 144px cell.
-       * The sticky header's `top` and `.hatch-empty` lose the same way — if a
-       * class on this component looks ignored, this is why.
+       * `px-2! py-2!` — THE `!` AGAIN, same cause as the sticky header's
+       * `top-…!` above. `skeleton.css` zeroes cell padding with `!important`,
+       * so a plain `py-2` here computed to `0px` on all four sides: measured in
+       * Chrome as `padding: 0px 0px 0px 0px` on a 144px cell. The full
+       * mechanism — and, more to the point, what must NOT be done about it —
+       * is on `tableHeaderClass` above. If a class on this component looks
+       * ignored, read that comment first.
        *
        * Horizontal padding as well as vertical, which the old rule never had:
        * without it a column's label sits flush against the rule dividing it
@@ -716,7 +739,9 @@ export function CalendarPanel({
            * stayed 38px left because `align-items: flex-start` was holding it
            * there. Both are kept — `justify-center` for the vertical and
            * `items-center!` for the horizontal, the `!` because skeleton.css
-           * sets that one too.
+           * sets that one too, with `!important`. See `tableHeaderClass` above
+           * for why the `!` is what beats it and why layering skeleton.css
+           * would take it back out.
            */
           "items-center! justify-center px-2! py-2!",
           dayOf(info.date.getTime(), timeZone) === today && "bg-surface-raised"
