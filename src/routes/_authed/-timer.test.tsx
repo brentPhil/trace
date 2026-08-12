@@ -86,8 +86,14 @@ vi.mock("@/components/entries/entry-log", () => ({
  * every element as zero-sized, so a real one rendered here would be an
  * assertion about nothing — and the panel's own suite already exercises what it
  * draws (`calendar-panel.test.tsx`). What this file is for is the branch around
- * it: which view is on screen, what the range control does across the switch,
- * and what a click on a block does.
+ * it: which view is on screen and what the range control does across the
+ * switch.
+ *
+ * WHAT A CLICK ON A BLOCK DOES IS NO LONGER THIS FILE'S BUSINESS. It used to
+ * be: the click was handled by the PAGE, which switched view, scrolled a row
+ * into view and focused it, or raised one of three toasts when no row existed.
+ * The grid opens an editor anchored to the block instead, so the behaviour and
+ * its tests live in `calendar-panel.test.tsx` beside the popover itself.
  *
  * IT RENDERS WHAT IT IS GIVEN, which a bare `<div />` did not. Discarding every
  * prop made four behaviours of this page unassertable. In particular it prints
@@ -100,11 +106,9 @@ vi.mock("@/components/calendar/calendar-panel", () => ({
   CalendarPanel: ({
     entries,
     range,
-    onEntryClick,
   }: {
     entries: Array<Doc<"timeEntries">>
     range: CalendarRange
-    onEntryClick: (entryId: string) => void
   }) => (
     <div
       data-testid="calendar-panel"
@@ -114,9 +118,7 @@ vi.mock("@/components/calendar/calendar-panel", () => ({
     >
       <span data-testid="calendar-rows">{entries.length}</span>
       {entries.map((entry) => (
-        <button key={entry._id} onClick={() => onEntryClick(entry._id)}>
-          {`block: ${entry.title}`}
-        </button>
+        <span key={entry._id}>{`block: ${entry.title}`}</span>
       ))}
     </div>
   ),
@@ -126,6 +128,13 @@ vi.mock("@/components/calendar/calendar-panel", () => ({
  * only threads these through as props; nothing here presses any of them. */
 vi.mock("@/hooks/use-entry-edit-mutations", () => ({
   useEntryEditMutations: () => ({ create: vi.fn(async () => {}) }),
+}))
+
+/* Same reason, one level up: Timer reaches for the log row's actions so it can
+ * hand them to the grid's popover, and every one of them is a Convex mutation.
+ * The grid is stubbed above, so nothing here can press one. */
+vi.mock("@/hooks/use-entry-actions", () => ({
+  useEntryActions: () => ({}),
 }))
 
 /* The same hand-driven `usePaginatedQuery` double `-reports.test.tsx` uses:
@@ -605,116 +614,6 @@ describe("Timer — the range control", () => {
     fireEvent.click(tab("List"))
 
     expect(screen.getByText("07/07/2026 - 08/05/2026")).toBeTruthy()
-  })
-})
-
-/*
- * CLICKING A BLOCK, when there is no row to land on.
- *
- * Both of these used to switch the view and focus nothing — for the running
- * entry, ALWAYS, since `groupByDay` never gives it a row; for anything outside
- * the loaded pages, whenever the user had stepped back further than the log has
- * paginated. The second is the worse of the two: the week on screen is replaced
- * by a log of recent rows, and nothing says why.
- */
-describe("Timer — clicking a calendar block", () => {
-  const block = (title: string) =>
-    screen.getByRole("button", { name: `block: ${title}` })
-
-  it("switches to the list when the entry has a row there", () => {
-    const entry = makeEntry({ title: "Client call" })
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [entry],
-      isDone: true,
-    })
-    renderTimer({ thisWeek: [entry] })
-
-    fireEvent.click(tab("Calendar"))
-    fireEvent.click(block("Client call"))
-
-    expect(screen.getByTestId("entry-log")).toBeTruthy()
-    expect(screen.queryByTestId("calendar-panel")).toBeNull()
-  })
-
-  it("stays on the calendar for the running entry, and says where it is", () => {
-    const running = makeEntry({
-      _id: "live" as unknown as Id<"timeEntries">,
-      title: "Standup",
-      endedAt: null,
-      durationMs: null,
-    })
-    // In the paginated results — and still not in the log's rows, because
-    // `groupByDay` deliberately keeps a running entry out of them.
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [running],
-      isDone: true,
-    })
-    renderTimer({ thisWeek: [running] })
-
-    fireEvent.click(tab("Calendar"))
-    fireEvent.click(block("Standup"))
-
-    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
-    expect(screen.queryByTestId("entry-log")).toBeNull()
-    expect(screen.getByText(/is still running/)).toBeTruthy()
-  })
-
-  it("stays on the calendar for a future entry, and does not send them backwards", () => {
-    /*
-     * The list's last instant is the end of TODAY while it is unbounded —
-     * pinned there so a clock-skewed entry cannot sit permanently on top —
-     * while the calendar's range is the whole current week. A Friday entry
-     * drawn on Wednesday's grid is therefore outside the list by construction,
-     * not merely unpaginated, and "Load earlier entries" walks the wrong way:
-     * no amount of loading earlier reaches a later day. The reachable way to
-     * get one is the `+` dialog's unbounded `<input type="date">`.
-     */
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ _id: "recent" as unknown as Id<"timeEntries"> })],
-      isDone: false, // pages remain, so the other message would have been offered
-    })
-    renderTimer({
-      thisWeek: [
-        makeEntry({
-          _id: "ahead" as unknown as Id<"timeEntries">,
-          title: "Mistyped month",
-          startedAt: NOW + 2 * 86_400_000,
-          endedAt: NOW + 2 * 86_400_000 + 3_600_000,
-        }),
-      ],
-    })
-
-    fireEvent.click(tab("Calendar"))
-    fireEvent.click(block("Mistyped month"))
-
-    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
-    expect(screen.getByText(/starts after the dates the list is showing/)).toBeTruthy()
-    // THE ASSERTION. The advice that cannot work must not be the one given.
-    expect(screen.queryByText(/Load earlier entries/)).toBeNull()
-  })
-
-  it("stays on the calendar for an entry outside the loaded pages", () => {
-    // The log paginates 50 at a time, newest first; the grid steps to any week.
-    // This block is on the grid and its row has simply never been fetched.
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ _id: "recent" as unknown as Id<"timeEntries"> })],
-      isDone: false,
-    })
-    renderTimer({
-      thisWeek: [
-        makeEntry({
-          _id: "unloaded" as unknown as Id<"timeEntries">,
-          title: "Deep history",
-        }),
-      ],
-    })
-
-    fireEvent.click(tab("Calendar"))
-    fireEvent.click(block("Deep history"))
-
-    expect(screen.getByTestId("calendar-panel")).toBeTruthy()
-    expect(screen.queryByTestId("entry-log")).toBeNull()
-    expect(screen.getByText(/has not been loaded into the list yet/)).toBeTruthy()
   })
 })
 

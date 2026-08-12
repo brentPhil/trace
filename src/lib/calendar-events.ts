@@ -129,8 +129,14 @@ export type CalendarEventProps = {
 
 export type CalendarEvent = EventInput & { extendedProps: CalendarEventProps }
 
-/** The smallest span FullCalendar will still draw. See `calendarEvents`. */
-const MIN_SPAN_MS = 60_000
+/**
+ * The smallest span FullCalendar will still draw. See `calendarEvents`.
+ *
+ * Exported because `calendar-panel.tsx` computes how tall a block will be in
+ * order to decide what text fits inside it, and a floor applied in one file and
+ * not the other would have it reasoning about a height the grid never draws.
+ */
+export const MIN_SPAN_MS = 60_000
 
 export function calendarEvents(
   entries: Array<Doc<"timeEntries">>,

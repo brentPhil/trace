@@ -80,37 +80,19 @@ export function EntryRow({
   return (
     <div
       /*
-       * ADDRESSABLE, so the calendar can hand focus to a row.
+       * NOT ADDRESSABLE, and no longer focusable.
        *
-       * Clicking a block on the grid does not open an editor of its own — the
-       * controls for that entry already exist here, and a second editor is two
-       * places to fix the same mistyped field. The grid switches to List and
-       * hands focus to this element instead, which it finds by this attribute.
-       *
-       * `tabIndex={-1}`, never `0`. The row must be focusable PROGRAMMATICALLY
-       * and must not join the tab order: a log of 200 rows would otherwise put
-       * 200 stops between the filter band and anything below it, and every
-       * control inside a row is already reachable on its own.
-       *
-       * AND IT HAS TO SHOW. `:focus-visible` is the wrong selector for exactly
-       * this row: the focus it receives arrives from a `.focus()` call made
-       * after a MOUSE click on the calendar, and a browser does not treat that
-       * as visible focus — so the only feedback a successful click-through had
-       * was the scroll, on a page that is often already scrolled to the row.
-       * Hence `:focus`, which fires for both.
-       *
-       * An OUTLINE rather than a border shift, because the border here is
-       * already carrying the row separator — DESIGN.md's stated answer for a
-       * control in that position. The offset is NEGATIVE, unlike the timer
-       * bar's: this row is full-bleed, so an outline drawn outside it would be
-       * clipped at both ends of the viewport.
+       * This carried `data-entry-id` and `tabIndex={-1}` for one caller: the
+       * calendar, which switched to List, found the row by that attribute and
+       * called `.focus()` on it. A block on the grid opens its own editor now
+       * — the same controls, the same writes, anchored to the block — so
+       * nothing looks a row up by id and nothing focuses one programmatically.
+       * The `:focus` outline that existed to make that arrival visible went
+       * with them.
        */
-      data-entry-id={entry._id}
-      tabIndex={-1}
       className={cn(
         "group border-b border-edge-soft/60 last:border-b-0",
-        "transition-colors hover:bg-surface/60",
-        "focus:outline-2 focus:-outline-offset-2 focus:outline-ring"
+        "transition-colors hover:bg-surface/60"
       )}
     >
       {/*

@@ -1,17 +1,19 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import Calendar from "@fullcalendar/react"
 import timeGridPlugin from "@fullcalendar/react/timegrid"
+import { CalendarEntryPopover } from "@/components/calendar/calendar-entry-popover"
 import { ProjectDot } from "@/components/classifiers/project-dot"
-import { calendarEvents, dayTotals, drawnDays } from "@/lib/calendar-events"
+import { MIN_SPAN_MS, calendarEvents, dayTotals, drawnDays } from "@/lib/calendar-events"
 import { formatTimeOfInstant, formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { cn } from "@/lib/utils"
-import { dayOf } from "@shared/day"
+import { dayOf, dayWindow } from "@shared/day"
 import { formatClock } from "@shared/duration"
 import type {
   CalendarEventProps,
   CalendarRange,
 } from "@/lib/calendar-events"
+import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { EventApi } from "@fullcalendar/react"
 import type { Doc } from "../../../convex/_generated/dataModel"
@@ -40,6 +42,101 @@ const SLOT_MIN_HEIGHT = 48
 
 /** Enough that a four-minute entry is still a click target. */
 const EVENT_MIN_HEIGHT = 18
+
+/*
+ * WHAT ACTUALLY FITS INSIDE A BLOCK, in pixels, measured rather than guessed.
+ *
+ * Every line of a block's content is 16px: the title is `text-xs font-medium`
+ * (16.00 measured) and both meta lines are `text-[0.6875rem]` (15.70, rounded
+ * up so the taller of the two governs). `gap-0.5` puts 2px between them. The
+ * block spends 7px on itself before any text — `mb-px`, its two 1px borders,
+ * and `py-0.5` at each end.
+ *
+ * This exists because the content DID NOT ADAPT. Three lines needed 63px of
+ * block, which is 79 minutes at 48px an hour, so every entry shorter than that
+ * had its project name sliced through by the bottom edge — measured in Chrome
+ * as `content.scrollHeight = 51` inside a `clientHeight` of 34 on a 45-minute
+ * block. `overflow-hidden` made it a clean cut rather than a spill, which is
+ * why it survived: it looked like a design decision.
+ *
+ * `py-0.5` AND NOT `py-1`, which is the one place this scale is worth arguing
+ * about. Vertical padding at the bottom of the range is not spacing, it is
+ * minutes: each pixel at both ends costs 2.5 minutes of the shortest block that
+ * can still show its own title. At `py-1` that floor is 34 minutes, which
+ * silences the commonest block in this product — the half-hour meeting — and
+ * at `py-0.5` it is 29.
+ */
+const LINE_PX = 16
+const LINE_GAP_PX = 2
+const BLOCK_CHROME_PX = 1 + 2 + 4
+
+/** What a block of this pixel height can show without clipping any of it. */
+type BlockFit = { titleLines: 0 | 1 | 2; time: boolean; project: boolean }
+
+/**
+ * The content a block has room for, in the order the information is worth
+ * reading.
+ *
+ * TITLE FIRST, always: a block's position on the axis already says when it ran,
+ * which is the entire point of a time grid, so the title is the one thing the
+ * picture cannot supply. Then the times (exact minutes the axis only
+ * approximates), then the project. The last row bought is a SECOND TITLE LINE —
+ * which is what the report of "titles truncate to … earlier than they need to"
+ * actually was: a two-hour block has 70px of room and was spending 52 of it,
+ * truncating a title with a blank third of the block underneath it.
+ *
+ * `hasProject` is taken rather than assumed because `ProjectDot` renders
+ * nothing at all for an unclassified entry — so on those, the row the project
+ * would have used is free for the title's second line instead of being left
+ * empty.
+ */
+function blockFit(heightPx: number, hasProject: boolean): BlockFit {
+  const rows = Math.floor(
+    (heightPx - BLOCK_CHROME_PX + LINE_GAP_PX) / (LINE_PX + LINE_GAP_PX)
+  )
+  if (rows <= 0) return { titleLines: 0, time: false, project: false }
+  if (rows === 1) return { titleLines: 1, time: false, project: false }
+  if (rows === 2) return { titleLines: 1, time: true, project: false }
+  if (rows === 3) {
+    return hasProject
+      ? { titleLines: 1, time: true, project: true }
+      : { titleLines: 2, time: true, project: false }
+  }
+  return { titleLines: 2, time: true, project: hasProject }
+}
+
+/**
+ * How tall FullCalendar will draw this block, from the same numbers it uses.
+ *
+ * The grid is a linear scale — `SLOT_MIN_HEIGHT` pixels per hour — so a
+ * segment's height is its span, floored at `EVENT_MIN_HEIGHT`. Overlap packing
+ * changes a block's WIDTH and never its height, so nothing here has to know
+ * about it.
+ *
+ * CLIPPED AT MIDNIGHT, through `@shared/day` like every other boundary in this
+ * product. An entry that crosses midnight is drawn as two segments and this
+ * runs for the head, whose height is start-to-midnight rather than the whole
+ * entry — a 23:00–04:00 shift is a one-hour block on the day it started, and
+ * sizing its text for five hours would put four lines in a box with room for
+ * one. The tail returns before this is reached; it carries no text by the Hatch
+ * Rule.
+ */
+function blockHeightPx(
+  startedAt: number,
+  endedAt: number | null,
+  nowMs: number,
+  timeZone: string
+): number {
+  const dayEndMs = dayWindow(dayOf(startedAt, timeZone), timeZone).toMs
+  // The same one-minute floor `calendarEvents` applies, so a zero-length entry
+  // is measured as the block the grid actually draws for it.
+  const drawnEnd = Math.min(
+    Math.max(endedAt ?? nowMs, startedAt + MIN_SPAN_MS),
+    dayEndMs
+  )
+  const hours = (drawnEnd - startedAt) / 3_600_000
+  return Math.max(EVENT_MIN_HEIGHT, hours * SLOT_MIN_HEIGHT)
+}
 
 /*
  * Hour rules and column dividers.
@@ -102,8 +199,10 @@ export function CalendarPanel({
   use12Hour,
   display,
   nowMs,
+  projects,
   projectsById,
-  onEntryClick,
+  tags,
+  actions,
 }: {
   entries: Array<Doc<"timeEntries">>
   /**
@@ -125,8 +224,20 @@ export function CalendarPanel({
   use12Hour: boolean
   display: DurationDisplay
   nowMs: number
+  /** The pickers' options. `projectsById` is the same list keyed for the render
+   *  hooks, which look a block's project up once per block per render. */
+  projects: Array<Doc<"projects">>
   projectsById: Map<string, Doc<"projects">>
-  onEntryClick: (entryId: string) => void
+  tags: Array<Doc<"tags">>
+  /**
+   * What a block's popover may do to its entry — the log row's own vocabulary,
+   * from `useEntryActions`.
+   *
+   * PASSED IN, not reached for, exactly as `EntryRow` takes its actions: this
+   * component stays renderable against fixtures with no backend anywhere near
+   * it, and every write in the product still originates in one hook.
+   */
+  actions: EntryActions
 }) {
   /*
    * THE CLOCK, ADMITTED ONLY WHEN SOMETHING IS ACTUALLY RUNNING.
@@ -156,6 +267,31 @@ export function CalendarPanel({
    * which is the whole cost this replaces `n` day-lookups per second with.
    */
   const clockMs = entries.some((entry) => entry.endedAt === null) ? nowMs : 0
+
+  /*
+   * THE BLOCK THAT IS BEING EDITED, and the element its popover hangs off.
+   *
+   * The element rather than only the id, because the grid draws the blocks and
+   * there is no `Popover.Trigger` of ours to anchor to — FullCalendar's
+   * `eventClick` hands over the node it built, and Base UI's positioner takes
+   * it directly.
+   *
+   * The ENTRY is looked up from `entries` on every render rather than stored
+   * here, so an edit made inside the popover is reflected by the popover: the
+   * Convex subscription pushes the new row through this prop, and a snapshot
+   * taken at click time would show the user their own edit failing to appear.
+   * It also means a row that is deleted — or that leaves the range because its
+   * day was changed — closes the popover by simply not being found.
+   */
+  const [selected, setSelected] = useState<{
+    entryId: string
+    anchor: HTMLElement
+  } | null>(null)
+
+  const editing =
+    selected === null
+      ? null
+      : (entries.find((entry) => entry._id === selected.entryId) ?? null)
 
   const events = useMemo(() => calendarEvents(entries, clockMs), [entries, clockMs])
 
@@ -198,6 +334,7 @@ export function CalendarPanel({
   )
 
   return (
+    <>
     <Calendar
       plugins={PLUGINS}
       initialView={VIEW}
@@ -298,9 +435,27 @@ export function CalendarPanel({
           )
         }
       }}
+      /*
+       * A CLICK OPENS AN EDITOR, ANCHORED TO THE BLOCK.
+       *
+       * It used to switch to List, scroll that entry's row into view and focus
+       * it — and for three kinds of block (the running entry, one outside the
+       * loaded pages, one dated ahead of today) there was no row to land on, so
+       * it raised a toast and stayed put. The spec argued that at length under
+       * "Read, not draw", and the spec has been rewritten: the grid still draws
+       * nothing by drag, but a block is now editable in place. Every control in
+       * that popover is the log row's, and every write goes through the same
+       * hook, so "two places to fix the same mistyped field" is two doors onto
+       * one implementation rather than two implementations.
+       *
+       * `info.el` is the block's own element. A midnight TAIL hands over the
+       * same `entryId` as its head — both segments are one entry — so clicking
+       * a continuation opens that entry's editor rather than pretending there
+       * is a second entry to edit.
+       */
       eventClick={(info) => {
         info.jsEvent.preventDefault()
-        onEntryClick(propsOf(info.event).entryId)
+        setSelected({ entryId: propsOf(info.event).entryId, anchor: info.el })
       }}
       // ---- Styling. One prop per element; no stylesheet override anywhere. --
       className="text-sm"
@@ -393,8 +548,17 @@ export function CalendarPanel({
          * times per render, and this component re-renders every second.
          *
          * The Tabular Rule: every digit the user reads, at any size.
+         *
+         * `px-3` rather than `pr-2`. The rail is as wide as this label plus its
+         * padding, so this is the only control over how far the hours sit from
+         * both the viewport edge and the divider they label across — and at
+         * `pr-2` with no left padding, "12:00 AM" started on the page's first
+         * pixel and ended 8px from the first column's blocks. 12px each side
+         * puts the digits inside a margin on the left and clear of the grid on
+         * the right, and the first column's blocks add 2px of their own (see
+         * `columnEventClass`).
          */
-        <span className="tabular pr-2 text-xs text-muted-foreground">
+        <span className="tabular px-3 text-xs text-muted-foreground">
           {formatTimeOfInstant(info.date.getTime(), timeZone, use12Hour)}
         </span>
       )}
@@ -443,7 +607,25 @@ export function CalendarPanel({
           // No transition anywhere: the running block's height changes with
           // the clock, and an eased height change is continuous motion with no
           // reduced-motion alternative.
-          "overflow-hidden rounded-md px-1.5 py-1 text-left",
+          /*
+           * THE MARGINS ARE WHAT MAKE TWO BLOCKS TWO OBJECTS.
+           *
+           * FullCalendar positions a harness at `left: 0; right: 0` inside the
+           * column and lays this element out as its only flex child, so a
+           * margin here — and nothing else — insets the block. Measured: a
+           * 143.16px harness draws a 141.16px block under `mx-0.5`.
+           *
+           * Without them a block ran edge to edge into the column dividers and
+           * two back-to-back entries shared one hairline, which read as a
+           * single striped block. `mb-px` rather than `mb-0.5` because each
+           * block already carries its own 1px border: 1 + 1 + 1 is three pixels
+           * of separation, and every pixel taken here comes off the text.
+           *
+           * `px-1` where it used to be `px-1.5`: the 2px margin now sits
+           * outside the border, so the title's usable width is 129px either
+           * way. Spending the same budget differently, not narrowing the text.
+           */
+          "mx-0.5 mb-px overflow-hidden rounded-md px-1 py-0.5 text-left",
           running
             ? // Cold light, and only here: something IS running.
               "bg-enlarger/15 text-foreground"
@@ -484,53 +666,118 @@ export function CalendarPanel({
           )
         }
 
+        /*
+         * `formatTimeRange`, never FullCalendar's `timeText`.
+         *
+         * timegrid's default event format is
+         * `{hour:'numeric', minute:'2-digit', meridiem:false}`, and
+         * `meridiem:false` DELETES the am/pm string rather than switching to a
+         * 24-hour cycle — so a 09:30 entry and a 21:30 entry both rendered
+         * "9:30 – 10:30" and `use12Hour` was ignored entirely. Going through
+         * the app's own formatter is also what makes a block read identically
+         * to the same entry's row in the log: one spelling of a time,
+         * everywhere.
+         *
+         * A running entry shows its elapsed clock instead, because that is the
+         * number that is still moving. Both instants come from `extendedProps`,
+         * so this is the STORED start, not a `Date` that has been through
+         * FullCalendar's own parsing.
+         */
+        const timeText =
+          endedAt === null
+            ? formatClock(nowMs - startedAt)
+            : formatTimeRange(startedAt, endedAt, timeZone, use12Hour)
+
+        const fit = blockFit(
+          blockHeightPx(startedAt, endedAt, nowMs, timeZone),
+          project !== null
+        )
+
+        /*
+         * What the block cannot show, said out loud instead.
+         *
+         * Only the parts that were dropped, so nothing is announced twice —
+         * and the block's accessible name stays complete however short it is.
+         * The spec's "a block too short for text shows nothing but its fill;
+         * its title is on the `title` attribute and in its accessible name" is
+         * this line.
+         */
+        const spoken = [
+          fit.titleLines === 0 ? titleOf(info.event) : null,
+          fit.time ? null : timeText,
+          fit.project || project === null ? null : project.name,
+        ]
+          .filter((part) => part !== null)
+          .join(" — ")
+
         return (
           /*
            * `title`, in ADDITION to the accessible name the text below already
-           * gives the block. A block only as tall as `eventMinHeight` clips its
-           * own title, and the native tooltip is the only way to read it without
-           * leaving the grid. It goes on this element rather than on the block
-           * itself because `columnEventClass` is the only hook the block element
-           * has and it takes class names, not attributes — and this div fills
-           * the block's content box, so the hover target is the same one.
+           * gives the block. A block only as tall as `eventMinHeight` shows no
+           * text at all, and the native tooltip is the only way to read it
+           * without leaving the grid — so it carries the times as well as the
+           * title, since those are the first thing to go. It sits on this
+           * element rather than on the block itself because `columnEventClass`
+           * is the only hook the block element has and it takes class names,
+           * not attributes — and this div fills the block's content box, so the
+           * hover target is the same one.
            *
            * The midnight TAIL is deliberately excluded: it returns above, and
            * "no title on the tail" is the Hatch Rule, not an oversight.
            */
           <div
-            title={titleOf(info.event)}
+            title={`${titleOf(info.event)} — ${timeText}`}
             className="flex min-w-0 flex-col gap-0.5"
           >
-            <span className="truncate text-xs font-medium">
-              {titleOf(info.event)}
-            </span>
-            {/*
-             * `formatTimeRange`, never FullCalendar's `timeText`.
-             *
-             * timegrid's default event format is
-             * `{hour:'numeric', minute:'2-digit', meridiem:false}`, and
-             * `meridiem:false` DELETES the am/pm string rather than switching
-             * to a 24-hour cycle — so a 09:30 entry and a 21:30 entry both
-             * rendered "9:30 – 10:30" and `use12Hour` was ignored entirely.
-             * Going through the app's own formatter is also what makes a block
-             * read identically to the same entry's row in the log: one
-             * spelling of a time, everywhere.
-             *
-             * A running entry shows its elapsed clock instead, because that is
-             * the number that is still moving. Both instants come from
-             * `extendedProps`, so this is the STORED start, not a `Date` that
-             * has been through FullCalendar's own parsing.
-             */}
-            <span className="tabular truncate text-[0.6875rem] text-muted-foreground">
-              {endedAt === null
-                ? formatClock(nowMs - startedAt)
-                : formatTimeRange(startedAt, endedAt, timeZone, use12Hour)}
-            </span>
-            <ProjectDot project={project} className="text-[0.6875rem]" />
+            {fit.titleLines === 0 ? null : (
+              <span
+                className={cn(
+                  "text-xs font-medium",
+                  // `line-clamp-2` is a truncate that is allowed a second line:
+                  // it still ends in an ellipsis, but only after using the room
+                  // the block actually has. `truncate` at one line, because
+                  // `line-clamp-1` sets `display: -webkit-box`, which a
+                  // single-line title does not need.
+                  fit.titleLines === 1 ? "truncate" : "line-clamp-2"
+                )}
+              >
+                {titleOf(info.event)}
+              </span>
+            )}
+            {fit.time ? (
+              <span className="tabular truncate text-[0.6875rem] text-muted-foreground">
+                {timeText}
+              </span>
+            ) : null}
+            {fit.project ? (
+              <ProjectDot project={project} className="text-[0.6875rem]" />
+            ) : null}
+            {spoken === "" ? null : <span className="sr-only">{spoken}</span>}
           </div>
         )
       }}
     />
+
+      {/*
+        THE EDITOR, mounted only while a block is selected.
+        Unmounting is what closes it, so there is no second flag that could
+        disagree with the selection — and `editing` going `null` because the
+        entry was deleted or re-dated out of the range closes it for free.
+      */}
+      {selected === null || editing === null ? null : (
+        <CalendarEntryPopover
+          entry={editing}
+          anchor={selected.anchor}
+          onClose={() => setSelected(null)}
+          timeZone={timeZone}
+          use12Hour={use12Hour}
+          weekStartDay={weekStartDay}
+          projects={projects}
+          tags={tags}
+          actions={actions}
+        />
+      )}
+    </>
   )
 }
 

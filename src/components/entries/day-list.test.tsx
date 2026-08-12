@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
-import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 
 /*
@@ -112,57 +111,14 @@ describe("DayList empty state", () => {
 })
 
 /*
- * How the calendar reaches a row.
- *
- * Clicking a block on the grid switches to List and hands focus to that
- * entry's row, which it finds by `data-entry-id`. Both halves of that are
- * properties of the row and invisible in a screenshot, so this is the only
- * thing that can hold them.
+ * "EntryRow — addressable from the calendar" USED TO SIT HERE, and it is gone
+ * rather than moved. It pinned `data-entry-id` and `tabIndex === -1` on the
+ * row, both of which existed for one caller: the calendar, which switched to
+ * List, found the row by that attribute and focused it. A block on the grid
+ * opens its own editor now — see `calendar-entry-popover.tsx` — so nothing
+ * looks a row up by id, and a test asserting an attribute no code reads is a
+ * test that can only ever fail for the wrong reason.
  */
-describe("EntryRow — addressable from the calendar", () => {
-  const group = {
-    day: "2026-08-05",
-    label: "Today",
-    entries: [makeEntry({ title: "Client call" })],
-    notedCount: 0,
-    totalMs: 3_600_000,
-    billableMs: 0,
-    runningCount: 0,
-  }
-
-  function renderOneRow() {
-    render(
-      <DayList
-        groups={[group]}
-        timeZone="UTC"
-        use12Hour
-        weekStartDay={1}
-        projects={[]}
-        tags={[]}
-        actions={noActions}
-      />
-    )
-  }
-
-  it("carries the entry's id, so a block on the grid can find its row", () => {
-    renderOneRow()
-    const row = document.querySelector(`[data-entry-id="${group.entries[0]._id}"]`)
-    expect(row).not.toBeNull()
-  })
-
-  it("is focusable programmatically without joining the tab order", () => {
-    // `tabIndex` is load-bearing at -1: the calendar has to be able to call
-    // `.focus()` on this, and at 0 a log of 200 rows would put 200 tab stops
-    // between the filter band and anything beneath it.
-    renderOneRow()
-    const row = document.querySelector<HTMLElement>("[data-entry-id]")
-    expect(row).not.toBeNull()
-    expect(row!.tabIndex).toBe(-1)
-
-    row!.focus()
-    expect(document.activeElement).toBe(row)
-  })
-})
 
 describe("LogSkeleton", () => {
   /*

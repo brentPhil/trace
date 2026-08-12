@@ -5,6 +5,7 @@ import { RangeBar } from "@/components/timer/range-bar"
 import { boundsOf, rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { calendarLabel } from "@/lib/calendar-label"
 import { rangePillLabel } from "@/lib/timer-range"
+import { noEntryActions } from "@/test-utils/fixtures"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
@@ -98,8 +99,10 @@ function Harness({
         use12Hour={false}
         display="hms"
         nowMs={NOW}
+        projects={[]}
         projectsById={new Map()}
-        onEntryClick={() => {}}
+        tags={[]}
+        actions={noEntryActions}
       />
       <div
         data-testid="range-bar"

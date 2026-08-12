@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
 import { rangeOf } from "@/lib/calendar-events"
+import { noEntryActions } from "@/test-utils/fixtures"
+import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { CalendarSize } from "@/lib/calendar-label"
-import type { Doc } from "../../../convex/_generated/dataModel"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as CalendarEventsModuleType from "@/lib/calendar-events"
 
 type CalendarEventsModule = typeof CalendarEventsModuleType
@@ -105,8 +107,10 @@ function buildProps(over: Harness): PanelProps {
     use12Hour: false,
     display: "hms",
     nowMs: NOW,
+    projects: [],
     projectsById: new Map(),
-    onEntryClick: vi.fn(),
+    tags: [],
+    actions: noEntryActions,
     range: rangeOf(anchor, size, weekStartDay, timeZone),
     // Last, so an explicit `range` in a case beats the derived one.
     ...rest,
@@ -148,6 +152,15 @@ function railLabels(container: HTMLElement): Array<string> {
  */
 function blocks(container: HTMLElement): Array<HTMLElement> {
   return [...container.querySelectorAll<HTMLElement>(".rounded-md")]
+}
+
+/** The block reading `text` — the assertion target, and the click target. */
+function blockSaying(container: HTMLElement, text: string): HTMLElement {
+  const found = blocks(container).find((block) =>
+    block.textContent.includes(text)
+  )
+  if (found === undefined) throw new Error(`no block reading "${text}"`)
+  return found
 }
 
 afterEach(cleanup)
@@ -226,20 +239,14 @@ describe("CalendarPanel", () => {
         ],
       })
 
-      const blockSaying = (text: string) => {
-        const found = blocks(container).find((block) =>
-          block.textContent.includes(text)
-        )
-        if (found === undefined) throw new Error(`no block reading "${text}"`)
-        return found
-      }
-
-      expect(blockSaying("Still going").className).toContain("border-enlarger")
-      expect(blockSaying("Still going").className).toContain("bg-enlarger/15")
+      const live = blockSaying(container, "Still going")
+      expect(live.className).toContain("border-enlarger")
+      expect(live.className).toContain("bg-enlarger/15")
       // A completed entry is the ordinary raised surface. `enlarger` on the
       // grid means a timer is running and nothing else.
-      expect(blockSaying("Finished").className).not.toContain("enlarger")
-      expect(blockSaying("Finished").className).toContain("border-edge-raised")
+      const done = blockSaying(container, "Finished")
+      expect(done.className).not.toContain("enlarger")
+      expect(done.className).toContain("border-edge-raised")
     })
 
     it("shows the elapsed clock on a running block, not a closing time", () => {
@@ -455,5 +462,331 @@ describe("CalendarPanel", () => {
       const { container } = renderPanel({ size: "day" })
       expect(renderedDays(container)).toEqual(["2026-08-11"])
     })
+  })
+})
+
+/*
+ * CLICKING A BLOCK OPENS AN EDITOR, which reverses what this grid used to do.
+ *
+ * It switched to List, scrolled the entry's row into view and focused it — and
+ * for the running entry, for anything outside the loaded pages and for anything
+ * dated ahead of today there was no row to land on, so it raised a toast and
+ * stayed where it was. Those three cases are gone rather than fixed: every block
+ * is editable now, including the ones the log never had a row for, which is what
+ * made the click worth reversing.
+ *
+ * Every assertion below is that the CONTROL is present and reports what was
+ * typed. What each write then does to the database is tested where the mutations
+ * are, because this surface and the log row reach one `useEntryActions`.
+ */
+function spyActions(over: Partial<EntryActions> = {}): EntryActions {
+  return {
+    onTitleChange: vi.fn(async () => {}),
+    onTimeChange: vi.fn(async () => {}),
+    onDayChange: vi.fn(async () => {}),
+    onDurationChange: vi.fn(async () => {}),
+    onClassify: vi.fn(),
+    onCreateProject: vi.fn(async () => ({
+      projectId: "p1" as unknown as Id<"projects">,
+    })),
+    onCreateTag: vi.fn(async () => ({ tagId: "t1" as unknown as Id<"tags"> })),
+    onRemove: vi.fn(),
+    onResume: vi.fn(),
+    onDuplicate: vi.fn(),
+    ...over,
+  }
+}
+
+const timesTrigger = () =>
+  screen.getByRole("button", { name: /edit start, end and day/i })
+
+const noTimesTrigger = () =>
+  screen.queryByRole("button", { name: /edit start, end and day/i })
+
+describe("CalendarPanel — clicking a block", () => {
+  /** 09:30–10:30 Manila: an hour, which is two rows of content. */
+  const clicked = entry({ title: "Client call" })
+
+  function openEditor(over: Harness = {}) {
+    const actions = spyActions()
+    const { container } = renderPanel({ entries: [clicked], actions, ...over })
+    fireEvent.click(blockSaying(container, "Client call"))
+    return { actions, container }
+  }
+
+  it("opens an editor on that entry rather than navigating anywhere", () => {
+    openEditor()
+    // The heading is the entry's own title, editable in place — the same
+    // `EditableTitle` the log row carries, one size larger.
+    expect(
+      screen.getByRole("button", { name: "Description: Client call" })
+    ).toBeTruthy()
+  })
+
+  it("shows the entry's start and end, through the app's own formatter", () => {
+    openEditor()
+    expect(timesTrigger().textContent).toBe("09:3010:30")
+    expect(timesTrigger().getAttribute("aria-label")).toContain(
+      "09:30 to 10:30"
+    )
+  })
+
+  it("commits a title edit", () => {
+    const { actions } = openEditor()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Description: Client call" })
+    )
+    const field = screen.getByLabelText("Description: Client call")
+    fireEvent.change(field, { target: { value: "Client call, rescheduled" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+
+    expect(actions.onTitleChange).toHaveBeenCalledWith(
+      clicked,
+      "Client call, rescheduled"
+    )
+  })
+
+  it("commits a time edit through the row's own time popover", () => {
+    // Not a second implementation of parsing: `EntryTimePopover` is mounted
+    // here with a different trigger, so `0915` still means 09:15 and the
+    // overnight and DST rules are the ones already tested against it.
+    const { actions } = openEditor()
+
+    fireEvent.click(timesTrigger())
+    const start = screen.getByLabelText("Start time")
+    fireEvent.change(start, { target: { value: "0915" } })
+    fireEvent.keyDown(start, { key: "Enter" })
+
+    expect(actions.onTimeChange).toHaveBeenCalledWith(
+      clicked,
+      "start",
+      Date.parse("2026-08-11T01:15:00Z")
+    )
+  })
+
+  it("offers the classifiers the row offers, and reports a billable toggle", () => {
+    const { actions } = openEditor()
+
+    expect(screen.getByRole("button", { name: "Project" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Tags" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Not billable" }))
+
+    expect(actions.onClassify).toHaveBeenCalledWith(clicked, { billable: true })
+  })
+
+  it("resumes and duplicates through the log's own actions", () => {
+    const { actions } = openEditor()
+
+    fireEvent.click(screen.getByRole("button", { name: "Resume Client call" }))
+    expect(actions.onResume).toHaveBeenCalledWith(clicked)
+
+    const again = openEditor()
+    fireEvent.click(screen.getByRole("button", { name: "Duplicate Client call" }))
+    expect(again.actions.onDuplicate).toHaveBeenCalledWith(clicked)
+  })
+
+  it("closes on Escape", () => {
+    openEditor()
+    expect(noTimesTrigger()).not.toBeNull()
+
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    expect(noTimesTrigger()).toBeNull()
+  })
+
+  it("closes when the × is pressed", () => {
+    openEditor()
+    fireEvent.click(screen.getByRole("button", { name: "Close" }))
+    expect(noTimesTrigger()).toBeNull()
+  })
+
+  it("opens the same entry's editor from the tail of a midnight crossing", () => {
+    /*
+     * A tail is a CONTINUATION, not a second entry — the Hatch Rule — so a
+     * click on one must not offer an editor claiming otherwise. Both segments
+     * carry the same `entryId`, so both open the one entry, times and all.
+     */
+    const { container } = renderPanel({
+      entries: [
+        entry({
+          title: "Night deploy",
+          startedAt: Date.parse("2026-08-12T15:00:00Z"), // 23:00 on the 12th
+          endedAt: Date.parse("2026-08-12T17:30:00Z"), // 01:30 on the 13th
+        }),
+      ],
+      actions: spyActions(),
+    })
+
+    const tail = blocks(container).find((block) =>
+      block.className.includes("hatch-empty")
+    )
+    fireEvent.click(tail!)
+
+    expect(
+      screen.getByRole("button", { name: "Description: Night deploy" })
+    ).toBeTruthy()
+    expect(timesTrigger().textContent).toBe("23:0001:30")
+  })
+
+  describe("the running entry", () => {
+    /** Started 11:00 Manila; `NOW` is 12:00 there. */
+    const live = entry({
+      title: "Still going",
+      startedAt: Date.parse("2026-08-11T03:00:00Z"),
+      endedAt: null,
+      durationMs: null,
+    })
+
+    function openLive() {
+      const { container } = renderPanel({
+        entries: [live],
+        actions: spyActions(),
+      })
+      fireEvent.click(blockSaying(container, "Still going"))
+    }
+
+    it("is editable, and prints no end time it does not have", () => {
+      // The whole reason the old click had to raise a toast here: `groupByDay`
+      // keeps the running entry out of the log, so there was never a row to
+      // navigate to. Printing "now" as an end would be a value that looks
+      // recorded when it is not.
+      openLive()
+      expect(timesTrigger().textContent).toBe("11:00…")
+      expect(timesTrigger().getAttribute("aria-label")).toContain(
+        "still running"
+      )
+      // Its elapsed clock instead — the number that is still moving. Twice on
+      // screen: the block behind, and the popover's duration.
+      expect(screen.getAllByText("1:00:00").length).toBeGreaterThan(1)
+    })
+
+    it("offers no end field, and no verb that could not be written", () => {
+      // `entries.create` takes a definite `endedAt`, so there is nothing
+      // honest to duplicate; and starting a copy would stop the very entry the
+      // popover is describing, so Resume is absent too.
+      openLive()
+      fireEvent.click(timesTrigger())
+      expect(screen.queryByLabelText("End time")).toBeNull()
+
+      expect(screen.queryByRole("button", { name: /^Duplicate/ })).toBeNull()
+      expect(screen.queryByRole("button", { name: /^Resume/ })).toBeNull()
+    })
+  })
+})
+
+/*
+ * WHAT FITS IN A BLOCK.
+ *
+ * The defect: three lines of content need 63px of block — 79 minutes at 48px an
+ * hour — and everything shorter had its project name cut through by the bottom
+ * edge, cleanly, because the block is `overflow-hidden`. Measured in Chrome as
+ * `scrollHeight 51` inside a `clientHeight` of 34 on a 45-minute block.
+ *
+ * These assert the CONTENT, not the geometry. The panel computes the height it
+ * is about to be given from the same two numbers FullCalendar uses, so what it
+ * chooses to draw is checkable in jsdom even though jsdom lays nothing out.
+ */
+describe("CalendarPanel — a block shows only what it can hold", () => {
+  const SEALOGS = {
+    _id: "p1",
+    name: "Sealogs",
+    color: "iris",
+    archived: false,
+  } as unknown as Doc<"projects">
+
+  const projectsById = new Map<string, Doc<"projects">>([["p1", SEALOGS]])
+
+  /** A classified entry of `minutes`, starting 09:00 Manila. */
+  function sized(minutes: number): Doc<"timeEntries"> {
+    const startedAt = Date.parse("2026-08-11T01:00:00Z")
+    return entry({
+      title: "Fixing the logbook",
+      startedAt,
+      endedAt: startedAt + minutes * 60_000,
+      durationMs: minutes * 60_000,
+      projectId: "p1",
+    } as Partial<Doc<"timeEntries">>)
+  }
+
+  function blockOf(minutes: number): HTMLElement {
+    const { container } = renderPanel({
+      entries: [sized(minutes)],
+      projectsById,
+    })
+    return blocks(container)[0]
+  }
+
+  it("draws the project line only in a block tall enough for it", () => {
+    // 90 minutes is 72px: three 16px rows with 2px between them, over the 7px
+    // the block spends on its own margin, borders and padding.
+    const tall = blockOf(90)
+    expect(tall.querySelector("[data-project-color]")).not.toBeNull()
+    expect(tall.querySelector(".sr-only")).toBeNull()
+  })
+
+  it("drops the project rather than slicing it, and still says it", () => {
+    // 60 minutes is 48px, which holds two rows.
+    const short = blockOf(60)
+    expect(short.querySelector("[data-project-color]")).toBeNull()
+    expect(short.querySelector(".tabular")?.textContent).toBe("09:00 – 10:00")
+    expect(short.querySelector(".sr-only")?.textContent).toBe("Sealogs")
+  })
+
+  it("keeps only the title when there is room for one line", () => {
+    // 30 minutes is 24px: one row. The times join the screen-reader line.
+    const tiny = blockOf(30)
+    expect(tiny.querySelector(".truncate")?.textContent).toBe(
+      "Fixing the logbook"
+    )
+    expect(tiny.querySelector(".tabular")).toBeNull()
+    expect(tiny.querySelector(".sr-only")?.textContent).toBe(
+      "09:00 – 09:30 — Sealogs"
+    )
+  })
+
+  it("draws no text at all in a block at the minimum height", () => {
+    // `eventMinHeight` is 18px and the block spends 7 of that on itself: 11px
+    // is not a line of anything. The spec's "shows nothing but its fill".
+    const minimal = blockOf(1)
+    expect(minimal.querySelector("span:not(.sr-only)")).toBeNull()
+    // Never silent, though — the whole description is on the screen-reader
+    // line, and the times are on the native tooltip beside the title.
+    expect(minimal.querySelector(".sr-only")?.textContent).toBe(
+      "Fixing the logbook — 09:00 – 09:01 — Sealogs"
+    )
+    expect(minimal.querySelector("[title]")?.getAttribute("title")).toBe(
+      "Fixing the logbook — 09:00 – 09:01"
+    )
+  })
+
+  it("spends a tall block's spare row on a second line of title", () => {
+    // The other half of "titles truncate to … earlier than they need to": a
+    // two-hour block has room for four rows and was using three.
+    expect(blockOf(120).querySelector(".line-clamp-2")?.textContent).toBe(
+      "Fixing the logbook"
+    )
+  })
+
+  it("measures the HEAD of a midnight crossing against midnight", () => {
+    // 23:00 to 04:00 is a five-hour entry drawn as a ONE-hour block on the day
+    // it started. Sizing its text for five hours would put four rows of
+    // content in a box with room for two.
+    const { container } = renderPanel({
+      entries: [
+        entry({
+          title: "Night deploy",
+          startedAt: Date.parse("2026-08-12T15:00:00Z"), // 23:00 on the 12th
+          endedAt: Date.parse("2026-08-12T20:00:00Z"), // 04:00 on the 13th
+          projectId: "p1",
+        } as Partial<Doc<"timeEntries">>),
+      ],
+      projectsById,
+    })
+    const head = blocks(container).find(
+      (block) => !block.className.includes("hatch-empty")
+    )
+    expect(head!.querySelector(".line-clamp-2")).toBeNull()
+    expect(head!.querySelector(".truncate")?.textContent).toBe("Night deploy")
   })
 })

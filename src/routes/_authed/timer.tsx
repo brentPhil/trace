@@ -12,9 +12,9 @@ import { RangeBar } from "@/components/timer/range-bar"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
+import { useEntryActions } from "@/hooks/use-entry-actions"
 import { boundsOf, rangeOf, rangeTotal } from "@/lib/calendar-events"
 import { groupByDay } from "@/lib/group-entries"
 import { periodTotals } from "@/lib/period-totals"
@@ -91,12 +91,17 @@ export function Timer() {
     convexQuery(api.entries.listRange, weekRange)
   )
 
-  const { projectsById } = useClassifiers()
+  const { projects, tags, projectsById } = useClassifiers()
 
-  // Reached for rather than passed in, exactly as `EntryLog` does: this page
-  // raises one toast of its own, for a calendar block whose row is not there
-  // to focus. See `onEntryClick` below.
-  const toasts = Toast.useToastManager()
+  /*
+   * WHAT A BLOCK'S POPOVER MAY DO, reached for here and handed down.
+   *
+   * The same hook `EntryLog` uses, so the grid's editor and the log's rows
+   * write through one implementation of every edit — one undo window, one
+   * error posture, one sentence per event. The panel takes it as a prop for
+   * the reason `EntryRow` does: it stays renderable against fixtures.
+   */
+  const entryActions = useEntryActions(settings.timezone)
 
   /*
    * THE THREE PIECES OF STATE, and nothing derived stored beside them.
@@ -372,91 +377,6 @@ export function Timer() {
    */
   const rowCount = groups.reduce((n, group) => n + group.entries.length, 0)
 
-  /** The last instant the LIST reaches: the end of today when unbounded, the
-   *  end of the selected range when it is not. */
-  const listEndMs = range === null ? logRange.toMs : instantsOf(range, settings.timezone).toMs
-
-  /**
-   * A block on the grid, clicked.
-   *
-   * The calendar navigates; it does not edit. A block is a picture of an entry,
-   * and the editing controls for that entry already exist on its row — inline
-   * title, the time popover, the note sheet. Growing a second editor inside a
-   * popover on the grid would mean two places to fix the same mistyped field,
-   * which is how they come to disagree. So: switch to List, then focus the row.
-   * The switch has to happen first and the focus after paint, because the row
-   * is not mounted until List renders.
-   *
-   * IT SWITCHES ONLY WHEN THERE IS A ROW TO SWITCH TO. Three kinds of block on
-   * this grid have no row behind them, and all are one click away:
-   *
-   *   - the RUNNING entry, which the grid draws deliberately and `groupByDay`
-   *     deliberately keeps out of its rows (it is already on screen, live and
-   *     larger, in the timer bar);
-   *   - anything OUTSIDE what the list is showing — with "All dates" that is
-   *     the pages it has not paginated yet, since the list walks back 50 at a
-   *     time while the grid steps to any week in history;
-   *   - anything dated AFTER the list's last instant. With "All dates" that is
-   *     the end of today, pinned there so a clock-skewed entry cannot sit
-   *     permanently on top of the log, while the calendar's range routinely
-   *     includes the rest of the current week — so a Friday entry is drawn on
-   *     Wednesday's grid and is outside the list by construction.
-   *
-   * Switching anyway flipped the view to a log of recent rows and focused
-   * nothing, which is worse than a no-op: the week the user was reading is gone
-   * and nothing says why. So the miss is REPORTED instead, in the same toast
-   * vocabulary the rest of the page answers with, and the grid stays put.
-   *
-   * THE MESSAGES SAY DIFFERENT TRUE THINGS. Telling someone to press "Load
-   * earlier entries" to reach a future entry is advice that cannot work —
-   * loading earlier only ever walks backwards — and the button is not even
-   * there when a bounded range is selected. The reachable way to get a future
-   * date is the `+` dialog's Day field, an unbounded `<input type="date">`
-   * where a mistyped month lands an entry months out, and noticing that is
-   * exactly what a calendar is good for.
-   *
-   * `groups` decides, not `listRows`: `groups` is what the list actually draws,
-   * and the running entry is in one and not the other.
-   */
-  const onEntryClick = useCallback(
-    (entryId: string) => {
-      const row = groups
-        .flatMap((group) => group.entries)
-        .find((entry) => entry._id === entryId)
-
-      if (row === undefined) {
-        const clicked = calendarEntries.find((e) => e._id === entryId)
-        const title = (clicked?.title ?? "").trim()
-        const label = title === "" ? "That entry" : `“${title}”`
-        // `listEndMs` is exclusive — the midnight that ends the last day the
-        // list reaches — so anything at or past it starts later than the list
-        // will ever go.
-        const future = clicked !== undefined && clicked.startedAt >= listEndMs
-        toasts.add({
-          title:
-            clicked?.endedAt === null
-              ? `${label} is still running, so the log has no row for it — it is in the timer bar above.`
-              : future
-                ? `${label} starts after the dates the list is showing, so there is no row for it. A day typed wrong in the add-entry dialog is what that usually is.`
-                : range === null
-                  ? `${label} has not been loaded into the list yet. Use “Load earlier entries” at the foot of the list to reach it.`
-                  : `${label} is outside the dates the list is showing, so there is no row for it.`,
-        })
-        return
-      }
-
-      changeView("list")
-      requestAnimationFrame(() => {
-        const element = document.querySelector<HTMLElement>(
-          `[data-entry-id="${entryId}"]`
-        )
-        element?.scrollIntoView({ block: "center" })
-        element?.focus()
-      })
-    },
-    [groups, calendarEntries, listEndMs, range, toasts, changeView]
-  )
-
   const totals = periodTotals(weekEntries, settings.timezone, today, nowMs)
 
   /*
@@ -660,8 +580,10 @@ export function Timer() {
               use12Hour={settings.timeFormat === "12"}
               display={settings.durationDisplay}
               nowMs={nowMs}
+              projects={projects}
               projectsById={projectsById}
-              onEntryClick={onEntryClick}
+              tags={tags}
+              actions={entryActions}
             />
           </div>
         ) : listPending ? (
