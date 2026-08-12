@@ -19,7 +19,7 @@
 - The Convex project and deployment names do NOT change.
 - The email sender ADDRESS stays `onboarding@resend.dev`. Only its display name changes. Changing the address before chroneli.com is verified in Resend breaks password-reset delivery silently.
 - `convex/lib/` is the pure shared layer: no Convex imports, no React, no `process.env`. It must run in the `unit` (node) Vitest project.
-- Run `pnpm format` before committing if Prettier would reformat a touched file; `pnpm check` must stay green.
+- Do NOT run `pnpm format` or `prettier --write`. `pnpm check` fails on ~240 files at the branch point — a long-standing repo-wide condition, not something this work caused. Reformatting would bury the rename in thousands of lines of unrelated churn. Match the surrounding style by hand and leave the pre-existing deviations alone.
 
 ---
 
@@ -463,13 +463,11 @@ These name the product, not the `TraceError*` identifiers, so they are in scope.
 
 Do NOT touch `src/lib/error-message.ts:6`, `src/routes/_authed/-invoice-record.test.tsx:407`, or `convex/lib/codes.ts:102,115`. Those describe the `TraceError` type, which keeps its name.
 
-- [ ] **Step 5: Verify line lengths still satisfy Prettier**
+- [ ] **Step 5: Rewrap any comment that now overruns**
 
-```bash
-pnpm check
-```
+"Chroneli's" is three characters longer than "Trace's", so a comment that sat near the margin may now exceed it. Check the four comments by eye against the 80-column margin their neighbours keep, and rewrap by hand where needed.
 
-Expected: clean. "Chroneli's" is two characters longer than "Trace's", so a comment that sat near the margin may now exceed it. If Prettier objects, rewrap that comment by hand — it will not rewrap comments for you.
+Do NOT run `pnpm format` to decide this — see Global Constraints. Prettier does not rewrap comment prose anyway.
 
 - [ ] **Step 6: Confirm nothing out of scope changed**
 
@@ -567,13 +565,15 @@ pnpm typecheck
 
 Expected: no errors.
 
-- [ ] **Step 3: Confirm formatting is clean**
+- [ ] **Step 3: Confirm this branch added no new formatting drift**
+
+`pnpm check` fails on ~240 files at the branch point, so its exit code proves nothing here. Compare instead — the count must not have grown:
 
 ```bash
-pnpm check
+pnpm check 2>&1 | tail -1
 ```
 
-Expected: `All matched files use Prettier code style!`. If not, run `pnpm format` and amend the relevant commit.
+Expected: a "Code style issues found in N files" line where N is 240 or fewer. If N grew, a touched file picked up new drift; find it with `git diff --name-only <branch-base>..HEAD` and fix that file by hand.
 
 - [ ] **Step 4: Audit every surviving mention of the old name**
 
