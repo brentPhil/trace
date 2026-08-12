@@ -178,6 +178,75 @@ const COLUMN_RULE = "border border-edge-soft"
  *  hours from the grid, in the header row and in the body alike. */
 const RAIL_RULE = "border-r border-edge-soft"
 
+/*
+ * A BLOCK IS A BUTTON, AND NOW LOOKS LIKE ONE.
+ *
+ * FullCalendar already makes it one: registering `eventClick` is what makes
+ * `getEventTagAndAttrs` return `role="button"`, `tabIndex: 0` and an
+ * Enter/Space handler. So every block on this grid has been keyboard-reachable
+ * and keyboard-activatable since the click became an editor — with nothing on
+ * screen to say so at either end of the interaction.
+ *
+ * THE CURSOR, because FullCalendar will not supply it. Its own `cursorPointer`
+ * is applied on `(url || isDraggable)`, and ours is neither: the entries carry
+ * no `url` and dragging is out of scope by decision. A `role="button"` under an
+ * arrow cursor is a control that has to be guessed at.
+ *
+ * THE FOCUS RING IS AN OUTLINE, NOT A BORDER SHIFT — DESIGN.md's second focus
+ * pattern, for a control whose border already carries state. This border says
+ * three different things already (`enlarger` = running, `edge-raised` =
+ * completed, `.hatch-empty`'s dashed rule = a midnight continuation), and
+ * spending it on focus would delete whichever one the focused block was saying.
+ *
+ * `-outline-offset-2`, INSET, where the timer bar's version of this pattern
+ * uses `outline-offset-2`. The bar sits on open ground and can afford to put
+ * ground on both sides of its outline; a block cannot. It is inset from its
+ * harness by only the 2px `mx-0.5` below, and an overlapping block is packed
+ * hard against it — so an outward outline would be drawn across the neighbour
+ * it is meant to be distinguished from. Inset, it lands wholly on the block's
+ * own fill: `ring` on `surface-raised` is measured in `styles.contrast.test.ts`
+ * and clears the 3:1 that SC 2.4.11 asks of it. `overflow-hidden` on the block
+ * does not clip this — overflow clips descendants, not an element's own
+ * outline.
+ *
+ * NO TRANSITION, which is the same call the block's own comment makes below and
+ * for a stricter reason than it needed: a running block's height is rewritten
+ * once a second, and this element is the one being hovered. An instant fill
+ * change needs no `prefers-reduced-motion` alternative because there is no
+ * motion to reduce.
+ */
+const BLOCK_INTERACTIVE = cn(
+  "cursor-pointer",
+  "focus-visible:outline-2 focus-visible:-outline-offset-2",
+  "focus-visible:outline-ring"
+)
+
+/*
+ * THE HOVER LIFT, one step up the neutral ramp — and it has to be MIXED rather
+ * than layered.
+ *
+ * `hover:bg-foreground/5` is the obvious spelling and it is wrong here: a
+ * `hover:bg-*` REPLACES the block's `bg-surface-raised` rather than sitting on
+ * top of it, so 5% ivory would composite over the LANE (`surface`, L 0.22) and
+ * land at roughly L 0.24 — darker than the 0.26 it was before the pointer
+ * arrived. A hover that dims the thing under the cursor is worse than none.
+ *
+ * `color-mix` states the destination instead of a layer over a guess, which is
+ * the idiom `ui/tabs.tsx` already uses for the same problem. 8% of Ink into
+ * Surface Raised is ~L 0.31: a clear step at a glance, and still well under the
+ * `edge-raised` border that has to keep reading as this block's boundary.
+ */
+const BLOCK_HOVER =
+  "hover:bg-[color-mix(in_oklch,var(--surface-raised),var(--foreground)_8%)]"
+
+/*
+ * The same step for a RUNNING block, spent in its own light rather than in
+ * ivory. Cold light is legal here and nowhere else on this grid, because this
+ * block is the one thing on screen that IS running — mixing ivory into it would
+ * wash the one signal the Cold Light Rule reserves.
+ */
+const RUNNING_HOVER = "hover:bg-enlarger/25"
+
 /**
  * The calendar grid.
  *
@@ -267,6 +336,25 @@ export function CalendarPanel({
    * which is the whole cost this replaces `n` day-lookups per second with.
    */
   const clockMs = entries.some((entry) => entry.endedAt === null) ? nowMs : 0
+
+  /*
+   * WHICH COLUMN IS TODAY, computed here rather than taken from FullCalendar.
+   *
+   * `DayHeaderInfo` and `DayLaneInfo` both carry an `isToday` and it is
+   * tempting, and it is a SECOND ANSWER to a question this product answers in
+   * one place: FullCalendar derives it from the machine clock against its own
+   * `todayRange`, while every other "what day is it" on this page — the page's
+   * range, the day totals below, `groupByDay` in the log — comes from `dayOf`
+   * against `nowMs`. Two derivations of one boundary is the defect this whole
+   * feature was reshaped to remove once already, and the failure mode is the
+   * quiet one: a user whose stored zone is not their browser's would see the
+   * grid ring a different column from the one the totals call today.
+   *
+   * Recomputed every render, which is once a second. `dayOf` is one
+   * `Intl.DateTimeFormat` lookup and the header hook below already runs it once
+   * per column per render; one more is not a cost worth memoising against.
+   */
+  const today = dayOf(nowMs, timeZone)
 
   /*
    * THE BLOCK THAT IS BEING EDITED, and the element its popover hangs off.
@@ -562,25 +650,83 @@ export function CalendarPanel({
           {formatTimeOfInstant(info.date.getTime(), timeZone, use12Hour)}
         </span>
       )}
-      dayHeaderClass={cn(COLUMN_RULE, "py-2")}
+      /*
+       * TODAY'S COLUMN IS MARKED AT THE TOP OF IT, and deliberately not down
+       * its length.
+       *
+       * A tonal wash on the LANE was the first shape of this and it is the one
+       * to argue against, because it looks free and is not: a lane is
+       * `surface` (L 0.22) and the blocks standing on it are `surface-raised`
+       * (L 0.26), which is the whole 0.04 that makes a block read as an object
+       * rather than as a stain. Any wash big enough to see spends most of that
+       * gap, and it spends it on the column where the blocks most need it —
+       * today's, which is the one being worked in.
+       *
+       * So the marker goes where it costs nothing and is never off screen
+       * anyway: this row is `sticky`, so a column labelled at the top is
+       * labelled at every scroll position. `surface-raised` on the cell is the
+       * same step the log's own hovered rows use, and it is the ramp rather
+       * than a hue — `enlarger` here would say A TIMER IS RUNNING about a day.
+       */
+      dayHeaderClass={(info) =>
+        cn(
+          COLUMN_RULE,
+          "py-2",
+          dayOf(info.date.getTime(), timeZone) === today && "bg-surface-raised"
+        )
+      }
       dayHeaderContent={(info) => {
         // Through `dayOf`, so the column header and the same day's header in
         // the list are computed by one function and cannot disagree.
         const day = dayOf(info.date.getTime(), timeZone)
         const total = totals.get(day) ?? 0
+        const isToday = day === today
         return (
-          <div className="flex flex-col items-center gap-0.5">
-            {/* FullCalendar has already formatted both of these, in the
-             * calendar's own timeZone. Building an `Intl.DateTimeFormat` per
-             * cell to recompute them is the cost this render hook can least
-             * afford — see `format-time.ts`'s note on why its formatters are
-             * cached. */}
-            <span className="text-xs text-muted-foreground">
-              {info.weekdayText}
-            </span>
-            <span className="tabular text-base text-foreground">
-              {info.dayNumberText}
-            </span>
+          /*
+           * TWO ROWS, NOT THREE. The weekday and the date are one label — "Thu
+           * 13" — and stacking them spent a whole 16px line of a STICKY element
+           * on splitting a two-word phrase in half. Inline, this row is ~58px
+           * where it was ~76, and the 18px comes off the top of every scroll
+           * position on the page, not just the first screen. The total keeps
+           * its own line below, because it is a different kind of fact: the
+           * pair above says which column this is, and the figure says what is
+           * in it.
+           */
+          <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-1.5">
+              {/* FullCalendar has already formatted both of these, in the
+               * calendar's own timeZone. Building an `Intl.DateTimeFormat` per
+               * cell to recompute them is the cost this render hook can least
+               * afford — see `format-time.ts`'s note on why its formatters are
+               * cached. */}
+              <span
+                className={cn(
+                  "text-xs",
+                  isToday ? "text-foreground" : "text-muted-foreground"
+                )}
+              >
+                {info.weekdayText}
+              </span>
+              {/*
+                The date, and on today the one INVERTED thing on this page.
+                Ink on ground is the same figure/ground swap DESIGN.md gives the
+                primary button, and it is chosen for the same reason it is:
+                it is the loudest mark the system has that carries no hue at
+                all. `size-6` fixes the box at the 24px the `text-base` line it
+                replaced already occupied, so today's column is not a row taller
+                than its neighbours.
+              */}
+              <span
+                className={cn(
+                  "tabular flex size-6 items-center justify-center text-sm",
+                  isToday
+                    ? "rounded-full bg-foreground font-medium text-ground"
+                    : "text-foreground"
+                )}
+              >
+                {info.dayNumberText}
+              </span>
+            </div>
             {/* Nothing at all on an untracked day. `0:00:00` under five of
              * seven columns on a light week is noise that reads as a value,
              * and `formatCompactDuration` refuses to print `0m` for the same
@@ -626,10 +772,13 @@ export function CalendarPanel({
            * way. Spending the same budget differently, not narrowing the text.
            */
           "mx-0.5 mb-px overflow-hidden rounded-md px-1 py-0.5 text-left",
+          // The pointer cursor and the focus ring, which FullCalendar gives a
+          // `role="button"` block neither of.
+          BLOCK_INTERACTIVE,
           running
             ? // Cold light, and only here: something IS running.
-              "bg-enlarger/15 text-foreground"
-            : "bg-surface-raised text-foreground",
+              cn("bg-enlarger/15 text-foreground", RUNNING_HOVER)
+            : cn("bg-surface-raised text-foreground", BLOCK_HOVER),
           /*
            * The tail of an entry that crossed midnight. FullCalendar segments
            * it across both columns and `isStart` says which half this is. A

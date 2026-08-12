@@ -270,6 +270,69 @@ describe("CalendarPanel", () => {
     })
   })
 
+  describe("a block is a button, and looks like one", () => {
+    /*
+     * FullCalendar makes every block `role="button"` with `tabIndex: 0` and an
+     * Enter/Space handler the moment an `eventClick` handler is registered —
+     * which it has been since the click became an editor. What it does NOT
+     * supply is any sign of that: its own pointer cursor is applied on
+     * `(url || isDraggable)` and ours is neither, and it draws no focus style
+     * at all. Both of those were invisible to every other assertion in this
+     * file, because a control nobody can see is still a control the DOM agrees
+     * exists.
+     */
+    it("is reachable by keyboard and says so when focused", () => {
+      const { container } = renderPanel({ entries: [entry({})] })
+      const [block] = blocks(container)
+
+      expect(block.getAttribute("role")).toBe("button")
+      expect(block.getAttribute("tabindex")).toBe("0")
+      expect(block.className).toContain("cursor-pointer")
+
+      // An OUTLINE, not a border shift: this border is already spent saying
+      // running / complete / continued. Turned inward, because an outward ring
+      // on a block inset 2px from its harness is drawn across the overlapping
+      // block beside it.
+      expect(block.className).toContain("focus-visible:outline-ring")
+      expect(block.className).toContain("focus-visible:-outline-offset-2")
+    })
+
+    it("lifts on hover without spending the cold light on it", () => {
+      const { container } = renderPanel({
+        entries: [
+          entry({ _id: "done", title: "Finished" } as Partial<
+            Doc<"timeEntries">
+          >),
+          entry({
+            _id: "live",
+            title: "Still going",
+            startedAt: Date.parse("2026-08-11T03:00:00Z"),
+            endedAt: null,
+            durationMs: null,
+          } as Partial<Doc<"timeEntries">>),
+        ],
+      })
+
+      /*
+       * A `color-mix` toward Ink, not `hover:bg-foreground/5`. A `hover:bg-*`
+       * REPLACES the block's own `bg-surface-raised` rather than layering over
+       * it, so 5% ivory would composite over the LANE and land DARKER than the
+       * block was before the pointer arrived — a hover that dims what it is
+       * pointing at.
+       */
+      const done = blockSaying(container, "Finished")
+      expect(done.className).toContain("color-mix")
+      expect(done.className).not.toContain("hover:bg-enlarger")
+
+      // The running block spends its hover step in its own light instead:
+      // mixing ivory into it would wash the one signal the Cold Light Rule
+      // reserves, and cold is legal on this block because it IS running.
+      const live = blockSaying(container, "Still going")
+      expect(live.className).toContain("hover:bg-enlarger/25")
+      expect(live.className).not.toContain("color-mix")
+    })
+  })
+
   describe("an entry that crosses midnight", () => {
     /** 23:00 Manila on the 12th to 01:30 on the 13th. */
     const crosser = entry({
@@ -349,6 +412,103 @@ describe("CalendarPanel", () => {
       )
       expect(empty?.textContent).toBe("Thu13")
       expect(empty?.textContent).not.toContain("0:00")
+    })
+
+    it("marks today's column, and marks exactly one", () => {
+      // `NOW` is 12:00 on the 11th in Manila, and the rendered week is the
+      // 10th to the 16th. The mark is the ramp and a figure/ground swap — no
+      // hue anywhere, because `enlarger` on a grid means a timer is running
+      // and a Tuesday is not a timer.
+      const { container } = renderPanel()
+
+      const marked = [
+        ...container.querySelectorAll<HTMLElement>(
+          '[role="columnheader"][data-date]'
+        ),
+      ].filter((cell) => cell.className.includes("bg-surface-raised"))
+
+      expect(marked).toHaveLength(1)
+      expect(marked[0].getAttribute("data-date")).toBe("2026-08-11")
+      // The date itself inverts — Ink on ground, the loudest colourless mark
+      // the system has.
+      expect(
+        marked[0].querySelector(".rounded-full")?.textContent
+      ).toBe("11")
+      expect(marked[0].className).not.toContain("enlarger")
+    })
+
+    it("takes today from the app's clock, never FullCalendar's", () => {
+      /*
+       * THE POINT OF COMPUTING THIS OURSELVES.
+       *
+       * `DayHeaderInfo` carries an `isToday`, and it is derived from the
+       * machine clock against FullCalendar's own `todayRange` — a second answer
+       * to a question `dayOf(nowMs, timeZone)` already answers for the page's
+       * range, the day totals and the log's grouping alike. A user whose stored
+       * zone is not their browser's would have seen the grid ring one column
+       * while the totals called another one today.
+       *
+       * Moving `nowMs` alone moves the mark. Under FullCalendar's own flag this
+       * assertion could not even be written: the machine clock is not a prop.
+       */
+      const { container, rerender } = renderPanel()
+      const markedDay = () =>
+        container
+          .querySelector<HTMLElement>(
+            '[role="columnheader"][data-date].bg-surface-raised'
+          )
+          ?.getAttribute("data-date")
+
+      expect(markedDay()).toBe("2026-08-11")
+
+      // 24 hours on: the 12th, still inside the drawn week.
+      rerender({ nowMs: NOW + 86_400_000 })
+
+      expect(markedDay()).toBe("2026-08-12")
+    })
+
+    it("lands on the right column in a zone BEHIND UTC", () => {
+      /*
+       * THE OFF-BY-ONE THIS WHOLE HOOK IS EXPOSED TO.
+       *
+       * `dayOf(info.date.getTime(), timeZone)` is only correct if FullCalendar
+       * hands the render hook a true INSTANT — local midnight of that column.
+       * If it handed over one of its internal "markers" (midnight expressed as
+       * fake UTC) instead, then west of Greenwich every column would resolve to
+       * the day BEFORE it: 2026-08-11T00:00Z read in New York is 19:00 on the
+       * 10th. Asia/Manila is +8 and cannot show this — the error is absorbed —
+       * so every other case in this file would stay green through it.
+       *
+       * It matters twice over, because the day TOTALS beside this marker are
+       * keyed by the same expression. A totals column off by one on a tool
+       * people invoice from is the expensive version of this bug; a ring around
+       * the wrong day is the visible one.
+       *
+       * 2026-08-11T04:00Z is 00:00 on the 11th in New York — deliberately the
+       * first minute of the day, where an off-by-one has nowhere to hide.
+       */
+      const NEW_YORK = "America/New_York"
+      const { container } = renderPanel({
+        timeZone: NEW_YORK,
+        nowMs: Date.parse("2026-08-11T04:00:00Z"),
+        entries: [
+          entry({
+            startedAt: Date.parse("2026-08-11T14:00:00Z"), // 10:00 on the 11th
+            endedAt: Date.parse("2026-08-11T15:00:00Z"),
+          }),
+        ],
+      })
+
+      const marked = [
+        ...container.querySelectorAll<HTMLElement>(
+          '[role="columnheader"][data-date]'
+        ),
+      ].filter((cell) => cell.className.includes("bg-surface-raised"))
+
+      expect(marked).toHaveLength(1)
+      expect(marked[0].getAttribute("data-date")).toBe("2026-08-11")
+      // And the hour's total is under that same column, not the one before it.
+      expect(marked[0].textContent).toContain("1:00:00")
     })
   })
 

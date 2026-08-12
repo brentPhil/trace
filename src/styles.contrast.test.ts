@@ -159,6 +159,21 @@ describe("the focus indicator, split into the two things it is", () => {
     // surface figure is checked too, for anything that adopts the pattern
     // without the offset.
     expect(ratio("ring", "surface")).toBeGreaterThanOrEqual(3)
+    /*
+     * A CALENDAR BLOCK'S FOCUS RING, which is the same pattern with the offset
+     * turned INWARD (`-outline-offset-2`).
+     *
+     * A block's border is already spent — `enlarger` while running,
+     * `edge-raised` when complete, `.hatch-empty`'s dashed rule on a midnight
+     * continuation — so focus cannot be a border shift there. And it cannot be
+     * an OUTWARD outline either: a block is inset from its harness by 2px and an
+     * overlapping block is packed against it, so the ring would be drawn across
+     * the neighbour. Inset, both of its adjacent colours are the block's own
+     * fill rather than ground, so this is the figure that has to hold — and it
+     * is the layer the timer bar's `outline-offset-2` was specifically avoiding
+     * having to measure against.
+     */
+    expect(ratio("ring", "surface-raised")).toBeGreaterThanOrEqual(3)
   })
 })
 
