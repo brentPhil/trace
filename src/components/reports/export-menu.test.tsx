@@ -122,7 +122,7 @@ describe("ExportMenu", () => {
 
     await waitFor(() => expect(click).toHaveBeenCalled())
     const anchor = click.mock.instances[0] as HTMLAnchorElement
-    expect(anchor.download).toBe("trace-report-2026-07-13.csv")
+    expect(anchor.download).toBe("chroneli-report-2026-07-13.csv")
 
     vi.unstubAllGlobals()
     click.mockRestore()

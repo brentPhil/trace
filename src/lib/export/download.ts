@@ -1,3 +1,5 @@
+import { APP_NAME } from "@shared/brand"
+
 /**
  * Getting a generated file out of the tab.
  *
@@ -7,16 +9,19 @@
  */
 
 /**
- * `trace-report-2026-07-13_2026-07-25.csv`.
+ * `chroneli-report-2026-07-13_2026-07-25.csv`.
  *
  * The range is in the name because a freelancer exports the same report for
  * consecutive fortnights and then has to tell two files apart in a downloads
  * folder six weeks later. A single-day range is not repeated, because
  * `…-2026-07-13_2026-07-13` reads as a defect.
+ *
+ * The prefix comes from `APP_NAME` rather than being spelled out here, so a
+ * future rename cannot leave the exported files answering to the old name.
  */
 export function exportFilename(from: string, to: string, extension: string): string {
   const range = from === to ? from : `${from}_${to}`
-  return `trace-report-${range}.${extension}`
+  return `${APP_NAME.toLowerCase()}-report-${range}.${extension}`
 }
 
 /**

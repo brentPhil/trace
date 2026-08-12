@@ -131,7 +131,10 @@ To be executed by the owner, in this order. Each step is safe to stop after.
    push, so merging the rebrand creates the `chroneli` Worker without anyone
    asking it to. Step 1 is not a prerequisite — the new Worker is reachable at
    its workers.dev URL and behaves exactly as `trace` did, because nothing yet
-   depends on the new domain. Confirm this build succeeded before continuing.
+   depends on the new domain. Confirm this build succeeded before continuing —
+   by loading a page, not by signing in: `convex/auth.ts` still reads
+   `SITE_URL` pointed at the old origin until step 4, so a reset link or a
+   sign-in origin check can fail here even though the rebrand itself is fine.
 3. **Attach the custom domain** chroneli.com to the `chroneli` Worker. Verify
    the app loads over the domain before touching auth.
 4. **Repoint auth.** Set `SITE_URL` to `https://chroneli.com` on the Convex

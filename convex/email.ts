@@ -2,7 +2,7 @@ import { Resend } from "@convex-dev/resend"
 import { components } from "./_generated/api"
 import type { GenericActionCtx } from "convex/server"
 import type { DataModel } from "./_generated/dataModel"
-import { APP_NAME } from "@shared/brand"
+import { APP_NAME } from "./lib/brand"
 
 /**
  * testMode defaults to true in this component, which silently restricts

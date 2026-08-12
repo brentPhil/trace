@@ -98,4 +98,13 @@ describe("AppSidebar", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }))
     expect(onSignOut).toHaveBeenCalledTimes(1)
   })
+
+  /**
+   * Both spans inside the home link are `aria-hidden`, so `aria-label` is its
+   * ONLY accessible name — nothing visible would catch a regression here.
+   */
+  it("names the home link after the product", async () => {
+    mount("/timer")
+    expect(await screen.findByRole("link", { name: "Chroneli" })).toBeTruthy()
+  })
 })
