@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react"
 import { CalendarRange } from "lucide-react"
 import { useAnnounce } from "@/components/a11y/announcer"
+import { Chip } from "@/components/history/filter-controls"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover } from "@/components/ui/popover"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { dateToDay, dayToDate, formatDayRange, rangeTriggerLabel } from "@/lib/date-range-picker"
+import { dateToDay, dayToDate, formatDayRange } from "@/lib/date-range-picker"
 import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-force-close"
 import { cn } from "@/lib/utils"
 import type { DateRange } from "react-day-picker"
-import type { Period } from "@/lib/history-filters"
 import type { DayString } from "@shared/day"
 
 /**
@@ -22,6 +22,15 @@ import type { DayString } from "@shared/day"
  * the caller (`PeriodControls`) is the one that knows setting a custom range means
  * `period: "custom"`, exactly as it already knows for the segmented control.
  *
+ * TWO CALLERS NOW, and what differs between them is deliberately not decided
+ * here. /reports names the active period ("This week") through
+ * `rangeTriggerLabel`; /timer prints `08/10/2026 - 08/16/2026`, the one date
+ * format this product puts on paper. The trigger's WORDS are the caller's
+ * vocabulary and arrive as `label` — a second `period`-shaped prop would have
+ * meant this file knowing about a period /timer does not have. What is shared
+ * is everything that is genuinely hard: the grid, the popover, the force-close,
+ * the roving tabindex, and the announcement.
+ *
  * `Date` only exists inside this component, for react-day-picker's grid.
  * Every crossing of the props boundary goes through `dayToDate` / `dateToDay`
  * (`@/lib/date-range-picker`) and nowhere else — see that file's comment for
@@ -30,20 +39,59 @@ import type { DayString } from "@shared/day"
 export function DateRangePicker({
   from,
   to,
-  period,
   today,
   weekStartDay,
+  label,
+  spokenLabel,
+  months,
+  showWeekNumber = false,
+  presets,
   onChange,
 }: {
-  from: DayString
-  to: DayString
-  period: Period
+  /**
+   * The selected range, or `null` on BOTH ends for "nothing bounded is
+   * selected" — /timer's "All dates". Nullable on both rather than one
+   * `range: {from,to} | null` prop only because every existing caller passes
+   * them separately; the two are read together everywhere below.
+   */
+  from: DayString | null
+  to: DayString | null
   today: DayString
   weekStartDay: number
+  /** What the trigger says. The caller's vocabulary — see the note above. */
+  label: string
+  /** What a screen reader hears instead, when the visible label is digits.
+   *  Defaults to `label`, which is right whenever the label is already prose. */
+  spokenLabel?: string
+  /** Forced month count. Omitted, it is 2 on a desktop and 1 on a phone. */
+  months?: 1 | 2
+  /**
+   * Week numbers down the side, as /timer's reference design carries.
+   *
+   * OFF by default, and not the ISO number `calendar-label.ts` refuses: this is
+   * react-day-picker's own count, which follows `weekStartsOn` — so on a
+   * Sunday-start calendar it numbers the weeks the user's grid actually draws
+   * rather than the Monday-based weeks ISO 8601 defines and this app does not
+   * necessarily use.
+   */
+  showWeekNumber?: boolean
+  /**
+   * A rail of one-click ranges down the left, all three fields or none.
+   *
+   * Grouped into one prop because they are useless apart: a list with no
+   * handler is decoration, and a handler with no list has nothing to fire. The
+   * chips are the same `Chip` /reports' Day/Week/Month row and the preset chips
+   * are built from, so a preset reads the same everywhere in the product.
+   */
+  presets?: {
+    items: ReadonlyArray<{ value: string; label: string }>
+    active: string | null
+    onSelect: (value: string) => void
+  }
   onChange: (range: { from: DayString; to: DayString }) => void
 }) {
   const isMobile = useIsMobile()
-  const numberOfMonths = isMobile ? 1 : 2
+  const numberOfMonths = months ?? (isMobile ? 1 : 2)
   const announce = useAnnounce()
   const actionsRef = usePopoverActionsRef()
 
@@ -56,16 +104,15 @@ export function DateRangePicker({
   // `forceUnmount` against a live, open popup. See src/lib/popover-force-close.ts.
   useForceCloseWhenClosed(open, actionsRef)
 
-  const [draft, setDraft] = useState<DateRange | undefined>(() => ({
-    from: dayToDate(from),
-    to: dayToDate(to),
-  }))
+  const [draft, setDraft] = useState<DateRange | undefined>(() =>
+    draftOf(from, to)
+  )
 
   // Re-seed every time it OPENS, not once at mount — the same reason every
   // other popover here does. A tab left open must not offer a stale draft.
   useEffect(() => {
     if (!open) return
-    setDraft({ from: dayToDate(from), to: dayToDate(to) })
+    setDraft(draftOf(from, to))
   }, [open, from, to])
 
   const handleSelect = (range: DateRange | undefined, triggerDate: Date) => {
@@ -112,8 +159,6 @@ export function DateRangePicker({
     if (GRID_NAVIGATION_KEYS.has(event.key)) event.stopPropagation()
   }
 
-  const label = rangeTriggerLabel(period, from, to, today, weekStartDay)
-
   // A fresh key each time the popover transitions to open forces
   // react-day-picker to remount (and its `autoFocus` to fire again), moving
   // real focus onto the grid the way the WAI-ARIA date-picker-dialog pattern
@@ -126,7 +171,7 @@ export function DateRangePicker({
         render={
           <button
             type="button"
-            aria-label={`Date range — ${label}`}
+            aria-label={`Date range — ${spokenLabel ?? label}`}
             className={cn(
               "touch-target tabular flex items-center gap-1.5 rounded-md border border-edge",
               "bg-ground px-2 py-1.5 text-sm",
@@ -141,35 +186,80 @@ export function DateRangePicker({
 
       <Popover.Popup
         align="start"
-        className={cn("gap-0 p-3", numberOfMonths === 2 ? "w-[min(38rem,92vw)]" : "w-[19.75rem]")}
+        className={cn(
+          "gap-0 p-3",
+          // Content-sized once a rail is beside the grid: a fixed width would
+          // have to guess at the widest preset label in whichever language.
+          presets !== undefined
+            ? "w-auto max-w-[92vw]"
+            : numberOfMonths === 2
+              ? "w-[min(38rem,92vw)]"
+              : "w-[19.75rem]"
+        )}
         onKeyDown={stopGridNavigationKeys}
       >
-        <Calendar
-          key={calendarKey}
-          mode="range"
-          numberOfMonths={numberOfMonths}
-          weekStartsOn={weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6}
-          today={dayToDate(today)}
-          defaultMonth={dayToDate(from)}
-          selected={draft}
-          onSelect={handleSelect}
-          // Below 2, react-day-picker would complete a range on the very
-          // first click (`{ from: day, to: day }` immediately) — this forces
-          // the second click PeriodControls' own tests, and the trigger label
-          // logic above, both assume happens before anything commits.
-          min={1}
-          // Without this, react-day-picker treats a click as EXTENDING the
-          // already-complete range it was seeded with (`from`/`to` are
-          // always both set on these props) rather than starting a fresh
-          // pick — so the very first click after opening would silently
-          // move `to` instead of arming a new `from`. `resetOnSelect` is
-          // what makes clicking anywhere start a new two-click selection.
-          resetOnSelect
-          autoFocus
-        />
+        <div className="flex items-start gap-3">
+          {presets === undefined ? null : (
+            <div
+              // A rail, not a row: it runs down the left of the grid, which is
+              // where the reference design puts it and where it stays out of
+              // the way of the two-click gesture on the right.
+              className="flex flex-col items-start gap-1 self-stretch border-r border-edge-soft pr-3"
+            >
+              {presets.items.map((preset) => (
+                <Chip
+                  key={preset.value}
+                  active={presets.active === preset.value}
+                  onClick={() => {
+                    announce(`Range set to ${preset.label}.`)
+                    presets.onSelect(preset.value)
+                    setOpen(false)
+                  }}
+                >
+                  {preset.label}
+                </Chip>
+              ))}
+            </div>
+          )}
+
+          <Calendar
+            key={calendarKey}
+            mode="range"
+            numberOfMonths={numberOfMonths}
+            showWeekNumber={showWeekNumber}
+            weekStartsOn={weekStartDay as 0 | 1 | 2 | 3 | 4 | 5 | 6}
+            today={dayToDate(today)}
+            defaultMonth={dayToDate(from ?? today)}
+            selected={draft}
+            onSelect={handleSelect}
+            // Below 2, react-day-picker would complete a range on the very
+            // first click (`{ from: day, to: day }` immediately) — this forces
+            // the second click PeriodControls' own tests, and the trigger label
+            // logic above, both assume happens before anything commits.
+            min={1}
+            // Without this, react-day-picker treats a click as EXTENDING the
+            // already-complete range it was seeded with (`from`/`to` are
+            // always both set on these props) rather than starting a fresh
+            // pick — so the very first click after opening would silently
+            // move `to` instead of arming a new `from`. `resetOnSelect` is
+            // what makes clicking anywhere start a new two-click selection.
+            resetOnSelect
+            autoFocus
+          />
+        </div>
       </Popover.Popup>
     </Popover.Root>
   )
+}
+
+/** The grid's own copy of the selection — `undefined` when nothing is bounded,
+ *  so an unbounded "All dates" does not paint today as though it were picked. */
+function draftOf(
+  from: DayString | null,
+  to: DayString | null
+): DateRange | undefined {
+  if (from === null || to === null) return undefined
+  return { from: dayToDate(from), to: dayToDate(to) }
 }
 
 const GRID_NAVIGATION_KEYS = new Set([

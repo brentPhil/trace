@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Chip } from "@/components/history/filter-controls"
 import { DateRangePicker } from "@/components/history/date-range-picker"
+import { rangeTriggerLabel } from "@/lib/date-range-picker"
 import { periodFilters, stepPeriod } from "@/lib/history-filters"
 import { cn } from "@/lib/utils"
 import type { Filters } from "@/lib/history-filters"
@@ -92,12 +93,21 @@ export function PeriodControls({
         ))}
       </div>
 
+      {/* The trigger's WORDS are this page's, not the picker's: /reports names
+          the active period ("This week") where /timer prints US dates. See
+          `date-range-picker.tsx` for why that moved out to the callers. */}
       <DateRangePicker
         from={filters.from}
         to={filters.to}
-        period={filters.period}
         today={today}
         weekStartDay={weekStartDay}
+        label={rangeTriggerLabel(
+          filters.period,
+          filters.from,
+          filters.to,
+          today,
+          weekStartDay
+        )}
         onChange={(range) => onChange((f) => ({ ...f, period: "custom", ...range }))}
       />
     </div>

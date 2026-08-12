@@ -65,9 +65,9 @@ function open(
     <DateRangePicker
       from="2026-08-01"
       to="2026-08-01"
-      period="custom"
       today="2026-08-06"
       weekStartDay={1}
+      label="1 Aug 2026"
       onChange={onChange}
       {...props}
     />
@@ -86,33 +86,98 @@ const dayButton = (day: number, month = "August", year = 2026) =>
   })
 
 describe("DateRangePicker trigger", () => {
-  it("collapses a shared month and year", () => {
+  /*
+   * The trigger says what the CALLER gives it.
+   *
+   * It used to compute its own text from a `period`, which only ever made
+   * sense for /reports — /timer has no period and prints `08/10/2026 -
+   * 08/16/2026`, the format this product puts on invoices. What each page's
+   * label says is asserted where the label is made: `date-range-picker.test.ts`
+   * for `rangeTriggerLabel`, `period-controls.test.tsx` for /reports' wiring of
+   * it, and `timer-range.test.ts` for /timer's.
+   */
+  it("shows the label it is given", () => {
     render(
       <DateRangePicker
         from="2026-08-03"
         to="2026-08-09"
-        period="custom"
         today="2026-08-06"
         weekStartDay={1}
+        label="3 – 9 Aug 2026"
         onChange={vi.fn()}
       />
     )
     expect(screen.getByText("3 – 9 Aug 2026")).toBeTruthy()
   })
 
-  it("names a matching period instead of the raw dates", () => {
+  it("can be named differently for a screen reader than for the eye", () => {
+    // "zero eight slash one zero slash two zero two six", twice, is what the
+    // visible label spells out loud — so /timer hands over prose as well.
     render(
       <DateRangePicker
         from="2026-08-03"
         to="2026-08-09"
-        period="week"
         today="2026-08-06"
         weekStartDay={1}
+        label="08/03/2026 - 08/09/2026"
+        spokenLabel="This week · 3–9 Aug"
         onChange={vi.fn()}
       />
     )
-    expect(screen.getByText("This week")).toBeTruthy()
-    expect(screen.queryByText("3 – 9 Aug 2026")).toBeNull()
+    expect(screen.getByText("08/03/2026 - 08/09/2026")).toBeTruthy()
+    expect(
+      screen.getByRole("button", { name: "Date range — This week · 3–9 Aug" })
+    ).toBeTruthy()
+  })
+
+  it("offers a grid with nothing selected when nothing is bounded", () => {
+    // /timer's "All dates" default. The grid still opens on today's month, and
+    // no day is painted as picked — a highlighted "today" would claim a
+    // selection nobody made.
+    open({ from: null, to: null, label: "MM/DD/YYYY - MM/DD/YYYY" })
+
+    expect(screen.getByText(monthLabel("2026-08-01"))).toBeTruthy()
+    expect(document.querySelectorAll('[data-range="start"]')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-range="in-range"]')).toHaveLength(0)
+  })
+})
+
+describe("DateRangePicker preset rail", () => {
+  const PRESETS = [
+    { value: "today", label: "Today" },
+    { value: "this-week", label: "This week" },
+    { value: "all-dates", label: "All dates" },
+  ]
+
+  it("draws one chip per preset, with the active one pressed", () => {
+    open({
+      presets: { items: PRESETS, active: "this-week", onSelect: vi.fn() },
+    })
+
+    expect(
+      screen.getByRole("button", { name: "This week" }).getAttribute("aria-pressed")
+    ).toBe("true")
+    expect(
+      screen.getByRole("button", { name: "Today" }).getAttribute("aria-pressed")
+    ).toBe("false")
+  })
+
+  it("reports the chosen preset and closes", () => {
+    const onSelect = vi.fn()
+    open({ presets: { items: PRESETS, active: null, onSelect } })
+
+    fireEvent.click(screen.getByRole("button", { name: "All dates" }))
+
+    expect(onSelect).toHaveBeenCalledWith("all-dates")
+    // The popup is gone, so the month grid it held is gone with it.
+    expect(screen.queryByText(monthLabel("2026-08-01"))).toBeNull()
+  })
+
+  it("draws no rail at all when a caller offers none", () => {
+    // /reports has its own Day/Week/Month row outside the popover and must not
+    // grow a second one inside it.
+    open({})
+    expect(screen.queryByRole("button", { name: "This week" })).toBeNull()
   })
 })
 

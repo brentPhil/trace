@@ -38,6 +38,23 @@ function Harness() {
 }
 
 describe("PeriodControls' date range picker", () => {
+  it("names the period on the trigger", () => {
+    /*
+     * The picker no longer computes this: /timer shows the same control with
+     * US dates on it, so the trigger's WORDS moved out to the caller. This is
+     * the assertion that /reports still passes the ones it always did —
+     * `rangeTriggerLabel`'s own cases live in date-range-picker.test.ts.
+     */
+    render(<Harness />)
+
+    // `defaultFilters` opens on the week containing TODAY.
+    expect(screen.getByText("This week")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: /previous period/i }))
+    expect(screen.queryByText("This week")).toBeNull()
+    expect(screen.getByText("27 Jul – 2 Aug 2026")).toBeTruthy()
+  })
+
   it("sets period to custom when a range is picked", () => {
     render(<Harness />)
 

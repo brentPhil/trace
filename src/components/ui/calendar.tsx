@@ -84,6 +84,17 @@ function Calendar({
           defaultClassNames.weekday
         ),
         week: defaultClassNames.week,
+        /* Only rendered under `showWeekNumber`, which is off by default. Muted
+           and non-tabular-width-competing with the day cells: the numbers are a
+           rail to find a row by, not data to read across. */
+        week_number_header: cn(
+          "w-8 pb-1 text-center text-[0.6875rem] font-normal text-muted-foreground select-none",
+          defaultClassNames.week_number_header
+        ),
+        week_number: cn(
+          "tabular w-8 text-center text-[0.6875rem] text-muted-foreground select-none",
+          defaultClassNames.week_number
+        ),
         day: cn("p-0.5 text-center", defaultClassNames.day),
         range_start: defaultClassNames.range_start,
         range_middle: defaultClassNames.range_middle,
