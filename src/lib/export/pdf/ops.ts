@@ -37,12 +37,34 @@ export type RectOp = {
 }
 
 /** An arbitrary filled path, given as SVG path data. Used for donut slices. */
-export type PathOp = { kind: "path"; x: number; y: number; d: string; color: Rgb }
+export type PathOp = {
+  kind: "path"
+  x: number
+  y: number
+  d: string
+  color: Rgb
+}
 
 /** A hatched region — absence. Rendered as diagonal strokes, never a fill. */
-export type HatchOp = { kind: "hatch"; x: number; y: number; width: number; height: number }
+export type HatchOp = {
+  kind: "hatch"
+  x: number
+  y: number
+  width: number
+  height: number
+}
 
-export type PdfOp = TextOp | RectOp | PathOp | HatchOp
+export type ImageOp = {
+  kind: "image"
+  x: number
+  y: number
+  width: number
+  height: number
+  data: Uint8Array
+  format: "png" | "jpeg"
+}
+
+export type PdfOp = TextOp | RectOp | PathOp | HatchOp | ImageOp
 export type PdfPage = { ops: Array<PdfOp> }
 
 export function text(op: Omit<TextOp, "kind">): TextOp {
@@ -82,33 +104,199 @@ export function rect(op: Omit<RectOp, "kind">): RectOp {
  * version ever changes its metrics.
  */
 const DM_SANS_WIDTHS: Record<string, number> = {
-  " ": 266, "!": 250, '"': 291, "#": 804, $: 580, "%": 786, "&": 734,
-  "'": 159, "(": 373, ")": 373, "*": 480, "+": 550, ",": 182, "-": 541,
-  ".": 198, "/": 392, "0": 684, "1": 312, "2": 576, "3": 591, "4": 607,
-  "5": 610, "6": 628, "7": 534, "8": 608, "9": 628, ":": 202, ";": 227,
-  "<": 550, "=": 550, ">": 550, "?": 524, "@": 1005, A: 664, B: 603,
-  C: 717, D: 688, E: 565, F: 535, G: 758, H: 681, I: 234, J: 501, K: 584,
-  L: 527, M: 841, N: 691, O: 774, P: 580, Q: 774, R: 594, S: 580, T: 561,
-  U: 655, V: 669, W: 968, X: 603, Y: 580, Z: 541, "[": 314, "\\": 392,
-  "]": 314, "^": 622, _: 660, "`": 213, a: 544, b: 626, c: 572, d: 627,
-  e: 568, f: 340, g: 558, h: 575, i: 240, j: 243, k: 504, l: 223, m: 891,
-  n: 574, o: 593, p: 626, q: 627, r: 370, s: 502, t: 392, u: 573, v: 527,
-  w: 763, x: 496, y: 556, z: 458, "{": 427, "|": 234, "}": 427, "~": 550,
+  " ": 266,
+  "!": 250,
+  '"': 291,
+  "#": 804,
+  $: 580,
+  "%": 786,
+  "&": 734,
+  "'": 159,
+  "(": 373,
+  ")": 373,
+  "*": 480,
+  "+": 550,
+  ",": 182,
+  "-": 541,
+  ".": 198,
+  "/": 392,
+  "0": 684,
+  "1": 312,
+  "2": 576,
+  "3": 591,
+  "4": 607,
+  "5": 610,
+  "6": 628,
+  "7": 534,
+  "8": 608,
+  "9": 628,
+  ":": 202,
+  ";": 227,
+  "<": 550,
+  "=": 550,
+  ">": 550,
+  "?": 524,
+  "@": 1005,
+  A: 664,
+  B: 603,
+  C: 717,
+  D: 688,
+  E: 565,
+  F: 535,
+  G: 758,
+  H: 681,
+  I: 234,
+  J: 501,
+  K: 584,
+  L: 527,
+  M: 841,
+  N: 691,
+  O: 774,
+  P: 580,
+  Q: 774,
+  R: 594,
+  S: 580,
+  T: 561,
+  U: 655,
+  V: 669,
+  W: 968,
+  X: 603,
+  Y: 580,
+  Z: 541,
+  "[": 314,
+  "\\": 392,
+  "]": 314,
+  "^": 622,
+  _: 660,
+  "`": 213,
+  a: 544,
+  b: 626,
+  c: 572,
+  d: 627,
+  e: 568,
+  f: 340,
+  g: 558,
+  h: 575,
+  i: 240,
+  j: 243,
+  k: 504,
+  l: 223,
+  m: 891,
+  n: 574,
+  o: 593,
+  p: 626,
+  q: 627,
+  r: 370,
+  s: 502,
+  t: 392,
+  u: 573,
+  v: 527,
+  w: 763,
+  x: 496,
+  y: 556,
+  z: 458,
+  "{": 427,
+  "|": 234,
+  "}": 427,
+  "~": 550,
 }
 
 const DM_SANS_BOLD_WIDTHS: Record<string, number> = {
-  " ": 235, "!": 309, '"': 367, "#": 857, $: 604, "%": 902, "&": 781,
-  "'": 197, "(": 405, ")": 405, "*": 513, "+": 579, ",": 246, "-": 576,
-  ".": 252, "/": 427, "0": 704, "1": 364, "2": 577, "3": 603, "4": 650,
-  "5": 622, "6": 634, "7": 537, "8": 633, "9": 635, ":": 254, ";": 278,
-  "<": 579, "=": 579, ">": 579, "?": 538, "@": 1046, A: 709, B: 638,
-  C: 738, D: 707, E: 583, F: 556, G: 778, H: 714, I: 272, J: 541, K: 653,
-  L: 558, M: 886, N: 729, O: 784, P: 614, Q: 784, R: 631, S: 604, T: 597,
-  U: 685, V: 706, W: 1018, X: 670, Y: 635, Z: 577, "[": 377, "\\": 427,
-  "]": 377, "^": 677, _: 725, "`": 235, a: 586, b: 655, c: 607, d: 655,
-  e: 602, f: 371, g: 596, h: 618, i: 274, j: 274, k: 578, l: 267, m: 941,
-  n: 617, o: 610, p: 655, q: 655, r: 409, s: 532, t: 433, u: 616, v: 565,
-  w: 820, x: 571, y: 604, z: 490, "{": 470, "|": 272, "}": 470, "~": 579,
+  " ": 235,
+  "!": 309,
+  '"': 367,
+  "#": 857,
+  $: 604,
+  "%": 902,
+  "&": 781,
+  "'": 197,
+  "(": 405,
+  ")": 405,
+  "*": 513,
+  "+": 579,
+  ",": 246,
+  "-": 576,
+  ".": 252,
+  "/": 427,
+  "0": 704,
+  "1": 364,
+  "2": 577,
+  "3": 603,
+  "4": 650,
+  "5": 622,
+  "6": 634,
+  "7": 537,
+  "8": 633,
+  "9": 635,
+  ":": 254,
+  ";": 278,
+  "<": 579,
+  "=": 579,
+  ">": 579,
+  "?": 538,
+  "@": 1046,
+  A: 709,
+  B: 638,
+  C: 738,
+  D: 707,
+  E: 583,
+  F: 556,
+  G: 778,
+  H: 714,
+  I: 272,
+  J: 541,
+  K: 653,
+  L: 558,
+  M: 886,
+  N: 729,
+  O: 784,
+  P: 614,
+  Q: 784,
+  R: 631,
+  S: 604,
+  T: 597,
+  U: 685,
+  V: 706,
+  W: 1018,
+  X: 670,
+  Y: 635,
+  Z: 577,
+  "[": 377,
+  "\\": 427,
+  "]": 377,
+  "^": 677,
+  _: 725,
+  "`": 235,
+  a: 586,
+  b: 655,
+  c: 607,
+  d: 655,
+  e: 602,
+  f: 371,
+  g: 596,
+  h: 618,
+  i: 274,
+  j: 274,
+  k: 578,
+  l: 267,
+  m: 941,
+  n: 617,
+  o: 610,
+  p: 655,
+  q: 655,
+  r: 409,
+  s: 532,
+  t: 433,
+  u: 616,
+  v: 565,
+  w: 820,
+  x: 571,
+  y: 604,
+  z: 490,
+  "{": 470,
+  "|": 272,
+  "}": 470,
+  "~": 579,
 }
 
 /**
@@ -157,7 +345,12 @@ export function textWidth(str: string, size: number, bold: boolean): number {
  * was rewritten to avoid, just bounded by one word's length here instead of
  * a whole line's, so it never showed up as a real cost.
  */
-function hardBreak(word: string, maxWidth: number, size: number, bold: boolean): Array<string> {
+function hardBreak(
+  word: string,
+  maxWidth: number,
+  size: number,
+  bold: boolean
+): Array<string> {
   const table = bold ? DM_SANS_BOLD_WIDTHS : DM_SANS_WIDTHS
   const chunks: Array<string> = []
   let current = ""
@@ -227,7 +420,8 @@ export function wrapToWidth(
   for (const word of str.split(" ")) {
     const wordUnits = advanceUnits(word, table)
     const wordWidth = (wordUnits / 1000) * size
-    const pieces = wordWidth > maxWidth ? hardBreak(word, maxWidth, size, bold) : [word]
+    const pieces =
+      wordWidth > maxWidth ? hardBreak(word, maxWidth, size, bold) : [word]
 
     pieces.forEach((piece, pieceIndex) => {
       // The common case (`pieces` is just `[word]`) reuses `wordUnits` rather
@@ -236,7 +430,8 @@ export function wrapToWidth(
       // decide whether it needed hard-breaking and a second time as part of
       // the candidate line. A hard-broken piece has no such width in hand, so
       // it is measured once, here, and nowhere else.
-      const pieceUnits = pieces.length === 1 ? wordUnits : advanceUnits(piece, table)
+      const pieceUnits =
+        pieces.length === 1 ? wordUnits : advanceUnits(piece, table)
 
       // A piece past the first is a continuation of a hard-broken word, not a
       // new word — it must start its own line unconditionally (no leading
@@ -302,7 +497,9 @@ export function axisTickIndices(
   if (labels.length === 1) return [0]
 
   const slot = totalWidth / labels.length
-  const widest = Math.max(...labels.map((label) => textWidth(label, size, bold)))
+  const widest = Math.max(
+    ...labels.map((label) => textWidth(label, size, bold))
+  )
   const step = Math.max(1, Math.ceil((widest + AXIS_LABEL_GUTTER) / slot))
 
   const indices: Array<number> = []
@@ -315,7 +512,12 @@ export function axisTickIndices(
 
 const TAU = Math.PI * 2
 
-function pointOn(cx: number, cy: number, radius: number, angle: number): [number, number] {
+function pointOn(
+  cx: number,
+  cy: number,
+  radius: number,
+  angle: number
+): [number, number] {
   return [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]
 }
 
@@ -478,14 +680,19 @@ const MIN_BAR_HEIGHT = 1.5
  * so a caller with no axis still gets the old, self-scaled behaviour.
  */
 export function barColumns(
-  values: ReadonlyArray<{ billableMs: number; nonBillableMs: number; empty: boolean }>,
+  values: ReadonlyArray<{
+    billableMs: number
+    nonBillableMs: number
+    empty: boolean
+  }>,
   box: { x: number; y: number; width: number; height: number },
   maxMs?: number
 ): Array<PdfOp> {
   if (values.length === 0) return []
 
   const tallest =
-    maxMs ?? Math.max(...values.map((value) => value.billableMs + value.nonBillableMs))
+    maxMs ??
+    Math.max(...values.map((value) => value.billableMs + value.nonBillableMs))
   const slot = box.width / values.length
   const barWidth = Math.min(MAX_BAR_WIDTH, Math.max(1, slot - COLUMN_GAP))
   // Centred in its slot rather than offset by half a gap: the two are the same
@@ -497,7 +704,13 @@ export function barColumns(
     const x = box.x + index * slot + barInset
 
     if (value.empty) {
-      ops.push({ kind: "hatch", x, y: box.y, width: barWidth, height: box.height })
+      ops.push({
+        kind: "hatch",
+        x,
+        y: box.y,
+        width: barWidth,
+        height: box.height,
+      })
       return
     }
 
@@ -518,12 +731,21 @@ export function barColumns(
     // the two segments in their original ratio; a bar already taller than
     // the floor is untouched, so ordinary columns keep their proportional
     // reading.
-    const boost = rawTotal > 0 && rawTotal < MIN_BAR_HEIGHT ? MIN_BAR_HEIGHT / rawTotal : 1
+    const boost =
+      rawTotal > 0 && rawTotal < MIN_BAR_HEIGHT ? MIN_BAR_HEIGHT / rawTotal : 1
     const billable = rawBillable * boost
     const nonBillable = rawNonBillable * boost
 
     if (billable > 0) {
-      ops.push(rect({ x, y: box.y, width: barWidth, height: billable, color: PAPER.bar }))
+      ops.push(
+        rect({
+          x,
+          y: box.y,
+          width: barWidth,
+          height: billable,
+          color: PAPER.bar,
+        })
+      )
     }
     if (nonBillable > 0) {
       ops.push(
@@ -548,7 +770,13 @@ export function barColumns(
      */
     if (billable <= 0 && nonBillable <= 0) {
       ops.push(
-        rect({ x, y: box.y, width: barWidth, height: ZERO_MARK_HEIGHT, color: PAPER.bar })
+        rect({
+          x,
+          y: box.y,
+          width: barWidth,
+          height: ZERO_MARK_HEIGHT,
+          color: PAPER.bar,
+        })
       )
     }
   })

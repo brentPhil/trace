@@ -108,8 +108,11 @@ export const INVOICE_SCAN_LIMIT = ENTRY_SCAN_LIMIT
  * `sourceProjectId` at `MAX_SOURCE_TEXT_LENGTH` (100 each), and `notes` at
  * `MAX_NOTES_LENGTH` (600 — the payment block and the thank-you, and now the
  * largest single term in this sum). That is 2,302 characters — ~2.3 KB of text
- * beside a handful of ids and numbers and a `sourcePresets` array deduplication
- * bounds at three short literals. Call the row ~2.7 KB, where this comment said
+ * beside a handful of ids and numbers (now including the optional
+ * `logoStorageId` snapshot) and a `sourcePresets` array deduplication bounds at
+ * three short literals. A storage id is another fixed-size id term, not free
+ * text, so the conservative ~400 B allowance around the text still contains
+ * it. Call the row ~2.7 KB, where this comment said
  * ~2.1 KB before `notes`, ~1.8 KB before the filter was stored, and ~800 B
  * before there was an editor at all.
  *
@@ -210,36 +213,34 @@ export const INVOICE_NUMBER_SCAN_LIMIT = 1_000
  * `purchaseOrder` at 100, `paymentTerms` at 200, `sourceText` and
  * `sourceProjectId` at 100 each, `notes` at 600, beside ids and numbers). An
  * `invoiceLines` row is a description, four numbers and two ids — call it
- * ~400 B. For M lines an invoice, a page of 50 costs 50 x (2,700 + M x 400)
+ * ~300 B. For M lines an invoice, a page of 50 costs 50 x (2,700 + M x 300)
  * bytes and 50 x (1 + M) documents.
  *
- * That ~400 B assumes a bound `invoiceLines.description` does not actually
- * have. It is a bare `v.string()`, and it holds today only because the sole
- * writer is `createFromRange`, which puts a project name (bounded by
- * projects.ts) or `NO_PROJECT_LABEL` in it. A line editor writing free text
- * breaks the per-row figure the same way an unbounded `purchaseOrder` would
- * have broken `INVOICE_NUMBER_SCAN_LIMIT`'s — so it gets the same warning, and
- * `createFromRange`'s own `checkText` calls are the worked example of answering
- * it: `notes`, `purchaseOrder`, `paymentTerms` and the party blocks are all free
- * text a human types, and each is bounded at the single place that writes it.
- * Whichever surface first lets a human type a line DESCRIPTION must do the same,
- * and then redo the division below.
+ * The old ~400 B estimate now has the bound it used to owe. `createFromRange`
+ * is still the
+ * sole writer, but it can now put a human-typed summary into `description`, so
+ * `MAX_LINE_DESCRIPTION_LENGTH` caps it at 100 characters — the same bound as
+ * a project name and a purchase order. At the byte-worst ASCII case the row is
+ * therefore approximately 100 B of description plus four numbers, ids,
+ * field names and document overhead: ~300 B, about 100 B less than the old
+ * estimate that had to leave the description unbounded. The division below is
+ * consequently redone as 50 x (2,700 + M x 300), not merely re-asserted.
  *
  * DOCUMENTS BIND, NOT BYTES, and it is worth saying plainly because the
  * accounting above is all in bytes and the byte ceiling is the LOOSER of the
  * two here. At a page of 50 the document limit is reached at M = 327 and the
- * byte limit not until M = 413, so the real headroom is:
+ * byte limit not until M = 551, so the real headroom is:
  *
- *     M <= 326 fits. M = 200 -> 10,050 docs (61% of 16,384) and ~4.1 MB (49%).
+ *     M <= 326 fits. M = 200 -> 10,050 docs (61% of 16,384) and ~3.1 MB (37%).
  *
  * Those three figures are UNCHANGED by the row growing from ~2.1 KB to ~2.7 KB
  * — the document limit does not know about bytes at all, and at M = 200 the
- * extra 600 characters a row are 30 KB of a 4.1 MB page — but the byte failure
- * point DID move, from M = 415 to M = 413, and the division was redone rather
+ * extra 600 characters a row are 30 KB of a 3.1 MB page — but the byte failure
+ * point DID move, from M = 413 to M = 551, and the division was redone rather
  * than assumed to find that out:
  *
- *     50 x (2,700 + 412 x 400) = 8,375,000 B   under the 8,388,608 ceiling
- *     50 x (2,700 + 413 x 400) = 8,395,000 B   over it
+ *     50 x (2,700 + 550 x 300) = 8,385,000 B   under the 8,388,608 ceiling
+ *     50 x (2,700 + 551 x 300) = 8,400,000 B   over it
  *
  * Lines still dominate, so the head of the row barely registers — which is the
  * same fact that makes M, not this constant, the number to worry about, and the

@@ -17,12 +17,13 @@ import {
   MAX_PARTY_LENGTH,
   MAX_PAYMENT_TERMS_LENGTH,
   MAX_PURCHASE_ORDER_LENGTH,
+  MAX_LINE_DESCRIPTION_LENGTH,
   MAX_SOURCE_TEXT_LENGTH,
 } from "./invoices"
 import { isTraceError, traceErrorCode } from "./lib/codes"
 import { billableBucketsOf, invoiceLineDrafts } from "./lib/invoiceLines"
 import { parseInvoiceSequence } from "./lib/invoiceNumber"
-import { NO_PROJECT_LABEL } from "./lib/labels"
+import { NO_PROJECT_LABEL, SUMMARY_LABEL } from "./lib/labels"
 import {
   INVOICE_LIST_LIMIT,
   INVOICE_NUMBER_SCAN_LIMIT,
@@ -39,7 +40,12 @@ const BOB = "user_bob"
 const HOUR = 3_600_000
 
 const MON = Date.parse("2026-08-03T00:00:00Z")
-const RANGE = { fromMs: MON, toMs: MON + 7 * 24 * HOUR, timeZone: "UTC", weekStartDay: 1 }
+const RANGE = {
+  fromMs: MON,
+  toMs: MON + 7 * 24 * HOUR,
+  timeZone: "UTC",
+  weekStartDay: 1,
+}
 
 /**
  * A refusal, by its code and — when one is named — by the FIELD it is about.
@@ -62,7 +68,9 @@ async function expectCode(
   } catch (error) {
     expect(traceErrorCode(error) ?? String(error)).toBe(code)
     if (field !== undefined) {
-      expect(isTraceError(error) ? error.data.meta?.field : undefined).toBe(field)
+      expect(isTraceError(error) ? error.data.meta?.field : undefined).toBe(
+        field
+      )
     }
     return
   }
@@ -154,6 +162,9 @@ async function create(
     currency: string
     issuedAt: number
     dueAt: number
+    mergeLines: boolean
+    summaryDescription: string
+    useAccountMergeDefault: boolean
   }> = {}
 ) {
   return await t.mutation(internal.invoices.createFromRangeAs, {
@@ -174,6 +185,10 @@ async function create(
     currency: over.currency,
     issuedAt: over.issuedAt,
     dueAt: over.dueAt,
+    ...(over.useAccountMergeDefault
+      ? {}
+      : { mergeLines: over.mergeLines ?? false }),
+    summaryDescription: over.summaryDescription,
   })
 }
 
@@ -182,17 +197,215 @@ async function get(t: ReturnType<typeof setup>, invoiceId: Id<"invoices">) {
 }
 
 async function countInvoices(t: ReturnType<typeof setup>): Promise<number> {
-  return await t.run(async (ctx) => (await ctx.db.query("invoices").collect()).length)
+  return await t.run(
+    async (ctx) => (await ctx.db.query("invoices").collect()).length
+  )
+}
+
+async function logoFile(t: ReturnType<typeof setup>, type = "image/png") {
+  const bytes = type === "image/png" ? [1, 2, 3] : [4, 5, 6]
+  return await t.run(
+    async (ctx) =>
+      await ctx.storage.store(new Blob([new Uint8Array(bytes)], { type }))
+  )
 }
 
 describe("invoices.createFromRange", () => {
+  it("snapshots the current logo and does not follow a later repoint", async () => {
+    const t = setup()
+    const first = await logoFile(t)
+    const second = await logoFile(t, "image/jpeg")
+    await t.action(internal.settings.setLogoAs, {
+      userId: ALICE,
+      storageId: first,
+    })
+    const { projectId } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 1_000,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const { invoiceId } = await create(t)
+    const before = await get(t, invoiceId)
+    expect(before.logoStorageId).toBe(first)
+    expect(before.logoUrl).not.toBeNull()
+
+    await t.action(internal.settings.setLogoAs, {
+      userId: ALICE,
+      storageId: second,
+    })
+    const after = await get(t, invoiceId)
+    expect(after.logoStorageId).toBe(first)
+    expect(after.logoUrl).toBe(before.logoUrl)
+
+    const next = await get(t, (await create(t)).invoiceId)
+    expect(next.logoStorageId).toBe(second)
+    expect(next.logoUrl).not.toBe(before.logoUrl)
+  })
+
+  it("keeps an invoice raised without a logo without one", async () => {
+    const t = setup()
+    const { projectId } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 1_000,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const { invoiceId } = await create(t)
+    const invoice = await get(t, invoiceId)
+    expect(invoice.logoStorageId).toBeUndefined()
+    expect(invoice.logoUrl).toBeNull()
+  })
+
+  it("uses the account default to merge same-rate projects when the caller sends no override", async () => {
+    const t = setup()
+    const { projectId: alpha } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 1_000,
+    })
+    const { projectId: bravo } = await project(t, {
+      name: "Bravo",
+      hourlyRateCents: 1_000,
+    })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: HOUR,
+      projectId: alpha,
+    })
+    await entry(t, {
+      startedAt: MON + 3 * HOUR,
+      durationMs: 2 * HOUR,
+      projectId: bravo,
+    })
+
+    const { invoiceId } = await create(t, { useAccountMergeDefault: true })
+    const invoice = await get(t, invoiceId)
+
+    expect(invoice.lines).toHaveLength(1)
+    expect(invoice.lines[0]).toMatchObject({
+      description: SUMMARY_LABEL,
+      quantityCentis: 300,
+      unitCents: 1_000,
+      amountCents: 3_000,
+    })
+    expect(invoice.lines[0]?.projectId).toBeUndefined()
+  })
+
+  it("keeps project lines when this invoice explicitly switches merging off", async () => {
+    const t = setup()
+    const { projectId: alpha } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 1_000,
+    })
+    const { projectId: bravo } = await project(t, {
+      name: "Bravo",
+      hourlyRateCents: 1_000,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId: alpha })
+    await entry(t, { startedAt: MON + 3 * HOUR, projectId: bravo })
+
+    const { invoiceId } = await create(t, { mergeLines: false })
+    expect(
+      (await get(t, invoiceId)).lines.map((line) => line.description)
+    ).toEqual(["Alpha", "Bravo"])
+  })
+
+  it("merges with one rounding step from the total printed quantity", async () => {
+    const t = setup()
+    const { projectId: alpha } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 50,
+    })
+    const { projectId: bravo } = await project(t, {
+      name: "Bravo",
+      hourlyRateCents: 50,
+    })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: 36_000,
+      projectId: alpha,
+    })
+    await entry(t, {
+      startedAt: MON + 2 * HOUR,
+      durationMs: 36_000,
+      projectId: bravo,
+    })
+
+    const { invoiceId } = await create(t, {
+      mergeLines: true,
+      summaryDescription: "Micro consulting",
+    })
+    expect((await get(t, invoiceId)).lines).toMatchObject([
+      {
+        description: "Micro consulting",
+        quantityCentis: 2,
+        unitCents: 50,
+        amountCents: 1,
+      },
+    ])
+  })
+
+  it("leaves mixed rates split even when merging is requested", async () => {
+    const t = setup()
+    const { projectId: alpha } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 1_000,
+    })
+    const { projectId: bravo } = await project(t, {
+      name: "Bravo",
+      hourlyRateCents: 2_000,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId: alpha })
+    await entry(t, { startedAt: MON + 3 * HOUR, projectId: bravo })
+
+    const { invoiceId } = await create(t, { mergeLines: true })
+    expect(
+      (await get(t, invoiceId)).lines.map((line) => line.description)
+    ).toEqual(["Alpha", "Bravo"])
+  })
+
+  it("falls back to the shared summary label when the typed description is blank", async () => {
+    const t = setup()
+    const { projectId } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 1_000,
+    })
+    await entry(t, { startedAt: MON + HOUR, projectId })
+
+    const { invoiceId } = await create(t, {
+      mergeLines: true,
+      summaryDescription: "   ",
+    })
+    expect((await get(t, invoiceId)).lines[0]?.description).toBe(SUMMARY_LABEL)
+  })
+
+  it("refuses a summary description past its bound beside that field", async () => {
+    const t = setup()
+    await expectCode(
+      create(t, {
+        mergeLines: true,
+        summaryDescription: "x".repeat(MAX_LINE_DESCRIPTION_LENGTH + 1),
+      }),
+      "TOO_LONG",
+      "summaryDescription"
+    )
+  })
+
   it("makes one line per project, priced at that project's rate", async () => {
     const t = setup()
     const { clientId } = await client(t, "Acme")
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000, clientId })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+      clientId,
+    })
     // 98:48:00 of billable time -> 98.80 centihours, matching the reference
     // invoice line in convex/lib/invoiceMath.test.ts.
-    await entry(t, { startedAt: MON + HOUR, durationMs: 98 * HOUR + 48 * 60_000, projectId })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: 98 * HOUR + 48 * 60_000,
+      projectId,
+    })
 
     const { invoiceId } = await create(t)
     const invoice = await get(t, invoiceId)
@@ -216,12 +429,19 @@ describe("invoices.createFromRange", () => {
    */
   it("prices a line from the rounded quantity, not the breakdown's exact billableCents", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 6100 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 6100,
+    })
     // 1h 0m 20s = 3,620,000ms. centiHours floors 100.5(5)... down to 100
     // centihours, so lineAmountCents(100, 6100) = 6_100 exactly. The exact
     // value — (3,620,000 / 3,600,000) x 6100 = 6133.8(8)... -> 6_134 rounded —
     // is what `billableCents` would price this same time at.
-    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR + 20_000, projectId })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: HOUR + 20_000,
+      projectId,
+    })
 
     const { invoiceId } = await create(t)
     const invoice = await get(t, invoiceId)
@@ -238,8 +458,15 @@ describe("invoices.createFromRange", () => {
    */
   it("is a snapshot: editing a source entry afterwards does not change it", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
-    const entryId = await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
+    const entryId = await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: HOUR,
+      projectId,
+    })
 
     const { invoiceId } = await create(t)
     const before = await get(t, invoiceId)
@@ -278,7 +505,10 @@ describe("invoices.createFromRange", () => {
 
   it("refuses a truncated range rather than invoicing a floor", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
 
     const BATCH = 500
     // INVOICE_SCAN_LIMIT, not SUMMARY_SCAN_LIMIT — createFromRange scans
@@ -307,7 +537,10 @@ describe("invoices.createFromRange", () => {
       })
     }
 
-    await expectCode(create(t, { toMs: MON + (n + 10) * 60_000 }), "RANGE_TOO_LARGE")
+    await expectCode(
+      create(t, { toMs: MON + (n + 10) * 60_000 }),
+      "RANGE_TOO_LARGE"
+    )
   }, 60_000)
 
   it("refuses a range spanning two clients, naming both", async () => {
@@ -385,7 +618,9 @@ describe("invoices.createFromRange", () => {
     expect(invoice.billedTo).toContain("Acme Corp")
     // Named explicitly: the OTHER client's work is on no line of this document
     // at any price. A superset invoice would have carried it at 2000/hr.
-    expect(invoice.lines.map((line) => line.projectId)).not.toContain(globexProject)
+    expect(invoice.lines.map((line) => line.projectId)).not.toContain(
+      globexProject
+    )
   })
 
   /*
@@ -395,8 +630,15 @@ describe("invoices.createFromRange", () => {
    */
   it("bills only the rows matching the search text", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
-    await entry(t, { startedAt: MON + HOUR, projectId, title: "Schema migration" })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      projectId,
+      title: "Schema migration",
+    })
     await entry(t, { startedAt: MON + 2 * HOUR, projectId, title: "Standup" })
 
     const { invoiceId } = await create(t, { text: "migration" })
@@ -416,7 +658,10 @@ describe("invoices.createFromRange", () => {
       userId: ALICE,
       defaultHourlyRateCents: 1000,
     })
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
     // The only row with no project, which is what the chip keeps. Priced by the
     // account default, so it lands on a line rather than in `unratedMs`.
@@ -439,7 +684,10 @@ describe("invoices.createFromRange", () => {
    */
   it("records the filter beside the range, as provenance", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     // 45s, and that is not arbitrary: the chips below have to be ones this
     // entry actually SURVIVES. `no-project` was here once, ANDed against a
     // `projectId` filter — a pair nothing can satisfy, which left the range
@@ -474,7 +722,10 @@ describe("invoices.createFromRange", () => {
 
   it("records the unfiltered defaults rather than leaving the fields absent", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
     const { invoiceId } = await create(t)
@@ -493,10 +744,16 @@ describe("invoices.createFromRange", () => {
    */
   it("refuses a search filter past its bound rather than storing it", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
-    await expectCode(create(t, { text: "x".repeat(MAX_SOURCE_TEXT_LENGTH + 1) }), "TOO_LONG")
+    await expectCode(
+      create(t, { text: "x".repeat(MAX_SOURCE_TEXT_LENGTH + 1) }),
+      "TOO_LONG"
+    )
     expect(await countInvoices(t)).toBe(0)
   })
 
@@ -513,10 +770,21 @@ describe("invoices.createFromRange", () => {
    */
   it("excludes billable time that has no rate, and reports how much", async () => {
     const t = setup()
-    const { projectId: rated } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId: rated } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     const { projectId: unrated } = await project(t, { name: "Unrated" })
-    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: rated })
-    await entry(t, { startedAt: MON + 4 * HOUR, durationMs: 2 * HOUR, projectId: unrated })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: HOUR,
+      projectId: rated,
+    })
+    await entry(t, {
+      startedAt: MON + 4 * HOUR,
+      durationMs: 2 * HOUR,
+      projectId: unrated,
+    })
 
     const { invoiceId, unratedMs } = await create(t)
     const invoice = await get(t, invoiceId)
@@ -574,10 +842,17 @@ describe("invoices.createFromRange", () => {
    */
   it("does not refuse a mixed range, where only some of the time is priced", async () => {
     const t = setup()
-    const { projectId: free } = await project(t, { name: "Pro bono", hourlyRateCents: 0 })
+    const { projectId: free } = await project(t, {
+      name: "Pro bono",
+      hourlyRateCents: 0,
+    })
     const { projectId: unrated } = await project(t, { name: "Unrated" })
     await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: free })
-    await entry(t, { startedAt: MON + 4 * HOUR, durationMs: 2 * HOUR, projectId: unrated })
+    await entry(t, {
+      startedAt: MON + 4 * HOUR,
+      durationMs: 2 * HOUR,
+      projectId: unrated,
+    })
 
     const { invoiceId, unratedMs } = await create(t)
     const invoice = await get(t, invoiceId)
@@ -596,7 +871,10 @@ describe("invoices.createFromRange", () => {
    */
   it("prices a zero-rate project as a real $0.00 line, not as unrated", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Pro bono", hourlyRateCents: 0 })
+    const { projectId } = await project(t, {
+      name: "Pro bono",
+      hourlyRateCents: 0,
+    })
     await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId })
 
     const { invoiceId, unratedMs } = await create(t)
@@ -645,7 +923,10 @@ describe("invoices.createFromRange", () => {
    */
   it("excludes non-billable time entirely", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId })
     await entry(t, {
       startedAt: MON + 4 * HOUR,
@@ -668,7 +949,11 @@ describe("invoices.createFromRange", () => {
   it("snapshots the client's address, so renaming the client later does not rewrite it", async () => {
     const t = setup()
     const { clientId } = await client(t, "Acme")
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000, clientId })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+      clientId,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
     const { invoiceId } = await create(t)
@@ -689,7 +974,10 @@ describe("invoices.createFromRange", () => {
 
   it("is idempotent on clientKey, so a retry does not mint a second number", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
     const first = await create(t, { clientKey: "k1" })
@@ -714,10 +1002,21 @@ describe("invoices.createFromRange", () => {
     // are the thing whose SNAPSHOT is under test. This is the only coverage
     // anywhere for `unratedMsAtCreation` being read back on the replay branch,
     // so it is the fixture that had to change rather than the assertions.
-    const { projectId: rated } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId: rated } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     const { projectId: unrated } = await project(t, { name: "Unrated" })
-    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: rated })
-    await entry(t, { startedAt: MON + 4 * HOUR, durationMs: 2 * HOUR, projectId: unrated })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: HOUR,
+      projectId: rated,
+    })
+    await entry(t, {
+      startedAt: MON + 4 * HOUR,
+      durationMs: 2 * HOUR,
+      projectId: unrated,
+    })
 
     const first = await create(t, { clientKey: "replay-unrated" })
     expect(first.unratedMs).toBe(2 * HOUR)
@@ -732,8 +1031,14 @@ describe("invoices.createFromRange", () => {
 
   it("stamps number, currency and dueAt on creation, and no status", async () => {
     const t = setup()
-    await t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "EUR" })
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      currency: "EUR",
+    })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
     /*
@@ -778,7 +1083,10 @@ describe("invoices.createFromRange", () => {
 
   it("gives two invoices created in sequence different, advancing numbers", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
     const first = await create(t, { clientKey: "seq-1" })
@@ -845,7 +1153,10 @@ describe("invoices.createFromRange", () => {
 
   it("refuses to mint a number once the invoice history is too large to scan safely", async () => {
     const t = setup()
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
 
     const BATCH = 500
@@ -880,19 +1191,44 @@ describe("invoices.createFromRange", () => {
 
   it("lines carry a stable sortKey, matching print order", async () => {
     const t = setup()
-    const { projectId: alpha } = await project(t, { name: "Alpha", hourlyRateCents: 1000 })
-    const { projectId: bravo } = await project(t, { name: "Bravo", hourlyRateCents: 1000 })
-    const { projectId: charlie } = await project(t, { name: "Charlie", hourlyRateCents: 1000 })
+    const { projectId: alpha } = await project(t, {
+      name: "Alpha",
+      hourlyRateCents: 1000,
+    })
+    const { projectId: bravo } = await project(t, {
+      name: "Bravo",
+      hourlyRateCents: 1000,
+    })
+    const { projectId: charlie } = await project(t, {
+      name: "Charlie",
+      hourlyRateCents: 1000,
+    })
     // Distinct totals so `breakdown.projects`'s descending-by-time order is
     // unambiguous: Charlie (3h) > Bravo (2h) > Alpha (1h).
-    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: alpha })
-    await entry(t, { startedAt: MON + 2 * HOUR, durationMs: 2 * HOUR, projectId: bravo })
-    await entry(t, { startedAt: MON + 5 * HOUR, durationMs: 3 * HOUR, projectId: charlie })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: HOUR,
+      projectId: alpha,
+    })
+    await entry(t, {
+      startedAt: MON + 2 * HOUR,
+      durationMs: 2 * HOUR,
+      projectId: bravo,
+    })
+    await entry(t, {
+      startedAt: MON + 5 * HOUR,
+      durationMs: 3 * HOUR,
+      projectId: charlie,
+    })
 
     const { invoiceId } = await create(t)
     const invoice = await get(t, invoiceId)
 
-    expect(invoice.lines.map((l) => l.description)).toEqual(["Charlie", "Bravo", "Alpha"])
+    expect(invoice.lines.map((l) => l.description)).toEqual([
+      "Charlie",
+      "Bravo",
+      "Alpha",
+    ])
     expect(invoice.lines.map((l) => l.sortKey)).toEqual([0, 1, 2])
   })
 })
@@ -983,8 +1319,14 @@ describe("invoices.list", () => {
   it("returns the newest issued invoice first", async () => {
     const t = setup()
     await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
-    await seedInvoice(t, { number: "020126-0002", issuedAt: MON + 5 * 24 * HOUR })
-    await seedInvoice(t, { number: "030126-0003", issuedAt: MON + 2 * 24 * HOUR })
+    await seedInvoice(t, {
+      number: "020126-0002",
+      issuedAt: MON + 5 * 24 * HOUR,
+    })
+    await seedInvoice(t, {
+      number: "030126-0003",
+      issuedAt: MON + 2 * 24 * HOUR,
+    })
 
     const { invoices } = await listAs(t)
     expect(invoices.map((row) => row.number)).toEqual([
@@ -1082,7 +1424,9 @@ describe("invoices.list", () => {
     expect(truncated).toBe(true)
     // Newest first, so the ONE dropped invoice is the oldest — never the one
     // just raised.
-    expect(invoices[0]?.number).toBe(`010126-${String(INVOICE_LIST_LIMIT).padStart(4, "0")}`)
+    expect(invoices[0]?.number).toBe(
+      `010126-${String(INVOICE_LIST_LIMIT).padStart(4, "0")}`
+    )
   })
 
   it("reports no truncation when the whole history fits", async () => {
@@ -1180,7 +1524,10 @@ describe("invoices.createFromRange — the document it is handed", () => {
   /** One priced hour under one rated project, which is all any of these needs
    *  for the mutation to reach the insert. */
   async function billable(t: ReturnType<typeof setup>) {
-    const { projectId } = await project(t, { name: "Website", hourlyRateCents: 1000 })
+    const { projectId } = await project(t, {
+      name: "Website",
+      hourlyRateCents: 1000,
+    })
     await entry(t, { startedAt: MON + HOUR, projectId })
     return projectId
   }
@@ -1311,7 +1658,9 @@ describe("invoices.createFromRange — the document it is handed", () => {
     // this mutation may leave behind.
     expect(await countInvoices(t)).toBe(0)
 
-    const { invoiceId } = await create(t, { billedTo: "b".repeat(MAX_PARTY_LENGTH) })
+    const { invoiceId } = await create(t, {
+      billedTo: "b".repeat(MAX_PARTY_LENGTH),
+    })
     expect((await row(t, invoiceId))?.billedTo).toHaveLength(MAX_PARTY_LENGTH)
   })
 
@@ -1358,7 +1707,9 @@ describe("invoices.createFromRange — the document it is handed", () => {
     const { invoiceId } = await create(t, {
       purchaseOrder: "P".repeat(MAX_PURCHASE_ORDER_LENGTH),
     })
-    expect((await row(t, invoiceId))?.purchaseOrder).toHaveLength(MAX_PURCHASE_ORDER_LENGTH)
+    expect((await row(t, invoiceId))?.purchaseOrder).toHaveLength(
+      MAX_PURCHASE_ORDER_LENGTH
+    )
   })
 
   /* Bounded because it is a name/value row of the document HEAD, beside the
@@ -1376,7 +1727,9 @@ describe("invoices.createFromRange — the document it is handed", () => {
     const { invoiceId } = await create(t, {
       paymentTerms: "t".repeat(MAX_PAYMENT_TERMS_LENGTH),
     })
-    expect((await row(t, invoiceId))?.paymentTerms).toHaveLength(MAX_PAYMENT_TERMS_LENGTH)
+    expect((await row(t, invoiceId))?.paymentTerms).toHaveLength(
+      MAX_PAYMENT_TERMS_LENGTH
+    )
   })
 
   /*
@@ -1398,7 +1751,9 @@ describe("invoices.createFromRange — the document it is handed", () => {
       "TOO_LONG",
       "notes"
     )
-    const { invoiceId } = await create(t, { notes: "n".repeat(MAX_NOTES_LENGTH) })
+    const { invoiceId } = await create(t, {
+      notes: "n".repeat(MAX_NOTES_LENGTH),
+    })
     expect((await row(t, invoiceId))?.notes).toHaveLength(MAX_NOTES_LENGTH)
   })
 
@@ -1427,8 +1782,16 @@ describe("invoices.createFromRange — the document it is handed", () => {
     // JPY is a real code whose minor unit is not a hundredth — see
     // money.supportedCurrencies. `formatMoney` would silently round the stored
     // hundredths away on a document.
-    await expectCode(create(t, { currency: "JPY" }), "INVALID_CURRENCY", "currency")
-    await expectCode(create(t, { currency: "ZZZ" }), "INVALID_CURRENCY", "currency")
+    await expectCode(
+      create(t, { currency: "JPY" }),
+      "INVALID_CURRENCY",
+      "currency"
+    )
+    await expectCode(
+      create(t, { currency: "ZZZ" }),
+      "INVALID_CURRENCY",
+      "currency"
+    )
     expect(await countInvoices(t)).toBe(0)
   })
 
@@ -1439,7 +1802,11 @@ describe("invoices.createFromRange — the document it is handed", () => {
     const t = setup()
     await billable(t)
 
-    await expectCode(create(t, { issuedAt: Number.NaN }), "INVALID_DATE", "issuedAt")
+    await expectCode(
+      create(t, { issuedAt: Number.NaN }),
+      "INVALID_DATE",
+      "issuedAt"
+    )
     await expectCode(
       create(t, { dueAt: Number.POSITIVE_INFINITY }),
       "INVALID_DATE",
@@ -1455,7 +1822,10 @@ describe("invoices.createFromRange — the document it is handed", () => {
     const t = setup()
     await billable(t)
 
-    const { invoiceId } = await create(t, { issuedAt: MON, dueAt: MON - 24 * HOUR })
+    const { invoiceId } = await create(t, {
+      issuedAt: MON,
+      dueAt: MON - 24 * HOUR,
+    })
     expect((await row(t, invoiceId))?.dueAt).toBe(MON - 24 * HOUR)
   })
 
@@ -1480,11 +1850,16 @@ describe("invoices.createFromRange — the document it is handed", () => {
     const t = setup()
     await billable(t)
 
-    await expectCode(create(t, { notes: "n".repeat(MAX_NOTES_LENGTH + 1) }), "TOO_LONG")
+    await expectCode(
+      create(t, { notes: "n".repeat(MAX_NOTES_LENGTH + 1) }),
+      "TOO_LONG"
+    )
 
     expect(await countInvoices(t)).toBe(0)
     expect(
-      await t.run(async (ctx) => (await ctx.db.query("invoiceLines").collect()).length)
+      await t.run(
+        async (ctx) => (await ctx.db.query("invoiceLines").collect()).length
+      )
     ).toBe(0)
   })
 })
@@ -1525,21 +1900,39 @@ describe("invoices.createFromRange — the preview cannot diverge from it", () =
     const free = await project(t, { name: "Pro bono", hourlyRateCents: 0 })
     // Descending by total time, which is the order `rangeBreakdownImpl` sorts
     // in and therefore the order the document prints in.
-    await entry(t, { startedAt: MON + HOUR, durationMs: 4 * HOUR, projectId: website.projectId })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: 4 * HOUR,
+      projectId: website.projectId,
+    })
     await entry(t, {
       startedAt: MON + 6 * HOUR,
       durationMs: HOUR + 20_000,
       projectId: website.projectId,
     })
-    await entry(t, { startedAt: MON + 9 * HOUR, durationMs: 2 * HOUR, projectId: unrated.projectId })
-    await entry(t, { startedAt: MON + 12 * HOUR, durationMs: HOUR, projectId: free.projectId })
+    await entry(t, {
+      startedAt: MON + 9 * HOUR,
+      durationMs: 2 * HOUR,
+      projectId: unrated.projectId,
+    })
+    await entry(t, {
+      startedAt: MON + 12 * HOUR,
+      durationMs: HOUR,
+      projectId: free.projectId,
+    })
     // NO account default, which is what leaves "Discovery" genuinely unpriced:
     // with one set, `rateOf` covers every bucket and nothing is ever excluded.
 
     // THE PAGE'S OWN EXPRESSION, evaluated here against the very query the page
     // subscribes to. Not a re-implementation — the same two exported functions.
-    const breakdown = await t.query(internal.entries.rangeBreakdownAs, BREAKDOWN)
-    const previewed = invoiceLineDrafts(billableBucketsOf(breakdown.projects), null)
+    const breakdown = await t.query(
+      internal.entries.rangeBreakdownAs,
+      BREAKDOWN
+    )
+    const previewed = invoiceLineDrafts(
+      billableBucketsOf(breakdown.projects),
+      null
+    )
 
     const { invoiceId } = await create(t)
     const stored = await get(t, invoiceId)
@@ -1604,11 +1997,25 @@ describe("invoices.createFromRange — the preview cannot diverge from it", () =
     const t = setup()
     const small = await project(t, { name: "Alpha", hourlyRateCents: 1000 })
     const large = await project(t, { name: "Zulu", hourlyRateCents: 1000 })
-    await entry(t, { startedAt: MON + HOUR, durationMs: HOUR, projectId: small.projectId })
-    await entry(t, { startedAt: MON + 3 * HOUR, durationMs: 5 * HOUR, projectId: large.projectId })
+    await entry(t, {
+      startedAt: MON + HOUR,
+      durationMs: HOUR,
+      projectId: small.projectId,
+    })
+    await entry(t, {
+      startedAt: MON + 3 * HOUR,
+      durationMs: 5 * HOUR,
+      projectId: large.projectId,
+    })
 
-    const breakdown = await t.query(internal.entries.rangeBreakdownAs, BREAKDOWN)
-    const previewed = invoiceLineDrafts(billableBucketsOf(breakdown.projects), null)
+    const breakdown = await t.query(
+      internal.entries.rangeBreakdownAs,
+      BREAKDOWN
+    )
+    const previewed = invoiceLineDrafts(
+      billableBucketsOf(breakdown.projects),
+      null
+    )
 
     const { invoiceId } = await create(t)
     const stored = await get(t, invoiceId)
@@ -1639,7 +2046,10 @@ describe("invoices.createFromRange — the preview cannot diverge from it", () =
       ...BREAKDOWN,
       ...filter,
     })
-    const previewed = invoiceLineDrafts(billableBucketsOf(breakdown.projects), null)
+    const previewed = invoiceLineDrafts(
+      billableBucketsOf(breakdown.projects),
+      null
+    )
 
     const { invoiceId } = await create(t, filter)
     const stored = await get(t, invoiceId)

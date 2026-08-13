@@ -118,6 +118,16 @@ export function InvoiceForm({
             error={errors.paymentTerms}
             onChange={(paymentTerms) => onChange({ paymentTerms })}
           />
+          {draft.mergeLines ? (
+            <TextField
+              label="Summary description"
+              value={draft.summaryDescription}
+              error={errors.summaryDescription}
+              onChange={(summaryDescription) =>
+                onChange({ summaryDescription })
+              }
+            />
+          ) : null}
           <CurrencyField
             value={draft.currency}
             error={errors.currency}
@@ -157,7 +167,13 @@ export function InvoiceForm({
  * beneath — The Sentence Case Rule, and a hairline under a two-field group is
  * chrome the spacing already provides.
  */
-function Group({ legend, children }: { legend: string; children: React.ReactNode }) {
+function Group({
+  legend,
+  children,
+}: {
+  legend: string
+  children: React.ReactNode
+}) {
   return (
     <fieldset className="flex min-w-0 flex-col">
       <legend className="mb-3 text-sm font-medium">{legend}</legend>
@@ -207,7 +223,11 @@ function DateField({
           if (event.target.value === "") return
           onChange(event.target.value)
         }}
-        className={cn(INVOICE_FIELD, "tabular", fieldBorder(error !== undefined))}
+        className={cn(
+          INVOICE_FIELD,
+          "tabular",
+          fieldBorder(error !== undefined)
+        )}
       />
       {note === undefined ? null : (
         <p role="status" className="text-xs text-muted-foreground">

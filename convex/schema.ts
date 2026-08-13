@@ -132,6 +132,8 @@ export const invoiceFields = {
   payTo: v.string(),
   /** Snapshot. `userSettings.currency` may change; this invoice may not. */
   currency: v.string(),
+  /** Snapshot of the account logo selected when this document was raised. */
+  logoStorageId: v.optional(v.id("_storage")),
   issuedAt: v.number(),
   dueAt: v.number(),
   purchaseOrder: v.optional(v.string()),
@@ -185,7 +187,11 @@ export const invoiceFields = {
    *  the caller sent. */
   sourcePresets: v.optional(
     v.array(
-      v.union(v.literal("no-project"), v.literal("no-note"), v.literal("under-a-minute"))
+      v.union(
+        v.literal("no-project"),
+        v.literal("no-note"),
+        v.literal("under-a-minute")
+      )
     )
   ),
   /** SNAPSHOT of `entries.rangeBreakdownImpl`'s `unratedBillableMs` for the
@@ -369,6 +375,14 @@ export default defineSchema({
      *  argues that at length against PRODUCT.md's rule that the product
      *  "never silently rounds, merges, or guesses on the user's behalf". */
     groupEntries: v.optional(v.boolean()),
+    /** Merge same-rate project rows into one client-facing invoice line.
+     * Optional and additive: older settings rows fall through to the account
+     * default, and an individual invoice can override it without changing
+     * this preference. */
+    mergeInvoiceLines: v.optional(v.boolean()),
+    /** Current account logo pointer. Repointing never deletes the old file:
+     * historical invoices may still snapshot it. */
+    logoStorageId: v.optional(v.id("_storage")),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 })

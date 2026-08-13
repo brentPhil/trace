@@ -61,6 +61,7 @@ export type InvoiceDoc = {
   notes?: string
   taxes: ReadonlyArray<{ label: string; basisPoints: number }>
   lines: ReadonlyArray<InvoiceDocLine>
+  logo?: { bytes: Uint8Array; format: "png" | "jpeg" }
 }
 
 /**
@@ -101,7 +102,9 @@ export function percentOfBasisPoints(basisPoints: number): string {
  * PDF printing `08/05/2026` breaks that claim on the two values a payment
  * dispute turns on.
  */
-export function invoiceMetaRows(invoice: InvoiceDoc): Array<{ label: string; value: string }> {
+export function invoiceMetaRows(
+  invoice: InvoiceDoc
+): Array<{ label: string; value: string }> {
   const rows = [
     { label: "Invoice number", value: invoice.number },
     { label: "Invoice date", value: usDate(invoice.issuedOn) },

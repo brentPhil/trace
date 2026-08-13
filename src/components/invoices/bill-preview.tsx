@@ -34,6 +34,7 @@ export function BillPreview({
   currency,
   unratedMs,
   durationDisplay,
+  mergeDeclined,
 }: {
   /**
    * The scan has not landed, or what is on screen is a stale answer for a
@@ -57,9 +58,13 @@ export function BillPreview({
    *  breakdown. See the note below for why this cannot be silent. */
   unratedMs: number
   durationDisplay: DurationDisplay
+  mergeDeclined: boolean
 }) {
   return (
-    <section aria-labelledby="bill-preview-heading" className="flex flex-col gap-4">
+    <section
+      aria-labelledby="bill-preview-heading"
+      className="flex flex-col gap-4"
+    >
       <div className="flex flex-col gap-1">
         <h2 id="bill-preview-heading" className="text-sm font-semibold">
           What this will bill
@@ -84,6 +89,13 @@ export function BillPreview({
         />
       )}
 
+      {!pending && mergeDeclined ? (
+        <p role="status" className="max-w-prose text-xs text-muted-foreground">
+          These projects bill at different rates, so this invoice lists them
+          separately.
+        </p>
+      ) : null}
+
       {/*
         BILLABLE TIME NOBODY HAS PRICED, and the reason it is on this screen at
         all: `invoiceLineDrafts` deliberately leaves those buckets off rather
@@ -104,7 +116,9 @@ export function BillPreview({
       {unratedMs > 0 ? (
         <p role="status" className="max-w-prose text-xs text-muted-foreground">
           {UNPRICED_NOTE} There is{" "}
-          <span className="tabular">{formatTotal(unratedMs, durationDisplay)}</span>{" "}
+          <span className="tabular">
+            {formatTotal(unratedMs, durationDisplay)}
+          </span>{" "}
           of it in this period, and it will not appear on the invoice at all.{" "}
           {/* `SET_A_RATE_NOTE`, shared with the button's own refusal for the
               range where EVERY bucket is unpriced — see

@@ -11,3 +11,12 @@
  * name rather than holding a second literal that could drift from it.
  */
 export const NO_PROJECT_LABEL = "No project"
+
+/**
+ * The default description of a collapsed invoice line.
+ *
+ * Shared by the form prefill, the preview and the mutation fallback so a
+ * blank field cannot make those three renderings name the same charge
+ * differently.
+ */
+export const SUMMARY_LABEL = "Professional services"

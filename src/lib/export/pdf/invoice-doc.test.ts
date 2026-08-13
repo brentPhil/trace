@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { COL, invoiceDocPages } from "./invoice-doc"
+import { COL, LOGO_BAND, LOGO_BOX, invoiceDocPages } from "./invoice-doc"
 import { PAGE, TYPE } from "./paper"
 import { textWidth } from "./ops"
 import type { InvoiceDoc, InvoiceDocLine } from "./invoice-doc"
@@ -37,8 +37,12 @@ function textOf(page: { ops: Array<PdfOp> }): Array<string> {
   return page.ops.filter((op) => op.kind === "text").map((op) => op.text)
 }
 
-function textOps(page: { ops: Array<PdfOp> }): Array<Extract<PdfOp, { kind: "text" }>> {
-  return page.ops.filter((op): op is Extract<PdfOp, { kind: "text" }> => op.kind === "text")
+function textOps(page: {
+  ops: Array<PdfOp>
+}): Array<Extract<PdfOp, { kind: "text" }>> {
+  return page.ops.filter(
+    (op): op is Extract<PdfOp, { kind: "text" }> => op.kind === "text"
+  )
 }
 
 /**
@@ -59,7 +63,10 @@ function descriptionOpsOf(page: { ops: Array<PdfOp> }) {
   const bottom = ops.find((op) => op.text === "Subtotal")?.y ?? 0
   return ops.filter(
     (op) =>
-      op.x === COL.description && op.size === TYPE.body && op.y < top && op.y > bottom
+      op.x === COL.description &&
+      op.size === TYPE.body &&
+      op.y < top &&
+      op.y > bottom
   )
 }
 
@@ -76,6 +83,53 @@ describe("invoiceDocPages — the head", () => {
     expect(strings).toContain("08/26/2026")
   })
 
+  it("adds one top-right logo box and shifts the first-page head by its band", () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const withoutLogo = invoiceDocPages(makeInvoice())[0]
+    const withLogo = invoiceDocPages(
+      makeInvoice({ logo: { bytes, format: "png" } })
+    )[0]
+
+    expect(withoutLogo.ops.filter((op) => op.kind === "image")).toHaveLength(0)
+    expect(withLogo.ops.filter((op) => op.kind === "image")).toEqual([
+      {
+        kind: "image",
+        x: PAGE.width - PAGE.margin - LOGO_BOX.width,
+        y: PAGE.height - PAGE.margin - LOGO_BOX.height,
+        ...LOGO_BOX,
+        data: bytes,
+        format: "png",
+      },
+    ])
+
+    const yOf = (page: { ops: Array<PdfOp> }, value: string) =>
+      textOps(page).find((op) => op.text === value)?.y
+    expect(yOf(withLogo, "Invoice")).toBe(yOf(withoutLogo, "Invoice"))
+    expect(yOf(withLogo, "DESCRIPTION")).toBe(
+      (yOf(withoutLogo, "DESCRIPTION") ?? 0) - LOGO_BAND
+    )
+  })
+
+  it("uses the smaller first-page row budget and never repeats the logo", () => {
+    const lines = Array.from({ length: 80 }, (_, n) =>
+      makeLine({ description: `Logo line ${n}` })
+    )
+    const withoutLogo = invoiceDocPages(makeInvoice({ lines }))
+    const withLogo = invoiceDocPages(
+      makeInvoice({
+        lines,
+        logo: { bytes: new Uint8Array([9]), format: "jpeg" },
+      })
+    )
+    const firstPageRows = (pages: Array<{ ops: Array<PdfOp> }>) =>
+      textOf(pages[0]).filter((value) => /^Logo line \d+$/.test(value)).length
+
+    expect(firstPageRows(withLogo)).toBeLessThan(firstPageRows(withoutLogo))
+    expect(
+      withLogo.flatMap((page) => page.ops).filter((op) => op.kind === "image")
+    ).toHaveLength(1)
+  })
+
   /*
    * No Currency row. An earlier version printed one, on the reasoning that "$
    * alone does not distinguish USD from CAD" — which is true of the character
@@ -90,7 +144,9 @@ describe("invoiceDocPages — the head", () => {
   it("names no currency of its own, because every amount already carries one", () => {
     expect(textOf(invoiceDocPages(makeInvoice())[0])).not.toContain("USD")
 
-    const canadian = textOf(invoiceDocPages(makeInvoice({ currency: "CAD" }))[0])
+    const canadian = textOf(
+      invoiceDocPages(makeInvoice({ currency: "CAD" }))[0]
+    )
     expect(canadian).not.toContain("CAD")
     // Not merely absent — disambiguated where it counts, in the figures.
     expect(canadian.some((text) => text.includes("CA$"))).toBe(true)
@@ -112,7 +168,9 @@ describe("invoiceDocPages — the head", () => {
 
   it("prints a purchase order and payment terms when the invoice carries them", () => {
     const strings = textOf(
-      invoiceDocPages(makeInvoice({ purchaseOrder: "PO-4471", paymentTerms: "Net 30" }))[0]
+      invoiceDocPages(
+        makeInvoice({ purchaseOrder: "PO-4471", paymentTerms: "Net 30" })
+      )[0]
     )
     expect(strings).toContain("Purchase order")
     expect(strings).toContain("PO-4471")
@@ -130,13 +188,19 @@ describe("invoiceDocPages — the head", () => {
     const strings = textOf(first)
 
     expect(strings).toContain("Billed to")
-    for (const line of ["Vessel Vanguard", "Bonita Springs, FL", "34134, USA"]) {
+    for (const line of [
+      "Vessel Vanguard",
+      "Bonita Springs, FL",
+      "34134, USA",
+    ]) {
       expect(strings).toContain(line)
     }
     expect(strings).toContain("Pay to")
     expect(strings).toContain("1 Harbour Way")
     // Not one run-on string anywhere.
-    expect(strings.some((s) => s.includes("Bonita Springs, FL 34134"))).toBe(false)
+    expect(strings.some((s) => s.includes("Bonita Springs, FL 34134"))).toBe(
+      false
+    )
   })
 
   /*
@@ -149,10 +213,14 @@ describe("invoiceDocPages — the head", () => {
     const [first] = invoiceDocPages(makeInvoice({ billedTo: long }))
     const partyWidth = (PAGE.width - 2 * PAGE.margin) / 2 - 10
 
-    const drawn = textOps(first).filter((op) => long.startsWith(op.text.slice(0, 6)))
+    const drawn = textOps(first).filter((op) =>
+      long.startsWith(op.text.slice(0, 6))
+    )
     expect(drawn.length).toBeGreaterThan(1)
     for (const op of drawn) {
-      expect(textWidth(op.text, op.size, op.bold ?? false)).toBeLessThanOrEqual(partyWidth)
+      expect(textWidth(op.text, op.size, op.bold ?? false)).toBeLessThanOrEqual(
+        partyWidth
+      )
     }
   })
 
@@ -188,7 +256,12 @@ describe("invoiceDocPages — the lines", () => {
       invoiceDocPages(
         makeInvoice({
           lines: [
-            makeLine({ kind: "custom", description: "Hosting", unitCents: 5_000, amountCents: 5_000 }),
+            makeLine({
+              kind: "custom",
+              description: "Hosting",
+              unitCents: 5_000,
+              amountCents: 5_000,
+            }),
           ],
         })
       )[0]
@@ -224,7 +297,9 @@ describe("invoiceDocPages — the lines", () => {
   it("wraps a long description across lines rather than cutting it with an ellipsis", () => {
     const description =
       "Offshore vessel maintenance logs, crew training CSV and PDF download, and the quarterly reconciliation against the client's own export"
-    const [first] = invoiceDocPages(makeInvoice({ lines: [makeLine({ description })] }))
+    const [first] = invoiceDocPages(
+      makeInvoice({ lines: [makeLine({ description })] })
+    )
 
     const drawn = descriptionOpsOf(first)
     expect(drawn.length).toBeGreaterThan(1)
@@ -262,17 +337,20 @@ describe("invoiceDocPages — the lines", () => {
 
     const drawn = descriptionOpsOf(first)
     const quantityOp = textOps(first).find(
-      (op) => op.x === COL.quantity && op.align === "right" && op.size === TYPE.body
+      (op) =>
+        op.x === COL.quantity && op.align === "right" && op.size === TYPE.body
     )
     expect(drawn.length).toBeGreaterThan(1)
     expect(quantityOp).toBeDefined()
     if (quantityOp === undefined) return
 
     const quantityStartX =
-      COL.quantity - textWidth(quantityOp.text, quantityOp.size, quantityOp.bold ?? false)
+      COL.quantity -
+      textWidth(quantityOp.text, quantityOp.size, quantityOp.bold ?? false)
 
     for (const op of drawn) {
-      const endX = COL.description + textWidth(op.text, op.size, op.bold ?? false)
+      const endX =
+        COL.description + textWidth(op.text, op.size, op.bold ?? false)
       expect(endX).toBeLessThan(quantityStartX)
     }
   })
@@ -298,7 +376,10 @@ describe("invoiceDocPages — the totals", () => {
     const strings = textOf(
       invoiceDocPages(
         makeInvoice({
-          lines: [makeLine({ amountCents: 98_800 }), makeLine({ amountCents: 1_200 })],
+          lines: [
+            makeLine({ amountCents: 98_800 }),
+            makeLine({ amountCents: 1_200 }),
+          ],
         })
       )[0]
     )
@@ -332,7 +413,10 @@ describe("invoiceDocPages — the totals", () => {
   it("formats every amount in the invoice's own snapshotted currency", () => {
     const strings = textOf(
       invoiceDocPages(
-        makeInvoice({ currency: "EUR", lines: [makeLine({ amountCents: 100_000 })] })
+        makeInvoice({
+          currency: "EUR",
+          lines: [makeLine({ amountCents: 100_000 })],
+        })
       )[0]
     )
     expect(strings.filter((s) => s.startsWith("€"))).not.toHaveLength(0)
@@ -349,7 +433,11 @@ describe("invoiceDocPages — the notes", () => {
     const strings = textOf(last)
 
     expect(strings).toContain("Notes")
-    for (const line of ["Bank transfer to Acme Bank", "Account 1234-5678", "Thank you!"]) {
+    for (const line of [
+      "Bank transfer to Acme Bank",
+      "Account 1234-5678",
+      "Thank you!",
+    ]) {
       expect(strings).toContain(line)
     }
 
@@ -377,10 +465,13 @@ describe("invoiceDocPages — the notes", () => {
     const pages = invoiceDocPages(
       makeInvoice({
         notes: `${NOTES}\n${"Payment is due within thirty days of the invoice date. ".repeat(5)}`,
-        lines: Array.from({ length: 40 }, (_, n) => makeLine({ description: `Line ${n}` })),
+        lines: Array.from({ length: 40 }, (_, n) =>
+          makeLine({ description: `Line ${n}` })
+        ),
       })
     )
-    const pageOf = (needle: string) => pages.findIndex((page) => textOf(page).includes(needle))
+    const pageOf = (needle: string) =>
+      pages.findIndex((page) => textOf(page).includes(needle))
 
     expect(pages.length).toBeGreaterThan(1)
     expect(pageOf("Notes")).toBe(pages.length - 1)

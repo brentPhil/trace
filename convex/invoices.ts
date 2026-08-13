@@ -1,6 +1,11 @@
 import { v } from "convex/values"
 import type { ObjectType } from "convex/values"
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server"
 import { requireUserId } from "./auth"
 import { getOwned } from "./owned"
 import { traceError } from "./errors"
@@ -8,7 +13,12 @@ import { rangeBreakdownImpl } from "./entries"
 import { MAX_ADDRESS_LENGTH, MAX_NAME_LENGTH } from "./clients"
 import { isValidCurrency } from "./lib/money"
 import { invoiceTotals } from "./lib/invoiceMath"
-import { billableBucketsOf, invoiceLineDrafts } from "./lib/invoiceLines"
+import {
+  billableBucketsOf,
+  invoiceLineDrafts,
+  mergeLines as mergeLineDrafts,
+} from "./lib/invoiceLines"
+import { SUMMARY_LABEL } from "./lib/labels"
 import { nextInvoiceNumber } from "./lib/invoiceNumber"
 import { partyBlockOf } from "./lib/party"
 import { invoiceDoc, invoiceLineDoc } from "./lib/docs"
@@ -17,7 +27,12 @@ import {
   INVOICE_NUMBER_SCAN_LIMIT,
   INVOICE_SCAN_LIMIT,
 } from "./lib/scan"
-import { currencyOf, defaultRateCents } from "./settings"
+import {
+  currencyOf,
+  defaultRateCents,
+  logoStorageIdOf,
+  mergeInvoiceLinesOf,
+} from "./settings"
 import type { Doc, Id } from "./_generated/dataModel"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
@@ -45,6 +60,7 @@ const invoiceWithLines = v.object({
   ...invoiceDoc.fields,
   /** Ascending by `sortKey` — the printed order. */
   lines: v.array(invoiceLineDoc),
+  logoUrl: v.union(v.string(), v.null()),
 })
 
 /**
@@ -54,14 +70,24 @@ const invoiceWithLines = v.object({
  * so there is no live filter to apply here — every row this index finds
  * belongs on the document.
  */
-async function getImpl(ctx: QueryCtx, userId: string, invoiceId: Id<"invoices">) {
+async function getImpl(
+  ctx: QueryCtx,
+  userId: string,
+  invoiceId: Id<"invoices">
+) {
   const invoice = await getOwned(ctx, userId, "invoices", invoiceId)
   const lines = await ctx.db
     .query("invoiceLines")
-    .withIndex("by_user_invoice", (q) => q.eq("userId", userId).eq("invoiceId", invoiceId))
+    .withIndex("by_user_invoice", (q) =>
+      q.eq("userId", userId).eq("invoiceId", invoiceId)
+    )
     .collect()
   lines.sort((a, b) => a.sortKey - b.sortKey)
-  return { ...invoice, lines }
+  const logoUrl =
+    invoice.logoStorageId === undefined
+      ? null
+      : await ctx.storage.getUrl(invoice.logoStorageId)
+  return { ...invoice, lines, logoUrl }
 }
 
 const getArgs = { invoiceId: v.id("invoices") }
@@ -249,6 +275,10 @@ export const MAX_PURCHASE_ORDER_LENGTH = 100
  */
 export const MAX_PAYMENT_TERMS_LENGTH = 200
 
+/** A human-authored invoice line description; also the byte bound used by
+ * `INVOICE_LIST_LIMIT`'s per-line accounting in convex/lib/scan.ts. */
+export const MAX_LINE_DESCRIPTION_LENGTH = 100
+
 /**
  * The message at the foot of the document — payment details, thanks, terms.
  *
@@ -295,6 +325,7 @@ type InvoiceField =
   | "dueAt"
   | "purchaseOrder"
   | "paymentTerms"
+  | "summaryDescription"
   | "notes"
 
 /**
@@ -309,7 +340,12 @@ type InvoiceField =
  * those arrive from /reports' filter bar rather than from a control on the
  * form, so there is nothing for a refusal to point at.
  */
-function checkText(raw: string, what: string, max: number, field?: InvoiceField): string {
+function checkText(
+  raw: string,
+  what: string,
+  max: number,
+  field?: InvoiceField
+): string {
   const trimmed = raw.trim()
   if (trimmed.length > max) {
     traceError(
@@ -330,9 +366,15 @@ function checkText(raw: string, what: string, max: number, field?: InvoiceField)
  * the PDF. There is no editor to correct it in, which is what turns a tidiness
  * check into the only thing standing between a typo and a permanent record.
  */
-function checkInstant(value: number, what: string, field: InvoiceField): number {
+function checkInstant(
+  value: number,
+  what: string,
+  field: InvoiceField
+): number {
   if (!Number.isFinite(value)) {
-    traceError("INVALID_DATE", `That ${what} is not a date I can read.`, { field })
+    traceError("INVALID_DATE", `That ${what} is not a date I can read.`, {
+      field,
+    })
   }
   return value
 }
@@ -410,7 +452,11 @@ const createFromRangeArgs = {
   text: v.optional(v.string()),
   presets: v.optional(
     v.array(
-      v.union(v.literal("no-project"), v.literal("no-note"), v.literal("under-a-minute"))
+      v.union(
+        v.literal("no-project"),
+        v.literal("no-note"),
+        v.literal("under-a-minute")
+      )
     )
   ),
 
@@ -447,6 +493,9 @@ const createFromRangeArgs = {
   payTo: v.optional(v.string()),
   purchaseOrder: v.optional(v.string()),
   paymentTerms: v.optional(v.string()),
+  /** Per-document override. Absent follows the account setting. */
+  mergeLines: v.optional(v.boolean()),
+  summaryDescription: v.optional(v.string()),
   notes: v.optional(v.string()),
   currency: v.optional(v.string()),
   issuedAt: v.optional(v.number()),
@@ -493,7 +542,11 @@ async function createFromRangeImpl(
     )
     .first()
   if (replay !== null) {
-    return { invoiceId: replay._id, unratedMs: replay.unratedMsAtCreation, replayed: true }
+    return {
+      invoiceId: replay._id,
+      unratedMs: replay.unratedMsAtCreation,
+      replayed: true,
+    }
   }
 
   /*
@@ -514,7 +567,12 @@ async function createFromRangeImpl(
   const typedBilledTo =
     args.billedTo === undefined
       ? undefined
-      : checkText(args.billedTo, "billed-to block", MAX_PARTY_LENGTH, "billedTo")
+      : checkText(
+          args.billedTo,
+          "billed-to block",
+          MAX_PARTY_LENGTH,
+          "billedTo"
+        )
   const payTo =
     args.payTo === undefined
       ? ""
@@ -541,6 +599,17 @@ async function createFromRangeImpl(
             "paymentTerms"
           )
         )
+  const typedSummaryDescription =
+    args.summaryDescription === undefined
+      ? SUMMARY_LABEL
+      : checkText(
+          args.summaryDescription,
+          "summary description",
+          MAX_LINE_DESCRIPTION_LENGTH,
+          "summaryDescription"
+        )
+  const summaryDescription =
+    typedSummaryDescription === "" ? SUMMARY_LABEL : typedSummaryDescription
   /*
    * Trimmed at the ends and NEVER collapsed inside, by the same `checkText` the
    * party blocks use and for the same reason: this prints verbatim at the foot
@@ -570,7 +639,9 @@ async function createFromRangeImpl(
       ? undefined
       : checkInstant(args.issuedAt, "invoice date", "issuedAt")
   const typedDueAt =
-    args.dueAt === undefined ? undefined : checkInstant(args.dueAt, "due date", "dueAt")
+    args.dueAt === undefined
+      ? undefined
+      : checkInstant(args.dueAt, "due date", "dueAt")
   if (args.currency !== undefined && !isValidCurrency(args.currency)) {
     // The same refusal `settings.update` makes, in the same words: the list is
     // `money.SUPPORTED_CURRENCIES`, which is the runtime's own codes narrowed
@@ -603,7 +674,11 @@ async function createFromRangeImpl(
    * predicate ANDs the presets together, so a repeat is a no-op, and sorting
    * only makes two identical filters record identically.
    */
-  const sourceText = checkText(args.text ?? "", "search filter", MAX_SOURCE_TEXT_LENGTH)
+  const sourceText = checkText(
+    args.text ?? "",
+    "search filter",
+    MAX_SOURCE_TEXT_LENGTH
+  )
   const sourceProjectId =
     args.projectId === undefined || args.projectId === null
       ? null
@@ -689,13 +764,17 @@ async function createFromRangeImpl(
   let clientId: Id<"clients"> | null = null
   for (const p of breakdown.projects) {
     if (p.billableMs === 0) continue
-    const project = p.projectId === null ? undefined : projectDocs.get(p.projectId)
+    const project =
+      p.projectId === null ? undefined : projectDocs.get(p.projectId)
     const projectClientId = project?.clientId ?? null
     if (projectClientId === null) continue
     if (clientId === null) {
       clientId = projectClientId
     } else if (clientId !== projectClientId) {
-      const [a, b] = await Promise.all([ctx.db.get(clientId), ctx.db.get(projectClientId)])
+      const [a, b] = await Promise.all([
+        ctx.db.get(clientId),
+        ctx.db.get(projectClientId),
+      ])
       // "A SINGLE PROJECT", not "a single client", which is what this sentence
       // used to say. There is no client filter on /reports — the picker is by
       // project — so the old advice named a control that does not exist, and
@@ -763,10 +842,15 @@ async function createFromRangeImpl(
    * stays for the client check below, which is a question about ownership
    * rather than about money.
    */
-  const lines = invoiceLineDrafts(
+  const draftedLines = invoiceLineDrafts(
     billableBucketsOf(breakdown.projects),
     accountRateCents
   )
+  const shouldMergeLines =
+    args.mergeLines ?? (await mergeInvoiceLinesOf(ctx, userId))
+  const lines = shouldMergeLines
+    ? mergeLineDrafts(draftedLines, summaryDescription)
+    : draftedLines
 
   /*
    * NO LINES IS NOT A DOCUMENT. Refused here, where it is still refusable.
@@ -836,6 +920,9 @@ async function createFromRangeImpl(
     // where that question gets asked.
     payTo,
     currency: args.currency ?? (await currencyOf(ctx, userId)),
+    // Snapshot of the current setting. Repointing the account later must not
+    // change a document a client already received.
+    logoStorageId: await logoStorageIdOf(ctx, userId),
     issuedAt,
     // Net 30, the most common freelance default — and a default rather than a
     // policy, which is why the form offers a date picker beside it. Counted
@@ -878,7 +965,10 @@ async function createFromRangeImpl(
       // pure and holds no Convex types (see convex/lib/invoiceLines.ts) — while
       // the column is `v.optional(v.id("projects"))`. One spelling of "no
       // project" per side of that boundary, converted at it.
-      projectId: line.projectId === null ? undefined : (line.projectId as Id<"projects">),
+      projectId:
+        line.projectId === null
+          ? undefined
+          : (line.projectId as Id<"projects">),
       sortKey: index,
       deletedAt: null,
     })

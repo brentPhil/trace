@@ -1,7 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { NewInvoicePage, Route } from "@/routes/_authed/invoices_.new"
+import { BillPreview } from "@/components/invoices/bill-preview"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
@@ -76,7 +84,11 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 
 beforeEach(() => {
   createInvoice.mockReset()
-  createInvoice.mockResolvedValue({ invoiceId: "inv-1", unratedMs: 0, replayed: false })
+  createInvoice.mockResolvedValue({
+    invoiceId: "inv-1",
+    unratedMs: 0,
+    replayed: false,
+  })
   onCreated.mockReset()
 })
 
@@ -84,7 +96,10 @@ afterEach(cleanup)
 
 const HOUR = 3_600_000
 const TODAY = dayOf(NOW, SETTINGS.timezone)
-const WEEK = rangeOf(defaultFilters(TODAY, SETTINGS.weekStartDay), SETTINGS.timezone)
+const WEEK = rangeOf(
+  defaultFilters(TODAY, SETTINGS.weekStartDay),
+  SETTINGS.timezone
+)
 
 const WEBSITE = "p-web" as unknown as Id<"projects">
 const DISCOVERY = "p-disc" as unknown as Id<"projects">
@@ -124,7 +139,10 @@ function clientRow(
 type BreakdownProjectRow = (typeof EMPTY_BREAKDOWN)["projects"][number]
 
 function projectTotal(
-  over: Partial<BreakdownProjectRow> & { projectId: Id<"projects"> | null; name: string }
+  over: Partial<BreakdownProjectRow> & {
+    projectId: Id<"projects"> | null
+    name: string
+  }
 ): BreakdownProjectRow {
   return {
     color: "slate",
@@ -179,6 +197,27 @@ const BREAKDOWN = {
   projects: PROJECTS,
 }
 
+const SAME_RATE_BREAKDOWN = {
+  ...EMPTY_BREAKDOWN,
+  totalMs: 3 * HOUR,
+  billableMs: 3 * HOUR,
+  count: 2,
+  projects: [
+    projectTotal({
+      projectId: WEBSITE,
+      name: "Website",
+      hourlyRateCents: 6100,
+      totalMs: 2 * HOUR,
+      billableMs: 2 * HOUR,
+    }),
+    projectTotal({
+      projectId: DISCOVERY,
+      name: "Discovery",
+      hourlyRateCents: 6100,
+    }),
+  ],
+}
+
 /** The args the page builds for its own breakdown — including
  *  `billableOnly: true`, which the mutation hard-codes and which decides the
  *  bucket ORDER as well as which rows are counted. */
@@ -199,7 +238,10 @@ function renderNew(
   opts: {
     search?: InvoiceSearch
     breakdown?: typeof EMPTY_BREAKDOWN | null
-    settings?: typeof SETTINGS & { defaultHourlyRateCents?: number }
+    settings?: Omit<typeof SETTINGS, "logoUrl"> & {
+      logoUrl: string | null
+      defaultHourlyRateCents?: number
+    }
     projects?: Array<Doc<"projects">>
     clients?: Array<Doc<"clients">>
   } = {}
@@ -218,7 +260,10 @@ function renderNew(
       },
     },
   })
-  queryClient.setQueryData(convexKey(api.settings.get, {}), opts.settings ?? SETTINGS)
+  queryClient.setQueryData(
+    convexKey(api.settings.get, {}),
+    opts.settings ?? SETTINGS
+  )
   queryClient.setQueryData(
     convexKey(api.projects.list, {}),
     opts.projects ?? [
@@ -230,7 +275,11 @@ function renderNew(
   queryClient.setQueryData(
     convexKey(api.clients.list, {}),
     opts.clients ?? [
-      clientRow({ _id: ACME, name: "Acme Corp", address: "1 Way\nSpringfield" }),
+      clientRow({
+        _id: ACME,
+        name: "Acme Corp",
+        address: "1 Way\nSpringfield",
+      }),
     ]
   )
   if (opts.breakdown !== null) {
@@ -276,7 +325,9 @@ describe("/invoices/new — the page heading", () => {
     expectPageHeading("New invoice")
     // `BillPreview` names itself with an `<h2>`. The page heading is what makes
     // that an h2 OF something rather than the first heading on the page.
-    expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole("heading", { level: 2 }).length).toBeGreaterThan(
+      0
+    )
   })
 })
 
@@ -296,6 +347,76 @@ describe("/invoices/new — the preview is what will be billed", () => {
     ])
 
     dateSpy.mockRestore()
+  })
+
+  it("merges same-rate projects by default and redraws when split is chosen", () => {
+    const { dateSpy } = renderNew({ breakdown: SAME_RATE_BREAKDOWN })
+
+    expect(lineRows()).toEqual([
+      ["Professional services", "3.00", "$61.00/hr", "$183.00"],
+    ])
+
+    fireEvent.click(
+      screen.getByLabelText("Merge same-rate projects into one line")
+    )
+    expect(lineRows()).toEqual([
+      ["Website", "2.00", "$61.00/hr", "$122.00"],
+      ["Discovery", "1.00", "$61.00/hr", "$61.00"],
+    ])
+
+    dateSpy.mockRestore()
+  })
+
+  it("redraws the merged preview from the typed summary", () => {
+    const { dateSpy } = renderNew({ breakdown: SAME_RATE_BREAKDOWN })
+
+    fireEvent.change(screen.getByLabelText("Summary description"), {
+      target: { value: "  Design and development  " },
+    })
+    expect(lineRows()[0]?.[0]).toBe("Design and development")
+
+    fireEvent.change(screen.getByLabelText("Summary description"), {
+      target: { value: "   " },
+    })
+    expect(lineRows()[0]?.[0]).toBe("Professional services")
+
+    dateSpy.mockRestore()
+  })
+
+  it("explains when different rates prevent a requested merge", () => {
+    const { dateSpy } = renderNew()
+
+    const status = screen.getByText(
+      "These projects bill at different rates, so this invoice lists them separately."
+    )
+    expect(status.getAttribute("role")).toBe("status")
+
+    dateSpy.mockRestore()
+  })
+
+  it("does not announce a stale mixed-rate result while totalling", () => {
+    cleanup()
+    render(
+      <BillPreview
+        pending
+        lines={[
+          {
+            projectId: null,
+            description: "Old result",
+            quantityCentis: 100,
+            unitCents: 1000,
+            amountCents: 1000,
+          },
+        ]}
+        currency="USD"
+        unratedMs={0}
+        durationDisplay="hms"
+        mergeDeclined
+      />
+    )
+
+    expect(screen.getByText("Still totalling this period.")).toBeTruthy()
+    expect(screen.queryByText(/different rates/)).toBeNull()
   })
 
   /* Time nobody has priced is on NO line, so the total is not short by
@@ -343,7 +464,9 @@ describe("/invoices/new — the preview is what will be billed", () => {
         projects: [PROJECTS[0], PROJECTS[2]],
       },
     })
-    expect(screen.queryByText(new RegExp(UNPRICED_NOTE.slice(0, 40)))).toBeNull()
+    expect(
+      screen.queryByText(new RegExp(UNPRICED_NOTE.slice(0, 40)))
+    ).toBeNull()
     dateSpy.mockRestore()
   })
 
@@ -360,7 +483,11 @@ describe("/invoices/new — the preview is what will be billed", () => {
    */
   it("draws a zero-line document rather than nothing", () => {
     const { dateSpy } = renderNew({
-      breakdown: { ...BREAKDOWN, projects: [PROJECTS[1]], unratedBillableMs: 2 * HOUR },
+      breakdown: {
+        ...BREAKDOWN,
+        projects: [PROJECTS[1]],
+        unratedBillableMs: 2 * HOUR,
+      },
     })
     expect(screen.getByText(/Lines come from the range/)).toBeTruthy()
     expect(totalsRows()).toEqual([
@@ -376,7 +503,9 @@ describe("/invoices/new — the preview is what will be billed", () => {
   it("re-denominates the preview when the currency picker changes", async () => {
     const { dateSpy } = renderNew()
 
-    fireEvent.change(screen.getByLabelText("Currency"), { target: { value: "EUR" } })
+    fireEvent.change(screen.getByLabelText("Currency"), {
+      target: { value: "EUR" },
+    })
 
     await waitFor(() => expect(lineRows()[0]?.[3]).toBe("€305.00"))
 
@@ -412,7 +541,9 @@ describe("/invoices/new — the form", () => {
         clientRow({ _id: other, name: "Globex Inc" }),
       ],
     })
-    expect(screen.getByLabelText<HTMLTextAreaElement>("Billed to").value).toBe("")
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Billed to").value).toBe(
+      ""
+    )
     dateSpy.mockRestore()
   })
 
@@ -421,7 +552,9 @@ describe("/invoices/new — the form", () => {
     expect(screen.getByLabelText<HTMLInputElement>("Invoice date").value).toBe(
       "2026-08-05"
     )
-    expect(screen.getByLabelText<HTMLInputElement>("Due date").value).toBe("2026-09-04")
+    expect(screen.getByLabelText<HTMLInputElement>("Due date").value).toBe(
+      "2026-09-04"
+    )
     dateSpy.mockRestore()
   })
 
@@ -431,21 +564,59 @@ describe("/invoices/new — the form", () => {
   it("warns when the due date precedes the invoice date, without blocking", () => {
     const { dateSpy } = renderNew()
 
-    fireEvent.change(screen.getByLabelText("Due date"), { target: { value: "2026-08-01" } })
+    fireEvent.change(screen.getByLabelText("Due date"), {
+      target: { value: "2026-08-01" },
+    })
 
     expect(screen.getByText(/paid before it was raised/)).toBeTruthy()
     expect(
-      screen.getByRole("button", { name: "Create invoice" }).hasAttribute("disabled")
+      screen
+        .getByRole("button", { name: "Create invoice" })
+        .hasAttribute("disabled")
     ).toBe(false)
 
     dateSpy.mockRestore()
+  })
+
+  it("prefills the summary description only while merging is enabled", () => {
+    const { dateSpy } = renderNew({ breakdown: SAME_RATE_BREAKDOWN })
+
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Summary description").value
+    ).toBe("Professional services")
+    fireEvent.click(
+      screen.getByLabelText("Merge same-rate projects into one line")
+    )
+    expect(screen.queryByLabelText("Summary description")).toBeNull()
+
+    dateSpy.mockRestore()
+  })
+
+  it("shows the current logo or a settings link in the form column", () => {
+    const withLogo = renderNew({
+      settings: { ...SETTINGS, logoUrl: "/logo.png" },
+    })
+    expect(
+      document.querySelector<HTMLImageElement>('img[src="/logo.png"]')?.alt
+    ).toBe("")
+    withLogo.unmount()
+    withLogo.dateSpy.mockRestore()
+
+    const withoutLogo = renderNew({ settings: { ...SETTINGS, logoUrl: null } })
+    const link = screen.getByRole("link", {
+      name: "No logo — add one in Settings",
+    })
+    expect(link.getAttribute("href")).toBe("/settings")
+    withoutLogo.dateSpy.mockRestore()
   })
 
   /* An emptied date input is the browser mid-typing, not an invoice with no
    * date. Recording it would leave the picker blank and send `NaN`. */
   it("ignores an emptied date rather than recording one", () => {
     const { dateSpy } = renderNew()
-    fireEvent.change(screen.getByLabelText("Invoice date"), { target: { value: "" } })
+    fireEvent.change(screen.getByLabelText("Invoice date"), {
+      target: { value: "" },
+    })
     expect(screen.getByLabelText<HTMLInputElement>("Invoice date").value).toBe(
       "2026-08-05"
     )
@@ -471,15 +642,15 @@ describe("/invoices/new — minting", () => {
     fireEvent.change(screen.getByLabelText("Purchase order"), {
       target: { value: "PO-4471" },
     })
-    fireEvent.change(screen.getByLabelText("Payment terms"), { target: { value: "Net 14" } })
+    fireEvent.change(screen.getByLabelText("Payment terms"), {
+      target: { value: "Net 14" },
+    })
     fireEvent.change(screen.getByLabelText("Notes"), {
       target: { value: "Bank transfer\nAccount 1234" },
     })
     fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
 
-    await waitFor(() =>
-      expect(onCreated).toHaveBeenCalledWith("inv-1")
-    )
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith("inv-1"))
     // Every field, including the ones left as prefilled — an emptied block is
     // "" rather than absent, because absent means "nobody said" and the server
     // then falls back to a client address the user may have just cleared.
@@ -495,11 +666,50 @@ describe("/invoices/new — minting", () => {
       payTo: "Jane Freelancer\n2 Lane",
       purchaseOrder: "PO-4471",
       paymentTerms: "Net 14",
+      mergeLines: true,
+      summaryDescription: "Professional services",
       notes: "Bank transfer\nAccount 1234",
       currency: "USD",
       issuedAt: Date.parse("2026-08-05T00:00:00.000Z"),
       dueAt: Date.parse("2026-09-04T00:00:00.000Z"),
     })
+
+    dateSpy.mockRestore()
+  })
+
+  it("sends the per-invoice merge choice and edited summary description", async () => {
+    const { dateSpy } = renderNew({ breakdown: SAME_RATE_BREAKDOWN })
+
+    fireEvent.change(screen.getByLabelText("Summary description"), {
+      target: { value: "Design and development" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
+
+    await waitFor(() =>
+      expect(createInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mergeLines: true,
+          summaryDescription: "Design and development",
+        })
+      )
+    )
+
+    dateSpy.mockRestore()
+  })
+
+  it("sends an explicit split choice instead of consulting settings again", async () => {
+    const { dateSpy } = renderNew({ breakdown: SAME_RATE_BREAKDOWN })
+
+    fireEvent.click(
+      screen.getByLabelText("Merge same-rate projects into one line")
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
+
+    await waitFor(() =>
+      expect(createInvoice).toHaveBeenCalledWith(
+        expect.objectContaining({ mergeLines: false })
+      )
+    )
 
     dateSpy.mockRestore()
   })
@@ -510,7 +720,9 @@ describe("/invoices/new — minting", () => {
   it("sends an emptied billed-to block as empty, not as absent", async () => {
     const { dateSpy } = renderNew()
 
-    fireEvent.change(screen.getByLabelText("Billed to"), { target: { value: "" } })
+    fireEvent.change(screen.getByLabelText("Billed to"), {
+      target: { value: "" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
 
     await waitFor(() =>
@@ -582,13 +794,19 @@ describe("/invoices/new — refusals", () => {
     })
     const { dateSpy } = renderNew()
 
-    fireEvent.change(screen.getByLabelText("Pay to"), { target: { value: "x".repeat(700) } })
+    fireEvent.change(screen.getByLabelText("Pay to"), {
+      target: { value: "x".repeat(700) },
+    })
     fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
 
     const box = screen.getByLabelText("Pay to")
     await waitFor(() => expect(box.getAttribute("aria-invalid")).toBe("true"))
-    const message = document.getElementById(box.getAttribute("aria-describedby") ?? "")
-    expect(message?.textContent).toBe("Keep the pay-to block under 601 characters.")
+    const message = document.getElementById(
+      box.getAttribute("aria-describedby") ?? ""
+    )
+    expect(message?.textContent).toBe(
+      "Keep the pay-to block under 601 characters."
+    )
     // The text that earned it is still in the box, so fixing it and pressing
     // again sends the whole set exactly as before.
     expect((box as HTMLTextAreaElement).value).toHaveLength(700)
@@ -611,11 +829,17 @@ describe("/invoices/new — refusals", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
     await waitFor(() =>
-      expect(screen.getByLabelText("Pay to").getAttribute("aria-invalid")).toBe("true")
+      expect(screen.getByLabelText("Pay to").getAttribute("aria-invalid")).toBe(
+        "true"
+      )
     )
 
-    fireEvent.change(screen.getByLabelText("Pay to"), { target: { value: "Jane" } })
-    expect(screen.getByLabelText("Pay to").getAttribute("aria-invalid")).toBe("false")
+    fireEvent.change(screen.getByLabelText("Pay to"), {
+      target: { value: "Jane" },
+    })
+    expect(screen.getByLabelText("Pay to").getAttribute("aria-invalid")).toBe(
+      "false"
+    )
 
     dateSpy.mockRestore()
   })
@@ -643,22 +867,29 @@ describe("/invoices/new — refusals", () => {
       "This period has more time entries than an invoice can total exactly — invoicing reads a smaller window than /reports does. Narrow the dates.",
       /smaller window/,
     ],
-  ])("shows a %s refusal in the words the server wrote", async (code, message, shown) => {
-    createInvoice.mockRejectedValue({ data: { code, message } })
-    const { dateSpy } = renderNew()
+  ])(
+    "shows a %s refusal in the words the server wrote",
+    async (code, message, shown) => {
+      createInvoice.mockRejectedValue({ data: { code, message } })
+      const { dateSpy } = renderNew()
 
-    fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
+      fireEvent.click(screen.getByRole("button", { name: "Create invoice" }))
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(shown))
-    expect(onCreated).not.toHaveBeenCalled()
-    // And the control comes back: every one of these has a fix the user can go
-    // and apply, so it has to be pressable again.
-    expect(
-      screen.getByRole("button", { name: "Create invoice" }).hasAttribute("disabled")
-    ).toBe(false)
+      await waitFor(() =>
+        expect(screen.getByRole("alert").textContent).toMatch(shown)
+      )
+      expect(onCreated).not.toHaveBeenCalled()
+      // And the control comes back: every one of these has a fix the user can go
+      // and apply, so it has to be pressable again.
+      expect(
+        screen
+          .getByRole("button", { name: "Create invoice" })
+          .hasAttribute("disabled")
+      ).toBe(false)
 
-    dateSpy.mockRestore()
-  })
+      dateSpy.mockRestore()
+    }
+  )
 
   /*
    * THE SAME THREE STATES /reports refuses, checked again HERE — because this
@@ -667,7 +898,9 @@ describe("/invoices/new — refusals", () => {
    * the rule somewhere, and this is the only somewhere left.
    */
   it("refuses a truncated range, visibly", async () => {
-    const { dateSpy } = renderNew({ breakdown: { ...BREAKDOWN, truncated: true } })
+    const { dateSpy } = renderNew({
+      breakdown: { ...BREAKDOWN, truncated: true },
+    })
 
     const button = screen.getByRole("button", { name: "Create invoice" })
     expect(button.hasAttribute("disabled")).toBe(true)
@@ -675,7 +908,8 @@ describe("/invoices/new — refusals", () => {
     // disabled button with no stated reason is a dead end for everybody.
     expect(screen.getByText(/under-bill/)).toBeTruthy()
     expect(
-      document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent
+      document.getElementById(button.getAttribute("aria-describedby") ?? "")
+        ?.textContent
     ).toMatch(/under-bill/)
 
     fireEvent.click(button)
@@ -712,7 +946,8 @@ describe("/invoices/new — refusals", () => {
     // `SET_A_RATE_NOTE`, the same sentence the note under the preview carries —
     // the button and the note are one fix, so they name one screen.
     expect(
-      document.getElementById(button.getAttribute("aria-describedby") ?? "")?.textContent
+      document.getElementById(button.getAttribute("aria-describedby") ?? "")
+        ?.textContent
     ).toContain(SET_A_RATE_NOTE)
 
     // And pressing it anyway mints nothing: `disabled` is the appearance, the
@@ -736,7 +971,9 @@ describe("/invoices/new — refusals", () => {
   it("refuses a range that has not finished totalling, and draws no document for it", () => {
     const { dateSpy } = renderNew({ breakdown: null })
     expect(
-      screen.getByRole("button", { name: "Create invoice" }).hasAttribute("disabled")
+      screen
+        .getByRole("button", { name: "Create invoice" })
+        .hasAttribute("disabled")
     ).toBe(true)
     // Twice: on the trigger, and where the lines would be.
     expect(screen.getAllByText("Still totalling this period.")).toHaveLength(2)
@@ -766,9 +1003,9 @@ describe("/invoices/new — a link with no readable period", () => {
     ])
     const notice = screen.getByText(/carried no period/)
     expect(notice.getAttribute("role")).toBe("status")
-    expect(screen.getByRole("link", { name: "Reports" }).getAttribute("href")).toBe(
-      "/reports"
-    )
+    expect(
+      screen.getByRole("link", { name: "Reports" }).getAttribute("href")
+    ).toBe("/reports")
 
     dateSpy.mockRestore()
   })

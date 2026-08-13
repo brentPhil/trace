@@ -50,6 +50,8 @@ export type TraceErrorCode =
    *  case that earns this: `v.number()` round-trips non-finite doubles, and one
    *  stored NaN rate renders every OTHER project's money as "$NaN" too. */
   | "INVALID_RATE"
+  /** A selected invoice logo is missing, too large, or not PNG/JPEG. */
+  | "INVALID_LOGO"
   /** More than one running entry existed. Should be impossible; reported rather
    *  than swallowed, because the recovery path stops all of them and the user
    *  deserves to know their data was repaired. */
@@ -112,7 +114,9 @@ export type TraceErrorData = {
  * without importing anything from Convex, and so it survives the error being
  * serialised across the wire.
  */
-export function isTraceError(error: unknown): error is { data: TraceErrorData } {
+export function isTraceError(
+  error: unknown
+): error is { data: TraceErrorData } {
   if (typeof error !== "object" || error === null) return false
   const data: unknown = (error as { data?: unknown }).data
   if (typeof data !== "object" || data === null) return false

@@ -36,6 +36,9 @@ const RIGHT = PAGE.width - PAGE.margin
 const TOP = PAGE.height - PAGE.margin
 const BOTTOM = PAGE.margin
 
+export const LOGO_BOX = { width: 160, height: 48 } as const
+export const LOGO_BAND = 58
+
 /* Re-exported from the shape they now live in, so `to-pdf.ts` and the export
  * button keep importing the document's type from the module that prints it. */
 export type { InvoiceDoc, InvoiceDocLine } from "@/lib/invoice-document"
@@ -123,16 +126,30 @@ function blockLines(raw: string, maxWidth: number): Array<string> {
   // `\r\n` as well as `\n`: a block pasted from a Windows document keeps its
   // carriage returns, and a stray `\r` drawn as a glyph is a black box on a
   // client's invoice.
-  return raw.split(/\r?\n/).flatMap((line) => wrapToWidth(line, maxWidth, TYPE.body, false))
+  return raw
+    .split(/\r?\n/)
+    .flatMap((line) => wrapToWidth(line, maxWidth, TYPE.body, false))
 }
 
 /** A labelled block of free text, drawn from `y` downward. */
-function blockOps(label: string, x: number, y: number, lines: ReadonlyArray<string>): Array<PdfOp> {
+function blockOps(
+  label: string,
+  x: number,
+  y: number,
+  lines: ReadonlyArray<string>
+): Array<PdfOp> {
   const ops: Array<PdfOp> = [
     text({ x, y, text: label, size: TYPE.tick, color: PAPER.inkMuted }),
   ]
   lines.forEach((line, n) => {
-    ops.push(text({ x, y: y - LABEL_GAP - n * LINE_HEIGHT, text: line, size: TYPE.body }))
+    ops.push(
+      text({
+        x,
+        y: y - LABEL_GAP - n * LINE_HEIGHT,
+        text: line,
+        size: TYPE.body,
+      })
+    )
   })
   return ops
 }
@@ -164,11 +181,21 @@ function headOps(invoice: InvoiceDoc): { ops: Array<PdfOp>; tableTop: number } {
   const ops: Array<PdfOp> = [
     text({ x: LEFT, y: TOP, text: "Invoice", size: TYPE.title, bold: true }),
   ]
+  if (invoice.logo !== undefined) {
+    ops.push({
+      kind: "image",
+      x: RIGHT - LOGO_BOX.width,
+      y: TOP - LOGO_BOX.height,
+      ...LOGO_BOX,
+      data: invoice.logo.bytes,
+      format: invoice.logo.format,
+    })
+  }
 
   /* Which rows exist, and what they say, is the DOCUMENT's decision and lives
    * in `invoice-document.ts` — the record page draws the same list. What is
    * decided here is only where they sit on the paper. */
-  let y = TOP - 34
+  let y = TOP - 34 - (invoice.logo === undefined ? 0 : LOGO_BAND)
   for (const { label, value } of invoiceMetaRows(invoice)) {
     ops.push(
       text({ x: LEFT, y, text: label, size: TYPE.tick, color: PAPER.inkMuted }),
@@ -195,7 +222,8 @@ function headOps(invoice: InvoiceDoc): { ops: Array<PdfOp>; tableTop: number } {
    * send the money finds the question, not a document that never asked it.
    */
   const partyLines = Math.max(billed.length, payTo.length)
-  const partiesBottom = partiesTop - LABEL_GAP - Math.max(0, partyLines - 1) * LINE_HEIGHT
+  const partiesBottom =
+    partiesTop - LABEL_GAP - Math.max(0, partyLines - 1) * LINE_HEIGHT
 
   return { ops, tableTop: partiesBottom - 30 }
 }
@@ -215,7 +243,13 @@ function columnHeaderOps(y: number): Array<PdfOp> {
     label(COL.quantity, "QUANTITY", "right"),
     label(COL.rate, "RATE", "right"),
     label(COL.amount, "AMOUNT", "right"),
-    rect({ x: LEFT, y: y - 7, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule }),
+    rect({
+      x: LEFT,
+      y: y - 7,
+      width: RIGHT - LEFT,
+      height: 0.5,
+      color: PAPER.rule,
+    }),
   ]
 }
 
@@ -257,12 +291,21 @@ type SizedLine = {
  * EVEN count lands between the two middle lines, which is what "centred against
  * the block" means when there is no middle line to pin to.
  */
-function lineRowOps(sized: SizedLine, firstLineY: number, currency: string): Array<PdfOp> {
+function lineRowOps(
+  sized: SizedLine,
+  firstLineY: number,
+  currency: string
+): Array<PdfOp> {
   const { line, descriptionLines } = sized
   const centerY = firstLineY - ((descriptionLines.length - 1) * LINE_HEIGHT) / 2
 
   const ops: Array<PdfOp> = descriptionLines.map((wrapped, n) =>
-    text({ x: COL.description, y: firstLineY - n * LINE_HEIGHT, text: wrapped, size: TYPE.body })
+    text({
+      x: COL.description,
+      y: firstLineY - n * LINE_HEIGHT,
+      text: wrapped,
+      size: TYPE.body,
+    })
   )
   ops.push(
     // A QUANTITY is not money — decimal hours are ordinary ink, and the Two
@@ -368,15 +411,27 @@ export function invoiceDocPages(invoice: InvoiceDoc): Array<PdfPage> {
    */
   const maxQuantityTextWidth = invoice.lines.reduce(
     (widest, line) =>
-      Math.max(widest, textWidth(quantityText(line.quantityCentis), TYPE.body, false)),
+      Math.max(
+        widest,
+        textWidth(quantityText(line.quantityCentis), TYPE.body, false)
+      ),
     0
   )
   const descriptionMaxWidth =
     COL.quantity - maxQuantityTextWidth - GUTTER - COL.description
 
   const sized: Array<SizedLine> = invoice.lines.map((line) => {
-    const descriptionLines = wrapToWidth(line.description, descriptionMaxWidth, TYPE.body, false)
-    return { line, descriptionLines, height: rowSlotHeight(descriptionLines.length) }
+    const descriptionLines = wrapToWidth(
+      line.description,
+      descriptionMaxWidth,
+      TYPE.body,
+      false
+    )
+    return {
+      line,
+      descriptionLines,
+      height: rowSlotHeight(descriptionLines.length),
+    }
   })
 
   /*
@@ -410,7 +465,9 @@ export function invoiceDocPages(invoice: InvoiceDoc): Array<PdfPage> {
 
   const noteLines = blockLines(invoice.notes ?? "", RIGHT - LEFT)
   const notesHeight =
-    noteLines.length === 0 ? 0 : NOTES_GAP + LABEL_GAP + noteLines.length * LINE_HEIGHT
+    noteLines.length === 0
+      ? 0
+      : NOTES_GAP + LABEL_GAP + noteLines.length * LINE_HEIGHT
 
   const tailReserve = totalsHeight + notesHeight
 
@@ -499,14 +556,26 @@ export function invoiceDocPages(invoice: InvoiceDoc): Array<PdfPage> {
 
     if (isLast) {
       ops.push(
-        rect({ x: LEFT, y: cursor - 2, width: RIGHT - LEFT, height: 0.5, color: PAPER.rule })
+        rect({
+          x: LEFT,
+          y: cursor - 2,
+          width: RIGHT - LEFT,
+          height: 0.5,
+          color: PAPER.rule,
+        })
       )
       cursor -= TOTALS_GAP
       for (const row of totals) {
         ops.push(
-          ...totalsRowOps(cursor - LINE_HEIGHT, row.label, row.cents, currency, {
-            strong: row.strong,
-          })
+          ...totalsRowOps(
+            cursor - LINE_HEIGHT,
+            row.label,
+            row.cents,
+            currency,
+            {
+              strong: row.strong,
+            }
+          )
         )
         cursor -= rowSlotHeight(1)
       }

@@ -22,8 +22,12 @@ import { format } from "@/lib/report-series"
 import { pageTitle } from "@shared/brand"
 import { dayOf } from "@shared/day"
 import { NO_PROJECT_FILTER } from "@shared/entryFilter"
-import { NO_PROJECT_LABEL } from "@shared/labels"
-import { billableBucketsOf, invoiceLineDrafts } from "@shared/invoiceLines"
+import { NO_PROJECT_LABEL, SUMMARY_LABEL } from "@shared/labels"
+import {
+  billableBucketsOf,
+  invoiceLineDrafts,
+  mergeLines as mergeLineDrafts,
+} from "@shared/invoiceLines"
 import { api } from "../../../convex/_generated/api"
 import type { InvoiceDraft, InvoiceFieldErrors } from "@/lib/invoice-draft"
 import type { InvoiceSearch } from "@/lib/invoice-search"
@@ -115,7 +119,9 @@ export function NewInvoicePage({
   onCreated: (invoiceId: Id<"invoices">) => void
 }) {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
-  const { data: projects } = useSuspenseQuery(convexQuery(api.projects.list, {}))
+  const { data: projects } = useSuspenseQuery(
+    convexQuery(api.projects.list, {})
+  )
   const { data: clients } = useSuspenseQuery(convexQuery(api.clients.list, {}))
   const { createInvoice } = useCreateInvoice()
 
@@ -193,7 +199,7 @@ export function NewInvoicePage({
    * reads through `defaultRateCents`, `?? null` in both places — `??` and not
    * `||`, because a zero rate is pro bono work somebody chose.
    */
-  const lines = useMemo(
+  const rawLines = useMemo(
     () =>
       breakdown === undefined
         ? []
@@ -218,7 +224,9 @@ export function NewInvoicePage({
     const clientId = singleClientId(breakdown?.projects ?? [], clientIdOf)
     if (clientId === null) return null
     const client = clients.find((row) => row._id === clientId)
-    return client === undefined ? null : { name: client.name, address: client.address }
+    return client === undefined
+      ? null
+      : { name: client.name, address: client.address }
   }, [breakdown, projects, clients])
 
   /*
@@ -241,11 +249,29 @@ export function NewInvoicePage({
         timeZone,
         currency: settings.currency,
         client: clientBlock,
+        mergeInvoiceLines: settings.mergeInvoiceLines,
       }),
-    [timeZone, settings.currency, clientBlock]
+    [timeZone, settings.currency, settings.mergeInvoiceLines, clientBlock]
   )
   const [typed, setTyped] = useState<Partial<InvoiceDraft>>({})
   const draft: InvoiceDraft = { ...prefill, ...typed }
+
+  const lines = useMemo(
+    () =>
+      draft.mergeLines
+        ? mergeLineDrafts(
+            rawLines,
+            draft.summaryDescription.trim() === ""
+              ? SUMMARY_LABEL
+              : draft.summaryDescription.trim()
+          )
+        : rawLines,
+    [draft.mergeLines, draft.summaryDescription, rawLines]
+  )
+  const mergeDeclined =
+    draft.mergeLines &&
+    rawLines.length > 1 &&
+    new Set(rawLines.map((line) => line.unitCents)).size > 1
 
   const [errors, setErrors] = useState<InvoiceFieldErrors>({})
   /** A refusal that named no field — `MIXED_CLIENTS`, `RANGE_TOO_LARGE`,
@@ -301,7 +327,11 @@ export function NewInvoicePage({
    * `NO_PRICED_TIME` — so this is the sentence before the click rather than the
    * only thing standing in the way.
    */
-  const disabledReason = invoiceDisabledReason(breakdown, isPlaceholderData, lines.length)
+  const disabledReason = invoiceDisabledReason(
+    breakdown,
+    isPlaceholderData,
+    lines.length
+  )
 
   async function create() {
     // Set BEFORE the first `await` — the ref write and this read are in one
@@ -358,7 +388,11 @@ export function NewInvoicePage({
     <Page
       title="New invoice"
       above={
-        <PageBreadcrumb parentTo="/invoices" parentLabel="Invoices" current="New invoice" />
+        <PageBreadcrumb
+          parentTo="/invoices"
+          parentLabel="Invoices"
+          current="New invoice"
+        />
       }
     >
       {/* Full width and `px-4` on the content element itself, like every other
@@ -382,14 +416,43 @@ export function NewInvoicePage({
           the boxes before the table it is about to attach them to.
         */}
         <div className="grid gap-8 xl:grid-cols-2 xl:gap-12">
-          <InvoiceForm draft={draft} errors={errors} onChange={edit} />
-          <BillPreview
-            pending={breakdown === undefined || isPlaceholderData}
-            lines={lines}
-            currency={draft.currency}
-            unratedMs={breakdown?.unratedBillableMs ?? 0}
-            durationDisplay={settings.durationDisplay}
-          />
+          <div className="flex min-w-0 flex-col gap-7">
+            {settings.logoUrl === null ? (
+              <Link
+                to="/settings"
+                className="hover:border-edge-strong flex h-20 items-center justify-center rounded-md border border-dashed border-edge px-4 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                No logo — add one in Settings
+              </Link>
+            ) : (
+              <div className="flex h-20 items-center justify-end">
+                <img
+                  src={settings.logoUrl}
+                  alt=""
+                  className="max-h-16 max-w-full object-contain"
+                />
+              </div>
+            )}
+            <InvoiceForm draft={draft} errors={errors} onChange={edit} />
+          </div>
+          <div className="flex min-w-0 flex-col gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={draft.mergeLines}
+                onChange={(event) => edit({ mergeLines: event.target.checked })}
+              />
+              Merge same-rate projects into one line
+            </label>
+            <BillPreview
+              pending={breakdown === undefined || isPlaceholderData}
+              lines={lines}
+              currency={draft.currency}
+              unratedMs={breakdown?.unratedBillableMs ?? 0}
+              durationDisplay={settings.durationDisplay}
+              mergeDeclined={mergeDeclined}
+            />
+          </div>
         </div>
 
         {/*
@@ -407,7 +470,9 @@ export function NewInvoicePage({
                  is what pressing it does permanently. Both are on screen either
                  way — this chooses which one is read out with the control. */
               aria-describedby={
-                disabledReason === null ? "create-invoice-permanence" : "create-invoice-refused"
+                disabledReason === null
+                  ? "create-invoice-permanence"
+                  : "create-invoice-refused"
               }
               onClick={() => void create()}
             >
@@ -443,7 +508,10 @@ export function NewInvoicePage({
             dead end for everybody, not only for a screen reader.
           */}
           {disabledReason === null ? null : (
-            <p id="create-invoice-refused" className="max-w-prose text-xs text-muted-foreground">
+            <p
+              id="create-invoice-refused"
+              className="max-w-prose text-xs text-muted-foreground"
+            >
               {disabledReason}
             </p>
           )}
@@ -505,7 +573,8 @@ function SourceStrip({
             (projectName(search.projectId) ?? "An unknown project"),
     })
   }
-  if (search.text !== undefined) rows.push({ label: "Search", value: `“${search.text}”` })
+  if (search.text !== undefined)
+    rows.push({ label: "Search", value: `“${search.text}”` })
   if (search.presets !== undefined) {
     rows.push({
       label: "Filters",
@@ -517,7 +586,10 @@ function SourceStrip({
     <div className="flex flex-col gap-2">
       <dl className="flex flex-col gap-1.5">
         {rows.map((row) => (
-          <div key={row.label} className="grid grid-cols-[6rem_1fr] items-baseline gap-3">
+          <div
+            key={row.label}
+            className="grid grid-cols-[6rem_1fr] items-baseline gap-3"
+          >
             <dt className="text-[0.8125rem] font-medium text-muted-foreground">
               {row.label}
             </dt>
@@ -561,7 +633,10 @@ function SourceStrip({
  * The month and year are stated once where they are the same at both ends —
  * the same shape `weekLabel` gives a week in the exported report.
  */
-function periodText(range: { fromMs: number; toMs: number }, timeZone: string): string {
+function periodText(
+  range: { fromMs: number; toMs: number },
+  timeZone: string
+): string {
   const from = dayOf(range.fromMs, timeZone)
   const to = dayOf(range.toMs - 1, timeZone)
   const full: Intl.DateTimeFormatOptions = {

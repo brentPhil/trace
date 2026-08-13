@@ -153,3 +153,36 @@ export function invoiceLineDrafts(
   }
   return lines
 }
+
+/**
+ * Collapses priced project lines into one client-facing summary when one rate
+ * can still explain every printed number.
+ *
+ * Mixed rates stay split: a single line cannot carry two multipliers without
+ * hiding the arithmetic. A one-line input is still rewritten because removing
+ * the internal project name is part of the feature, not merely an optimisation
+ * for ranges with several projects.
+ */
+export function mergeLines(
+  lines: ReadonlyArray<InvoiceLineDraft>,
+  description: string
+): Array<InvoiceLineDraft> {
+  if (lines.length === 0) return []
+
+  const unitCents = lines[0].unitCents
+  if (lines.some((line) => line.unitCents !== unitCents)) return [...lines]
+
+  const quantityCentis = lines.reduce(
+    (sum, line) => sum + line.quantityCentis,
+    0
+  )
+  return [
+    {
+      description,
+      quantityCentis,
+      unitCents,
+      amountCents: lineAmountCents(quantityCentis, unitCents),
+      projectId: null,
+    },
+  ]
+}
