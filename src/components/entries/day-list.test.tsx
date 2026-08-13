@@ -319,6 +319,63 @@ describe("grouped entries", () => {
       />
     )
 
+  it("renders a number-only sitting disclosure", () => {
+    renderLog(true)
+    const disclosure = screen.getByRole("button", { name: "Show grouped entries" })
+    expect(disclosure.textContent).toBe("2")
+    expect(disclosure.querySelector("svg")).toBeNull()
+  })
+
+  it("uses one duration column for the day, sitting, and entry", () => {
+    const { container } = renderLog(true)
+    const durations = container.querySelectorAll(".entry-log-duration")
+    expect(durations.length).toBeGreaterThanOrEqual(3)
+    for (const duration of durations) {
+      expect(duration.parentElement?.className).toContain("entry-log-grid")
+    }
+  })
+
+  it("renders entry titles at the title scale", () => {
+    renderLog(false)
+    const title = screen.getAllByRole("button", { name: /Description:/ })[0]
+    expect(title.className).toContain("text-base")
+  })
+
+  it("draws a stronger full-width boundary before later days", () => {
+    const yesterdayEntry = makeEntry({
+      _id: "yesterday" as unknown as Doc<"timeEntries">["_id"],
+      title: "Yesterday's work",
+      startedAt: -86_400_000,
+      endedAt: -82_800_000,
+      durationMs: 3_600_000,
+    })
+    const { container } = render(
+      <DayList
+        groups={[
+          groups[0],
+          {
+            day: "2026-08-08",
+            label: "Yesterday",
+            entries: [yesterdayEntry],
+            notedCount: 0,
+            totalMs: 3_600_000,
+            billableMs: 0,
+            runningCount: 0,
+          },
+        ]}
+        timeZone="UTC"
+        use12Hour={false}
+        weekStartDay={0}
+        projects={[]}
+        tags={[]}
+        actions={noActions}
+      />
+    )
+    const sections = container.querySelectorAll("section[data-day-group]")
+    expect(sections[1].className).toContain("border-t")
+    expect(sections[1].className).toContain("border-edge")
+  })
+
   it("draws the flat log by default, with no badge and no disclosure", () => {
     // The PROP defaults off even though the user SETTING defaults on. This is
     // what keeps the component honest in isolation, and what lets every test

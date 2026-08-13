@@ -250,6 +250,64 @@
   }
 }
 
+/* One geometry for day headers, sitting rows and entry rows. The day total and
+ * every row duration occupy the same named column, so alignment is structural
+ * rather than three matching width guesses. */
+.entry-log-grid {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) 8.5rem 4.5rem 4rem;
+  grid-template-areas: "select content time duration actions";
+  column-gap: 0.5rem;
+  align-items: start;
+}
+.entry-log-select {
+  grid-area: select;
+  align-self: center;
+}
+.entry-log-content {
+  grid-area: content;
+  min-width: 0;
+}
+.entry-log-time {
+  grid-area: time;
+  align-self: center;
+  text-align: right;
+}
+.entry-log-duration {
+  grid-area: duration;
+  align-self: center;
+  width: 4.5rem;
+  text-align: right;
+}
+.entry-log-actions {
+  grid-area: actions;
+  align-self: center;
+  width: 4rem;
+}
+
+@media (max-width: 639px) {
+  .entry-log-grid {
+    grid-template-columns: 1rem minmax(0, 1fr) 4.5rem 4rem;
+    grid-template-areas: "select content duration actions";
+  }
+  .entry-log-time {
+    display: none;
+  }
+}
+
+/* Defaults visible for touch/non-hover devices. Only a precise hover-capable
+ * pointer gets the quieter contextual state. Keyboard focus always reveals. */
+@media (hover: hover) and (pointer: fine) {
+  .entry-selection-contextual {
+    opacity: 0;
+  }
+  .group:hover .entry-selection-contextual,
+  .group:focus-within .entry-selection-contextual,
+  .entry-selection-contextual:focus-visible {
+    opacity: 1;
+  }
+}
+
 /* The Hatch Rule: gaps, untracked time, and entries missing a note are marked
  * with a texture, never a colour. Absence is a hatch, not a hue — which is what
  * makes it survive colour blindness and peripheral vision alike, and keeps it

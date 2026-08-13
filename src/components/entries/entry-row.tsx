@@ -176,12 +176,14 @@ export function EntryRow({
         eye reads a row left to right along its FIRST line, so that is the line
         everything on it has to sit on.
       */}
-      <div className="flex min-h-(--entry-row-height) w-full items-start gap-2 px-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
+      <div className="entry-log-grid min-h-(--entry-row-height) w-full px-4">
+        <span aria-hidden="true" className="entry-log-select" />
+        <div className="entry-log-content flex min-w-0 flex-col gap-0.5 py-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <EditableTitle
               entry={entry}
               onCommit={(next) => actions.onTitleChange(entry, next)}
+              textClassName="text-base"
             />
             {entry.billable ? (
               // Brass means money — The Two Temperatures Rule. Paired with a
@@ -205,6 +207,33 @@ export function EntryRow({
                 <span className="sr-only">Billable</span>
               </span>
             ) : null}
+            {/* Classifiers stay beside the title: they describe the work and
+                must give way with it before the fixed time and duration columns. */}
+            <div className="flex shrink-0 items-center gap-0.5">
+              <ProjectPicker
+                projects={projects}
+                value={entry.projectId ?? null}
+                onCreate={actions.onCreateProject}
+                onChange={(projectId) => actions.onClassify(entry, { projectId })}
+                className={cn("max-w-[8rem]", entry.projectId === undefined && revealed)}
+                // The dot survives at every width; the name is what gets dropped
+                // when there is no room, because the dot plus the row's own
+                // context is enough to tell two clients apart at a glance.
+                nameClassName="hidden md:inline"
+              />
+              <TagPicker
+                tags={tags}
+                value={entry.tagIds}
+                onCreate={actions.onCreateTag}
+                onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
+                className={cn("hidden sm:inline-flex", entry.tagIds.length === 0 && revealed)}
+              />
+              <BillableToggle
+                value={entry.billable}
+                onChange={(billable) => actions.onClassify(entry, { billable })}
+                className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
+              />
+            </div>
           </div>
 
           {/* The 20px slot and its `touch-target` sizing are explained in `NoteLine`.
@@ -221,60 +250,13 @@ export function EntryRow({
           ) : null}
         </div>
 
+        {/* Fixed columns stay on the row's first line when a note expands. */}
         {/*
-          EVERYTHING AFTER THE TEXT, IN ONE BOX, and the box is a row's height.
-
-          These four clusters used to be siblings of the title column, centred by
-          the parent. They are grouped now for one reason: the group can hold
-          `min-h-(--entry-row-height) items-center` while the parent top-aligns,
-          which is what keeps them on the row's first line rather than halfway
-          down a note (see the parent's own note above). The `gap-2` between them
-          is the gap the parent used to supply, so nothing moves.
-        */}
-        <div className="flex min-h-(--entry-row-height) shrink-0 items-center gap-2">
-          {/*
-            The classifiers, editable in place like everything else on the row.
-            Same three controls in the same order as the timer bar — a project is
-            set the same way whether the work is running or finished, because a
-            second way to do it is a second thing to remember.
-
-            A control that HOLDS something is always visible, because it is data.
-            An EMPTY one is only an affordance, and is revealed on hover like the
-            row's other controls. Showing all three on every row put a dollar
-            sign beside every entry in the log, which is exactly how "brass means
-            money" stops meaning anything.
-          */}
-          <div className="flex shrink-0 items-center gap-0.5">
-            <ProjectPicker
-              projects={projects}
-              value={entry.projectId ?? null}
-              onCreate={actions.onCreateProject}
-              onChange={(projectId) => actions.onClassify(entry, { projectId })}
-              className={cn("max-w-[8rem]", entry.projectId === undefined && revealed)}
-              // The dot survives at every width; the name is what gets dropped
-              // when there is no room, because the dot plus the row's own
-              // context is enough to tell two clients apart at a glance.
-              nameClassName="hidden md:inline"
-            />
-            <TagPicker
-              tags={tags}
-              value={entry.tagIds}
-              onCreate={actions.onCreateTag}
-              onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
-              className={cn("hidden sm:inline-flex", entry.tagIds.length === 0 && revealed)}
-            />
-            <BillableToggle
-              value={entry.billable}
-              onChange={(billable) => actions.onClassify(entry, { billable })}
-              className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
-            />
-          </div>
-
-          {/*
             Visible at EVERY width. The inline fields this replaced were
             `hidden sm:inline-flex`, so on a phone an entry's times could not be
             corrected at all — the surface Toggl abandoned, again.
           */}
+        <div className="entry-log-time">
           <EntryTimePopover
             entry={entry}
             timeZone={timeZone}
@@ -283,13 +265,16 @@ export function EntryRow({
             onCommitTime={(field, value) => actions.onTimeChange(entry, field, value)}
             onCommitDay={(day) => actions.onDayChange(entry, day)}
           />
+        </div>
 
+        <div className="entry-log-duration">
           <EditableDuration
             entry={entry}
             onCommit={(ms) => actions.onDurationChange(entry, ms)}
           />
+        </div>
 
-          {/*
+        {/*
             Row controls stay in the layout at all times and fade in on hover or
             focus, rather than being added and removed. Reserving the space means
             the columns to their left do not shift when the pointer crosses a row
@@ -299,21 +284,20 @@ export function EntryRow({
             on a phone, so a hover-revealed control is not subtle there, it is
             absent: delete and resume would be unreachable by any means.
           */}
-          <div className="flex shrink-0 items-center gap-0.5">
-            <RowButton
-              label={`Resume ${title === "" ? "this entry" : title}`}
-              onClick={() => actions.onResume(entry)}
-            >
-              <Play className="size-4" />
-            </RowButton>
-            <RowButton
-              label={`Delete ${title === "" ? "this entry" : title}`}
-              onClick={() => actions.onRemove(entry)}
-              destructive
-            >
-              <Trash2 className="size-4" />
-            </RowButton>
-          </div>
+        <div className="entry-log-actions flex items-center justify-end gap-0.5">
+          <RowButton
+            label={`Resume ${title === "" ? "this entry" : title}`}
+            onClick={() => actions.onResume(entry)}
+          >
+            <Play className="size-4" />
+          </RowButton>
+          <RowButton
+            label={`Delete ${title === "" ? "this entry" : title}`}
+            onClick={() => actions.onRemove(entry)}
+            destructive
+          >
+            <Trash2 className="size-4" />
+          </RowButton>
         </div>
       </div>
     </div>

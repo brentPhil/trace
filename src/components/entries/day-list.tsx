@@ -116,8 +116,16 @@ export function DayList({
 
   return (
     <div className="flex flex-col">
-      {groups.map((group) => (
-        <section key={group.day} aria-label={group.label} className="flex flex-col">
+      {groups.map((group, groupIndex) => (
+        <section
+          key={group.day}
+          data-day-group={group.day}
+          aria-label={group.label}
+          className={cn(
+            "flex flex-col",
+            groupIndex > 0 && "border-t-2 border-edge"
+          )}
+        >
           {/*
             `top-(--log-sticky-top)`, not `top-0`. A page that owns a sticky
             band sets that variable to the height of everything above this
@@ -141,9 +149,10 @@ export function DayList({
               The padding lives HERE and not on the header, because the
               header's background and border are meant to stay full-bleed.
             */}
-            <div className="flex w-full items-baseline justify-between gap-3 px-4">
-              <div className="flex items-baseline gap-3">
-                <h2 className="text-sm font-semibold">{group.label}</h2>
+            <div className="entry-log-grid w-full items-baseline px-4">
+              <span aria-hidden="true" className="entry-log-select" />
+              <div className="entry-log-content flex min-w-0 items-baseline gap-2">
+                <h2 className="text-sm font-medium">{group.label}</h2>
                 {/*
                   The note count, not a badge or a score. It states a fact and
                   creates just enough pressure to fill the gaps in the day --
@@ -161,15 +170,17 @@ export function DayList({
                   </span>
                 )}
               </div>
+              <span aria-hidden="true" className="entry-log-time" />
               <span
                 // Includes a running entry's live elapsed time, so the server's
                 // value and the client's first render legitimately differ. See
                 // the same attribute in `totals-row.tsx`.
                 suppressHydrationWarning
-                className="text-base font-semibold tabular text-muted-foreground"
+                className="entry-log-duration tabular text-base font-semibold text-muted-foreground"
               >
                 {formatTotal(group.totalMs, display)}
               </span>
+              <span aria-hidden="true" className="entry-log-actions" />
             </div>
           </header>
 
@@ -327,9 +338,12 @@ export function LogSkeleton() {
             <div className="border-b border-edge-soft py-2">
               {/* Same `w-full px-4` as the header it stands in for, so the
                   page does not shift sideways when the real rows arrive. */}
-              <div className="flex w-full items-baseline justify-between gap-3 px-4">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-4 w-14" />
+              <div className="entry-log-grid w-full items-baseline px-4">
+                <span className="entry-log-select" />
+                <Skeleton className="entry-log-content h-4 w-32" />
+                <span className="entry-log-time" />
+                <Skeleton className="entry-log-duration h-4" />
+                <span className="entry-log-actions" />
               </div>
             </div>
             {/* Both tokens, tracking the real row and the real group gap
@@ -340,9 +354,12 @@ export function LogSkeleton() {
             <div className="flex flex-col pb-(--day-group-gap)">
               {[0, 1, 2].map((row) => (
                 <div key={row} className="border-b border-edge-soft">
-                  <div className="flex h-(--entry-row-height) w-full items-center gap-3 px-4">
-                    <Skeleton className="h-4 flex-1 max-w-64" />
-                    <Skeleton className="h-4 w-16 shrink-0" />
+                  <div className="entry-log-grid h-(--entry-row-height) w-full items-center px-4">
+                    <span className="entry-log-select" />
+                    <Skeleton className="entry-log-content h-4 max-w-64" />
+                    <span className="entry-log-time" />
+                    <Skeleton className="entry-log-duration h-4" />
+                    <span className="entry-log-actions" />
                   </div>
                 </div>
               ))}
@@ -353,6 +370,3 @@ export function LogSkeleton() {
     </>
   )
 }
-
-
-
