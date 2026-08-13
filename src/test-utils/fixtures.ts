@@ -24,6 +24,7 @@ export const SETTINGS = {
   runawayThresholdMs: 8 * 60 * 60 * 1000,
   tabTitleClock: false,
   currency: "USD",
+  pdfIncludeNotes: false,
 }
 
 /**

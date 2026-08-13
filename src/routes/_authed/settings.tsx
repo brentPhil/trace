@@ -36,7 +36,9 @@ const WEEKDAYS = [
 
 const RUNAWAY_CHOICES = [4, 6, 8, 10, 12, 24]
 
-function Settings() {
+// Exported for -settings.test.tsx, the same way every other route in this
+// directory exports its component for its own test.
+export function Settings() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const update = useLatest(useConvexMutation(api.settings.update))
   const toasts = Toast.useToastManager()
@@ -203,6 +205,36 @@ function Settings() {
             currency={settings.currency}
             onChange={(defaultHourlyRateCents) => save({ defaultHourlyRateCents })}
           />
+        </Section>
+
+        {/*
+          A RADIO PAIR, not a lone checkbox, and the wording is the reason.
+          "Include notes" as a single box states only the on position; the
+          reader has to infer that unchecking it leaves the notes out, which on
+          a control governing what reaches a client is an inference worth not
+          asking for. Both outcomes are written down, the same way Durations and
+          Clock above spell out both of theirs.
+        */}
+        <Section
+          title="Notes in the PDF report"
+          hint="A note is what you wrote about how the work actually went, and the PDF is the copy that goes to a client — so this is off unless you say otherwise. It changes the exported PDF only: the CSV and XLSX exports never carry notes, and nothing on this page changes what you see on /reports."
+        >
+          <div className="flex flex-col gap-2">
+            <Radio
+              name="pdfIncludeNotes"
+              checked={!settings.pdfIncludeNotes}
+              onChange={() => save({ pdfIncludeNotes: false })}
+            >
+              Leave notes out
+            </Radio>
+            <Radio
+              name="pdfIncludeNotes"
+              checked={settings.pdfIncludeNotes}
+              onChange={() => save({ pdfIncludeNotes: true })}
+            >
+              Print each row's notes
+            </Radio>
+          </div>
         </Section>
 
         <Section

@@ -42,6 +42,7 @@ function rowsWithTotals(totals: ReportRows["totals"]): ReportRows {
       project: "Acme",
       description: "Standup",
       weekStart: "2026-07-13",
+      notes: [],
       totalMs: totals.totalMs,
       percent: 100,
       billableCents: totals.billableCents,
@@ -68,6 +69,7 @@ function rowsWithTotals(totals: ReportRows["totals"]): ReportRows {
       },
     ],
     titlesTruncated: false,
+    notesTruncated: false,
   }
 }
 
@@ -240,6 +242,7 @@ describe("the three writers agree on the grand-total Percent for an empty range"
       titles: [],
       weeks: [],
       titlesTruncated: false,
+      notesTruncated: false,
     }
 
     expect(toCsv(empty).split("\r\n").at(-1)!.split(",")[5]).toBe("0")

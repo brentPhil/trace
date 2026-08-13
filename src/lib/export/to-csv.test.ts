@@ -33,6 +33,7 @@ function rowsOf(titles: ReportRows["titles"]): ReportRows {
     // grouping logic cannot mask a bug here by accident.
     weeks: [],
     titlesTruncated: false,
+    notesTruncated: false,
   }
 }
 
@@ -41,6 +42,7 @@ const ONE: ReportRows["titles"] = [
     project: "Acme",
     description: "Standup",
     weekStart: "2026-07-13",
+    notes: [],
     totalMs: HOUR,
     percent: 100,
     billableCents: 1_000,
@@ -86,6 +88,7 @@ describe("toCsv", () => {
           project: "Acme",
           description: 'Fixing "toggle" bleeding across Maintenance, Log\nEntries',
           weekStart: "2026-07-13",
+          notes: [],
           totalMs: HOUR,
           percent: 100,
           billableCents: 1_000,
@@ -164,6 +167,7 @@ describe("toCsv", () => {
       ...rows,
       totals: { ...rows.totals, unpriced: true },
       titlesTruncated: true,
+      notesTruncated: true,
     })
     const lines = csv.split("\r\n")
     // header, one body row, TOTAL, two trailing notes.

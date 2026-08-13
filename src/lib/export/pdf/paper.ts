@@ -64,6 +64,34 @@ export const TYPE = {
   title: 20,
 } as const
 
+/**
+ * THE TABULAR RULE IS NOT APPLIED ON PAPER, and this is the record of why —
+ * because it is a named DESIGN.md rule (§3) being deliberately not followed,
+ * which without a note here reads as an oversight nobody noticed.
+ *
+ * The rule says every duration, timestamp and total is IBM Plex Mono with
+ * `tnum`, so "history columns align on the decimal without effort". On screen
+ * they do. In this document every figure is DM Sans, whose digits are
+ * proportional (`0` is 684 units against `1`'s 312), so right-aligning the
+ * Duration and Amount columns aligns their right edges but not their decimal
+ * points.
+ *
+ * It was attempted and it cannot ship. pdf-lib 1.17.1's bundled
+ * `@pdf-lib/fontkit` 1.1.1 throws `RangeError: Trying to access beyond buffer
+ * length` parsing IBM Plex Mono's SPACE glyph — it has no contours, and
+ * fontkit's `_getCBox` reads past the zero-length `glyf` entry. Every weight
+ * (400/500/600/700) fails identically; a space-free string draws fine, which is
+ * what makes it a trap rather than an obvious blocker. `formatMoney` pins
+ * `en-US` and renders any currency without a narrow symbol as `AED 10.50` — with
+ * U+00A0 — so of the 39 currencies `supportedCurrencies()` offers, most would
+ * crash the export the moment an amount was drawn in mono.
+ *
+ * Reconsider if pdf-lib upgrades its fontkit, or if another tabular-figure face
+ * with a contoured space is embedded. Until then the alignment cost is accepted
+ * and the columns stay right-aligned, which is what carries most of the benefit
+ * for strings of a fixed format.
+ */
+
 export type Rgb = readonly [number, number, number]
 
 export const PAPER = {
@@ -79,8 +107,37 @@ export const PAPER = {
    * this text hard to read was size (6–8pt) and typeface, not this colour;
    * see `TYPE` above and `render.ts`'s embedded DM Sans. */
   inkMuted: [0.42, 0.41, 0.39],
-  /** Table rules and separators. */
+  /** Table rules and separators — a column header's underline, the rule that
+   *  closes a week, the one above TOTAL. Structural: it says "a block ends
+   *  here". */
   rule: [0.82, 0.81, 0.79],
+  /**
+   * The hairline between two body rows, and a chart's gridlines.
+   *
+   * Deliberately fainter than `rule`: these repeat dozens of times per page and
+   * exist to let the eye track ACROSS a row (a wrapped two-line description on
+   * the left, its amount 460pt away on the right), not to divide the document
+   * into parts. At `rule`'s weight a 22-row table reads as a grid of boxes,
+   * which is the enterprise-timesheet look DESIGN.md rejects by name.
+   */
+  ruleFaint: [0.91, 0.90, 0.885],
+  /**
+   * The tinted strip a week opens on in the breakdown — the one filled shape
+   * in the document that is not data.
+   *
+   * A fill rather than a rule because the week is the breakdown's only
+   * grouping and has to be findable halfway down a page of five hundred rows;
+   * a rule at `rule`'s weight had already proved indistinguishable from the
+   * ruling that used to run under every row. Warm rather than neutral grey, on
+   * the same hue the paper's ink is warmed toward, so the band reads as part of
+   * this document rather than as a highlight applied to it.
+   *
+   * Light enough that the bold label on top of it clears the text-contrast
+   * floor comfortably — the label is `ink` (0.11), which is ~15:1 here — and
+   * that the strip survives a black-and-white printer as a tint rather than a
+   * smear.
+   */
+  band: [0.945, 0.940, 0.930],
   /** Money, and only money. */
   brass: [0.55, 0.42, 0.09],
   /** A billable bar segment. */

@@ -46,6 +46,21 @@ export type ReportTitleRow = {
    *  it as a plain column, and so `reportRows` can partition this same flat
    *  list into `weeks` below without a second query. */
   weekStart: DayString
+  /**
+   * This row's entries' distinct notes — prose the user wrote about how the
+   * work actually went.
+   *
+   * EMPTY unless the export was asked for them: `userSettings.pdfIncludeNotes`
+   * decides whether `entries.rangeBreakdown` collects them at all, so an empty
+   * array here means either "nobody wrote one" or "this export does not print
+   * notes", and the document never has to tell the two apart — it prints what
+   * it is given.
+   *
+   * Read only by the PDF writer. CSV and XLSX deliberately do not carry it:
+   * they are the machine-readable cuts, and a spreadsheet cell holding several
+   * paragraphs joined by a separator is worse than no column at all.
+   */
+  notes: Array<string>
   totalMs: number
   /**
    * This row's share of the WHOLE RANGE — not of the week it is grouped
@@ -166,6 +181,11 @@ export type ReportRows = {
   /** `titles`, split by week, ascending — what the PDF renders as sections. */
   weeks: Array<ReportWeek>
   titlesTruncated: boolean
+  /** Notes were requested and the budget ran out before every row got its own,
+   *  so some rows print fewer notes than their entries hold. Carries
+   *  `NOTES_CAP_NOTE` onto the document, the same way `titlesTruncated`
+   *  carries `TITLE_CAP_NOTE`. */
+  notesTruncated: boolean
 }
 
 /**
@@ -276,6 +296,7 @@ export function reportRows(
     project: row.project === "" ? NO_PROJECT_LABEL : row.project,
     description: row.title === "" ? NO_DESCRIPTION : row.title,
     weekStart: row.weekStart,
+    notes: row.notes,
     totalMs: row.totalMs,
     percent: percentOf(row.totalMs, breakdown.totalMs),
     billableCents: row.billableCents,
@@ -313,6 +334,7 @@ export function reportRows(
     titles,
     weeks: groupWeeks(titles, breakdown.totalMs, opts.from, opts.to),
     titlesTruncated: breakdown.titlesTruncated,
+    notesTruncated: breakdown.notesTruncated,
   }
 }
 
@@ -331,6 +353,17 @@ export function reportRows(
  */
 export const TITLE_CAP_NOTE =
   `Only the ${TITLE_ROW_LIMIT} highest-duration rows in the range are listed — the same description in two different weeks counts as two rows — so a week's Subtotal may not include all of that week's work. Narrow the range for a complete breakdown.`
+
+/**
+ * The sentence a note list cut short by the budget must carry.
+ *
+ * Beside `TITLE_CAP_NOTE` and written for the same reason: a document that
+ * silently stops carrying notes reads as work that had none, and "this row had
+ * nothing to say" is a different claim from "we ran out of room to say it".
+ * Only ever printed when notes were actually asked for.
+ */
+export const NOTES_CAP_NOTE =
+  "Some entry notes are not shown — this range holds more note text than the report carries."
 
 /** The sentence unpriced billable time must carry. Same reasoning. */
 export const UNPRICED_NOTE =

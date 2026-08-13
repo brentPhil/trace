@@ -310,3 +310,39 @@ export const INVOICE_LIST_LIMIT = 50
  * is off limits to it (see eslint.config.js's component/Convex boundary).
  */
 export const TITLE_ROW_LIMIT = 500
+
+/**
+ * How many DISTINCT notes one breakdown row carries when notes are requested.
+ *
+ * A row is a `(week, project, description)` group, so it can hold every entry
+ * logged under one description in one week — a daily standup is five entries
+ * with five different notes, and a long-running ticket worked across a week is
+ * more. Past a handful the document stops being a report and becomes a diary:
+ * the note exists to say what was accomplished, and five accounts of the same
+ * description in the same week already say it.
+ *
+ * Notes are deduplicated before this applies, so five IDENTICAL notes count as
+ * one and this cap is only reached by five genuinely different ones.
+ */
+export const NOTES_PER_ROW_LIMIT = 5
+
+/**
+ * The total characters of note text one breakdown may return, across every row.
+ *
+ * THE BOUND THAT ACTUALLY BINDS. `NOTES_PER_ROW_LIMIT` alone does not: a note
+ * admits `MAX_NOTE_LENGTH` (2,000) characters, and 500 rows × 5 notes × 2,000
+ * is a 5 MB query response — past Convex's own limit, and reached by a range
+ * that is large but not pathological. A per-row cap cannot see the total; only
+ * a budget spent across the whole result can.
+ *
+ * 120,000 characters is roughly 240 KB of UTF-16 on the wire and about 40
+ * printed pages of notes, which is far past what anyone reads and far short of
+ * what breaks the response. It is spent in the order `allTitles` is already
+ * sorted — time descending — so when it runs out, what is dropped is the notes
+ * on the SHORTEST work in the range rather than an arbitrary slice.
+ *
+ * Running out is reported (`notesTruncated`), never silent: a document that
+ * quietly stops carrying notes reads as work that had none, which is the same
+ * class of lie `titlesTruncated` exists to prevent one level up.
+ */
+export const NOTES_CHAR_BUDGET = 120_000

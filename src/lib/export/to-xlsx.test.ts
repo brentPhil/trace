@@ -52,6 +52,7 @@ const ROWS: ReportRows = {
       project: "Acme",
       description: "Standup",
       weekStart: "2026-07-13",
+      notes: [],
       totalMs: 3 * HOUR,
       percent: 100,
       billableCents: 3_000,
@@ -63,6 +64,7 @@ const ROWS: ReportRows = {
   // report-rows.ts).
   weeks: [],
   titlesTruncated: false,
+  notesTruncated: false,
 }
 
 describe("xlsxSheets", () => {

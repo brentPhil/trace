@@ -21,7 +21,9 @@ export type TextOp = {
   text: string
   size: number
   bold?: boolean
-  align?: "left" | "right"
+  /** Where `x` sits relative to the glyphs: their start (`left`, the default),
+   *  their end (`right`), or their midpoint (`center`). */
+  align?: "left" | "right" | "center"
   color?: Rgb
 }
 
@@ -52,8 +54,15 @@ export function rect(op: Omit<RectOp, "kind">): RectOp {
 }
 
 /**
- * DM Sans's real advance widths, 1/1000 em, for printable ASCII 32-126 —
- * every character an export string in this app actually draws.
+ * DM Sans's real advance widths, 1/1000 em, for printable ASCII 32-126.
+ *
+ * NOT every character these documents draw — the em dash this file's own
+ * `truncateToWidth` appends, the middot bulleting a note, an accented letter in
+ * an imported description, and a non-breaking space inside a formatted currency
+ * all fall through to `DEFAULT_ADVANCE`. That is the designed behaviour rather
+ * than a gap (see its note), and it is only ever a rounding error in a wrap or
+ * a hanging indent — but the table is ASCII, and claiming otherwise would make
+ * the next person trust a measurement it cannot make.
  *
  * These are NOT retyped from a spec sheet — `render.ts` embeds the exact same
  * TTFs (`@expo-google-fonts/dm-sans`'s 400Regular and 700Bold), and these
@@ -379,7 +388,61 @@ export function donutSlices(
   return slices
 }
 
+/**
+ * A single line, cut to fit `maxWidth`, with an ellipsis marking the cut.
+ *
+ * THE ONE PLACE THIS IS RIGHT is a chart legend, and the doctrine everywhere
+ * else in this pipeline is the opposite: `wrapToWidth` exists precisely because
+ * truncation hides the text that justifies a billed line, which a client
+ * reconciling the report against an invoice cannot accept. A legend is not that
+ * text. It is a recognition aid beside a coloured swatch (DESIGN.md, §5: "Colour
+ * is a recognition aid there, never the information"), it sits in a fixed 17pt
+ * rhythm that a wrapped name would break, and — unlike the breakdown table — it
+ * has a hard vertical budget: twelve projects is the palette's own maximum, and
+ * twelve two-line rows run off the bottom of the page. The full project name
+ * survives in the breakdown table's PROJECT column, which does wrap.
+ *
+ * Returns the ellipsis alone rather than an empty string when not even one
+ * character fits, so a cell that cannot be drawn still reads as elided text
+ * rather than as a missing value.
+ */
+export function truncateToWidth(
+  str: string,
+  maxWidth: number,
+  size: number,
+  bold: boolean
+): string {
+  if (textWidth(str, size, bold) <= maxWidth) return str
+  const ellipsis = "…"
+  const budget = maxWidth - textWidth(ellipsis, size, bold)
+  const table = bold ? DM_SANS_BOLD_WIDTHS : DM_SANS_WIDTHS
+
+  let units = 0
+  let cut = ""
+  for (const ch of str) {
+    units += table[ch] ?? DEFAULT_ADVANCE
+    if ((units / 1000) * size > budget) break
+    cut += ch
+  }
+  // `trimEnd`: cutting mid-phrase often lands on a space, and "Vessel …" reads
+  // as a gap where a word was rather than as one elided name.
+  return `${cut.trimEnd()}${ellipsis}`
+}
+
 const COLUMN_GAP = 3
+
+/**
+ * The widest a single bar may be drawn, however few there are.
+ *
+ * `slot - COLUMN_GAP` alone is only a sensible width when the slots are
+ * narrow. A one-bucket range — a single day exported on its own, which is an
+ * ordinary thing to do — gave that one bar the plot's entire 472pt width, and a
+ * 472×280pt filled rectangle does not read as a bar at all; it reads as a
+ * shaded panel with an axis drawn beside it. Capping and centring leaves every
+ * multi-bar chart byte-identical (below the cap, `(slot - barWidth) / 2` IS
+ * `COLUMN_GAP / 2`) and makes the degenerate case look like the chart it is.
+ */
+const MAX_BAR_WIDTH = 28
 
 /**
  * The measured-zero tick's height. A real bar must always clear this, or a
@@ -397,28 +460,41 @@ const ZERO_MARK_HEIGHT = 1
 const MIN_BAR_HEIGHT = 1.5
 
 /**
- * A stacked bar per span, scaled to the tallest one.
+ * A stacked bar per span, scaled so that `maxMs` fills `box.height`.
  *
  * An empty span is HATCHED, never drawn as a bar of height zero (the Hatch
  * Rule): a zero-height bar and "no data arrived" are the same picture, and the
  * gap where somebody took a Thursday off is information the chart exists to
  * carry.
+ *
+ * `maxMs` IS THE AXIS TOP, and passing it is what keeps the bars and the
+ * gridlines drawn behind them telling the same story. Scaling to the tallest
+ * BAR instead — which is what this did before there was an axis — puts the
+ * tallest bar flush against the plot's ceiling while the top gridline says a
+ * rounder, larger number, so every bar on the page reads high by the ratio
+ * between them. On a document a client reconciles against an invoice, a chart
+ * that overstates by 20% is worse than a chart with no scale at all, because
+ * the scale is what invites the reader to trust it. Defaults to the tallest bar
+ * so a caller with no axis still gets the old, self-scaled behaviour.
  */
 export function barColumns(
   values: ReadonlyArray<{ billableMs: number; nonBillableMs: number; empty: boolean }>,
-  box: { x: number; y: number; width: number; height: number }
+  box: { x: number; y: number; width: number; height: number },
+  maxMs?: number
 ): Array<PdfOp> {
   if (values.length === 0) return []
 
-  const tallest = Math.max(
-    ...values.map((value) => value.billableMs + value.nonBillableMs)
-  )
+  const tallest =
+    maxMs ?? Math.max(...values.map((value) => value.billableMs + value.nonBillableMs))
   const slot = box.width / values.length
-  const barWidth = Math.max(1, slot - COLUMN_GAP)
+  const barWidth = Math.min(MAX_BAR_WIDTH, Math.max(1, slot - COLUMN_GAP))
+  // Centred in its slot rather than offset by half a gap: the two are the same
+  // number whenever the cap is not binding, and only the capped case moves.
+  const barInset = (slot - barWidth) / 2
 
   const ops: Array<PdfOp> = []
   values.forEach((value, index) => {
-    const x = box.x + index * slot + COLUMN_GAP / 2
+    const x = box.x + index * slot + barInset
 
     if (value.empty) {
       ops.push({ kind: "hatch", x, y: box.y, width: barWidth, height: box.height })

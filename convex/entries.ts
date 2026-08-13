@@ -8,7 +8,12 @@ import { dropEntryTags, syncEntryTags } from "./entryTags"
 import { traceError } from "./errors"
 import { applyTimeEdit, assertEnteredDuration, entryTimes } from "./lib/entryTimes"
 import { timeEntryDoc } from "./lib/docs"
-import { SUMMARY_SCAN_LIMIT, TITLE_ROW_LIMIT } from "./lib/scan"
+import {
+  NOTES_CHAR_BUDGET,
+  NOTES_PER_ROW_LIMIT,
+  SUMMARY_SCAN_LIMIT,
+  TITLE_ROW_LIMIT,
+} from "./lib/scan"
 import { dayOf, isValidTimeZone, localPartsOf, weekStartOf } from "./lib/day"
 import { isFilterActive, matchesFilter } from "./lib/entryFilter"
 import { defaultRateCents } from "./settings"
@@ -702,6 +707,23 @@ const titleTotal = v.object({
    * `days` and `hours` above: an entry never splits across two weeks.
    */
   weekStart: v.string(),
+  /**
+   * This row's entries' notes — distinct, in the order they were first written,
+   * and EMPTY unless the caller asked for them with `withNotes`.
+   *
+   * Off by default because it is the only field here whose size is unbounded by
+   * anything but a cap: every other one is a number. A range's notes can run to
+   * megabytes (see `NOTES_CHAR_BUDGET`), and /reports draws charts that never
+   * read this — so the page that loads a breakdown on every date change does
+   * not pay for prose it will not render. Only a PDF export with the setting on
+   * asks for it.
+   *
+   * Deduplicated: the same sentence logged against the same description five
+   * times in one week is one fact, and printing it five times is noise. Capped
+   * per row by `NOTES_PER_ROW_LIMIT` and across the whole result by
+   * `NOTES_CHAR_BUDGET`.
+   */
+  notes: v.array(v.string()),
   totalMs: v.number(),
   billableMs: v.number(),
   billableCents: v.number(),
@@ -754,6 +776,17 @@ const breakdownReturns = v.object({
   /** The list was cut at `TITLE_ROW_LIMIT`. Surfaced on the page and in the
    *  document, because a truncated list of work reads as a complete one. */
   titlesTruncated: v.boolean(),
+  /**
+   * Notes were asked for and `NOTES_CHAR_BUDGET` ran out before every row had
+   * been given its own — so some rows below carry fewer notes than their
+   * entries hold, or none at all.
+   *
+   * Always false when `withNotes` was not asked for: nothing was dropped,
+   * because nothing was requested. The distinction matters to the document,
+   * which must not print "some notes are missing" on an export that was never
+   * meant to have any.
+   */
+  notesTruncated: v.boolean(),
 })
 
 const breakdownArgs = {
@@ -801,6 +834,18 @@ const breakdownArgs = {
       )
     )
   ),
+  /**
+   * Carry each title row's notes (see `titleTotal.notes`). Off when absent.
+   *
+   * An ARGUMENT rather than a read of `userSettings.pdfIncludeNotes` here, for
+   * the same reason `timeZone` and `weekStartDay` are arguments: this query
+   * stays a pure function of what it is asked, so the same range can never come
+   * back two different shapes depending on a row nobody passed. It also keeps
+   * the cost opt-in at the CALL SITE — /reports asks for notes only when the
+   * setting says the next PDF will print them, so a user who leaves the setting
+   * off never pays for the collection on any of the page's many refetches.
+   */
+  withNotes: v.optional(v.boolean()),
 }
 
 /*
@@ -900,6 +945,26 @@ export async function rangeBreakdownImpl(
    */
   const byTitle = new Map<string, Ledger>()
 
+  /*
+   * Notes per title key, in the same keyspace as `byTitle` above.
+   *
+   * A `Set` rather than an array: dedup has to happen as rows arrive, not
+   * afterwards, because the thing being bounded is memory during the scan as
+   * much as bytes on the wire — a week of identical daily standup notes is one
+   * fact repeated, and holding all five before collapsing them is holding four
+   * copies of it. Insertion order is preserved by `Set`, so the notes still
+   * read in the order they were written.
+   *
+   * Only populated when the caller asked; `withNotes` off leaves this map empty
+   * and every row's `notes` an empty array, at no cost to the scan.
+   */
+  const notesByTitle = new Map<Ledger, Set<string>>()
+
+  /** Some row hit `NOTES_PER_ROW_LIMIT` and a note it had not already stored
+   *  was dropped. Folded into `notesTruncated` below — the two caps are
+   *  different mechanisms with the same consequence for a reader. */
+  let perRowNotesDropped = false
+
   for (const row of rows) {
     const rateCents = rateOf(row, projectDocs, accountRate)
     const day = dayOf(row.startedAt, args.timeZone)
@@ -912,11 +977,52 @@ export async function rangeBreakdownImpl(
     post(total, row, rateCents)
     post(bucket(byDay, day), row, rateCents)
     post(bucket(byProject, row.projectId ?? ""), row, rateCents)
-    post(
-      bucket(byTitle, `${weekStart}\u0000${row.projectId ?? ""}\u0000${row.title}`),
-      row,
-      rateCents
-    )
+    const titleLedger = bucket(byTitle, `${weekStart}\u0000${row.projectId ?? ""}\u0000${row.title}`)
+    post(titleLedger, row, rateCents)
+    /*
+     * Notes are filed against the row's own LEDGER OBJECT — `titleLedger`
+     * above — never against a second copy of the key expression. Re-deriving
+     * that key here would mean two places had to agree on the NUL separators
+     * documented above, and a note filed under a key one character different
+     * from its row's is a note that silently belongs to nothing. The ledger is
+     * unique per `(week, project, description)` by construction, so it IS the
+     * identity, and the read below is a lookup on the same object rather than
+     * a string that has to be rebuilt identically.
+     *
+     * An entry with no note contributes nothing — `undefined` and `""` are both
+     * "nobody wrote one", and an empty string here would print as a bullet with
+     * nothing after it. Trimmed first, because a note that is only whitespace is
+     * the same absence typed differently.
+     *
+     * `NOTES_PER_ROW_LIMIT` is applied HERE rather than when the rows are built
+     * below, so a description logged two hundred times with two hundred
+     * different notes never accumulates a two-hundred-element set only to throw
+     * most of it away — the cap bounds the scan's own memory, not just its
+     * output.
+     */
+    if (args.withNotes === true) {
+      const note = row.note?.trim() ?? ""
+      if (note !== "") {
+        let notes = notesByTitle.get(titleLedger)
+        if (notes === undefined) {
+          notes = new Set<string>()
+          notesByTitle.set(titleLedger, notes)
+        }
+        /*
+         * REACHING THE CAP IS REPORTED, not silent — the same rule the
+         * character budget below follows, and it was missing here: a row with
+         * eight distinct notes printed five and the document said nothing,
+         * which reads as work that had only five things to say about it.
+         *
+         * `!notes.has(note)` is load-bearing. A note already stored is a
+         * DUPLICATE being folded in, not a note being dropped, so a week of
+         * identical standup entries must not raise the flag — dedup is not
+         * truncation.
+         */
+        if (notes.size < NOTES_PER_ROW_LIMIT) notes.add(note)
+        else if (!notes.has(note)) perRowNotesDropped = true
+      }
+    }
     if (row.durationMs !== null) {
       hours[localPartsOf(row.startedAt, args.timeZone).hour] += row.durationMs
     }
@@ -998,6 +1104,11 @@ export async function rangeBreakdownImpl(
         project: doc?.name ?? "",
         title: rest.slice(secondSplit + 1),
         weekStart,
+        // Carried unspent here and BUDGETED BELOW, after the sort and the
+        // `TITLE_ROW_LIMIT` cut: a budget spent in map order would be spent on
+        // whichever rows the Map happened to iterate first, including rows that
+        // are about to be discarded.
+        notes: [...(notesByTitle.get(ledger) ?? [])],
         totalMs: ledger.totalMs,
         billableMs: ledger.billableMs,
         billableCents: centsOf(ledger),
@@ -1008,6 +1119,51 @@ export async function rangeBreakdownImpl(
     // Ties broken by title so the order is stable across refetches — a table
     // that reshuffles itself on every reactive update cannot be read.
     .sort((a, b) => b.totalMs - a.totalMs || a.title.localeCompare(b.title))
+
+  const titles = allTitles.slice(0, TITLE_ROW_LIMIT)
+
+  /*
+   * THE GLOBAL NOTE BUDGET, spent over the rows that survived the cut.
+   *
+   * `NOTES_PER_ROW_LIMIT` bounds one row and cannot see the total; 500 rows of
+   * five 2,000-character notes is a 5 MB response, which is a range that is
+   * large but not pathological. This is the bound that actually binds.
+   *
+   * Spent in `titles` order — time descending — so the rows most likely to
+   * keep their notes are the ones covering the most work, rather than an
+   * arbitrary slice. Not a strict prefix, though: the inner loop stops at the
+   * first note too long for what is left, and a LATER, shorter note can still
+   * be admitted after it. That packs more useful text into the same budget, and
+   * the guarantee is therefore "the longest work is served first", not "every
+   * row before row N is complete".
+   *
+   * A note itself is kept whole or not at all: half a note is a sentence that
+   * stops mid-clause on a document a client reads, and the note exists to say
+   * what was accomplished.
+   *
+   * Seeded from `perRowNotesDropped` — the per-row cap above and this budget
+   * are different mechanisms with the same consequence for a reader, and the
+   * document has one sentence for both.
+   *
+   * Mutates `titles` in place rather than rebuilding it. The array and every
+   * row in it were just constructed here and are not shared with anything.
+   */
+  let notesTruncated = perRowNotesDropped
+  if (args.withNotes === true) {
+    let spent = 0
+    for (const row of titles) {
+      const kept: Array<string> = []
+      for (const note of row.notes) {
+        if (spent + note.length > NOTES_CHAR_BUDGET) {
+          notesTruncated = true
+          break
+        }
+        spent += note.length
+        kept.push(note)
+      }
+      row.notes = kept
+    }
+  }
 
   return {
     totalMs: total.totalMs,
@@ -1020,8 +1176,9 @@ export async function rangeBreakdownImpl(
     days,
     projects,
     hours,
-    titles: allTitles.slice(0, TITLE_ROW_LIMIT),
+    titles,
     titlesTruncated: allTitles.length > TITLE_ROW_LIMIT,
+    notesTruncated,
   }
 }
 

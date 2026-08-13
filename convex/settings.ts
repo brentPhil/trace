@@ -34,6 +34,9 @@ export type Settings = {
   /** The account's fallback hourly rate, in cents, or absent when nobody has
    *  set one. See the schema — absent is not zero. */
   defaultHourlyRateCents?: number
+  /** Print each row's entry notes in the exported PDF report. See the schema
+   *  for why the default is off. */
+  pdfIncludeNotes: boolean
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -44,6 +47,7 @@ export const SETTINGS_DEFAULTS: Settings = {
   runawayThresholdMs: 8 * 60 * 60 * 1000,
   tabTitleClock: true,
   currency: "USD",
+  pdfIncludeNotes: false,
 }
 
 async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
@@ -62,6 +66,7 @@ const settingsReturns = v.object({
   runawayThresholdMs: v.number(),
   tabTitleClock: v.boolean(),
   currency: v.string(),
+  pdfIncludeNotes: v.boolean(),
 })
 
 async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
@@ -79,6 +84,8 @@ async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
     // before this column existed has no opinion, and that is a valid, common
     // state rather than one worth a backfill migration.
     currency: row.currency ?? SETTINGS_DEFAULTS.currency,
+    // Same additive-column fallback as `currency` above.
+    pdfIncludeNotes: row.pdfIncludeNotes ?? SETTINGS_DEFAULTS.pdfIncludeNotes,
   }
 }
 
@@ -186,6 +193,7 @@ const updateArgs = {
   runawayThresholdMs: v.optional(v.number()),
   tabTitleClock: v.optional(v.boolean()),
   currency: v.optional(v.string()),
+  pdfIncludeNotes: v.optional(v.boolean()),
   /** `null` CLEARS it, `undefined` leaves it alone — the same three-state
    *  shape `projects.update` uses for the same field, because "set it to
    *  nothing" and "do not touch it" are different requests. */
@@ -200,6 +208,7 @@ type UpdateArgs = {
   runawayThresholdMs?: number
   tabTitleClock?: boolean
   currency?: string
+  pdfIncludeNotes?: boolean
   defaultHourlyRateCents?: number | null
 }
 

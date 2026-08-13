@@ -39,6 +39,7 @@ const BREAKDOWN: Breakdown = {
       project: "Acme",
       title: "Standup",
       weekStart: "2026-07-13",
+      notes: [],
       totalMs: HOUR,
       billableMs: HOUR,
       billableCents: 1_000,
@@ -47,6 +48,7 @@ const BREAKDOWN: Breakdown = {
     },
   ],
   titlesTruncated: false,
+  notesTruncated: false,
 }
 
 const PROPS = {

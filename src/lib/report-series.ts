@@ -73,6 +73,11 @@ export type TitleTotal = {
    *  starts fall in — see the field's own doc in convex/entries.ts. Lets the
    *  export split this same flat list into weeks without a second query. */
   weekStart: DayString
+  /** This row's entries' distinct notes, or empty — which is both "nobody
+   *  wrote one" and "the caller did not ask for notes". Only the PDF writer
+   *  reads it, and only when the setting is on; see `titleTotal.notes` in
+   *  convex/entries.ts for the caps that bound it. */
+  notes: Array<string>
   totalMs: number
   billableMs: number
   billableCents: number
@@ -102,6 +107,10 @@ export type Breakdown = {
   hours: Array<number>
   titles: Array<TitleTotal>
   titlesTruncated: boolean
+  /** Notes were asked for and the character budget ran out — see
+   *  `notesTruncated` in convex/entries.ts. Always false when notes were not
+   *  requested. */
+  notesTruncated: boolean
 }
 
 /**
@@ -132,6 +141,7 @@ export const EMPTY_BREAKDOWN: Breakdown = {
   hours: Array.from({ length: 24 }, () => 0),
   titles: [],
   titlesTruncated: false,
+  notesTruncated: false,
 }
 
 export type Granularity = "day" | "week" | "month"

@@ -91,12 +91,17 @@ export async function renderPages(pages: Array<PdfPage>): Promise<Blob> {
     for (const op of model.ops) {
       if (op.kind === "text") {
         const font: PDFFont = op.bold ? bold : regular
-        // Right alignment is measured, not approximated: the amount column is
-        // the one a reader scans down, and a ragged right edge in it reads as
-        // a different number of digits than is there.
-        const width = op.align === "right" ? font.widthOfTextAtSize(op.text, op.size) : 0
+        // Alignment is measured, not approximated: the amount column is the one
+        // a reader scans down, and a ragged right edge in it reads as a
+        // different number of digits than is there. `center` is the same
+        // measurement halved — an axis tick sitting under the bar it labels.
+        const measured =
+          op.align === undefined || op.align === "left"
+            ? 0
+            : font.widthOfTextAtSize(op.text, op.size)
+        const offset = op.align === "center" ? measured / 2 : measured
         page.drawText(op.text, {
-          x: op.x - width,
+          x: op.x - offset,
           y: op.y,
           size: op.size,
           font,

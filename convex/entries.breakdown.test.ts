@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest"
 import schema from "./schema"
 import { internal } from "./_generated/api"
 import { traceErrorCode } from "./lib/codes"
+import { NOTES_CHAR_BUDGET, NOTES_PER_ROW_LIMIT } from "./lib/scan"
 import type { Id } from "./_generated/dataModel"
 
 const modules = import.meta.glob("./**/*.*s")
@@ -738,5 +739,174 @@ describe("rangeBreakdown — weekly grouping", () => {
     })
     const summed = result.titles.reduce((n, row) => n + row.totalMs, 0)
     expect(summed).toBe(result.totalMs)
+  })
+})
+
+/*
+ * Notes on the breakdown — the data the PDF export prints when
+ * `userSettings.pdfIncludeNotes` is on.
+ *
+ * Off by default at every level, and that is the property most worth pinning:
+ * a note is prose the user wrote about how the work actually went, the PDF is
+ * what goes to a client, and this query is the one place that decides whether
+ * the two ever meet.
+ */
+describe("rangeBreakdown — notes", () => {
+  it("carries no notes unless asked, however many the entries hold", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "A", note: "Went fine." })
+
+    const result = await breakdown(t)
+    expect(result.titles[0].notes).toEqual([])
+    expect(result.notesTruncated).toBe(false)
+  })
+
+  it("carries them when asked", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "A", note: "Went fine." })
+
+    const result = await breakdown(t, { withNotes: true })
+    expect(result.titles[0].notes).toEqual(["Went fine."])
+  })
+
+  /* A row is a `(week, project, description)` GROUP, so it holds every entry
+   * logged under one description in one week — five standups are five notes. */
+  it("gathers every entry's note onto the row they share", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "Standup", note: "Monday" })
+    await entry(t, { startedAt: TUE + HOUR, title: "Standup", note: "Tuesday" })
+
+    const [row] = (await breakdown(t, { withNotes: true })).titles
+    expect(row.notes).toEqual(["Monday", "Tuesday"])
+  })
+
+  /* The same sentence logged three times is one fact; printing it three times
+   * is noise, and holding all three before collapsing them is two wasted
+   * copies of it during the scan. */
+  it("deduplicates a note repeated across entries", async () => {
+    const t = setup()
+    for (const day of [MON, TUE, WED]) {
+      await entry(t, { startedAt: day + HOUR, title: "Standup", note: "Same as yesterday" })
+    }
+
+    const [row] = (await breakdown(t, { withNotes: true })).titles
+    expect(row.notes).toEqual(["Same as yesterday"])
+  })
+
+  /* `undefined` and `""` are both "nobody wrote one", and a whitespace-only
+   * note is the same absence typed differently. None may become a bullet with
+   * nothing after it on the document. */
+  it("ignores absent, empty and whitespace-only notes", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "A" })
+    await entry(t, { startedAt: MON + 2 * HOUR, title: "A", note: "" })
+    await entry(t, { startedAt: MON + 3 * HOUR, title: "A", note: "   \n  " })
+
+    const [row] = (await breakdown(t, { withNotes: true })).titles
+    expect(row.notes).toEqual([])
+  })
+
+  it("trims a note rather than printing its leading whitespace", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "A", note: "  Went fine.  " })
+
+    const [row] = (await breakdown(t, { withNotes: true })).titles
+    expect(row.notes).toEqual(["Went fine."])
+  })
+
+  it("keeps at most NOTES_PER_ROW_LIMIT distinct notes on one row", async () => {
+    const t = setup()
+    for (let n = 0; n < NOTES_PER_ROW_LIMIT + 3; n++) {
+      await entry(t, { startedAt: MON + (n + 1) * 60_000, title: "A", note: `note ${n}` })
+    }
+
+    const result = await breakdown(t, { withNotes: true })
+    expect(result.titles[0].notes).toHaveLength(NOTES_PER_ROW_LIMIT)
+    // AND SAYS SO. Dropping notes silently is the failure this whole mechanism
+    // exists to avoid: a row with eight notes printing five reads as work that
+    // had only five things to say about it.
+    expect(result.notesTruncated).toBe(true)
+  })
+
+  /* Dedup is NOT truncation. A week of identical standup notes collapses to one
+   * fact and nothing is lost, so the flag must stay down — otherwise the
+   * commonest note-writing habit in the product permanently prints a warning
+   * about missing notes on every export. */
+  it("does not call deduplication a truncation", async () => {
+    const t = setup()
+    for (let n = 0; n < NOTES_PER_ROW_LIMIT + 5; n++) {
+      await entry(t, {
+        startedAt: MON + (n + 1) * 60_000,
+        title: "Standup",
+        note: "Same as yesterday",
+      })
+    }
+
+    const result = await breakdown(t, { withNotes: true })
+    expect(result.titles[0].notes).toEqual(["Same as yesterday"])
+    expect(result.notesTruncated).toBe(false)
+  })
+
+  /* The flag is about notes that were REQUESTED and dropped. With the setting
+   * off nothing was asked for, so nothing is missing. */
+  it("never reports truncation on an export that asked for no notes", async () => {
+    const t = setup()
+    for (let n = 0; n < NOTES_PER_ROW_LIMIT + 3; n++) {
+      await entry(t, { startedAt: MON + (n + 1) * 60_000, title: "A", note: `note ${n}` })
+    }
+
+    expect((await breakdown(t)).notesTruncated).toBe(false)
+  })
+
+  /*
+   * THE BOUND THAT ACTUALLY BINDS. A per-row cap cannot see the total: 500 rows
+   * of five maximal notes is a multi-megabyte response, past the platform's own
+   * limit and reached by a range that is large but not pathological.
+   *
+   * Running out is REPORTED rather than silent — a document that quietly stops
+   * carrying notes reads as work that had none.
+   */
+  it("stops at the global character budget and says that it did", async () => {
+    const t = setup()
+    // Each row gets one note a twentieth of the budget long, so the budget runs
+    // out partway through rather than on the first row or not at all.
+    const note = "x".repeat(NOTES_CHAR_BUDGET / 20)
+    for (let n = 0; n < 30; n++) {
+      await entry(t, {
+        startedAt: MON + (n + 1) * 60_000,
+        title: `Row ${n}`,
+        // Descending, so `titles` sorts in this same order and the budget is
+        // demonstrably spent on the longest work first.
+        durationMs: (30 - n) * 60_000,
+        note: `${note}${n}`,
+      })
+    }
+
+    const result = await breakdown(t, { withNotes: true })
+    expect(result.notesTruncated).toBe(true)
+
+    const spent = result.titles.reduce(
+      (sum, row) => sum + row.notes.reduce((n, text) => n + text.length, 0),
+      0
+    )
+    expect(spent).toBeLessThanOrEqual(NOTES_CHAR_BUDGET)
+    // Spent on the longest work rather than an arbitrary slice: the first rows
+    // have their notes, the last ones do not.
+    expect(result.titles[0].notes).toHaveLength(1)
+    expect(result.titles.at(-1)!.notes).toEqual([])
+    // A row is given its note WHOLE or not at all — half a note is a sentence
+    // that stops mid-clause on a document a client reads.
+    for (const row of result.titles) {
+      for (const text of row.notes) {
+        expect(text.startsWith(note)).toBe(true)
+        expect(text.length).toBeGreaterThan(note.length)
+      }
+    }
+  })
+
+  it("reports no truncation when the budget was never approached", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + HOUR, title: "A", note: "Short." })
+    expect((await breakdown(t, { withNotes: true })).notesTruncated).toBe(false)
   })
 })

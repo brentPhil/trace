@@ -341,6 +341,19 @@ export default defineSchema({
      *  priced this" and "priced at nothing" are different facts, and
      *  `unratedBillableMs` exists to tell them apart. */
     defaultHourlyRateCents: v.optional(v.number()),
+    /** Print each row's entry notes in the exported PDF report.
+     *
+     *  Optional and additive like `currency` above — a row written before this
+     *  field existed has no opinion, and `settings.get` falls back to
+     *  `SETTINGS_DEFAULTS` rather than this needing a backfill.
+     *
+     *  OFF by default, and the default is the safe one rather than the
+     *  convenient one: a note is prose the user wrote to themselves about how
+     *  the work actually went, and the PDF is the artefact that goes to a
+     *  client. Opting in has to be a decision somebody made. It also governs
+     *  whether `entries.rangeBreakdown` is asked to carry notes at all, so off
+     *  costs nothing on the query either. */
+    pdfIncludeNotes: v.optional(v.boolean()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 })
