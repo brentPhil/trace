@@ -178,7 +178,7 @@ describe("entries.updateMany", () => {
         entryIds: [],
         note: "Nowhere.",
       }),
-      "EMPTY_IMPORT"
+      "EMPTY_SELECTION"
     )
   })
 })

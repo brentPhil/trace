@@ -1695,6 +1695,9 @@ const updateManyArgs = {
   entryIds: v.array(v.id("timeEntries")),
   title: v.optional(v.string()),
   note: v.optional(v.string()),
+  // See updateArgs.projectId above: v.null() vs. absent carries the same
+  // "unassign vs. leave alone" distinction here, applied to every member of
+  // the sitting at once.
   projectId: v.optional(v.union(v.id("projects"), v.null())),
   tagIds: v.optional(v.array(v.id("tags"))),
   billable: v.optional(v.boolean()),
@@ -1726,12 +1729,9 @@ async function updateManyImpl(
   userId: string,
   { entryIds, ...fields }: { entryIds: Array<Id<"timeEntries">> } & Omit<UpdateArgs, "entryId">
 ) {
-  // Reusing EMPTY_IMPORT rather than inventing a code: its meaning is exactly
-  // this shape of refusal — a bulk operation handed no rows — and the same
-  // reasoning applies. A no-op that reports success is how a broken caller
-  // stays broken.
+  // A no-op that reports success is how a broken caller stays broken.
   if (entryIds.length === 0) {
-    traceError("EMPTY_IMPORT", "updateMany needs at least one entry.")
+    traceError("EMPTY_SELECTION", "updateMany needs at least one entry.")
   }
 
   for (const entryId of entryIds) {

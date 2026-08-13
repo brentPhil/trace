@@ -59,6 +59,13 @@ export type TraceErrorCode =
    *  nothing, and reporting "imported 0" as success is how a broken importer
    *  gets shipped. */
   | "EMPTY_IMPORT"
+  /** A bulk operation over existing rows — e.g. updateMany — was given an
+   *  empty id list. Its own code rather than EMPTY_IMPORT: that code's doc
+   *  and callers are about a parse that produced nothing, but this caller
+   *  already has real rows in hand and simply passed none of them, so a
+   *  reader chasing "imported 0" from this error would land in the wrong
+   *  feature entirely. */
+  | "EMPTY_SELECTION"
   /** An import asked for a project with a blank name. Distinct from TOO_LONG:
    *  the name came from a file rather than a field, so there is no input to
    *  send anyone back to. */
