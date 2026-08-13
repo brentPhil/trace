@@ -42,10 +42,12 @@ export type EntryActions = Omit<
    * callers hide the control rather than passing a guess.
    */
   onDuplicate: (entry: Entry) => void
+  onRemoveMany: (entries: Array<Entry>) => Promise<boolean>
 }
 
 export function useEntryActions(timeZone: string): EntryActions {
-  const { update, editTime, remove, restore, create } = useEntryEditMutations()
+  const { update, editTime, remove, removeMany, restore, restoreMany, create } =
+    useEntryEditMutations()
   const { resume } = useEntryMutations()
   const { createProject: createProjectRaw, ensureTag } = useClassifierMutations()
   const toasts = Toast.useToastManager()
@@ -80,6 +82,27 @@ export function useEntryActions(timeZone: string): EntryActions {
       })()
     },
     [remove, restore, toasts]
+  )
+
+  const onRemoveMany = useCallback(
+    async (entries: Array<Entry>): Promise<boolean> => {
+      const uniqueEntries = [...new Map(entries.map((entry) => [entry._id, entry])).values()]
+      if (uniqueEntries.length === 0) return false
+
+      try {
+        await removeMany(uniqueEntries.map((entry) => entry._id))
+      } catch (thrown) {
+        toasts.add({ title: errorMessage(thrown), priority: "high", timeout: UNDO_MS })
+        return false
+      }
+
+      toastWithUndo(toasts, {
+        title: `Deleted ${uniqueEntries.length} ${uniqueEntries.length === 1 ? "record" : "records"}`,
+        undo: () => restoreMany(uniqueEntries),
+      })
+      return true
+    },
+    [removeMany, restoreMany, toasts]
   )
 
   /**
@@ -218,6 +241,7 @@ export function useEntryActions(timeZone: string): EntryActions {
       onCreateProject: createProject,
       onCreateTag: ensureTag,
       onRemove,
+      onRemoveMany,
       onResume: (entry) => {
         void resume(entry).catch((thrown: unknown) => {
           toasts.add({ title: errorMessage(thrown), priority: "high" })
@@ -233,6 +257,7 @@ export function useEntryActions(timeZone: string): EntryActions {
       ensureTag,
       onDayChange,
       onRemove,
+      onRemoveMany,
       onDuplicate,
       toasts,
     ]

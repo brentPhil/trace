@@ -79,6 +79,8 @@ type ListPageArgs = {
 }
 type ListPageValue = { page: Entry[]; isDone: boolean; continueCursor: string }
 type ListPageRecord = { args: ListPageArgs; value: ListPageValue | undefined }
+type ListRangeArgs = { fromMs: number; toMs: number }
+type ListRangeRecord = { args: ListRangeArgs; value: Entry[] | undefined }
 
 function makeEntry(overrides: Partial<Entry> = {}): Entry {
   return {
@@ -131,7 +133,10 @@ function makeTwoPageSubscription(fromMs: number, toMs: number): ListPageRecord[]
   ]
 }
 
-function makeFakeLocalStore(listPagePages: ListPageRecord[]): OptimisticLocalStore {
+function makeFakeLocalStore(
+  listPagePages: ListPageRecord[],
+  listRangeRecords: ListRangeRecord[] = []
+): OptimisticLocalStore {
   return {
     getQuery: (query: unknown) => {
       if (sameQuery(query, api.entries.getRunning)) return null
@@ -139,7 +144,7 @@ function makeFakeLocalStore(listPagePages: ListPageRecord[]): OptimisticLocalSto
     },
     getAllQueries: (query: unknown) => {
       if (sameQuery(query, api.entries.listPage)) return listPagePages
-      if (sameQuery(query, api.entries.listRange)) return []
+      if (sameQuery(query, api.entries.listRange)) return listRangeRecords
       if (sameQuery(query, api.entries.getRunning)) return []
       throw new Error("unexpected getAllQueries call in test fake")
     },
@@ -147,6 +152,11 @@ function makeFakeLocalStore(listPagePages: ListPageRecord[]): OptimisticLocalSto
       if (sameQuery(query, api.entries.listPage)) {
         const record = listPagePages.find((r) => r.args === args)
         if (record !== undefined) record.value = value as ListPageValue
+        return
+      }
+      if (sameQuery(query, api.entries.listRange)) {
+        const record = listRangeRecords.find((r) => r.args === args)
+        if (record !== undefined) record.value = value as Entry[]
         return
       }
       throw new Error("unexpected setQuery call in test fake")
@@ -222,5 +232,44 @@ describe("useEntryEditMutations restore — paginated listPage", () => {
 
     expect(countCopies(inRangePages, entry._id)).toBe(1)
     expect(countCopies(otherRangePages, entry._id)).toBe(0)
+  })
+})
+
+describe("useEntryEditMutations batch actions - paginated listPage", () => {
+  it("drops every selected entry from loaded paginated pages", async () => {
+    const fromMs = 1_699_999_000_000
+    const toMs = 1_700_100_000_000
+    const first = makeEntry({ _id: "first" as Id<"timeEntries"> })
+    const second = makeEntry({ _id: "second" as Id<"timeEntries"> })
+    const pages = makeTwoPageSubscription(fromMs, toMs)
+    pages[0].value?.page.push(first, second)
+    setActiveStore(makeFakeLocalStore(pages))
+
+    const { removeMany } = renderMutationsHook()
+    await removeMany([first._id, second._id])
+
+    expect(countCopies(pages, first._id)).toBe(0)
+    expect(countCopies(pages, second._id)).toBe(0)
+  })
+
+  it("restores every snapshot once across paginated pages", async () => {
+    const fromMs = 1_699_999_000_000
+    const toMs = 1_700_100_000_000
+    const first = makeEntry({
+      _id: "first" as Id<"timeEntries">,
+      startedAt: fromMs + 2_000,
+    })
+    const second = makeEntry({
+      _id: "second" as Id<"timeEntries">,
+      startedAt: fromMs + 3_000,
+    })
+    const pages = makeTwoPageSubscription(fromMs, toMs)
+    setActiveStore(makeFakeLocalStore(pages))
+
+    const { restoreMany } = renderMutationsHook()
+    await restoreMany([first, second])
+
+    expect(countCopies(pages, first._id)).toBe(1)
+    expect(countCopies(pages, second._id)).toBe(1)
   })
 })

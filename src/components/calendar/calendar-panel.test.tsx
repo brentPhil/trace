@@ -661,6 +661,7 @@ function spyActions(over: Partial<EntryActions> = {}): EntryActions {
     })),
     onCreateTag: vi.fn(async () => ({ tagId: "t1" as unknown as Id<"tags"> })),
     onRemove: vi.fn(),
+    onRemoveMany: vi.fn(async () => false),
     onResume: vi.fn(),
     onDuplicate: vi.fn(),
     ...over,
