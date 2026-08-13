@@ -44,7 +44,15 @@ export function SittingRow({
   onToggle: () => void
   /** Resumes the NEWEST member — see `DayList`, which supplies it. */
   onResume: () => void
-  /** The `id` of the container this row reveals, for `aria-controls`. */
+  /**
+   * The `id` of the container this row reveals, for `aria-controls`.
+   *
+   * Points at an element that DOES NOT EXIST while collapsed — `DayList`
+   * unmounts the member container at rest, for the same reason this row's own
+   * doc comment gives for carrying no edits: a long log of collapsed groups
+   * cannot afford to mount every member's pickers for nobody. `aria-controls`
+   * referencing a dangling id is the accepted cost of that trade.
+   */
   controls: string
 }) {
   const newest = sitting.entries[0]

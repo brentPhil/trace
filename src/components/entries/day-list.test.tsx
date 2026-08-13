@@ -270,13 +270,32 @@ describe("grouped entries", () => {
     }),
   ]
 
+  /*
+   * A plain, ungrouped row alongside the sitting — the ordinary case, where a
+   * day is not JUST one repeated title. Its title cannot join `twice`, and its
+   * duration is chosen so the day's own total (2:15:00) reads differently from
+   * the sitting's (2:00:00): the two used to be the same 7,200,000ms because
+   * the sitting WAS the whole day, which is what forced every assertion below
+   * that needs "the sitting's own figure" to scope itself under `within(...)`
+   * plus `.closest(".group")` to avoid also matching the day header. With this
+   * entry in the day, the day header and the sitting row no longer say the
+   * same thing, and those assertions can run unscoped.
+   */
+  const unrelated = makeEntry({
+    _id: "c" as unknown as Doc<"timeEntries">["_id"],
+    title: "Weekly retro",
+    startedAt: 8_000_000,
+    endedAt: 8_900_000,
+    durationMs: 900_000,
+  })
+
   const groups = [
     {
       day: "2026-08-09",
       label: "Today",
-      entries: twice,
+      entries: [unrelated, ...twice],
       notedCount: 1,
-      totalMs: 7_200_000,
+      totalMs: 8_100_000,
       billableMs: 0,
       runningCount: 0,
     },
@@ -333,34 +352,36 @@ describe("grouped entries", () => {
     // component) reads "Crew dropdowns" too, and it is not one of the members
     // this assertion is about — those are the ones absent.
     expect(screen.queryAllByText("Crew dropdowns")).toHaveLength(1)
+
+    // The day's other, unrelated entry is no part of this group, and the
+    // collapse must not reach it: it draws exactly as the flat log would.
+    expect(screen.getByText("Weekly retro")).toBeTruthy()
   })
 
   it("states how many of the group carry a note", () => {
     // The day header's own nudge, moved onto the parent. Collapsing rows must
     // not turn a missing note from VISIBLE into ABSENT.
     //
-    // Scoped to the sitting row itself: this fixture's one sitting IS the
-    // whole day, so the day header above states the identical "1 of 2 noted"
-    // for its own, unrelated reason — asserting unscoped would pass or fail
-    // on the wrong element.
+    // Unscoped: the day header states its own count over all three entries
+    // ("1 of 3 noted"), which is a different string from the sitting's own
+    // ("1 of 2 noted") now that the day holds more than just the sitting — so
+    // this can only match the sitting row.
     renderLog(true)
-    const sittingRow = screen.getByLabelText("Show grouped entries").closest<HTMLElement>(".group")
-    expect(sittingRow).not.toBeNull()
-    expect(within(sittingRow!).getByText("1 of 2 noted")).toBeTruthy()
+    expect(screen.getByText("1 of 2 noted")).toBeTruthy()
   })
 
   it("shows the span from first start to last end, and the summed total", () => {
     renderLog(true)
     expect(screen.getByText("00:00 – 02:06")).toBeTruthy()
-    // Scoped for the same reason as the note count above: this fixture's day
-    // total and sitting total are the same 7,200,000ms, so an unscoped query
-    // would find the day header's figure too.
+    // Unscoped for the same reason as the note count above: the day's own
+    // total (2:15:00, the sitting plus the unrelated "Standup" entry) is no
+    // longer the same figure as the sitting's own (2:00:00), so each can only
+    // match its own element.
     //
     // `formatClock` never pads the hour (`format-total.ts` / `duration.ts`),
     // so a two-hour total reads "2:00:00", not "02:00:00".
-    const sittingRow = screen.getByLabelText("Show grouped entries").closest<HTMLElement>(".group")
-    expect(sittingRow).not.toBeNull()
-    expect(within(sittingRow!).getByText("2:00:00")).toBeTruthy()
+    expect(screen.getByText("2:00:00")).toBeTruthy()
+    expect(screen.getByText("2:15:00")).toBeTruthy()
   })
 
   it("reveals every member when expanded, and says so", () => {
