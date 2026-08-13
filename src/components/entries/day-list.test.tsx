@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
 import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { Doc } from "../../../convex/_generated/dataModel"
 
 /*
  * The regression this guards: `/reports` used to fall through to Timer's
@@ -239,5 +240,201 @@ describe("LogSkeleton", () => {
       expect(bar.className).not.toContain("bg-muted")
       expect(bar.className).not.toContain("rounded-2xl")
     }
+  })
+})
+
+/*
+ * GROUPED ENTRIES.
+ *
+ * The feature is a disclosure and not a merge, and these are the properties
+ * that make that claim true on screen: the flat log still exists and is the
+ * component's default, a badge only ever appears where a group really does,
+ * absence of a note is still stated, and every member is reachable.
+ */
+describe("grouped entries", () => {
+  const twice = [
+    makeEntry({
+      _id: "b" as unknown as Doc<"timeEntries">["_id"],
+      title: "Crew dropdowns",
+      startedAt: 4_000_000,
+      endedAt: 7_600_000,
+      durationMs: 3_600_000,
+      note: "Finished the assignment modal.",
+    }),
+    makeEntry({
+      _id: "a" as unknown as Doc<"timeEntries">["_id"],
+      title: "Crew dropdowns",
+      startedAt: 0,
+      endedAt: 3_600_000,
+      durationMs: 3_600_000,
+    }),
+  ]
+
+  const groups = [
+    {
+      day: "2026-08-09",
+      label: "Today",
+      entries: twice,
+      notedCount: 1,
+      totalMs: 7_200_000,
+      billableMs: 0,
+      runningCount: 0,
+    },
+  ]
+
+  const renderLog = (grouped: boolean, actions: EntryRowActions = noActions) =>
+    render(
+      <DayList
+        groups={groups}
+        timeZone="UTC"
+        use12Hour={false}
+        weekStartDay={0}
+        projects={[]}
+        tags={[]}
+        actions={actions}
+        grouped={grouped}
+      />
+    )
+
+  it("draws the flat log by default, with no badge and no disclosure", () => {
+    // The PROP defaults off even though the user SETTING defaults on. This is
+    // what keeps the component honest in isolation, and what lets every test
+    // above go on asserting the log this product has always drawn.
+    render(
+      <DayList
+        groups={groups}
+        timeZone="UTC"
+        use12Hour={false}
+        weekStartDay={0}
+        projects={[]}
+        tags={[]}
+        actions={noActions}
+      />
+    )
+
+    expect(screen.queryByLabelText("Show grouped entries")).toBeNull()
+    // Not `getByDisplayValue`: `EditableTitle` only becomes an input while
+    // being edited (`InlineEdit`, `inline-edit.tsx`). At rest it is a button
+    // wrapping a `<span>` of the trimmed title, so that span is what a row
+    // actually offers to find a title by.
+    expect(screen.getAllByText("Crew dropdowns")).toHaveLength(2)
+  })
+
+  it("collapses the repeat behind a count, hiding both rows until asked", () => {
+    renderLog(true)
+
+    const toggle = screen.getByLabelText("Show grouped entries")
+    expect(toggle.getAttribute("aria-expanded")).toBe("false")
+    expect(toggle.textContent).toContain("2")
+    // Not merely hidden: not rendered. Fifty collapsed groups would otherwise
+    // mount fifty rows' worth of pickers nobody can see.
+    //
+    // The count is 1, not 0: `SittingRow`'s own static title span (see that
+    // component) reads "Crew dropdowns" too, and it is not one of the members
+    // this assertion is about — those are the ones absent.
+    expect(screen.queryAllByText("Crew dropdowns")).toHaveLength(1)
+  })
+
+  it("states how many of the group carry a note", () => {
+    // The day header's own nudge, moved onto the parent. Collapsing rows must
+    // not turn a missing note from VISIBLE into ABSENT.
+    //
+    // Scoped to the sitting row itself: this fixture's one sitting IS the
+    // whole day, so the day header above states the identical "1 of 2 noted"
+    // for its own, unrelated reason — asserting unscoped would pass or fail
+    // on the wrong element.
+    renderLog(true)
+    const sittingRow = screen.getByLabelText("Show grouped entries").closest<HTMLElement>(".group")
+    expect(sittingRow).not.toBeNull()
+    expect(within(sittingRow!).getByText("1 of 2 noted")).toBeTruthy()
+  })
+
+  it("shows the span from first start to last end, and the summed total", () => {
+    renderLog(true)
+    expect(screen.getByText("00:00 – 02:06")).toBeTruthy()
+    // Scoped for the same reason as the note count above: this fixture's day
+    // total and sitting total are the same 7,200,000ms, so an unscoped query
+    // would find the day header's figure too.
+    //
+    // `formatClock` never pads the hour (`format-total.ts` / `duration.ts`),
+    // so a two-hour total reads "2:00:00", not "02:00:00".
+    const sittingRow = screen.getByLabelText("Show grouped entries").closest<HTMLElement>(".group")
+    expect(sittingRow).not.toBeNull()
+    expect(within(sittingRow!).getByText("2:00:00")).toBeTruthy()
+  })
+
+  it("reveals every member when expanded, and says so", () => {
+    renderLog(true)
+
+    const badge = screen.getByLabelText("Show grouped entries")
+    fireEvent.click(badge)
+
+    const toggle = screen.getByLabelText("Hide grouped entries")
+    expect(toggle.getAttribute("aria-expanded")).toBe("true")
+
+    // Scoped to the revealed container, not the whole document: the parent
+    // row's own static title span (see `SittingRow`) also reads "Crew
+    // dropdowns", and it is not one of the two members being counted here.
+    const panelId = toggle.getAttribute("aria-controls")
+    const panel = document.getElementById(panelId!)
+    expect(panel).not.toBeNull()
+    expect(within(panel!).getAllByText("Crew dropdowns")).toHaveLength(2)
+  })
+
+  it("points aria-controls at the container it actually reveals", () => {
+    renderLog(true)
+    fireEvent.click(screen.getByLabelText("Show grouped entries"))
+
+    const controls = screen.getByLabelText("Hide grouped entries").getAttribute("aria-controls")
+    expect(controls).toBeTruthy()
+    expect(document.getElementById(controls!)).not.toBeNull()
+  })
+
+  it("resumes the NEWEST member from the parent's play button", () => {
+    // The parent has no edits by design, and this is the one write it carries.
+    // `useEntryActions`'s resume already copies title, project, tags and
+    // billable off the entry it is given, so "the newest one" IS "start this
+    // again" with nothing extra to build.
+    const onResume = vi.fn()
+    renderLog(true, { onResume } as unknown as EntryRowActions)
+
+    fireEvent.click(screen.getByLabelText("Resume Crew dropdowns"))
+
+    expect(onResume).toHaveBeenCalledTimes(1)
+    expect(onResume.mock.calls[0][0]._id).toBe("b")
+  })
+
+  it("leaves a day of unique titles completely alone", () => {
+    const unique = [
+      {
+        day: "2026-08-09",
+        label: "Today",
+        entries: [
+          makeEntry({ _id: "x" as unknown as Doc<"timeEntries">["_id"], title: "Email" }),
+          makeEntry({ _id: "y" as unknown as Doc<"timeEntries">["_id"], title: "Standup" }),
+        ],
+        notedCount: 0,
+        totalMs: 7_200_000,
+        billableMs: 0,
+        runningCount: 0,
+      },
+    ]
+
+    render(
+      <DayList
+        groups={unique}
+        timeZone="UTC"
+        use12Hour={false}
+        weekStartDay={0}
+        projects={[]}
+        tags={[]}
+        actions={noActions}
+        grouped
+      />
+    )
+
+    expect(screen.queryByLabelText("Show grouped entries")).toBeNull()
+    expect(screen.getByText("Email")).toBeTruthy()
+    expect(screen.getByText("Standup")).toBeTruthy()
   })
 })

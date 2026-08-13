@@ -1,10 +1,13 @@
+import { useState } from "react"
 import { EntryRow } from "@/components/entries/entry-row"
+import { SittingRow } from "@/components/entries/sitting-row"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatTotal } from "@/lib/format-total"
+import { toLogItems } from "@/lib/group-sittings"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 import type { EntryRowActions } from "@/components/entries/entry-row"
-import type { DayGroup } from "@/lib/group-entries"
+import type { DayGroup, Entry } from "@/lib/group-entries"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
@@ -27,6 +30,7 @@ export function DayList({
   display = "hms",
   empty,
   notesExpanded = false,
+  grouped = false,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -54,7 +58,57 @@ export function DayList({
    * `NoteSheet` and every held note draft along with it.
    */
   empty?: ReactNode
+  /**
+   * Collapse repeats of one title+project within a day behind a count.
+   *
+   * DEFAULTS OFF while `userSettings.groupEntries` defaults ON, and both are
+   * deliberate: the component stays honest in isolation and every existing
+   * caller and test keeps asserting the flat log, while the two pages pass the
+   * user's own preference in. A reader who finds only this default should not
+   * conclude the feature ships disabled.
+   */
+  grouped?: boolean
 }) {
+  /*
+   * WHICH SITTINGS ARE OPEN, keyed by `day\0key`.
+   *
+   * In memory and per-tab: a disclosure is a thing the reader is doing right
+   * now, not a property of the data, so it resets on reload. It lives HERE
+   * rather than in the row so that /timer's deliberate keeping-`EntryLog`-
+   * mounted across a change of range (see that page, and `note-sheet.tsx`)
+   * carries the open groups through with the note drafts.
+   */
+  const [open, setOpen] = useState<Set<string>>(new Set())
+
+  const toggle = (key: string) =>
+    setOpen((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
+  /*
+   * ONE SPELLING OF A ROW, for the two places that draw one: on its own, and
+   * as a member of a sitting. They are the same row — a member is not a
+   * reduced version of an entry — so the props that say so are written here
+   * rather than twice below, where the next one added would land on one call
+   * site and silently skip the other.
+   */
+  const row = (entry: Entry) => (
+    <EntryRow
+      key={entry._id}
+      entry={entry}
+      timeZone={timeZone}
+      use12Hour={use12Hour}
+      weekStartDay={weekStartDay}
+      projects={projects}
+      tags={tags}
+      actions={actions}
+      notesExpanded={notesExpanded}
+    />
+  )
+
   if (groups.length === 0) {
     return <>{empty !== undefined ? empty : <EmptyLog />}</>
   }
@@ -138,19 +192,49 @@ export function DayList({
             takes its breathing room from the space above it instead.
           */}
           <div className="flex flex-col pb-(--day-group-gap)">
-            {group.entries.map((entry) => (
-              <EntryRow
-                key={entry._id}
-                entry={entry}
-                timeZone={timeZone}
-                use12Hour={use12Hour}
-                weekStartDay={weekStartDay}
-                projects={projects}
-                tags={tags}
-                actions={actions}
-                notesExpanded={notesExpanded}
-              />
-            ))}
+            {(grouped
+              ? toLogItems(group.entries)
+              : group.entries.map((entry) => ({ kind: "row" as const, entry }))
+            ).map((item, index) => {
+              if (item.kind === "row") return row(item.entry)
+
+              const stateKey = `${group.day} ${item.key}`
+              // The DOM id cannot carry the NUL the state key does, and it does
+              // not need to be stable across reorderings — only unique on the
+              // page while it is rendered.
+              const panelId = `sitting-${group.day}-${index}`
+              const isOpen = open.has(stateKey)
+
+              return (
+                <div key={`sitting-${item.key}`} className="flex flex-col">
+                  <SittingRow
+                    sitting={item}
+                    timeZone={timeZone}
+                    use12Hour={use12Hour}
+                    projects={projects}
+                    display={display}
+                    expanded={isOpen}
+                    onToggle={() => toggle(stateKey)}
+                    // The NEWEST member. `useEntryActions`'s resume copies
+                    // title, project, tags and billable off whatever it is
+                    // given, so this already IS "start this again".
+                    onResume={() => actions.onResume(item.entries[0])}
+                    controls={panelId}
+                  />
+                  {isOpen ? (
+                    // Indented, and NOT RENDERED while collapsed rather than
+                    // merely hidden: a long log of collapsed groups would
+                    // otherwise mount every member's pickers for nobody.
+                    <div
+                      id={panelId}
+                      className="flex flex-col border-l-2 border-edge-soft pl-4"
+                    >
+                      {item.entries.map(row)}
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
         </section>
       ))}
