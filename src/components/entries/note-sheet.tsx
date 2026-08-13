@@ -43,6 +43,31 @@ export function clearNoteDrafts() {
 }
 
 /**
+ * What a note is being written for.
+ *
+ * A TARGET RATHER THAN AN ENTRY, because a note now belongs to a piece of
+ * work and a piece of work can be several entries — see the
+ * sitting-as-the-unit spec. A row builds a one-member target, so there is
+ * exactly one path through this component and it cannot behave differently
+ * depending on where it was opened from.
+ */
+export type NoteTarget = {
+  /** Every entry this note will be written to. One for a row, many for a sitting. */
+  entryIds: Array<Id<"timeEntries">>
+  /**
+   * Stable identity for re-seeding and for the `drafts` map.
+   *
+   * NOT the first entry's id: a sitting's membership changes when a member is
+   * retitled out of it, and keying on a member would hand the user back a
+   * draft written for a different set of rows.
+   */
+  key: string
+  title: string
+  note: string
+  totalMs: number
+}
+
+/**
  * The fifteen-second window.
  *
  * Raised the moment a timer stops, and reachable afterwards from any row. It
@@ -72,32 +97,6 @@ export function clearNoteDrafts() {
  * agreed to. See `handleDismiss` below, and `drafts` above for why that copy
  * outlives this component rather than the mount it was typed in.
  */
-
-/**
- * What a note is being written for.
- *
- * A TARGET RATHER THAN AN ENTRY, because a note now belongs to a piece of
- * work and a piece of work can be several entries — see the
- * sitting-as-the-unit spec. A row builds a one-member target, so there is
- * exactly one path through this component and it cannot behave differently
- * depending on where it was opened from.
- */
-export type NoteTarget = {
-  /** Every entry this note will be written to. One for a row, many for a sitting. */
-  entryIds: Array<Id<"timeEntries">>
-  /**
-   * Stable identity for re-seeding and for the `drafts` map.
-   *
-   * NOT the first entry's id: a sitting's membership changes when a member is
-   * retitled out of it, and keying on a member would hand the user back a
-   * draft written for a different set of rows.
-   */
-  key: string
-  title: string
-  note: string
-  totalMs: number
-}
-
 export function NoteSheet({
   target,
   open,
@@ -119,18 +118,24 @@ export function NoteSheet({
   /*
    * Seeded when the sheet OPENS, and never again while it is open.
    *
-   * `target` is built from a reactive query result, so listing `target.note`
-   * as a dependency makes this live-bound rather than seeded — and then any
-   * change to that note from anywhere replaces the whole textarea and drops
-   * the caret to the end. "Anywhere" is not exotic: a second tab, another
-   * device, or this very dialog's own optimistic update being rolled back
-   * after a failed save. The user is mid-sentence and their sentences are the
-   * product.
+   * The `seededFor` ref, not the dependency list, is what makes this
+   * seed-once: it records which target's turn already ran, and the effect
+   * bails out the moment `id` matches it again. `target` is built from a
+   * reactive query result, so without that guard this would be live-bound
+   * instead — any change to `target.note` from anywhere would replace the
+   * whole textarea and drop the caret to the end. "Anywhere" is not exotic: a
+   * second tab, another device, or this very dialog's own optimistic update
+   * being rolled back after a failed save. The user is mid-sentence and their
+   * sentences are the product.
    *
-   * Keyed on `target.key` as well as `open` so that reopening the sheet on a
-   * DIFFERENT target re-seeds. A row's key is its entry's `_id`, which cannot
-   * change while a sheet is open on it, so the optimistic-id instability that
-   * affects the timer bar cannot bite here.
+   * `target?.key` is listed as a dependency because `id` is built from it —
+   * that's what lets a reopen on a DIFFERENT target re-seed. A row's key is
+   * its entry's `_id`, which cannot change while a sheet is open on it, so
+   * the optimistic-id instability that affects the timer bar cannot bite
+   * here. `target?.note` is listed too, because it's read below as the
+   * fallback value — not because a note change alone should trigger
+   * anything. It doesn't: `id` stays the same, so the ref guard turns that
+   * extra run into a no-op before `setValue` is ever reached.
    */
   const seededFor = useRef<string | null>(null)
   useEffect(() => {

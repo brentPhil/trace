@@ -320,4 +320,48 @@ describe("a note written for a whole sitting", () => {
 
     expect(onSave).toHaveBeenCalledWith([ID_A], "Edited.")
   })
+
+  /*
+   * The Save-button tests above go through a harness-free render, so they
+   * already prove `entryIds` survives intact — but the dismiss-save path
+   * (Escape, Skip, backdrop) and the Undo write it can raise are a separate
+   * code path in `handleDismiss`, and had no test at any arity. Both close
+   * over `target.entryIds` too, but nothing pinned that until now.
+   */
+  it("dismissing with unsaved text saves every member, not just the first", async () => {
+    const onSave = vi.fn(async () => {})
+    render(
+      <Toast.Provider>
+        <NoteSheet target={TARGET} open onOpenChange={() => {}} onSave={onSave} />
+      </Toast.Provider>
+    )
+
+    fireEvent.change(textarea(), { target: { value: "Trimmed both accounts." } })
+    await act(async () => {
+      fireEvent.keyDown(textarea(), { key: "Escape" })
+    })
+
+    expect(onSave).toHaveBeenCalledWith([ID_A, ID_B], "Trimmed both accounts.")
+  })
+
+  it("Undo after a dismissed sitting note restores every member, not just the first", async () => {
+    const onSave = vi.fn(async () => {})
+    render(
+      <Toast.Provider>
+        <NoteSheet target={TARGET} open onOpenChange={() => {}} onSave={onSave} />
+        <ToastViewport />
+      </Toast.Provider>
+    )
+
+    fireEvent.change(textarea(), { target: { value: "Trimmed both accounts." } })
+    await act(async () => {
+      fireEvent.keyDown(textarea(), { key: "Escape" })
+    })
+    expect(onSave).toHaveBeenLastCalledWith([ID_A, ID_B], "Trimmed both accounts.")
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Undo" }))
+    })
+    expect(onSave).toHaveBeenLastCalledWith([ID_A, ID_B], TARGET.note)
+  })
 })

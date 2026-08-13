@@ -104,6 +104,12 @@ export function EntryLog({
     if (live.length === 0) return noteTarget
     return {
       ...noteTarget,
+      // A rename made in another tab or on another device must show up here
+      // too — the sheet header, the dialog's accessible name, and the undo
+      // toast's label all read `title`. A sitting's members share a title by
+      // construction (it is half the grouping key), so the first live
+      // member's is correct whether this target is a row or a sitting.
+      title: live[0].title,
       note: joinNotes(live),
       totalMs: live.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
     }
