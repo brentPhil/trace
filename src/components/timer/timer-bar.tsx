@@ -309,10 +309,21 @@ export function TimerBar({
                   ?.billableByDefault ?? false,
             }
 
-      // `...inherited` before `...change` so an explicit `billable` arriving in
-      // the same change always wins. Clearing the project finds nothing and
-      // derives `false`, which is the point: the flag only ever existed on the
-      // project's account.
+      /*
+       * `...inherited` before `...change` is belt-and-braces, NOT the operative
+       * rule — worth saying, because it reads like the mechanism and is not.
+       * What makes an explicit `billable` win is the `decided` guard above:
+       * `change.billable !== undefined` sets it, so `inherited` is already `{}`
+       * in exactly the case this ordering would otherwise defend against. The
+       * order is kept so that reordering the guard cannot silently invert the
+       * precedence, and it costs nothing.
+       *
+       * Clearing the project finds nothing and derives `false`. That is the
+       * point rather than a fallback: while nobody has stated a position, the
+       * flag only ever existed on the project's account, so it goes when the
+       * project does. Once someone HAS stated one, `decided` keeps this branch
+       * out of the way entirely and the stated value survives the clear.
+       */
       setStaged((current) => ({ ...current, ...inherited, ...change }))
       return
     }

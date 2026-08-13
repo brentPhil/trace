@@ -97,7 +97,10 @@ vi.mock("@/components/entries/entry-log", () => ({
         // this one is not the page's to own. It comes from `settings.get`, and
         // all this page does is carry it down — so what is assertable here is
         // that it arrives at all. What a row then draws is `day-list.test.tsx`.
-        data-grouped={grouped === true ? "on" : "off"}
+        // `String`, not a boolean test: once the OFF case is asserted too,
+        // "the page passed false" and "the page passed nothing" have to stay
+        // distinguishable, and the second is the regression.
+        data-grouped={String(grouped)}
       >
         {groups.length} day groups
       </div>
@@ -225,14 +228,24 @@ function renderTimer({
   previousWeek = [],
   onYesterday = [],
   projects = [],
+  settings = {},
 }: {
   thisWeek?: Array<Doc<"timeEntries">>
   previousWeek?: Array<Doc<"timeEntries">>
   onYesterday?: Array<Doc<"timeEntries">>
   projects?: Array<Doc<"projects">>
+  /**
+   * Overrides on the `SETTINGS` fixture.
+   *
+   * Only what a test names moves; everything else stays the shipped default,
+   * so a page that reads a setting this helper's callers have never heard of
+   * still gets a real value. Added for `groupEntries`, whose OFF case is the
+   * one a user reaches by unticking the box.
+   */
+  settings?: Partial<typeof SETTINGS>
 } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  queryClient.setQueryData(convexKey(api.settings.get, {}), SETTINGS)
+  queryClient.setQueryData(convexKey(api.settings.get, {}), { ...SETTINGS, ...settings })
   queryClient.setQueryData(convexKey(api.projects.list, {}), projects)
   queryClient.setQueryData(convexKey(api.tags.list, {}), [])
   queryClient.setQueryData(
@@ -755,13 +768,26 @@ describe("Timer — reading the notes in full", () => {
  * `DayList`'s own prop defaults false, so a page that forgets to pass it draws
  * a flat log and nothing else complains. */
 describe("Timer — the grouping setting reaches the log", () => {
-  it("hands the log the account's own groupEntries", () => {
+  const grouped = () => screen.getByTestId("entry-log").getAttribute("data-grouped")
+
+  beforeEach(() => {
     resolvePage(paginatedKey(api.entries.listPage, logRange), {
       page: [makeEntry({ title: "Client call" })],
       isDone: true,
     })
+  })
+
+  it("hands the log the account's own groupEntries", () => {
     renderTimer()
-    expect(screen.getByTestId("entry-log").getAttribute("data-grouped")).toBe("on")
+    expect(grouped()).toBe("true")
+  })
+
+  /* BOTH VALUES, because only this one is reachable by unticking the box —
+   * and asserting the default alone would pass against a page that hardcoded
+   * the prop, which is the same as not passing the setting at all. */
+  it("hands it down turned off, rather than ignoring the account", () => {
+    renderTimer({ settings: { groupEntries: false } })
+    expect(grouped()).toBe("false")
   })
 })
 

@@ -1176,11 +1176,74 @@ describe("billable, inherited from the project while idle", () => {
     expect(screen.getByLabelText("Not billable")).toBeTruthy()
   })
 
+  it("re-derives when the project is switched for one with a different default", async () => {
+    // The sequence a user hits most, and the one an implementation that only
+    // inherited into an unset value would get wrong: the second project's
+    // default has to replace the first's, not be blocked by it.
+    const { actions } = makeActions()
+    render(
+      <Bar
+        running={null}
+        actions={actions}
+        projects={[billableProject, proBonoProject]}
+      />
+    )
+
+    pick("Acme")
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByLabelText("Billable")).toBeTruthy()
+
+    pick("Pro bono")
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(screen.getByLabelText("Not billable")).toBeTruthy()
+  })
+
+  it("lets the next composition inherit again after a start", async () => {
+    /*
+     * THE RESET, which nothing else in this block reaches.
+     *
+     * `billableDecided` latches for as long as the bar is mounted, so without
+     * the reset beside each `setStaged` a single `$` click early in the day
+     * turns inheritance off for every entry after it — this task's own bug,
+     * resurrected for the rest of the session. Both idle write paths reset it;
+     * this covers the start path, and the popover path resets in the same way.
+     */
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[billableProject]} />)
+
+    // A stated position, then spend it.
+    fireEvent.click(screen.getByLabelText("Not billable"))
+    fireEvent.click(screen.getByLabelText("Billable"))
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(actions.start).toHaveBeenLastCalledWith(
+      expect.objectContaining({ billable: false })
+    )
+
+    pick("Acme")
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenLastCalledWith(
+      expect.objectContaining({ billable: true })
+    )
+  })
+
   it("lets a suggestion's own flag win over the project's default", async () => {
-    // A suggestion carries the flag the user last used for that exact title,
-    // which is a real prior decision rather than a default. Driven with
-    // `mouseDown`, matching the suggestion tests above — the list closes on
-    // blur, so a click never lands.
+    /*
+     * A suggestion carries the flag the user last used for that exact title,
+     * which is a real prior decision rather than a default. Driven with
+     * `mouseDown`, matching the suggestion tests above — the list closes on
+     * blur, so a click never lands.
+     *
+     * THE PROJECT IS PICKED AFTERWARDS, and that is the whole test.
+     * `takeSuggestion` writes `staged` wholesale rather than going through
+     * `applyClassification`, so inheritance cannot reach it on the way in;
+     * the only way its `setBillableDecided(true)` can matter is a project
+     * chosen after the fact. The suggestion therefore carries no project of
+     * its own, so the pick is a genuine change rather than a deselection.
+     */
     const { actions } = makeActions()
     render(
       <TimerBar
@@ -1191,7 +1254,6 @@ describe("billable, inherited from the project while idle", () => {
         suggestions={[
           {
             title: "Acme retainer",
-            projectId: billableProject._id,
             tagIds: [],
             billable: false,
           },
@@ -1205,6 +1267,7 @@ describe("billable, inherited from the project while idle", () => {
 
     fireEvent.change(input(), { target: { value: "Acme ret" } })
     fireEvent.mouseDown(screen.getByRole("option", { name: /Acme retainer/ }))
+    pick("Acme")
     fireEvent.click(screen.getByLabelText("Start timer"))
     await vi.advanceTimersByTimeAsync(0)
 

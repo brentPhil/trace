@@ -96,17 +96,27 @@ describe("/settings — notes in the PDF report", () => {
 
 /*
  * /settings' grouping control — here for the same reason the block above is:
- * the DEFAULT is the point, and this one defaults ON. `DayList`'s own `grouped`
- * prop defaults OFF so the component stays honest in isolation, which means
- * this screen is the only place the shipped default is asserted. A control that
- * renders unchecked over a stored `true` would read as a feature nobody enabled.
+ * the DEFAULT is the point, and this one defaults ON.
+ *
+ * The default itself is the SERVER's, and is asserted there: see
+ * convex/settings.test.ts on a row written before the column existed reading
+ * back `true`. What this screen owns is the rendering of it — a control that
+ * showed unchecked over a stored `true` would read as a feature nobody
+ * enabled, and that is a client bug the server test cannot see.
+ *
+ * `DayList`'s own `grouped` prop defaults OFF, which is deliberate and
+ * documented there; it is not the shipped default and nothing here should be
+ * read as asserting it.
  */
 const groupBox = () =>
   screen.getByLabelText("Group a day's repeats of the same entry") as HTMLInputElement
 
 describe("/settings — repeated entries", () => {
+  /* NO OVERRIDE — this one binds to the `SETTINGS` fixture deliberately, so
+   * that flipping the shipped default without meaning to fails here rather
+   * than passing against a value the test supplied itself. */
   it("is on for an account that has never touched it", () => {
-    renderSettings({ groupEntries: true })
+    renderSettings()
     expect(groupBox().checked).toBe(true)
   })
 

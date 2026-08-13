@@ -104,12 +104,14 @@ vi.mock("@/components/entries/entry-log", () => ({
     groups: Array<{ day: string; label: string; entries: Array<{ _id: string; title: string }> }>
     empty?: React.ReactNode
     // Not this page's to own — it comes from `settings.get` and the page only
-    // carries it down, so it is printed rather than swallowed.
+    // carries it down, so it is printed rather than swallowed. `String`, not a
+    // boolean test: "the page passed false" and "the page passed nothing" have
+    // to stay distinguishable, and the second is the regression.
     grouped?: boolean
   }) => {
     if (groups.length === 0) return <>{empty ?? null}</>
     return (
-      <div data-testid="entry-log" data-grouped={grouped === true ? "on" : "off"}>
+      <div data-testid="entry-log" data-grouped={String(grouped)}>
         {groups.map((group) => (
           <div key={group.day} data-testid={`day-${group.day}`}>
             <span>{group.label}</span>
@@ -226,8 +228,16 @@ function createQueryClient() {
   return { queryClient, resolveSummary }
 }
 
-function seedStable(queryClient: QueryClient) {
-  queryClient.setQueryData(convexKey(api.settings.get, {}), SETTINGS)
+/**
+ * The queries every test needs and no test is about.
+ *
+ * `settings` overrides only what a caller names; everything else stays the
+ * shipped default, so a page reading a setting this helper's callers have
+ * never heard of still gets a real value. Added for `groupEntries`, whose OFF
+ * case is the one a user reaches by unticking the box.
+ */
+function seedStable(queryClient: QueryClient, settings: Partial<typeof SETTINGS> = {}) {
+  queryClient.setQueryData(convexKey(api.settings.get, {}), { ...SETTINGS, ...settings })
   queryClient.setQueryData(convexKey(api.projects.list, {}), [])
   queryClient.setQueryData(convexKey(api.tags.list, {}), [])
 }
@@ -278,10 +288,11 @@ function seedBreakdown(
  */
 function renderReports(
   seedInitialSummary: (queryClient: QueryClient) => void,
-  view: "summary" | "detailed" = "detailed"
+  view: "summary" | "detailed" = "detailed",
+  settings: Partial<typeof SETTINGS> = {}
 ) {
   const { queryClient, resolveSummary } = createQueryClient()
-  seedStable(queryClient)
+  seedStable(queryClient, settings)
   // The default range's breakdown, always — Reports opens on Summary, so this
   // query runs on mount before any test gets to say which tab it cares about.
   seedBreakdown(
@@ -591,7 +602,8 @@ describe("Reports — the log's own staleness", () => {
  * grouping that applied on one page and not the other would read as a bug in
  * the grouping rather than a page that forgot to pass it down. */
 describe("Reports — the grouping setting reaches the log", () => {
-  it("hands the log the account's own groupEntries", async () => {
+  /** Renders the Detailed tab with one entry, and reports what the log got. */
+  const groupedWith = async (settings: Partial<typeof SETTINGS>) => {
     const today = dayOf(NOW, SETTINGS.timezone)
     const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
 
@@ -601,12 +613,23 @@ describe("Reports — the grouping setting reaches the log", () => {
     })
 
     const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
-    renderReports(() => {})
+    renderReports(() => {}, "detailed", settings)
 
     await waitFor(() => expect(screen.getByTestId("entry-log")).toBeTruthy())
-    expect(screen.getByTestId("entry-log").getAttribute("data-grouped")).toBe("on")
-
+    const value = screen.getByTestId("entry-log").getAttribute("data-grouped")
     dateSpy.mockRestore()
+    return value
+  }
+
+  it("hands the log the account's own groupEntries", async () => {
+    expect(await groupedWith({})).toBe("true")
+  })
+
+  /* BOTH VALUES, because only this one is reachable by unticking the box —
+   * and asserting the default alone would pass against a page that hardcoded
+   * the prop, which is the same as not passing the setting at all. */
+  it("hands it down turned off, rather than ignoring the account", async () => {
+    expect(await groupedWith({ groupEntries: false })).toBe("false")
   })
 })
 
