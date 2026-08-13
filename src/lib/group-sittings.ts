@@ -1,4 +1,5 @@
 import type { Entry } from "@/lib/group-entries"
+import type { Id } from "../../convex/_generated/dataModel"
 
 /**
  * One line of the log: an entry on its own, or several of them behind a count.
@@ -21,6 +22,19 @@ export type LogItem =
       totalMs: number
       /** How many members carry prose — the parent's "n of m noted". */
       notedCount: number
+      /**
+       * The tag union — see `tagUnion`. The parent's picker opens on this, and
+       * what it writes goes to every member.
+       */
+      tagIds: Array<Id<"tags">>
+      /**
+       * Every member is billable.
+       *
+       * ALL, not any. The parent's `$` is a claim about the sitting, and a mark
+       * meaning "some of these" is a mark that means nothing. A mixed group
+       * reads unlit, and one click on the parent makes it uniform.
+       */
+      allBillable: boolean
       /** Earliest start. */
       fromMs: number
       /**
@@ -44,6 +58,62 @@ const SEP = "\u0000"
 /** The two fields that decide whether two entries are the same work. */
 export function sittingKey(entry: Entry): string {
   return `${entry.title.trim()}${SEP}${entry.projectId ?? ""}`
+}
+
+/**
+ * Every distinct note in a sitting, oldest first, as one editable string.
+ *
+ * NOTHING IS RESOLVED BEHIND THE USER. A sitting whose members carry different
+ * prose must never pick a winner on their behalf — the losing text is the one
+ * thing PRODUCT.md says the product exists for. So every word goes on screen
+ * and the user edits down to what they meant, which makes the first save of a
+ * mixed group the only moment prose changes, and it changes in front of them.
+ *
+ * DISTINCT, not merely concatenated: the ordinary case is the same account
+ * typed twice, and offering it back twice would be asking the user to tidy up
+ * after a duplication they did not cause.
+ *
+ * Oldest first because that is the order the work happened in, and it is the
+ * order a person rereading their own day expects to find it in — the input
+ * array is newest-first, so this reverses it.
+ */
+export function joinNotes(entries: Array<Entry>): string {
+  const seen = new Set<string>()
+  const notes: Array<string> = []
+
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const note = (entries[index].note ?? "").trim()
+    if (note === "" || seen.has(note)) continue
+    seen.add(note)
+    notes.push(note)
+  }
+
+  // A blank line between them, matching the paragraph break a note is written
+  // with in the textarea — see `note-sheet.tsx` on Enter inserting a newline.
+  return notes.join("\n\n")
+}
+
+/**
+ * Every tag any member carries, in the order first met scanning oldest first.
+ *
+ * A UNION rather than an intersection, because the parent's picker opens on
+ * this and then writes what it is given back to every member: an intersection
+ * would silently strip a tag off the member that had it the moment the picker
+ * was opened and closed.
+ */
+export function tagUnion(entries: Array<Entry>): Array<Id<"tags">> {
+  const seen = new Set<string>()
+  const tagIds: Array<Id<"tags">> = []
+
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    for (const tagId of entries[index].tagIds) {
+      if (seen.has(tagId)) continue
+      seen.add(tagId)
+      tagIds.push(tagId)
+    }
+  }
+
+  return tagIds
 }
 
 /**
@@ -99,17 +169,29 @@ export function toLogItems(entries: Array<Entry>): Array<LogItem> {
 
     let totalMs = 0
     let notedCount = 0
+    let allBillable = true
     let fromMs = first.startedAt
     let toMs = endOf(first)
 
     for (const member of members) {
       totalMs += member.durationMs ?? 0
       if ((member.note ?? "").trim() !== "") notedCount += 1
+      if (!member.billable) allBillable = false
       if (member.startedAt < fromMs) fromMs = member.startedAt
       const end = endOf(member)
       if (end > toMs) toMs = end
     }
 
-    return { kind: "sitting", key, entries: members, totalMs, notedCount, fromMs, toMs }
+    return {
+      kind: "sitting",
+      key,
+      entries: members,
+      totalMs,
+      notedCount,
+      tagIds: tagUnion(members),
+      allBillable,
+      fromMs,
+      toMs,
+    }
   })
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { toLogItems } from "@/lib/group-sittings"
+import { joinNotes, tagUnion, toLogItems } from "@/lib/group-sittings"
 import { makeEntry, NOW } from "@/test-utils/fixtures"
 import type { LogItem } from "@/lib/group-sittings"
 import type { Id } from "../../convex/_generated/dataModel"
@@ -13,6 +13,10 @@ import type { Id } from "../../convex/_generated/dataModel"
 
 const id = (value: string) => value as unknown as Id<"timeEntries">
 const project = (value: string) => value as unknown as Id<"projects">
+
+const TAG_A = "jd7taga" as unknown as Id<"tags">
+const TAG_B = "jd7tagb" as unknown as Id<"tags">
+const TAG_C = "jd7tagc" as unknown as Id<"tags">
 
 /**
  * A completed entry whose three time fields AGREE.
@@ -204,5 +208,110 @@ describe("toLogItems", () => {
 
   it("returns nothing for no entries", () => {
     expect(toLogItems([])).toEqual([])
+  })
+})
+
+describe("joinNotes", () => {
+  it("returns one note unchanged when every member wrote the same thing", () => {
+    // The case that prompted this whole design: one ticket, two sittings, one
+    // account of what got done, typed twice by hand.
+    const same = "Fixed the 12-hour clock hours field."
+    expect(
+      joinNotes([
+        makeEntry({ startedAt: 200, note: same }),
+        makeEntry({ startedAt: 100, note: same }),
+      ])
+    ).toBe(same)
+  })
+
+  it("joins distinct notes oldest-first, so nothing is resolved unseen", () => {
+    expect(
+      joinNotes([
+        makeEntry({ startedAt: 200, note: "Then the tests." }),
+        makeEntry({ startedAt: 100, note: "First the parser." }),
+      ])
+    ).toBe("First the parser.\n\nThen the tests.")
+  })
+
+  it("skips members with no note rather than leaving blank paragraphs", () => {
+    expect(
+      joinNotes([
+        makeEntry({ startedAt: 300, note: "Second." }),
+        makeEntry({ startedAt: 200, note: "   " }),
+        makeEntry({ startedAt: 100, note: "First." }),
+      ])
+    ).toBe("First.\n\nSecond.")
+  })
+
+  it("is empty when nobody wrote anything, which is what renders + add note", () => {
+    expect(joinNotes([makeEntry({ note: undefined }), makeEntry({ note: "" })])).toBe("")
+  })
+
+  it("counts a repeated note once however many members carry it", () => {
+    // Otherwise opening a three-sitting group would offer the same paragraph
+    // three times and ask the user to delete two of them.
+    const same = "Same account."
+    expect(
+      joinNotes([
+        makeEntry({ startedAt: 300, note: same }),
+        makeEntry({ startedAt: 200, note: same }),
+        makeEntry({ startedAt: 100, note: same }),
+      ])
+    ).toBe(same)
+  })
+})
+
+describe("tagUnion", () => {
+  it("is every tag any member carries, without duplicates", () => {
+    // A SET CLAIM, deliberately order-independent: this test is about coverage
+    // and dedup. Order is pinned once, in the sitting-level test below, where
+    // it is a stated decision rather than a by-product of the loop direction.
+    const union = tagUnion([
+      makeEntry({ tagIds: [TAG_A, TAG_B] }),
+      makeEntry({ tagIds: [TAG_B, TAG_C] }),
+    ])
+    expect([...union].sort()).toEqual([TAG_A, TAG_B, TAG_C].sort())
+  })
+
+  it("is empty for members that carry none", () => {
+    expect(tagUnion([makeEntry({ tagIds: [] }), makeEntry({ tagIds: [] })])).toEqual([])
+  })
+})
+
+describe("a sitting's derived classification", () => {
+  const sittingOf = (items: Array<LogItem>) => {
+    const found = items.find((item) => item.kind === "sitting")
+    if (found === undefined || found.kind !== "sitting") throw new Error("no sitting")
+    return found
+  }
+
+  it("is billable only when every member is", () => {
+    // A mark meaning "some of these" means nothing, so mixed reads unlit and
+    // one click on the parent makes it uniform.
+    const mixed = sittingOf(
+      toLogItems([
+        makeEntry({ title: "Retainer", startedAt: 200, billable: true }),
+        makeEntry({ title: "Retainer", startedAt: 100, billable: false }),
+      ])
+    )
+    expect(mixed.allBillable).toBe(false)
+
+    const both = sittingOf(
+      toLogItems([
+        makeEntry({ title: "Retainer", startedAt: 200, billable: true }),
+        makeEntry({ title: "Retainer", startedAt: 100, billable: true }),
+      ])
+    )
+    expect(both.allBillable).toBe(true)
+  })
+
+  it("carries the tag union so the parent's picker opens on it", () => {
+    const sitting = sittingOf(
+      toLogItems([
+        makeEntry({ title: "Retainer", startedAt: 200, tagIds: [TAG_A] }),
+        makeEntry({ title: "Retainer", startedAt: 100, tagIds: [TAG_B] }),
+      ])
+    )
+    expect(sitting.tagIds).toEqual([TAG_B, TAG_A])
   })
 })
