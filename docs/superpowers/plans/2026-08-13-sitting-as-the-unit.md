@@ -100,12 +100,21 @@ describe("joinNotes", () => {
 
 describe("tagUnion", () => {
   it("is every tag any member carries, without duplicates", () => {
-    expect(
-      tagUnion([
-        makeEntry({ tagIds: [TAG_A, TAG_B] }),
-        makeEntry({ tagIds: [TAG_B, TAG_C] }),
-      ])
-    ).toEqual([TAG_A, TAG_B, TAG_C])
+    // A SET CLAIM, deliberately order-independent: this test is about coverage
+    // and dedup. Order is pinned once, in the sitting-level test below, where
+    // it is a stated decision rather than a by-product of the loop direction.
+    //
+    // CORRECTED DURING EXECUTION. This assertion originally read
+    // `.toEqual([TAG_A, TAG_B, TAG_C])`, which contradicted both the
+    // implementation in Step 3 and the sitting-level test below — the fixtures
+    // tie on `startedAt`, so it was silently asserting insertion order while
+    // its neighbour asserted oldest-first. The implementer stopped rather than
+    // pick one, which was correct.
+    const union = tagUnion([
+      makeEntry({ tagIds: [TAG_A, TAG_B] }),
+      makeEntry({ tagIds: [TAG_B, TAG_C] }),
+    ])
+    expect([...union].sort()).toEqual([TAG_A, TAG_B, TAG_C].sort())
   })
 
   it("is empty for members that carry none", () => {
