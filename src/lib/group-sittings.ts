@@ -1,4 +1,4 @@
-﻿import type { Entry } from "@/lib/group-entries"
+import type { Entry } from "@/lib/group-entries"
 
 /**
  * One line of the log: an entry on its own, or several of them behind a count.
