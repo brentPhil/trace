@@ -374,7 +374,7 @@ describe("grouped entries", () => {
     renderLog(true)
     expect(screen.getByText("00:00 – 02:06")).toBeTruthy()
     // Unscoped for the same reason as the note count above: the day's own
-    // total (2:15:00, the sitting plus the unrelated "Standup" entry) is no
+    // total (2:15:00, the sitting plus the unrelated "Weekly retro" entry) is no
     // longer the same figure as the sitting's own (2:00:00), so each can only
     // match its own element.
     //
