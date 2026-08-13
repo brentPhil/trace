@@ -2,6 +2,12 @@ import { useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
 import type { SelectionState } from "@/lib/entry-selection"
 
+export type SelectionTarget = {
+  label: string
+  state: SelectionState
+  onToggle: (origin: HTMLInputElement) => void
+}
+
 export function SelectionCheckbox({
   label,
   state,

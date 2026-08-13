@@ -7,7 +7,9 @@ import {
 import { EditableDuration, EditableTitle } from "@/components/entries/editable-fields"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
 import { NoteLine } from "@/components/entries/note-line"
+import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
 import { cn } from "@/lib/utils"
+import type { SelectionTarget } from "@/components/entries/selection-checkbox"
 import type { Classification } from "@/components/timer/timer-bar"
 import type { DayString } from "@shared/day"
 import type { Entry } from "@/lib/group-entries"
@@ -70,6 +72,7 @@ export function EntryRow({
   projects,
   tags,
   actions,
+  selection,
   notesExpanded = false,
   showNote = true,
 }: {
@@ -81,6 +84,7 @@ export function EntryRow({
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
+  selection?: SelectionTarget
   /**
    * READ THE NOTE, don't scan the row.
    *
@@ -177,7 +181,15 @@ export function EntryRow({
         everything on it has to sit on.
       */}
       <div className="entry-log-grid min-h-(--entry-row-height) w-full px-4">
-        <span aria-hidden="true" className="entry-log-select" />
+        {selection === undefined ? null : (
+          <SelectionCheckbox
+            contextual
+            className="entry-log-select"
+            label={selection.label}
+            state={selection.state}
+            onToggle={selection.onToggle}
+          />
+        )}
         <div className="entry-log-content flex min-w-0 flex-col gap-0.5 py-1.5">
           <div className="flex min-w-0 items-center gap-1.5">
             <EditableTitle

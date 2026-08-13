@@ -1,15 +1,26 @@
 import { useState } from "react"
 import { EntryRow } from "@/components/entries/entry-row"
+import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
 import { SittingRow } from "@/components/entries/sitting-row"
 import { Skeleton } from "@/components/ui/skeleton"
+import { selectionState } from "@/lib/entry-selection"
 import { formatTotal } from "@/lib/format-total"
 import { toLogItems } from "@/lib/group-sittings"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { SelectionTarget } from "@/components/entries/selection-checkbox"
 import type { DayGroup, Entry } from "@/lib/group-entries"
 import type { DurationDisplay } from "@/lib/format-total"
-import type { Doc } from "../../../convex/_generated/dataModel"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
+
+export type EntrySelectionController = {
+  selectedIds: ReadonlySet<Id<"timeEntries">>
+  onToggle: (
+    entryIds: Array<Id<"timeEntries">>,
+    origin: HTMLInputElement
+  ) => void
+}
 
 /**
  * The log: entries under day headers, newest first.
@@ -27,6 +38,7 @@ export function DayList({
   projects,
   tags,
   actions,
+  selection,
   display = "hms",
   empty,
   notesExpanded = false,
@@ -39,6 +51,7 @@ export function DayList({
   projects: Array<Doc<"projects">>
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
+  selection?: EntrySelectionController
   display?: DurationDisplay
   /** Whether every note is written out in full instead of clipped to its line.
    *  One mode over the whole log, set by the page — see `entry-row.tsx`. */
@@ -88,6 +101,19 @@ export function DayList({
       return next
     })
 
+  const targetFor = (
+    entries: Array<Entry>,
+    label: string
+  ): SelectionTarget | undefined => {
+    if (selection === undefined) return undefined
+    const entryIds = entries.map((entry) => entry._id)
+    return {
+      label,
+      state: selectionState(entryIds, selection.selectedIds),
+      onToggle: (origin) => selection.onToggle(entryIds, origin),
+    }
+  }
+
   /*
    * ONE SPELLING OF A ROW, for the two places that draw one: on its own, and
    * as a member of a sitting. They are the same row — a member is not a
@@ -105,6 +131,10 @@ export function DayList({
       projects={projects}
       tags={tags}
       actions={actions}
+      selection={targetFor(
+        [entry],
+        `Select ${entry.title.trim() === "" ? "untitled entry" : entry.title.trim()}`
+      )}
       notesExpanded={notesExpanded}
       showNote={showNote}
     />
@@ -150,7 +180,22 @@ export function DayList({
               header's background and border are meant to stay full-bleed.
             */}
             <div className="entry-log-grid w-full items-baseline px-4">
-              <span aria-hidden="true" className="entry-log-select" />
+              {selection === undefined ? null : (
+                <SelectionCheckbox
+                  className="entry-log-select"
+                  label={`Select all records for ${group.label}`}
+                  state={selectionState(
+                    group.entries.map((entry) => entry._id),
+                    selection.selectedIds
+                  )}
+                  onToggle={(origin) =>
+                    selection.onToggle(
+                      group.entries.map((entry) => entry._id),
+                      origin
+                    )
+                  }
+                />
+              )}
               <div className="entry-log-content flex min-w-0 items-baseline gap-2">
                 <h2 className="text-sm font-medium">{group.label}</h2>
                 {/*
@@ -228,6 +273,12 @@ export function DayList({
                     display={display}
                     expanded={isOpen}
                     notesExpanded={notesExpanded}
+                    selection={targetFor(
+                      item.entries,
+                      `Select all ${item.entries.length} records for ${
+                        item.entries[0].title.trim() || "untitled work"
+                      }`
+                    )}
                     onToggle={() => toggle(stateKey)}
                     // The NEWEST member. `useEntryActions`'s resume copies
                     // title, project, tags and billable off whatever it is

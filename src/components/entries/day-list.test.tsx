@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { useState } from "react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
 import { SittingRow } from "@/components/entries/sitting-row"
+import { toggleSelection } from "@/lib/entry-selection"
 import { joinNotes, toLogItems } from "@/lib/group-sittings"
 import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { Classification } from "@/components/timer/timer-bar"
+import type { DayGroup } from "@/lib/group-entries"
 import type { LogItem } from "@/lib/group-sittings"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -305,6 +308,33 @@ describe("grouped entries", () => {
     },
   ]
 
+  function SelectableDayList({
+    shownGroups = groups,
+  }: {
+    shownGroups?: Array<DayGroup>
+  }) {
+    const [selectedIds, setSelectedIds] = useState<Set<Id<"timeEntries">>>(
+      new Set()
+    )
+    return (
+      <DayList
+        groups={shownGroups}
+        timeZone="UTC"
+        use12Hour={false}
+        weekStartDay={0}
+        projects={[]}
+        tags={[]}
+        actions={noActions}
+        grouped
+        selection={{
+          selectedIds,
+          onToggle: (entryIds) =>
+            setSelectedIds((current) => toggleSelection(current, entryIds)),
+        }}
+      />
+    )
+  }
+
   const renderLog = (grouped: boolean, actions: EntryRowActions = noActions) =>
     render(
       <DayList
@@ -318,6 +348,87 @@ describe("grouped entries", () => {
         grouped={grouped}
       />
     )
+
+  it("selects and clears every entry in a day", () => {
+    render(<SelectableDayList />)
+    const day = screen.getByRole("checkbox", {
+      name: /Select all records for Today/,
+    }) as HTMLInputElement
+
+    fireEvent.click(day)
+
+    expect(day.checked).toBe(true)
+    expect(
+      (
+        screen.getByRole("checkbox", {
+          name: /Select all 2 records for Crew dropdowns/,
+        }) as HTMLInputElement
+      ).checked
+    ).toBe(true)
+
+    fireEvent.click(day)
+
+    expect(day.checked).toBe(false)
+  })
+
+  it("shows a mixed day and sitting after one member is selected", () => {
+    render(<SelectableDayList />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show grouped entries" })
+    )
+
+    fireEvent.click(
+      screen.getAllByRole("checkbox", { name: /Select Crew dropdowns/ })[0]
+    )
+
+    expect(
+      screen.getByRole("checkbox", {
+        name: /Select all records for Today/,
+      }) as HTMLInputElement
+    ).toHaveProperty("indeterminate", true)
+    expect(
+      screen.getByRole("checkbox", {
+        name: /Select all 2 records for Crew dropdowns/,
+      }) as HTMLInputElement
+    ).toHaveProperty("indeterminate", true)
+  })
+
+  it("selects hidden sitting members while collapsed", () => {
+    render(<SelectableDayList />)
+
+    fireEvent.click(
+      screen.getByRole("checkbox", {
+        name: /Select all 2 records for Crew dropdowns/,
+      })
+    )
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show grouped entries" })
+    )
+
+    for (const member of screen.getAllByRole("checkbox", {
+      name: /Select Crew dropdowns/,
+    })) {
+      expect((member as HTMLInputElement).checked).toBe(true)
+    }
+  })
+
+  it("keeps selection and sitting disclosure as independent controls", () => {
+    render(<SelectableDayList />)
+    const disclosure = screen.getByRole("button", { name: "Show grouped entries" })
+    const sitting = screen.getByRole("checkbox", {
+      name: /Select all 2 records for Crew dropdowns/,
+    }) as HTMLInputElement
+
+    fireEvent.click(sitting)
+
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false")
+    expect(sitting.checked).toBe(true)
+
+    fireEvent.click(disclosure)
+
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true")
+    expect(sitting.checked).toBe(true)
+  })
 
   it("renders a number-only sitting disclosure", () => {
     renderLog(true)

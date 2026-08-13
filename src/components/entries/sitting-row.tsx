@@ -5,11 +5,13 @@ import {
   TagPicker,
 } from "@/components/classifiers/classifier-pickers"
 import { NoteLine } from "@/components/entries/note-line"
+import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
 import { formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { joinNotes } from "@/lib/group-sittings"
 import { cn } from "@/lib/utils"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { SelectionTarget } from "@/components/entries/selection-checkbox"
 import type { Classification } from "@/components/timer/timer-bar"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { LogItem } from "@/lib/group-sittings"
@@ -51,6 +53,7 @@ export function SittingRow({
   display,
   expanded,
   notesExpanded = false,
+  selection,
   onToggle,
   onResume,
   onClassify,
@@ -68,6 +71,7 @@ export function SittingRow({
   expanded: boolean
   /** Forwarded from the page, exactly as `EntryRow` takes it. */
   notesExpanded?: boolean
+  selection?: SelectionTarget
   onToggle: () => void
   /** Resumes the NEWEST member — see `DayList`, which supplies it. */
   onResume: () => void
@@ -132,7 +136,15 @@ export function SittingRow({
           while the title/note column is left to grow downward without
           dragging the badge or the trailing cluster into its vertical middle. */}
       <div className="entry-log-grid min-h-(--entry-row-height) w-full px-4">
-        <span aria-hidden="true" className="entry-log-select" />
+        {selection === undefined ? null : (
+          <SelectionCheckbox
+            contextual
+            className="entry-log-select"
+            label={selection.label}
+            state={selection.state}
+            onToggle={selection.onToggle}
+          />
+        )}
         <div className="entry-log-content flex min-w-0 items-start gap-2">
           {/* The number is the disclosure, with its accessible state carried by
               the button rather than a separate visible chevron. */}
