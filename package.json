@@ -10,7 +10,8 @@
     "lint": "eslint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx}\"",
     "check": "prettier --check \"**/*.{ts,tsx,js,jsx}\"",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p convex"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p convex",
+    "deploy": "convex deploy --cmd \"npm run build\""
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

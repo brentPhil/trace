@@ -166,29 +166,6 @@ export function SittingRow({
             {/* Static text, not an `EditableTitle`. Retitling a group would be a
                 write to every member — see this component's own note above. */}
             <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
-
-            {sitting.allBillable ? (
-              // Brass means money — The Two Temperatures Rule. Paired with a
-              // glyph so it survives without colour.
-              // `sm:hidden` because the BillableToggle below carries this at
-              // wider widths, where it is also editable. Below `sm` the toggle is
-              // dropped for room, so this static mark is what keeps billable
-              // visible on a phone rather than merely absent.
-              //
-              // `leading-5` matters as much as the colour here: an unsized span
-              // establishes a 24px line box from the inherited 16px base, so
-              // without it every billable row is four pixels taller than every
-              // non-billable one and the whole log develops a stutter.
-              <span
-                className="flex shrink-0 items-center text-xs leading-5 text-brass sm:hidden"
-                title="Billable"
-              >
-                <span aria-hidden="true" className="font-semibold">
-                  $
-                </span>
-                <span className="sr-only">Billable</span>
-              </span>
-            ) : null}
           </div>
 
           <NoteLine note={note} notesExpanded={notesExpanded} onOpen={onNoteOpen} />
@@ -222,10 +199,17 @@ export function SittingRow({
               onChange={(tagIds) => onClassify({ tagIds })}
               className="hidden sm:inline-flex"
             />
+            {/* Visible at every width, unlike `TagPicker` above and unlike
+                `EntryRow`'s own toggle (out of scope — see that component).
+                `ProjectPicker`'s `chooseProject` can send `billable: true` on
+                every width there is a project picker, so the one control that
+                can turn it back off has to exist everywhere that control does
+                — a phone included. It also doubles as the row's billable
+                indicator now, which is why the static `$` mark above is
+                gone: this button already shows brass when lit. */}
             <BillableToggle
               value={sitting.allBillable}
               onChange={(billable) => onClassify({ billable })}
-              className="hidden sm:inline-flex"
             />
           </div>
 

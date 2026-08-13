@@ -1,8 +1,10 @@
 import { useState } from "react"
 import { DayList } from "@/components/entries/day-list"
 import { NoteSheet } from "@/components/entries/note-sheet"
+import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
+import { errorMessage } from "@/lib/error-message"
 import { joinNotes } from "@/lib/group-sittings"
 import { dayOf } from "@shared/day"
 import type { ReactNode } from "react"
@@ -72,6 +74,7 @@ export function EntryLog({
 }) {
   const { updateMany } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
+  const toasts = Toast.useToastManager()
 
   const [noteTarget, setNoteTarget] = useState<NoteTarget | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)
@@ -94,9 +97,12 @@ export function EntryLog({
         ...change,
         // `projectId` is already `Id | null` in `Classification`, which is the
         // shape `updateMany` takes — null clears, absent leaves alone.
-      }).catch(() => {
-        // Same reasoning as the row's own classify: never interrupt the reader
-        // to report that a tag did not stick.
+      }).catch((thrown: unknown) => {
+        // Same reasoning as the row's own classify (`use-entry-actions.ts`):
+        // a failure here reverts every member's optimistic patch at once,
+        // including `billable`, which reaches invoices — silence would let
+        // the reader believe a discarded change had stuck.
+        toasts.add({ title: errorMessage(thrown), priority: "high" })
       })
     },
     onSittingNoteOpen: (entries) => {
@@ -135,6 +141,16 @@ export function EntryLog({
   // falling back to the snapshot only if every one has since been removed
   // (deleted, or paginated out from under it) — so it stays in sync with edits
   // made elsewhere while it is open, rather than going stale mid-sentence.
+  //
+  // `entryIds` ITSELF stays the snapshot below, deliberately, even though
+  // `live` is computed here — the save still targets every id `noteTarget`
+  // was built with, not just the ones still found in `groups`. Narrowing to
+  // `live` would silently under-write a member that merely paginated out of
+  // view, dropping it from the sitting's save with nothing on screen to say
+  // so. The snapshot instead lets a genuinely deleted member fail the WHOLE
+  // save with `NOT_FOUND` — reported by `onSittingClassify`'s toast above (or
+  // the note sheet's own error state, for a note save) rather than silently
+  // dropped from a partial write.
   const liveNoteTarget = (() => {
     if (noteTarget === null) return null
     const byId = new Map(

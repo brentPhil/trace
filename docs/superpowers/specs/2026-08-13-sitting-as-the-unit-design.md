@@ -159,8 +159,19 @@ Two bulk mutations differing only in which fields they carry would be a seam
 with nothing behind it, which is why the note path and the classification path
 are one function.
 
-`entries.update` and `entries.setNote` are untouched. Plain rows, the calendar
-popover and the note sheet's single-entry path keep working exactly as they do.
+`entries.update` and `entries.setNote` are untouched on the server — both stay,
+and `entries.setNote` is still covered by `convex/entries.edit.test.ts`. Plain
+rows' non-note edits (title, project, tags, billable) and the calendar popover
+keep calling `entries.update` exactly as before, genuinely unchanged.
+
+The note sheet's own path is where this drifts from the plan above: with a
+one-member target and a many-member target now sharing one `onSave`, the sheet
+always calls `updateMany` — including for a lone entry, where that is
+`entries.update`'s note-writing semantics applied to a one-element list, not
+`entries.setNote`. The two are behaviourally equivalent — both `normaliseNote`,
+both length-check — so a plain row's note keeps working, just not literally
+"exactly as they do." One path replaced two, which is the better shape now
+that both existed side by side.
 
 ### Client
 
@@ -203,8 +214,17 @@ many from a sitting.
 **The first save of a mixed group is a real edit.** A user who opens a sitting
 whose members carry different prose sees them joined, and saving normalises all
 members to what they leave behind. This is intended and visible, but it is the
-one moment this feature changes prose, and the undo toast is what makes it
-recoverable.
+one moment this feature changes prose.
+
+**The undo toast is a true inverse only for the ordinary case.** `handleDismiss`
+captures `previous = target.note` — the joined string the sheet opened with —
+and undo writes that back to every member. For the case this feature exists to
+serve, the same note typed twice, `previous` equals what every member already
+held, so undo genuinely restores it. For a GENUINELY mixed sitting, `previous`
+is already the join: undo can put the joined text back, but it cannot restore
+which words belonged to which member — that split was lost the moment the save
+went out, not the moment undo runs. The text is recoverable; the pre-edit
+per-member division is not.
 
 **The parent becomes the densest row in the product** — disclosure, title, note,
 project, tags, billable, span, total and resume. The layout needs to survive

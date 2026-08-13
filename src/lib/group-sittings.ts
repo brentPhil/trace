@@ -74,6 +74,13 @@ export function sittingKey(entry: Entry): string {
  * Oldest first because that is the order the work happened in, and it is the
  * order a person rereading their own day expects to find it in — the input
  * array is newest-first, so this reverses it.
+ *
+ * CAN EXCEED THE SERVER'S `MAX_NOTE_LENGTH` (`convex/entries.ts`). Several
+ * members each carrying a long note can join past the limit a single note is
+ * held to, so the sheet can open on text the server will refuse with
+ * `TOO_LONG` on save. Not truncated here on purpose — silently dropping the
+ * user's own prose to fit is worse than a refusal they can see and edit down
+ * from. The sheet's own error state is what surfaces that refusal.
  */
 export function joinNotes(entries: Array<Entry>): string {
   const seen = new Set<string>()

@@ -193,6 +193,14 @@ export function NoteSheet({
    * reports what happened with an Undo that puts the previous note back,
    * raised through the same `toastWithUndo` delete and re-date go through.
    *
+   * `previous` is `target.note` — for a sitting, already the JOINED string,
+   * not each member's own text. Undo is a true inverse for the case this
+   * feature exists to serve, the same note typed twice: there, every member
+   * already held exactly `previous`. For a sitting whose members genuinely
+   * disagreed, undo restores the joined text but not which words were whose
+   * — that split is gone the moment this save lands, not the moment undo
+   * runs. See the spec's Risks section for the same limit stated in full.
+   *
    * The `toasts` manager is the one thing this component reaches for rather
    * than takes as a prop. Lifting the whole sequence into `EntryLog` would put
    * the toast beside the other two — but `drafts` is spliced through it at

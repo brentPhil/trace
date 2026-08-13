@@ -218,18 +218,6 @@ function insertEverywhere(localStore: OptimisticLocalStore, entry: Entry): void 
  * not corrupting a row that is already recorded.
  */
 export function useEntryEditMutations() {
-  const setNoteMutation = useLatest(
-    useConvexMutation(api.entries.setNote).withOptimisticUpdate((localStore, args) => {
-      const note = args.note.trim()
-      patchEverywhere(localStore, args.entryId, (entry) => ({
-        ...entry,
-        // undefined, not "" — matching the server, so the "N of M noted" count
-        // does not flicker by one while the mutation is in flight.
-        note: note === "" ? undefined : note,
-      }))
-    })
-  )
-
   const updateMutation = useLatest(
     useConvexMutation(api.entries.update).withOptimisticUpdate((localStore, args) => {
       patchEverywhere(localStore, args.entryId, (entry) => ({
@@ -322,13 +310,6 @@ export function useEntryEditMutations() {
   // stable. Wrapping it would add indirection that says nothing.
   const createMutation = useConvexMutation(api.entries.create)
 
-  const setNote = useCallback(
-    async (entryId: Id<"timeEntries">, note: string) => {
-      await setNoteMutation({ entryId, note })
-    },
-    [setNoteMutation]
-  )
-
   const update = useCallback(
     async (args: {
       entryId: Id<"timeEntries">
@@ -405,5 +386,5 @@ export function useEntryEditMutations() {
     [createMutation]
   )
 
-  return { setNote, update, updateMany, editTime, remove, restore, create }
+  return { update, updateMany, editTime, remove, restore, create }
 }

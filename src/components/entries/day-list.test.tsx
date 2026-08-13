@@ -635,6 +635,23 @@ describe("grouped entries", () => {
       expect(onClassify).toHaveBeenCalledWith({ billable: true })
     })
 
+    it("keeps the billable toggle reachable at every width, unlike the tag picker beside it", () => {
+      // Fix for a phone-unreachable control: `ProjectPicker`'s `chooseProject`
+      // can mark a sitting billable at any width, so the one control that can
+      // undo that has to exist at every width too — jsdom computes no layout,
+      // so "every width" is asserted as the absence of Tailwind's responsive
+      // `hidden` utility rather than a measured viewport.
+      renderSitting()
+
+      const toggle = screen.getByLabelText("Not billable")
+      expect(toggle.className).not.toMatch(/\bhidden\b/)
+
+      // The tag picker is the control this is contrasted against: it stays
+      // narrow-width-hidden, unaffected by this fix.
+      const tagPicker = screen.getByLabelText("Tags")
+      expect(tagPicker.className).toMatch(/\bhidden\b/)
+    })
+
     it("wires the tag picker to onClassify", () => {
       const onClassify = vi.fn()
       const FOCUS = {
@@ -669,6 +686,10 @@ describe("grouped entries", () => {
 
     it("no longer counts noted members on the parent", () => {
       renderLog(true)
+      // Positive first: without it, this test also passes if grouping breaks
+      // entirely and no `SittingRow` renders at all — the absence below would
+      // then be true for the wrong reason.
+      expect(screen.getByLabelText("Show grouped entries")).toBeTruthy()
       expect(screen.queryByText(/of 2 noted/)).toBeNull()
     })
   })
