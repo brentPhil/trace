@@ -186,12 +186,7 @@ export function EntryRow({
             ) : null}
           </div>
 
-          {/*
-            The slot is 20px so the row lands on 50, but a 20px control is under
-            WCAG 2.2's 24px target minimum. `touch-target` (styles.css) extends
-            the hit area with a pseudo-element instead of padding, so the target
-            grows without the row growing with it.
-          */}
+          {/* The 20px slot and its `touch-target` sizing are explained in `NoteLine`. */}
           <NoteLine
             note={note}
             notesExpanded={notesExpanded}

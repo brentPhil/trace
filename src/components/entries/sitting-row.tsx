@@ -29,6 +29,25 @@ function throwingCreator(propName: string): (name: string) => Promise<never> {
 }
 
 /**
+ * The default for `onClassify`/`onNoteOpen`, for the same caller-not-wired-up
+ * reason as `throwingCreator` above, but a silent no-op is the wrong shape
+ * here in a way it is not for `tags = []` below. `tags = []` just leaves the
+ * tag picker with nothing to choose. A no-op `onClassify` leaves the project
+ * picker, tag picker and billable toggle fully live and clickable anyway —
+ * this row does not know its caller forgot to wire it — so a user picks a
+ * project, the picker closes as if it worked, and the write silently never
+ * happens: no error, no failing test, no console line. Same for `onNoteOpen`:
+ * an `+ add note` hatch that opens nothing. Throwing turns that into a stack
+ * trace pointing at this file the moment the control is used, which is what
+ * `throwingCreator` already buys the two creator props above.
+ */
+function throwingHandler(propName: string): () => never {
+  return () => {
+    throw new Error(`SittingRow: ${propName} was not supplied`)
+  }
+}
+
+/**
  * Several sittings at one piece of work, and the place that work is edited.
  *
  * THE SITTING IS THE UNIT OF WORK; THE ENTRIES UNDER IT ARE THE UNIT OF TIME.
@@ -44,9 +63,14 @@ function throwingCreator(propName: string): (name: string) => Promise<never> {
  * copies a note forward. See
  * docs/superpowers/specs/2026-08-13-sitting-as-the-unit-design.md.
  *
- * Still a disclosure and not a merge. Nothing is stored here, nothing is
- * rewritten behind the user, and every member remains individually present with
- * its own times one click away.
+ * Still a disclosure and not a merge. Grouping stores nothing of its own —
+ * there is no sitting document, no row this component owns. The one write
+ * that follows from a choice made here (a billable-by-default project marking
+ * every member billable, below) is not an exception to that: it is a
+ * consequence of something the user just clicked, and it lands the instant
+ * they click it, in front of them — not a rewrite happening behind their
+ * back. Every member remains individually present with its own times one
+ * click away.
  */
 export function SittingRow({
   sitting,
@@ -59,8 +83,8 @@ export function SittingRow({
   notesExpanded = false,
   onToggle,
   onResume,
-  onClassify = () => {},
-  onNoteOpen = () => {},
+  onClassify = throwingHandler("onClassify"),
+  onNoteOpen = throwingHandler("onNoteOpen"),
   onCreateProject = throwingCreator("onCreateProject"),
   onCreateTag = throwingCreator("onCreateTag"),
   controls,
@@ -180,6 +204,29 @@ export function SittingRow({
             {/* Static text, not an `EditableTitle`. Retitling a group would be a
                 write to every member — see this component's own note above. */}
             <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+
+            {sitting.allBillable ? (
+              // Brass means money — The Two Temperatures Rule. Paired with a
+              // glyph so it survives without colour.
+              // `sm:hidden` because the BillableToggle below carries this at
+              // wider widths, where it is also editable. Below `sm` the toggle is
+              // dropped for room, so this static mark is what keeps billable
+              // visible on a phone rather than merely absent.
+              //
+              // `leading-5` matters as much as the colour here: an unsized span
+              // establishes a 24px line box from the inherited 16px base, so
+              // without it every billable row is four pixels taller than every
+              // non-billable one and the whole log develops a stutter.
+              <span
+                className="flex shrink-0 items-center text-xs leading-5 text-brass sm:hidden"
+                title="Billable"
+              >
+                <span aria-hidden="true" className="font-semibold">
+                  $
+                </span>
+                <span className="sr-only">Billable</span>
+              </span>
+            ) : null}
           </div>
 
           <NoteLine note={note} notesExpanded={notesExpanded} onOpen={onNoteOpen} />

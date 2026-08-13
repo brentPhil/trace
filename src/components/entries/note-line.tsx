@@ -28,7 +28,15 @@ export function NoteLine({
         // A FIXED 20px BOX, so a day of mixed written/empty notes does not
         // ripple — except when the note is the thing being read, where a
         // fixed height is exactly the clip being lifted. `min-h-5` keeps
-        // the floor (and with it the 54px row) for the one-line case.
+        // the floor for the one-line case; each caller pins its own row
+        // height to that floor via `--entry-row-height` (`EntryRow`,
+        // `SittingRow`), so this component only has to answer for its own
+        // 20px and never for either caller's total.
+        //
+        // That 20px floor is also under WCAG 2.2's 24px touch-target
+        // minimum, which is what `touch-target` (styles.css, used below) is
+        // for: it extends the hit area with a pseudo-element instead of
+        // padding, so the target grows without the row growing with it.
         notesExpanded ? "min-h-5" : "h-5"
       )}
     >

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
 import { SittingRow } from "@/components/entries/sitting-row"
-import { toLogItems } from "@/lib/group-sittings"
+import { joinNotes, toLogItems } from "@/lib/group-sittings"
 import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { Classification } from "@/components/timer/timer-bar"
@@ -464,37 +464,6 @@ describe("grouped entries", () => {
    * that does.
    */
   describe("the parent row is the sitting's editor", () => {
-    /*
-     * The "+ add note" count below wants only the sitting's own two members
-     * in view — `renderLog`'s day also carries `unrelated` ("Weekly retro",
-     * itself unnoted), which is exactly right for scoping the "N of M noted"
-     * assertions above but would add a THIRD hatch to this one. A day of just
-     * `twice`, grouped, isolates the sitting.
-     */
-    const renderTwiceOnly = () =>
-      render(
-        <DayList
-          groups={[
-            {
-              day: "2026-08-09",
-              label: "Today",
-              entries: twice,
-              notedCount: 1,
-              totalMs: 7_200_000,
-              billableMs: 0,
-              runningCount: 0,
-            },
-          ]}
-          timeZone="UTC"
-          use12Hour={false}
-          weekStartDay={0}
-          projects={[]}
-          tags={[]}
-          actions={noActions}
-          grouped
-        />
-      )
-
     const SEALOGS = {
       _id: "jd7sealogs" as unknown as Id<"projects">,
       _creationTime: 0,
@@ -525,10 +494,12 @@ describe("grouped entries", () => {
       onClassify = vi.fn(),
       onNoteOpen = vi.fn(),
       members,
+      tags = [],
     }: {
       onClassify?: (change: Partial<Classification>) => void
       onNoteOpen?: () => void
       members?: Array<Partial<Doc<"timeEntries">>>
+      tags?: Array<Doc<"tags">>
     } = {}) => {
       const memberEntries = members === undefined
         ? twice
@@ -552,7 +523,7 @@ describe("grouped entries", () => {
           timeZone="UTC"
           use12Hour={false}
           projects={[SEALOGS, PRO_BONO]}
-          tags={[]}
+          tags={tags}
           display="hms"
           expanded={false}
           onToggle={() => {}}
@@ -566,13 +537,62 @@ describe("grouped entries", () => {
       )
     }
 
-    it("writes one note for the whole sitting rather than one per member", () => {
-      renderTwiceOnly()
-      fireEvent.click(screen.getByRole("button", { name: /show grouped entries/i }))
+    it("shows every distinct member note, joined — not any single member's", () => {
+      // `renderSitting`'s two `twice` members carry only one note between
+      // them, which is not enough to tell "the parent shows the join" apart
+      // from "the parent shows whichever member happened to have a note" —
+      // both would pass. Two DIFFERENT notes are the only fixture that can
+      // fail if `SittingRow` regresses to picking one member's prose.
+      const NOTE_A = "Set up the invite template for the crew."
+      const NOTE_B = "Sent it out to the three team leads."
+      const memberEntries = [
+        makeEntry({
+          _id: "sitting-note-a" as unknown as Doc<"timeEntries">["_id"],
+          title: "Crew dropdowns",
+          startedAt: 0,
+          endedAt: 3_600_000,
+          note: NOTE_A,
+        }),
+        makeEntry({
+          _id: "sitting-note-b" as unknown as Doc<"timeEntries">["_id"],
+          title: "Crew dropdowns",
+          startedAt: 3_600_000,
+          endedAt: 7_200_000,
+          note: NOTE_B,
+        }),
+      ]
+      const sitting = toLogItems(memberEntries).find(
+        (item): item is Extract<LogItem, { kind: "sitting" }> => item.kind === "sitting"
+      )
+      if (sitting === undefined) throw new Error("fixture did not produce a sitting")
 
-      // The members carry times and controls, but no prose of their own — the
-      // duplication this feature exists to remove.
-      expect(screen.queryAllByRole("button", { name: /\+ add note/i })).toHaveLength(1)
+      // Rendered directly, not through `DayList`/`renderLog`: `SittingRow`
+      // never mounts a member row itself — `DayList` does that, only while
+      // expanded (`day-list.tsx:232`) — so this tree holds exactly one note
+      // control and a member's own note has nothing here it could satisfy.
+      const { container } = render(
+        <SittingRow
+          sitting={sitting}
+          timeZone="UTC"
+          use12Hour={false}
+          projects={[]}
+          tags={[]}
+          display="hms"
+          expanded={false}
+          onToggle={() => {}}
+          onResume={() => {}}
+          controls="sitting-panel"
+        />
+      )
+
+      const expectedNote = joinNotes(sitting.entries)
+      expect(expectedNote).toContain(NOTE_A)
+      expect(expectedNote).toContain(NOTE_B)
+
+      const noteButton = within(container)
+        .getAllByRole("button")
+        .find((button) => button.textContent === expectedNote)
+      expect(noteButton).toBeTruthy()
     })
 
     it("marks every member billable when the picked project bills by default", () => {
@@ -609,6 +629,38 @@ describe("grouped entries", () => {
       fireEvent.click(screen.getByLabelText("Not billable"))
 
       expect(onClassify).toHaveBeenCalledWith({ billable: true })
+    })
+
+    it("wires the tag picker to onClassify", () => {
+      const onClassify = vi.fn()
+      const FOCUS = {
+        _id: "tag-focus" as unknown as Id<"tags">,
+        _creationTime: 0,
+        userId: "user-1",
+        name: "Focus",
+        color: "amber",
+        archived: false,
+        updatedAt: 0,
+        deletedAt: null,
+      } as unknown as Doc<"tags">
+      renderSitting({ onClassify, tags: [FOCUS] })
+
+      fireEvent.click(screen.getByLabelText("Tags"))
+      fireEvent.click(screen.getByRole("option", { name: "Focus" }))
+
+      expect(onClassify).toHaveBeenCalledWith({ tagIds: [FOCUS._id] })
+    })
+
+    it("opens the note editor for the sitting from the parent's own note control", () => {
+      const onNoteOpen = vi.fn()
+      renderSitting({ onNoteOpen })
+
+      // `twice`'s one member note is enough to reach the note button here —
+      // this test is about the control firing `onNoteOpen`, not about what
+      // text it shows (that is the joined-notes test above).
+      fireEvent.click(screen.getByRole("button", { name: /Finished the assignment modal\./ }))
+
+      expect(onNoteOpen).toHaveBeenCalledTimes(1)
     })
 
     it("no longer counts noted members on the parent", () => {
