@@ -198,7 +198,7 @@ export function DayList({
             ).map((item, index) => {
               if (item.kind === "row") return row(item.entry)
 
-              const stateKey = `${group.day} ${item.key}`
+              const stateKey = `${group.day}\u0000${item.key}`
               // The DOM id cannot carry the NUL the state key does, and it does
               // not need to be stable across reorderings — only unique on the
               // page while it is rendered.
