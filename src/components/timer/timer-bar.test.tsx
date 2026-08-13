@@ -70,18 +70,21 @@ function Bar({
   actions,
   onError,
   use12Hour = true,
+  projects = [],
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
   onError?: (thrown: unknown) => void
   /** Overridable so a settings change arriving mid-interaction is testable. */
   use12Hour?: boolean
+  /** Overridable so a project's `billableByDefault` can be exercised. */
+  projects?: Array<Doc<"projects">>
 }) {
   return (
     <TimerBar
       running={running}
       actions={actions}
-      projects={[]}
+      projects={projects}
       tags={[]}
       timeZone={LONDON}
       use12Hour={use12Hour}
@@ -1021,5 +1024,223 @@ describe("staging a start from the idle popover", () => {
 
     const call = actions.start as ReturnType<typeof vi.fn>
     expect(call.mock.calls[0][0].startedAt).toBeUndefined()
+  })
+})
+
+/*
+ * THE PROJECT'S OWN DEFAULT, ON THE ENTRY THE BAR IS ABOUT TO WRITE.
+ *
+ * `startImpl` in convex/entries.ts has always read
+ * `args.billable ?? project?.billableByDefault ?? false`, with the comment "so
+ * a billable client's work is billable without the user remembering" — and the
+ * bar made that line unreachable. It staged `billable: false` and passed it
+ * explicitly, so the `??` short-circuited on every timer started from the
+ * product's primary surface. `ManualEntryDialog`, which passes no `billable` at
+ * all, inherited correctly the whole time; that asymmetry is the evidence the
+ * bar was the defect rather than the rule.
+ *
+ * SCOPED TO THE IDLE BAR. An entry that already exists still does not
+ * re-inherit when its project changes — see the test of that name in
+ * convex/entries.edit.test.ts, whose invariant this deliberately leaves alone.
+ * The difference is that here there is no entry yet, so there is no decision to
+ * reverse: lighting the toggle is the bar telling the truth about what Start is
+ * about to do.
+ */
+describe("billable, inherited from the project while idle", () => {
+  const billableProject = {
+    _id: "jd7billable" as unknown as Id<"projects">,
+    _creationTime: 0,
+    userId: "u",
+    name: "Acme",
+    color: "amber",
+    billableByDefault: true,
+    archived: false,
+    updatedAt: 0,
+    deletedAt: null,
+  } as unknown as Doc<"projects">
+
+  const proBonoProject = {
+    ...billableProject,
+    _id: "jd7probono" as unknown as Id<"projects">,
+    name: "Pro bono",
+    billableByDefault: false,
+  } as unknown as Doc<"projects">
+
+  /*
+   * Opens the picker and chooses a project by name.
+   *
+   * The trigger is matched by PREFIX, not by the exact string the plan for this
+   * work assumed: `ProjectPicker` labels it "Project" only while nothing is
+   * selected and `Project: Acme` afterwards, so an exact match would open the
+   * picker the first time and fail to find it the second — which is precisely
+   * the deselection path below.
+   */
+  const pick = (name: string) => {
+    fireEvent.click(screen.getByLabelText(/^Project/))
+    fireEvent.click(screen.getByRole("option", { name: new RegExp(name) }))
+  }
+
+  it("lights the toggle when the picked project bills by default", async () => {
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[billableProject]} />)
+
+    pick("Acme")
+    await vi.advanceTimersByTimeAsync(0)
+
+    // The toggle's own label IS its state — see `BillableToggle`.
+    expect(screen.getByLabelText("Billable")).toBeTruthy()
+  })
+
+  it("starts the timer billable, which is the whole point", async () => {
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[billableProject]} />)
+
+    pick("Acme")
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ billable: true })
+    )
+  })
+
+  it("leaves it alone for a project that does not bill by default", async () => {
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[proBonoProject]} />)
+
+    pick("Pro bono")
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ billable: false })
+    )
+  })
+
+  /*
+   * The user's own click is a decision. Inheritance is a convenience, and a
+   * convenience does not get to overrule a decision — the same principle
+   * convex/projects.ts states for an entry that already exists.
+   *
+   * BOTH DIRECTIONS, because they fail differently. A staged `true` being
+   * overwritten loses billable time silently; a staged `false` being
+   * overwritten bills a client for work the user marked unbillable. Only the
+   * first was in the plan for this work, and it is the less costly of the two.
+   */
+  it("never overrides an explicit yes with a project that says no", async () => {
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[proBonoProject]} />)
+
+    fireEvent.click(screen.getByLabelText("Not billable"))
+    pick("Pro bono")
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ billable: true })
+    )
+  })
+
+  it("never overrides an explicit no with a project that says yes", async () => {
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[billableProject]} />)
+
+    // On, then off again: the second click is what makes `false` a stated
+    // position rather than the value nobody has touched. The toggle is the
+    // only way to say it, so saying it costs two clicks from rest.
+    fireEvent.click(screen.getByLabelText("Not billable"))
+    fireEvent.click(screen.getByLabelText("Billable"))
+    pick("Acme")
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ billable: false })
+    )
+  })
+
+  it("clears the inherited flag when the project is cleared", async () => {
+    // The value only ever existed on the project's account, so it goes when
+    // the project does. Choosing the selected project again deselects it —
+    // see `ProjectPicker`'s `onChoose`.
+    const { actions } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[billableProject]} />)
+
+    pick("Acme")
+    await vi.advanceTimersByTimeAsync(0)
+    expect(screen.getByLabelText("Billable")).toBeTruthy()
+
+    pick("Acme")
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(screen.getByLabelText("Not billable")).toBeTruthy()
+  })
+
+  it("lets a suggestion's own flag win over the project's default", async () => {
+    // A suggestion carries the flag the user last used for that exact title,
+    // which is a real prior decision rather than a default. Driven with
+    // `mouseDown`, matching the suggestion tests above — the list closes on
+    // blur, so a click never lands.
+    const { actions } = makeActions()
+    render(
+      <TimerBar
+        running={null}
+        actions={actions}
+        projects={[billableProject]}
+        tags={[]}
+        suggestions={[
+          {
+            title: "Acme retainer",
+            projectId: billableProject._id,
+            tagIds: [],
+            billable: false,
+          },
+        ]}
+        timeZone={LONDON}
+        use12Hour
+        weekStartDay={1}
+        onCreateManual={vi.fn(async () => {})}
+      />
+    )
+
+    fireEvent.change(input(), { target: { value: "Acme ret" } })
+    fireEvent.mouseDown(screen.getByRole("option", { name: /Acme retainer/ }))
+    fireEvent.click(screen.getByLabelText("Start timer"))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(actions.start).toHaveBeenCalledWith(
+      expect.objectContaining({ billable: false })
+    )
+  })
+
+  it("carries the inherited flag into the idle popover's completed entry too", async () => {
+    /*
+     * Both idle write paths read `staged`, which is why the fix is there and
+     * not at either call site.
+     *
+     * ASSERTS THE WRITE, not the toggle. The plan for this work had this case
+     * checking `getByLabelText("Billable")` — which is what the first test in
+     * this block already checks, so it would have passed whether or not
+     * `createCompleted` ever saw the flag. That is the half of the bug this
+     * test exists for.
+     */
+    const fixedNow = Date.parse("2026-08-07T20:00:00Z")
+    vi.setSystemTime(fixedNow)
+    const { actions, createCompleted } = makeActions()
+    render(<Bar running={null} actions={actions} projects={[billableProject]} />)
+
+    pick("Acme")
+    await vi.advanceTimersByTimeAsync(0)
+
+    fireEvent.click(screen.getByRole("button", { name: /add a completed entry/i }))
+    fireEvent.change(screen.getByLabelText("End time"), {
+      target: { value: "9:05 PM" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /create entry/i }))
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(createCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ billable: true })
+    )
   })
 })

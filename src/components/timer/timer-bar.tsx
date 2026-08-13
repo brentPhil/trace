@@ -206,6 +206,23 @@ export function TimerBar({
   })
 
   /*
+   * WHETHER THE USER HAS SAID ANYTHING ABOUT BILLABLE THIS COMPOSITION.
+   *
+   * `staged.billable` cannot answer that on its own: `false` is both "no,
+   * don't bill this" and "nobody has mentioned it", and the two have to behave
+   * differently the moment a project with `billableByDefault` is picked. So
+   * the fact is recorded separately rather than encoded in the value.
+   *
+   * A SEPARATE FLAG rather than `boolean | null` on `staged.billable`, because
+   * `Classification` is shared with the row and the calendar popover, where a
+   * third state has no meaning and every consumer would have to narrow it.
+   *
+   * Reset wherever `staged` is, which is after each of the two idle writes:
+   * the next entry starts with nothing said about it.
+   */
+  const [billableDecided, setBillableDecided] = useState(false)
+
+  /*
    * The start instant before a timer exists — the same "no row to write to
    * yet" reasoning as `staged` above, extended to WHEN rather than only WHAT.
    *
@@ -264,7 +281,39 @@ export function TimerBar({
   /** Applies a classifier change to whichever of the two is currently real. */
   const applyClassification = (change: Partial<Classification>) => {
     if (running === null) {
-      setStaged((current) => ({ ...current, ...change }))
+      /*
+       * THE PROJECT'S DEFAULT, APPLIED WHERE NOTHING CAN BE OVERWRITTEN YET.
+       *
+       * `startImpl` reads `args.billable ?? project?.billableByDefault`, and
+       * this bar made that unreachable: it staged `false` and passed it
+       * explicitly, so every timer started here was non-billable however the
+       * project was configured. The derivation happens on the CLIENT rather
+       * than by omitting `billable` from the mutation, so that what the `$`
+       * shows is provably what gets written — two derivations could disagree
+       * whenever the cached project is behind the server's.
+       *
+       * Only while idle, and only until the user says otherwise. An entry that
+       * already exists never re-inherits: see convex/projects.ts on why an old
+       * billable flag "destroys the record of a decision", and the test of that
+       * name in convex/entries.edit.test.ts.
+       */
+      const decided = billableDecided || change.billable !== undefined
+      if (change.billable !== undefined) setBillableDecided(true)
+
+      const inherited =
+        change.projectId === undefined || decided
+          ? {}
+          : {
+              billable:
+                projects.find((project) => project._id === change.projectId)
+                  ?.billableByDefault ?? false,
+            }
+
+      // `...inherited` before `...change` so an explicit `billable` arriving in
+      // the same change always wins. Clearing the project finds nothing and
+      // derives `false`, which is the point: the flag only ever existed on the
+      // project's account.
+      setStaged((current) => ({ ...current, ...inherited, ...change }))
       return
     }
     // A row that does not exist yet cannot be patched; the start mutation is
@@ -406,6 +455,10 @@ export function TimerBar({
       tagIds: s.tagIds,
       billable: s.billable,
     })
+    // A SUGGESTION IS A DECISION, not a default: it carries the flag the user
+    // last used for this exact title. So the project it also sets must not
+    // then re-derive over the top of it.
+    setBillableDecided(true)
     setSuggestOpen(false)
     setSuggestIndex(-1)
     inputRef.current?.focus()
@@ -491,6 +544,7 @@ export function TimerBar({
         // would lose the classification (or silently re-arm a backdate) if
         // the start failed and the user pressed the button again.
         setStaged({ projectId: null, tagIds: [], billable: false })
+        setBillableDecided(false)
         clearStagedStart()
         setSuggestOpen(false)
         announce(
@@ -731,6 +785,7 @@ export function TimerBar({
             })
             setDraft({ key: null, text: "", dirty: false })
             setStaged({ projectId: null, tagIds: [], billable: false })
+            setBillableDecided(false)
           }}
           onStageStart={stageStart}
           onError={onError}
