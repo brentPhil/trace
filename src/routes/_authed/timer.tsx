@@ -768,6 +768,7 @@ export function Timer() {
               // straight through to every row — see `entry-row.tsx` for what a
               // row does with it.
               notesExpanded={notesExpanded}
+              grouped={settings.groupEntries}
               /*
                 NOT the onboarding copy, once a range is selected. "Nothing
                 tracked yet" means a new account, and it is flatly false of a

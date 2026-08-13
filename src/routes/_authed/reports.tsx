@@ -896,6 +896,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
             use12Hour={settings.timeFormat === "12"}
             weekStartDay={settings.weekStartDay}
             display={settings.durationDisplay}
+            grouped={settings.groupEntries}
             empty={
               <p className="px-4 py-12 text-sm text-muted-foreground">
                 Nothing here. Try a wider date range, or clear the filters.

@@ -36,6 +36,7 @@ export function EntryLog({
   empty,
   actions: entryActions,
   notesExpanded,
+  grouped,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -62,6 +63,9 @@ export function EntryLog({
    *  written out in full or clipped to one line. The page owns it, because it
    *  is a mode the reader is in rather than a property of any one entry. */
   notesExpanded?: boolean
+  /** Forwarded to `DayList` — the user's `groupEntries` setting. See there for
+   *  why the component's own default is the opposite of the setting's. */
+  grouped?: boolean
 }) {
   const { setNote } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
@@ -101,6 +105,7 @@ export function EntryLog({
         display={display}
         empty={empty}
         notesExpanded={notesExpanded}
+        grouped={grouped}
       />
       <NoteSheet
         entry={liveNoteEntry}

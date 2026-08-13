@@ -237,6 +237,32 @@ export function Settings() {
           </div>
         </Section>
 
+        {/*
+          A LONE CHECKBOX, where "Notes in the PDF report" above is a radio
+          pair — and the difference is which way the control faces. That one
+          governs what reaches a CLIENT, so both outcomes are spelled out
+          rather than inferred. This one is a view mode on the user's own
+          screen, reversible in one click and visible the moment it changes,
+          which is exactly the case `tabTitleClock` below is a checkbox for.
+        */}
+        <Section
+          title="Repeated entries"
+          hint="When you start and stop the same task several times in a day, the log can show them as one row with a count, expandable to the individual entries. Nothing is merged: every entry keeps its own times, note and controls, one click away. This changes only what you see — exports, invoices and totals are unaffected."
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.groupEntries}
+              onChange={(event) => save({ groupEntries: event.target.checked })}
+              // The neutral `--ink` accent every other control on this page
+              // uses. NOT `--enlarger`: a checked setting is not a timer
+              // running, and the Cold Light Rule reads the two differently.
+              className="size-4 accent-[var(--ink)]"
+            />
+            Group a day&apos;s repeats of the same entry
+          </label>
+        </Section>
+
         <Section
           title="Tab title"
           hint="Announced by screen readers whenever it changes, which is why it can be switched off. It updates once a minute rather than once a second for the same reason."

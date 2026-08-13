@@ -93,3 +93,47 @@ describe("/settings — notes in the PDF report", () => {
     expect(hint.textContent).toContain("CSV and XLSX exports never carry notes")
   })
 })
+
+/*
+ * /settings' grouping control — here for the same reason the block above is:
+ * the DEFAULT is the point, and this one defaults ON. `DayList`'s own `grouped`
+ * prop defaults OFF so the component stays honest in isolation, which means
+ * this screen is the only place the shipped default is asserted. A control that
+ * renders unchecked over a stored `true` would read as a feature nobody enabled.
+ */
+const groupBox = () =>
+  screen.getByLabelText("Group a day's repeats of the same entry") as HTMLInputElement
+
+describe("/settings — repeated entries", () => {
+  it("is on for an account that has never touched it", () => {
+    renderSettings({ groupEntries: true })
+    expect(groupBox().checked).toBe(true)
+  })
+
+  it("reflects an account that has turned it off", () => {
+    renderSettings({ groupEntries: false })
+    expect(groupBox().checked).toBe(false)
+  })
+
+  it("saves the moment it is switched off", async () => {
+    renderSettings({ groupEntries: true })
+    fireEvent.click(groupBox())
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ groupEntries: false }))
+  })
+
+  it("saves the moment it is switched back on", async () => {
+    renderSettings({ groupEntries: false })
+    fireEvent.click(groupBox())
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ groupEntries: true }))
+  })
+
+  /* The hint has to say what grouping does NOT touch. "Group repeats" reads as
+   * though entries were being merged into one, which would change what a client
+   * is billed for; nothing is merged and no total moves. */
+  it("says nothing is merged and no total moves", () => {
+    renderSettings()
+    const hint = screen.getByText(/When you start and stop the same task/)
+    expect(hint.textContent).toContain("Nothing is merged")
+    expect(hint.textContent).toContain("exports, invoices and totals are unaffected")
+  })
+})

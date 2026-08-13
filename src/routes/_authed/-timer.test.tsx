@@ -73,9 +73,11 @@ vi.mock("@/components/entries/entry-log", () => ({
   EntryLog: ({
     groups,
     notesExpanded,
+    grouped,
   }: {
     groups: Array<{ day: string }>
     notesExpanded?: boolean
+    grouped?: boolean
   }) => {
     useEffect(() => {
       logLifecycle.mounts += 1
@@ -88,7 +90,15 @@ vi.mock("@/components/entries/entry-log", () => ({
     // that what the header switch says is what the log was handed. What a ROW
     // then draws is `day-list.test.tsx`.
     return (
-      <div data-testid="entry-log" data-notes={notesExpanded === true ? "full" : "clipped"}>
+      <div
+        data-testid="entry-log"
+        data-notes={notesExpanded === true ? "full" : "clipped"}
+        // Printed for the same reason as the note mode, with one difference:
+        // this one is not the page's to own. It comes from `settings.get`, and
+        // all this page does is carry it down — so what is assertable here is
+        // that it arrives at all. What a row then draws is `day-list.test.tsx`.
+        data-grouped={grouped === true ? "on" : "off"}
+      >
         {groups.length} day groups
       </div>
     )
@@ -737,6 +747,21 @@ describe("Timer — reading the notes in full", () => {
 
     expect(notesButton().getAttribute("aria-pressed")).toBe("true")
     expect(logNotes()).toBe("full")
+  })
+})
+
+/* The setting reaches the log, or the whole feature is off however the account
+ * has it set. `SETTINGS.groupEntries` is the shipped default — true — and
+ * `DayList`'s own prop defaults false, so a page that forgets to pass it draws
+ * a flat log and nothing else complains. */
+describe("Timer — the grouping setting reaches the log", () => {
+  it("hands the log the account's own groupEntries", () => {
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [makeEntry({ title: "Client call" })],
+      isDone: true,
+    })
+    renderTimer()
+    expect(screen.getByTestId("entry-log").getAttribute("data-grouped")).toBe("on")
   })
 })
 

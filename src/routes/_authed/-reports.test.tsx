@@ -99,13 +99,17 @@ vi.mock("@/components/entries/entry-log", () => ({
   EntryLog: ({
     groups,
     empty,
+    grouped,
   }: {
     groups: Array<{ day: string; label: string; entries: Array<{ _id: string; title: string }> }>
     empty?: React.ReactNode
+    // Not this page's to own — it comes from `settings.get` and the page only
+    // carries it down, so it is printed rather than swallowed.
+    grouped?: boolean
   }) => {
     if (groups.length === 0) return <>{empty ?? null}</>
     return (
-      <div data-testid="entry-log">
+      <div data-testid="entry-log" data-grouped={grouped === true ? "on" : "off"}>
         {groups.map((group) => (
           <div key={group.day} data-testid={`day-${group.day}`}>
             <span>{group.label}</span>
@@ -578,6 +582,29 @@ describe("Reports — the log's own staleness", () => {
     // it with opacity alone, so a screen-reader user changing the range had no
     // way to know the rows below belonged to the range they just left.
     expect(screen.getByTestId("entry-alpha").closest('[aria-busy="true"]')).not.toBeNull()
+
+    dateSpy.mockRestore()
+  })
+})
+
+/* /timer is not the only page with a log, and the setting is one setting. A
+ * grouping that applied on one page and not the other would read as a bug in
+ * the grouping rather than a page that forgot to pass it down. */
+describe("Reports — the grouping setting reaches the log", () => {
+  it("hands the log the account's own groupEntries", async () => {
+    const today = dayOf(NOW, SETTINGS.timezone)
+    const range = rangeOf(reportsDefaultFilters(today, SETTINGS.weekStartDay), SETTINGS.timezone)
+
+    resolvePage(paginatedKey(api.entries.listPage, range), {
+      page: [makeEntry({ title: "Client call" })],
+      isDone: true,
+    })
+
+    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(NOW)
+    renderReports(() => {})
+
+    await waitFor(() => expect(screen.getByTestId("entry-log")).toBeTruthy())
+    expect(screen.getByTestId("entry-log").getAttribute("data-grouped")).toBe("on")
 
     dateSpy.mockRestore()
   })
