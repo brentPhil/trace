@@ -157,7 +157,7 @@ export function SittingRow({
           {/* The title/note column, mirroring `EntryRow`'s own. */}
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 flex-1 truncate text-base">{title}</span>
+              <span className="min-w-0 flex-1 truncate text-base font-medium">{title}</span>
               <div className="flex shrink-0 items-center gap-0.5">
                 <ProjectPicker
                   projects={projects}

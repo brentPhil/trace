@@ -335,10 +335,14 @@ describe("grouped entries", () => {
     }
   })
 
-  it("renders entry titles at the title scale", () => {
-    renderLog(false)
-    const title = screen.getAllByRole("button", { name: /Description:/ })[0]
-    expect(title.className).toContain("text-base")
+  it("renders entry and sitting titles at the title scale", () => {
+    renderLog(true)
+    const entryTitle = screen.getByRole("button", { name: "Description: Weekly retro" })
+    expect(entryTitle.className).toContain("text-base")
+
+    const sittingTitle = screen.getByText("Crew dropdowns")
+    expect(sittingTitle.className).toContain("text-base")
+    expect(sittingTitle.className).toContain("font-medium")
   })
 
   it("draws a stronger full-width boundary before later days", () => {
