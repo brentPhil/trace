@@ -247,6 +247,30 @@ export function useEntryEditMutations() {
     })
   )
 
+  const updateManyMutation = useLatest(
+    useConvexMutation(api.entries.updateMany).withOptimisticUpdate((localStore, args) => {
+      // `patchEverywhere` per id, so a sitting's members move together in the
+      // same commit rather than one row at a time. The patch body is the same
+      // one `update` applies — kept identical deliberately, because two
+      // spellings of "what this write does locally" is how the log and the
+      // server start disagreeing about a note.
+      for (const entryId of args.entryIds) {
+        patchEverywhere(localStore, entryId, (entry) => ({
+          ...entry,
+          ...(args.title !== undefined ? { title: args.title } : {}),
+          ...(args.note !== undefined
+            ? { note: args.note.trim() === "" ? undefined : args.note.trim() }
+            : {}),
+          ...(args.billable !== undefined ? { billable: args.billable } : {}),
+          ...(args.projectId !== undefined
+            ? { projectId: args.projectId ?? undefined }
+            : {}),
+          ...(args.tagIds !== undefined ? { tagIds: args.tagIds } : {}),
+        }))
+      }
+    })
+  )
+
   const editTimeMutation = useLatest(
     useConvexMutation(api.entries.editTime).withOptimisticUpdate((localStore, args) => {
       const now = Date.now()
@@ -319,6 +343,20 @@ export function useEntryEditMutations() {
     [updateMutation]
   )
 
+  const updateMany = useCallback(
+    async (args: {
+      entryIds: Array<Id<"timeEntries">>
+      title?: string
+      note?: string
+      projectId?: Id<"projects"> | null
+      tagIds?: Array<Id<"tags">>
+      billable?: boolean
+    }) => {
+      await updateManyMutation(args)
+    },
+    [updateManyMutation]
+  )
+
   const editTime = useCallback(
     async (entryId: Id<"timeEntries">, field: TimeEdit["field"], value: number) => {
       return await editTimeMutation({ entryId, field, value })
@@ -367,5 +405,5 @@ export function useEntryEditMutations() {
     [createMutation]
   )
 
-  return { setNote, update, editTime, remove, restore, create }
+  return { setNote, update, updateMany, editTime, remove, restore, create }
 }
