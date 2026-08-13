@@ -18,6 +18,7 @@ import schema from "./schema"
 import { api, internal } from "./_generated/api"
 import { SETTINGS_DEFAULTS } from "./settings"
 import { traceErrorCode } from "./lib/codes"
+import { MAX_LOGO_BYTES } from "./lib/logo"
 
 const modules = import.meta.glob("./**/*.*s")
 const setup = () => convexTest(schema, modules)
@@ -25,7 +26,10 @@ const setup = () => convexTest(schema, modules)
 const ALICE = "user_alice"
 const BOB = "user_bob"
 
-async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
+async function expectCode(
+  promise: Promise<unknown>,
+  code: string
+): Promise<void> {
   try {
     await promise
   } catch (error) {
@@ -44,6 +48,16 @@ describe("authorization", () => {
       t.mutation(api.settings.update, { weekStartDay: 0 }),
       "UNAUTHENTICATED"
     )
+    await expectCode(
+      t.mutation(api.settings.generateLogoUploadUrl, {}),
+      "UNAUTHENTICATED"
+    )
+    const storageId = await storedBlob(t, "image/png", 1)
+    await expectCode(
+      t.action(api.settings.setLogo, { storageId }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(t.mutation(api.settings.clearLogo, {}), "UNAUTHENTICATED")
   })
 
   it("keeps one user's settings invisible to another", async () => {
@@ -76,9 +90,10 @@ describe("authorization", () => {
 describe("defaults", () => {
   it("returns the defaults for a user who has never opened settings", async () => {
     const t = setup()
-    expect(await t.query(internal.settings.getAs, { userId: ALICE })).toEqual(
-      SETTINGS_DEFAULTS
-    )
+    expect(await t.query(internal.settings.getAs, { userId: ALICE })).toEqual({
+      ...SETTINGS_DEFAULTS,
+      logoUrl: null,
+    })
   })
 
   /**
@@ -230,15 +245,24 @@ describe("update", () => {
     // send someone to fix a timezone that is perfectly fine.
     const t = setup()
     await expectCode(
-      t.mutation(internal.settings.updateAs, { userId: ALICE, weekStartDay: 7 }),
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        weekStartDay: 7,
+      }),
       "INVALID_WEEK_START"
     )
     await expectCode(
-      t.mutation(internal.settings.updateAs, { userId: ALICE, weekStartDay: -1 }),
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        weekStartDay: -1,
+      }),
       "INVALID_WEEK_START"
     )
     await expectCode(
-      t.mutation(internal.settings.updateAs, { userId: ALICE, weekStartDay: 1.5 }),
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        weekStartDay: 1.5,
+      }),
       "INVALID_WEEK_START"
     )
   })
@@ -264,7 +288,10 @@ describe("update", () => {
   it("accepts every weekStartDay the UI can produce", async () => {
     const t = setup()
     for (let day = 0; day <= 6; day += 1) {
-      await t.mutation(internal.settings.updateAs, { userId: ALICE, weekStartDay: day })
+      await t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        weekStartDay: day,
+      })
       const settings = await t.query(internal.settings.getAs, { userId: ALICE })
       expect(settings.weekStartDay).toBe(day)
     }
@@ -274,20 +301,31 @@ describe("update", () => {
     const t = setup()
     // A row that has never set a currency reads back the default rather than
     // `undefined` — the additive-column fallback in `getImpl`.
-    const beforeAnyRow = await t.query(internal.settings.getAs, { userId: ALICE })
+    const beforeAnyRow = await t.query(internal.settings.getAs, {
+      userId: ALICE,
+    })
     expect(beforeAnyRow.currency).toBe("USD")
 
-    await t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "SGD" })
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      currency: "SGD",
+    })
     const settings = await t.query(internal.settings.getAs, { userId: ALICE })
     expect(settings.currency).toBe("SGD")
   })
 
   it("refuses a currency the runtime does not recognise, leaving the stored one untouched", async () => {
     const t = setup()
-    await t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "SGD" })
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      currency: "SGD",
+    })
 
     await expectCode(
-      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "NOTREAL" }),
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        currency: "NOTREAL",
+      }),
       "INVALID_CURRENCY"
     )
 
@@ -322,11 +360,17 @@ describe("update", () => {
     // hundredth and `hourlyRateCents` is.
     const t = setup()
     await expectCode(
-      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "JPY" }),
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        currency: "JPY",
+      }),
       "INVALID_CURRENCY"
     )
     await expectCode(
-      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "KWD" }),
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        currency: "KWD",
+      }),
       "INVALID_CURRENCY"
     )
   })
@@ -334,7 +378,10 @@ describe("update", () => {
   it("refuses a real code in the wrong case", async () => {
     const t = setup()
     await expectCode(
-      t.mutation(internal.settings.updateAs, { userId: ALICE, currency: "usd" }),
+      t.mutation(internal.settings.updateAs, {
+        userId: ALICE,
+        currency: "usd",
+      }),
       "INVALID_CURRENCY"
     )
   })
@@ -369,14 +416,157 @@ describe("groupEntries", () => {
 
   it("can be switched off and back on", async () => {
     const t = setup()
-    await t.mutation(internal.settings.updateAs, { userId: ALICE, groupEntries: false })
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      groupEntries: false,
+    })
     expect(
       (await t.query(internal.settings.getAs, { userId: ALICE })).groupEntries
     ).toBe(false)
 
-    await t.mutation(internal.settings.updateAs, { userId: ALICE, groupEntries: true })
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      groupEntries: true,
+    })
     expect(
       (await t.query(internal.settings.getAs, { userId: ALICE })).groupEntries
     ).toBe(true)
+  })
+})
+
+describe("mergeInvoiceLines", () => {
+  it("reads as true for a row written before the column existed", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("userSettings", {
+        userId: ALICE,
+        timezone: "UTC",
+        weekStartDay: 1,
+        durationDisplay: "hms",
+        timeFormat: "24",
+        runawayThresholdMs: 8 * 60 * 60 * 1000,
+        tabTitleClock: true,
+        updatedAt: Date.now(),
+      })
+    })
+
+    expect(
+      (await t.query(internal.settings.getAs, { userId: ALICE }))
+        .mergeInvoiceLines
+    ).toBe(true)
+  })
+
+  it("can be switched off and back on", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      mergeInvoiceLines: false,
+    })
+    expect(
+      (await t.query(internal.settings.getAs, { userId: ALICE }))
+        .mergeInvoiceLines
+    ).toBe(false)
+
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      mergeInvoiceLines: true,
+    })
+    expect(
+      (await t.query(internal.settings.getAs, { userId: ALICE }))
+        .mergeInvoiceLines
+    ).toBe(true)
+  })
+})
+
+async function storedBlob(
+  t: ReturnType<typeof setup>,
+  type: string,
+  size: number
+) {
+  return await t.run(
+    async (ctx) =>
+      await ctx.storage.store(new Blob([new Uint8Array(size)], { type }))
+  )
+}
+
+describe("invoice logo", () => {
+  it("returns no logo for an account with no settings row", async () => {
+    const t = setup()
+    expect(
+      (await t.query(internal.settings.getAs, { userId: ALICE })).logoUrl
+    ).toBeNull()
+  })
+
+  it.each(["image/png", "image/jpeg"])(
+    "accepts a %s file within the bound",
+    async (type) => {
+      const t = setup()
+      const storageId = await storedBlob(t, type, 32)
+
+      await t.action(internal.settings.setLogoAs, { userId: ALICE, storageId })
+
+      const row = await t.run(
+        async (ctx) =>
+          await ctx.db
+            .query("userSettings")
+            .withIndex("by_user", (q) => q.eq("userId", ALICE))
+            .first()
+      )
+      expect(row?.logoStorageId).toBe(storageId)
+      expect(
+        (await t.query(internal.settings.getAs, { userId: ALICE })).logoUrl
+      ).not.toBeNull()
+    }
+  )
+
+  it("refuses and deletes an upload whose content type is not PNG or JPEG", async () => {
+    const t = setup()
+    const storageId = await storedBlob(t, "image/gif", 32)
+
+    await expectCode(
+      t.action(internal.settings.setLogoAs, { userId: ALICE, storageId }),
+      "INVALID_LOGO"
+    )
+    expect(
+      await t.run(async (ctx) => await ctx.db.system.get("_storage", storageId))
+    ).toBeNull()
+  })
+
+  it("refuses and deletes an upload larger than one MiB", async () => {
+    const t = setup()
+    const storageId = await storedBlob(t, "image/png", MAX_LOGO_BYTES + 1)
+
+    await expectCode(
+      t.action(internal.settings.setLogoAs, { userId: ALICE, storageId }),
+      "INVALID_LOGO"
+    )
+    expect(
+      await t.run(async (ctx) => await ctx.db.system.get("_storage", storageId))
+    ).toBeNull()
+  })
+
+  it("repoints and clears the setting without deleting accepted files", async () => {
+    const t = setup()
+    const first = await storedBlob(t, "image/png", 32)
+    const second = await storedBlob(t, "image/jpeg", 32)
+    await t.action(internal.settings.setLogoAs, {
+      userId: ALICE,
+      storageId: first,
+    })
+    await t.action(internal.settings.setLogoAs, {
+      userId: ALICE,
+      storageId: second,
+    })
+
+    expect(
+      await t.run(async (ctx) => await ctx.db.system.get("_storage", first))
+    ).not.toBeNull()
+    await t.mutation(internal.settings.clearLogoAs, { userId: ALICE })
+    expect(
+      await t.run(async (ctx) => await ctx.db.system.get("_storage", second))
+    ).not.toBeNull()
+    expect(
+      (await t.query(internal.settings.getAs, { userId: ALICE })).logoUrl
+    ).toBeNull()
   })
 })

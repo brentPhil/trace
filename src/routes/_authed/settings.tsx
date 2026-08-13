@@ -1,8 +1,13 @@
 import { useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
-import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
+import {
+  convexQuery,
+  useConvexAction,
+  useConvexMutation,
+} from "@convex-dev/react-query"
 import { Page } from "@/components/shell/page"
+import { Button } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
@@ -11,7 +16,13 @@ import { rateHelp } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
 import { pageTitle } from "@shared/brand"
 import { formatMoney, parseMoney, supportedCurrencies } from "@shared/money"
+import {
+  LOGO_INPUT_ACCEPT,
+  MAX_LOGO_BYTES,
+  isAcceptedLogoContentType,
+} from "@shared/logo"
 import { api } from "../../../convex/_generated/api"
+import type { Id } from "../../../convex/_generated/dataModel"
 
 export const Route = createFileRoute("/_authed/settings")({
   head: () => ({ meta: [{ title: pageTitle("Settings") }] }),
@@ -41,12 +52,53 @@ const RUNAWAY_CHOICES = [4, 6, 8, 10, 12, 24]
 export function Settings() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const update = useLatest(useConvexMutation(api.settings.update))
+  const generateLogoUploadUrl = useLatest(
+    useConvexMutation(api.settings.generateLogoUploadUrl)
+  )
+  const clearLogo = useLatest(useConvexMutation(api.settings.clearLogo))
+  const setLogo = useLatest(useConvexAction(api.settings.setLogo))
   const toasts = Toast.useToastManager()
+  const [logoBusy, setLogoBusy] = useState(false)
 
   const save = (patch: Parameters<typeof update>[0]) => {
     void update(patch).catch((thrown: unknown) => {
       toasts.add({ title: errorMessage(thrown), priority: "high" })
     })
+  }
+
+  const uploadLogo = async (file: File) => {
+    if (!isAcceptedLogoContentType(file.type) || file.size > MAX_LOGO_BYTES) {
+      toasts.add({
+        title: "Use a PNG or JPEG logo no larger than 1 MB.",
+        priority: "high",
+      })
+      return
+    }
+
+    setLogoBusy(true)
+    try {
+      const uploadUrl = await generateLogoUploadUrl({})
+      const response = await fetch(uploadUrl, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      })
+      if (!response.ok) throw new Error("upload failed")
+      const payload: unknown = await response.json()
+      const storageId =
+        typeof payload === "object" &&
+        payload !== null &&
+        "storageId" in payload &&
+        typeof payload.storageId === "string"
+          ? payload.storageId
+          : null
+      if (storageId === null) throw new Error("upload returned no id")
+      await setLogo({ storageId: storageId as Id<"_storage"> })
+    } catch (thrown) {
+      toasts.add({ title: errorMessage(thrown), priority: "high" })
+    } finally {
+      setLogoBusy(false)
+    }
   }
 
   return (
@@ -87,7 +139,9 @@ export function Settings() {
           <select
             aria-label="Week starts on"
             value={settings.weekStartDay}
-            onChange={(event) => save({ weekStartDay: Number(event.target.value) })}
+            onChange={(event) =>
+              save({ weekStartDay: Number(event.target.value) })
+            }
             className={fieldClass}
           >
             {WEEKDAYS.map((name, index) => (
@@ -151,7 +205,9 @@ export function Settings() {
             aria-label="Warn after"
             value={Math.round(settings.runawayThresholdMs / 3_600_000)}
             onChange={(event) =>
-              save({ runawayThresholdMs: Number(event.target.value) * 3_600_000 })
+              save({
+                runawayThresholdMs: Number(event.target.value) * 3_600_000,
+              })
             }
             className={fieldClass}
           >
@@ -203,8 +259,27 @@ export function Settings() {
           <RateField
             cents={settings.defaultHourlyRateCents}
             currency={settings.currency}
-            onChange={(defaultHourlyRateCents) => save({ defaultHourlyRateCents })}
+            onChange={(defaultHourlyRateCents) =>
+              save({ defaultHourlyRateCents })
+            }
           />
+        </Section>
+
+        <Section
+          title="Invoice lines"
+          hint="New invoices combine project rows when one hourly rate can still explain the arithmetic. You can override this while composing an invoice without changing the account default. Projects with different rates always stay separate."
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.mergeInvoiceLines}
+              onChange={(event) =>
+                save({ mergeInvoiceLines: event.target.checked })
+              }
+              className="size-4 accent-[var(--ink)]"
+            />
+            Merge same-rate projects into one invoice line
+          </label>
         </Section>
 
         {/*
@@ -271,7 +346,9 @@ export function Settings() {
             <input
               type="checkbox"
               checked={settings.tabTitleClock}
-              onChange={(event) => save({ tabTitleClock: event.target.checked })}
+              onChange={(event) =>
+                save({ tabTitleClock: event.target.checked })
+              }
               // NOT `--enlarger`: this checkbox's own CHECKED state is a
               // setting being toggled, not a timer running — the Cold Light
               // Rule reads it the same way it reads a checked box anywhere
@@ -282,6 +359,67 @@ export function Settings() {
             />
             Show the running timer in the browser tab
           </label>
+        </Section>
+
+        <Section
+          title="Invoice logo"
+          hint="This logo is snapshotted when an invoice is raised. Replacing or removing it here does not change invoices that already carry it."
+        >
+          <div className="flex flex-col items-start gap-3">
+            {settings.logoUrl === null ? (
+              <p className="text-sm text-muted-foreground">No logo selected.</p>
+            ) : (
+              <div className="flex h-24 w-full items-center justify-start overflow-hidden rounded-md border border-edge-soft bg-ground p-3">
+                <img
+                  src={settings.logoUrl}
+                  alt=""
+                  className="max-h-full max-w-full object-contain object-left"
+                />
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm">
+                <span className="sr-only">Invoice logo file</span>
+                <input
+                  type="file"
+                  accept={LOGO_INPUT_ACCEPT}
+                  disabled={logoBusy}
+                  aria-label="Invoice logo file"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file !== undefined) void uploadLogo(file)
+                    event.target.value = ""
+                  }}
+                  className="max-w-full text-sm file:mr-3 file:rounded-md file:border file:border-edge file:bg-ground file:px-2 file:py-1.5 file:text-sm"
+                />
+              </label>
+              {settings.logoUrl === null ? null : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={logoBusy}
+                  onClick={() => {
+                    setLogoBusy(true)
+                    void clearLogo({})
+                      .catch((thrown: unknown) => {
+                        toasts.add({
+                          title: errorMessage(thrown),
+                          priority: "high",
+                        })
+                      })
+                      .finally(() => setLogoBusy(false))
+                  }}
+                >
+                  Remove logo
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              PNG or JPEG, up to {MAX_LOGO_BYTES / (1024 * 1024)} MB.
+            </p>
+          </div>
         </Section>
       </div>
     </Page>
@@ -382,7 +520,9 @@ function RateField({
   // Seeded with the bare number, no currency symbol, so the input round-trips
   // through `parseMoney` cleanly — the DISPLAY is where a symbol belongs. The
   // same split /projects makes for a project's own rate.
-  const [text, setText] = useState(cents === undefined ? "" : (cents / 100).toFixed(2))
+  const [text, setText] = useState(
+    cents === undefined ? "" : (cents / 100).toFixed(2)
+  )
   const [error, setError] = useState<string | null>(null)
 
   const commit = () => {
@@ -424,7 +564,11 @@ function RateField({
               setText(cents === undefined ? "" : (cents / 100).toFixed(2))
             }
           }}
-          className={cn(fieldClass, "w-32 tabular", error !== null && "border-alarm")}
+          className={cn(
+            fieldClass,
+            "tabular w-32",
+            error !== null && "border-alarm"
+          )}
         />
         <span className="text-sm text-muted-foreground">
           per hour
@@ -497,7 +641,9 @@ function Section({
       <div className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">{title}</h2>
         {hint === undefined ? null : (
-          <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            {hint}
+          </p>
         )}
       </div>
       <div className="pt-1 lg:pt-0">{children}</div>
@@ -533,7 +679,7 @@ function Radio({
 /** What the choice actually looks like, rather than a description of it. */
 function Sample({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-sm border border-edge-soft px-1.5 py-0.5 text-xs tabular text-muted-foreground">
+    <span className="tabular rounded-sm border border-edge-soft px-1.5 py-0.5 text-xs text-muted-foreground">
       {children}
     </span>
   )

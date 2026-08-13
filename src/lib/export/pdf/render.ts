@@ -1,8 +1,8 @@
 import { PDFDocument, rgb } from "pdf-lib"
 import fontkit from "@pdf-lib/fontkit"
 import { PAGE, PAPER } from "./paper"
-import type { PdfPage } from "./ops"
-import type { PDFFont, PDFPage } from "pdf-lib"
+import type { ImageOp, PdfPage } from "./ops"
+import type { PDFImage, PDFFont, PDFPage } from "pdf-lib"
 
 // The two TTF weights this document embeds — regular body text and every
 // `bold: true` op (headings, TOTAL, tile values). `?url` keeps Vite from
@@ -67,6 +67,39 @@ function drawHatch(
   }
 }
 
+type ImageDocument = {
+  embedPng: (data: Uint8Array) => Promise<PDFImage>
+  embedJpg: (data: Uint8Array) => Promise<PDFImage>
+}
+
+/** Draw optional decoration without allowing malformed bytes to sink the PDF. */
+export async function drawImageOp(
+  doc: ImageDocument,
+  page: Pick<PDFPage, "drawImage">,
+  op: ImageOp
+): Promise<void> {
+  try {
+    const embedded =
+      op.format === "png"
+        ? await doc.embedPng(op.data)
+        : await doc.embedJpg(op.data)
+    const scale = Math.min(
+      op.width / embedded.width,
+      op.height / embedded.height
+    )
+    const width = embedded.width * scale
+    const height = embedded.height * scale
+    page.drawImage(embedded, {
+      x: op.x + op.width - width,
+      y: op.y + op.height - height,
+      width,
+      height,
+    })
+  } catch {
+    // A logo is decoration; line items and totals must still produce a PDF.
+  }
+}
+
 export async function renderPages(pages: Array<PdfPage>): Promise<Blob> {
   const doc = await PDFDocument.create()
   // Embedding a TTF (rather than one of pdf-lib's built-in `StandardFonts`)
@@ -120,7 +153,13 @@ export async function renderPages(pages: Array<PdfPage>): Promise<Blob> {
         // coordinate in `ops.ts` is y-up PDF user space. `scale: -1` on y is
         // what reconciles them, and it is done here rather than in the path
         // builder so the ops stay in one coordinate system.
-        page.drawSvgPath(op.d, { x: op.x, y: PAGE.height, color: rgb(...op.color) })
+        page.drawSvgPath(op.d, {
+          x: op.x,
+          y: PAGE.height,
+          color: rgb(...op.color),
+        })
+      } else if (op.kind === "image") {
+        await drawImageOp(doc, page, op)
       } else {
         drawHatch(page, op)
       }

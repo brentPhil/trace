@@ -26,6 +26,8 @@ export const SETTINGS = {
   currency: "USD",
   pdfIncludeNotes: false,
   groupEntries: true,
+  mergeInvoiceLines: true,
+  logoUrl: null,
 }
 
 /**

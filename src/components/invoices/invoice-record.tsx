@@ -20,6 +20,7 @@ type Invoice = {
   purchaseOrder?: string
   paymentTerms?: string
   notes?: string
+  logoUrl: string | null
   taxes: ReadonlyArray<{ label: string; basisPoints: number }>
   lines: ReadonlyArray<Line>
 }
@@ -116,19 +117,31 @@ export function InvoiceRecord({
           screen rather than as the first line of a document. It is an `<h1>`
           because it is this page's subject.
         */}
-        <h1 className="text-2xl font-medium tracking-[-0.01em]">Invoice</h1>
+        <div className="flex min-h-12 items-start justify-between gap-6">
+          <h1 className="text-2xl font-medium tracking-[-0.01em]">Invoice</h1>
+          {invoice.logoUrl === null ? null : (
+            <img
+              src={invoice.logoUrl}
+              alt=""
+              className="max-h-12 max-w-40 object-contain"
+            />
+          )}
+        </div>
 
         {/* A `<dl>`: this is a document's name/value list, and it is what makes
             "Due date" read as the name of the value beside it. */}
         <dl className="flex flex-col gap-2">
           {metaRows.map((row) => (
-            <div key={row.label} className="grid grid-cols-[9rem_1fr] items-baseline gap-3">
+            <div
+              key={row.label}
+              className="grid grid-cols-[9rem_1fr] items-baseline gap-3"
+            >
               <dt className="text-[0.8125rem] font-medium text-muted-foreground">
                 {row.label}
               </dt>
               {/* Tabular on every one of them: a number, a date and an invoice
                   id are all digits somebody reads down a column. */}
-              <dd className="min-w-0 text-sm tabular">{row.value}</dd>
+              <dd className="tabular min-w-0 text-sm">{row.value}</dd>
             </div>
           ))}
         </dl>
@@ -191,7 +204,9 @@ export function InvoiceRecord({
 function PartyBlockRecord({ label, value }: { label: string; value: string }) {
   return (
     <dl className="flex min-w-0 flex-col gap-1.5">
-      <dt className="text-[0.8125rem] font-medium text-muted-foreground">{label}</dt>
+      <dt className="text-[0.8125rem] font-medium text-muted-foreground">
+        {label}
+      </dt>
       <dd className="text-sm leading-relaxed whitespace-pre-line">{value}</dd>
     </dl>
   )

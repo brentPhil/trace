@@ -1,11 +1,21 @@
 import { v } from "convex/values"
-import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server"
+import { internal } from "./_generated/api"
 import { requireUserId } from "./auth"
 import { traceError } from "./errors"
 import { checkRate } from "./projects"
 import { isValidTimeZone } from "./lib/day"
 import { isValidCurrency } from "./lib/money"
-import type { MutationCtx, QueryCtx } from "./_generated/server"
+import { MAX_LOGO_BYTES, isAcceptedLogoContentType } from "./lib/logo"
+import type { Id } from "./_generated/dataModel"
+import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server"
 
 /**
  * Defaults for a user who has never opened settings.
@@ -40,6 +50,8 @@ export type Settings = {
   /** Collapse a day's repeats of one title+project into a single log row. See
    *  the schema for why this default is on where `pdfIncludeNotes` is off. */
   groupEntries: boolean
+  /** Collapse same-rate project lines on newly composed invoices. */
+  mergeInvoiceLines: boolean
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -52,6 +64,7 @@ export const SETTINGS_DEFAULTS: Settings = {
   currency: "USD",
   pdfIncludeNotes: false,
   groupEntries: true,
+  mergeInvoiceLines: true,
 }
 
 async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
@@ -72,11 +85,16 @@ const settingsReturns = v.object({
   currency: v.string(),
   pdfIncludeNotes: v.boolean(),
   groupEntries: v.boolean(),
+  mergeInvoiceLines: v.boolean(),
+  logoUrl: v.union(v.string(), v.null()),
 })
 
-async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
+async function getImpl(
+  ctx: QueryCtx,
+  userId: string
+): Promise<Settings & { logoUrl: string | null }> {
   const row = await readSettings(ctx, userId)
-  if (row === null) return SETTINGS_DEFAULTS
+  if (row === null) return { ...SETTINGS_DEFAULTS, logoUrl: null }
   return {
     timezone: row.timezone,
     defaultHourlyRateCents: row.defaultHourlyRateCents,
@@ -93,6 +111,12 @@ async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
     pdfIncludeNotes: row.pdfIncludeNotes ?? SETTINGS_DEFAULTS.pdfIncludeNotes,
     // Same additive-column fallback as `currency` and `pdfIncludeNotes` above.
     groupEntries: row.groupEntries ?? SETTINGS_DEFAULTS.groupEntries,
+    mergeInvoiceLines:
+      row.mergeInvoiceLines ?? SETTINGS_DEFAULTS.mergeInvoiceLines,
+    logoUrl:
+      row.logoStorageId === undefined
+        ? null
+        : await ctx.storage.getUrl(row.logoStorageId),
   }
 }
 
@@ -121,9 +145,29 @@ export async function defaultRateCents(
  * meaning into that file, and without a second, hand-copied fallback to
  * `SETTINGS_DEFAULTS.currency` drifting from this one.
  */
-export async function currencyOf(ctx: QueryCtx, userId: string): Promise<string> {
+export async function currencyOf(
+  ctx: QueryCtx,
+  userId: string
+): Promise<string> {
   const row = await readSettings(ctx, userId)
   return row?.currency ?? SETTINGS_DEFAULTS.currency
+}
+
+/** The account preference used only when an invoice caller sends no override. */
+export async function mergeInvoiceLinesOf(
+  ctx: QueryCtx,
+  userId: string
+): Promise<boolean> {
+  const row = await readSettings(ctx, userId)
+  return row?.mergeInvoiceLines ?? SETTINGS_DEFAULTS.mergeInvoiceLines
+}
+
+/** Current logo pointer for snapshotting onto a newly raised invoice. */
+export async function logoStorageIdOf(
+  ctx: QueryCtx,
+  userId: string
+): Promise<Id<"_storage"> | undefined> {
+  return (await readSettings(ctx, userId))?.logoStorageId
 }
 
 export const get = query({
@@ -161,7 +205,11 @@ export const getAs = internalQuery({
  * That property is what makes the seeding call safe to repeat, and also what
  * makes getting the FIRST one right non-negotiable.
  */
-async function ensureImpl(ctx: MutationCtx, userId: string, suggested?: string) {
+async function ensureImpl(
+  ctx: MutationCtx,
+  userId: string,
+  suggested?: string
+) {
   if ((await readSettings(ctx, userId)) !== null) return null
 
   const timezone =
@@ -202,6 +250,7 @@ const updateArgs = {
   currency: v.optional(v.string()),
   pdfIncludeNotes: v.optional(v.boolean()),
   groupEntries: v.optional(v.boolean()),
+  mergeInvoiceLines: v.optional(v.boolean()),
   /** `null` CLEARS it, `undefined` leaves it alone — the same three-state
    *  shape `projects.update` uses for the same field, because "set it to
    *  nothing" and "do not touch it" are different requests. */
@@ -218,12 +267,16 @@ type UpdateArgs = {
   currency?: string
   pdfIncludeNotes?: boolean
   groupEntries?: boolean
+  mergeInvoiceLines?: boolean
   defaultHourlyRateCents?: number | null
 }
 
 async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
   if (args.timezone !== undefined && !isValidTimeZone(args.timezone)) {
-    traceError("INVALID_TIMEZONE", `"${args.timezone}" is not a timezone I know.`)
+    traceError(
+      "INVALID_TIMEZONE",
+      `"${args.timezone}" is not a timezone I know.`
+    )
   }
   if (
     args.weekStartDay !== undefined &&
@@ -267,7 +320,11 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
     updatedAt: Date.now(),
   }
   if (row === null) {
-    await ctx.db.insert("userSettings", { userId, ...SETTINGS_DEFAULTS, ...patch })
+    await ctx.db.insert("userSettings", {
+      userId,
+      ...SETTINGS_DEFAULTS,
+      ...patch,
+    })
   } else {
     await ctx.db.patch(row._id, patch)
   }
@@ -277,11 +334,156 @@ async function updateImpl(ctx: MutationCtx, userId: string, args: UpdateArgs) {
 export const update = mutation({
   args: updateArgs,
   returns: v.null(),
-  handler: async (ctx, args) => await updateImpl(ctx, await requireUserId(ctx), args),
+  handler: async (ctx, args) =>
+    await updateImpl(ctx, await requireUserId(ctx), args),
 })
 
 export const updateAs = internalMutation({
   args: { ...updateArgs, userId: v.string() },
   returns: v.null(),
-  handler: async (ctx, { userId, ...args }) => await updateImpl(ctx, userId, args),
+  handler: async (ctx, { userId, ...args }) =>
+    await updateImpl(ctx, userId, args),
+})
+
+export const generateLogoUploadUrl = mutation({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    await requireUserId(ctx)
+    return await ctx.storage.generateUploadUrl()
+  },
+})
+
+async function acceptLogoImpl(
+  ctx: MutationCtx,
+  userId: string,
+  storageId: Id<"_storage">
+) {
+  const metadata = await ctx.db.system.get("_storage", storageId)
+  if (metadata === null || metadata.size > MAX_LOGO_BYTES) {
+    traceError("INVALID_LOGO", "Use a PNG or JPEG logo no larger than 1 MB.")
+  }
+
+  const row = await readSettings(ctx, userId)
+  if (row === null) {
+    await ctx.db.insert("userSettings", {
+      userId,
+      ...SETTINGS_DEFAULTS,
+      logoStorageId: storageId,
+      updatedAt: Date.now(),
+    })
+  } else {
+    await ctx.db.patch(row._id, {
+      logoStorageId: storageId,
+      updatedAt: Date.now(),
+    })
+  }
+  return null
+}
+
+const logoArgs = { storageId: v.id("_storage") }
+
+export const acceptLogo = internalMutation({
+  args: { ...logoArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await acceptLogoImpl(ctx, args.userId, args.storageId),
+})
+
+export const deleteLogoUpload = internalMutation({
+  args: logoArgs,
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    if ((await ctx.db.system.get("_storage", args.storageId)) !== null) {
+      await ctx.storage.delete(args.storageId)
+    }
+    return null
+  },
+})
+
+const logoMetadata = v.union(
+  v.null(),
+  v.object({ contentType: v.optional(v.string()), size: v.number() })
+)
+
+export const readLogoMetadata = internalQuery({
+  args: logoArgs,
+  returns: logoMetadata,
+  handler: async (ctx, args) => {
+    const row = await ctx.db.system.get("_storage", args.storageId)
+    return row === null
+      ? null
+      : { contentType: row.contentType, size: row.size }
+  },
+})
+
+export const logoUserId = internalQuery({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => await requireUserId(ctx),
+})
+
+async function setLogoAction(
+  ctx: ActionCtx,
+  userId: string,
+  storageId: Id<"_storage">
+): Promise<null> {
+  const metadata = await ctx.runQuery(internal.settings.readLogoMetadata, {
+    storageId,
+  })
+  const blob =
+    metadata !== null && metadata.contentType === undefined
+      ? await ctx.storage.get(storageId)
+      : null
+  const contentType = metadata?.contentType ?? blob?.type
+  if (
+    metadata === null ||
+    !isAcceptedLogoContentType(contentType) ||
+    metadata.size > MAX_LOGO_BYTES
+  ) {
+    await ctx.runMutation(internal.settings.deleteLogoUpload, { storageId })
+    traceError("INVALID_LOGO", "Use a PNG or JPEG logo no larger than 1 MB.")
+  }
+
+  await ctx.runMutation(internal.settings.acceptLogo, { userId, storageId })
+  return null
+}
+
+export const setLogo = action({
+  args: logoArgs,
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    const userId: string = await ctx.runQuery(internal.settings.logoUserId, {})
+    return await setLogoAction(ctx, userId, args.storageId)
+  },
+})
+
+export const setLogoAs = internalAction({
+  args: { ...logoArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setLogoAction(ctx, args.userId, args.storageId),
+})
+
+async function clearLogoImpl(ctx: MutationCtx, userId: string) {
+  const row = await readSettings(ctx, userId)
+  if (row !== null) {
+    await ctx.db.patch(row._id, {
+      logoStorageId: undefined,
+      updatedAt: Date.now(),
+    })
+  }
+  return null
+}
+
+export const clearLogo = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => await clearLogoImpl(ctx, await requireUserId(ctx)),
+})
+
+export const clearLogoAs = internalMutation({
+  args: { userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => await clearLogoImpl(ctx, args.userId),
 })

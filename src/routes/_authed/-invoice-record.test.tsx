@@ -1,6 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import {
   InvoicePage,
@@ -109,6 +115,7 @@ function renderRecord(over: Record<string, unknown> = {}, settings = SETTINGS) {
     unratedMsAtCreation: 0,
     updatedAt: NOW,
     deletedAt: null,
+    logoUrl: null,
     lines: [makeLine({ description: "Website" })],
     ...over,
   }
@@ -124,7 +131,10 @@ function renderRecord(over: Record<string, unknown> = {}, settings = SETTINGS) {
       },
     },
   })
-  queryClient.setQueryData(convexKey(api.invoices.get, { invoiceId: INVOICE_ID }), invoice)
+  queryClient.setQueryData(
+    convexKey(api.invoices.get, { invoiceId: INVOICE_ID }),
+    invoice
+  )
   queryClient.setQueryData(convexKey(api.settings.get, {}), settings)
 
   render(
@@ -198,9 +208,9 @@ describe("the invoice record — it is read-only", () => {
 
   it("links back to the list", () => {
     renderRecord()
-    expect(screen.getByRole("link", { name: "Invoices" }).getAttribute("href")).toBe(
-      "/invoices"
-    )
+    expect(
+      screen.getByRole("link", { name: "Invoices" }).getAttribute("href")
+    ).toBe("/invoices")
   })
 })
 
@@ -211,7 +221,9 @@ describe("the invoice record — the document", () => {
   it("prints a party block with its line breaks intact", () => {
     renderRecord()
     const block = screen.getByText(/Vessel Vanguard/)
-    expect(block.textContent).toBe("Vessel Vanguard\nBonita Springs, FL\n34134, USA")
+    expect(block.textContent).toBe(
+      "Vessel Vanguard\nBonita Springs, FL\n34134, USA"
+    )
   })
 
   /*
@@ -250,6 +262,19 @@ describe("the invoice record — the document", () => {
     renderRecord({ purchaseOrder: "PO-4471" })
     expect(screen.getByText("Purchase order")).toBeTruthy()
     expect(screen.getByText("PO-4471")).toBeTruthy()
+  })
+
+  it("draws a snapshotted logo in the masthead and no placeholder when absent", () => {
+    renderRecord({ logoUrl: "/invoice-logo.png" })
+    expect(
+      document.querySelector<HTMLImageElement>('img[src="/invoice-logo.png"]')
+        ?.alt
+    ).toBe("")
+
+    cleanup()
+    renderRecord({ logoUrl: null })
+    expect(document.querySelector('img[src="/invoice-logo.png"]')).toBeNull()
+    expect(screen.queryByText(/logo/i)).toBeNull()
   })
 
   /* Empty notes print nothing at all rather than an empty heading: nobody was
@@ -379,6 +404,64 @@ describe("the invoice record — Export PDF", () => {
 
     click.mockRestore()
   })
+
+  it("fetches an accepted logo and hands its bytes and format to the renderer", async () => {
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: () => "blob:x",
+      revokeObjectURL: () => {},
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    const bytes = new Uint8Array([4, 5, 6])
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        headers: new Headers({ "content-type": "image/png" }),
+        arrayBuffer: async () => bytes.buffer,
+      }))
+    )
+    const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
+    vi.mocked(invoicePdfBlob).mockResolvedValue(new Blob(["%PDF-"]))
+
+    renderRecord({ logoUrl: "/invoice-logo.png" })
+    fireEvent.click(screen.getByRole("button", { name: /export pdf/i }))
+
+    await waitFor(() => expect(vi.mocked(invoicePdfBlob)).toHaveBeenCalled())
+    expect(vi.mocked(invoicePdfBlob).mock.calls[0][0].logo).toEqual({
+      bytes,
+      format: "png",
+    })
+  })
+
+  it.each([
+    ["failed fetch", () => Promise.reject(new Error("offline"))],
+    [
+      "unsupported content type",
+      () =>
+        Promise.resolve({
+          ok: true,
+          headers: new Headers({ "content-type": "image/gif" }),
+          arrayBuffer: async () => new ArrayBuffer(0),
+        }),
+    ],
+  ])("exports without decoration after a %s", async (_case, fetchResult) => {
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: () => "blob:x",
+      revokeObjectURL: () => {},
+    })
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    vi.stubGlobal("fetch", vi.fn(fetchResult))
+    const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
+    vi.mocked(invoicePdfBlob).mockResolvedValue(new Blob(["%PDF-"]))
+
+    renderRecord({ logoUrl: "/invoice-logo" })
+    fireEvent.click(screen.getByRole("button", { name: /export pdf/i }))
+
+    await waitFor(() => expect(vi.mocked(invoicePdfBlob)).toHaveBeenCalled())
+    expect(vi.mocked(invoicePdfBlob).mock.calls[0][0].logo).toBeUndefined()
+  })
 })
 
 /*
@@ -409,13 +492,17 @@ describe("the invoice route", () => {
     expect(Route.options.errorComponent).toBe(InvoiceUnreachable)
 
     for (const error of [
-      { data: { code: "NOT_FOUND", message: "Not found." } } as unknown as Error,
+      {
+        data: { code: "NOT_FOUND", message: "Not found." },
+      } as unknown as Error,
       new Error("ArgumentValidationError: Value does not match validator"),
     ]) {
       render(<InvoiceUnreachable error={error} />)
       expect(screen.getByText(/no invoice at this address/)).toBeTruthy()
       expect(
-        screen.getByRole("link", { name: "Back to invoices" }).getAttribute("href")
+        screen
+          .getByRole("link", { name: "Back to invoices" })
+          .getAttribute("href")
       ).toBe("/invoices")
       cleanup()
     }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { billableBucketsOf, invoiceLineDrafts } from "./invoiceLines"
-import { NO_PROJECT_LABEL } from "./labels"
+import {
+  billableBucketsOf,
+  invoiceLineDrafts,
+  mergeLines,
+} from "./invoiceLines"
+import { NO_PROJECT_LABEL, SUMMARY_LABEL } from "./labels"
 import type { BillableBucket, BreakdownProject } from "./invoiceLines"
 
 /*
@@ -33,17 +37,17 @@ describe("invoiceLineDrafts", () => {
   /* 98:48:00 is exactly 98.80 h, which is the reference invoice's own line —
    * see convex/lib/invoiceMath.test.ts. */
   it("prices a bucket at the project's own rate", () => {
-    expect(invoiceLineDrafts([bucket({ billableMs: 98 * HOUR + 48 * 60_000 })], null)).toEqual(
-      [
-        {
-          description: "Website",
-          quantityCentis: 9880,
-          unitCents: 1000,
-          amountCents: 98_800,
-          projectId: "p1",
-        },
-      ]
-    )
+    expect(
+      invoiceLineDrafts([bucket({ billableMs: 98 * HOUR + 48 * 60_000 })], null)
+    ).toEqual([
+      {
+        description: "Website",
+        quantityCentis: 9880,
+        unitCents: 1000,
+        amountCents: 98_800,
+        projectId: "p1",
+      },
+    ])
   })
 
   /*
@@ -67,7 +71,10 @@ describe("invoiceLineDrafts", () => {
   })
 
   it("falls back to the account rate for a project that has none", () => {
-    const lines = invoiceLineDrafts([bucket({ project: { name: "Website" } })], 1500)
+    const lines = invoiceLineDrafts(
+      [bucket({ project: { name: "Website" } })],
+      1500
+    )
     expect(lines[0]?.unitCents).toBe(1500)
     expect(lines[0]?.amountCents).toBe(1_500)
   })
@@ -131,17 +138,106 @@ describe("invoiceLineDrafts", () => {
   it("keeps the order it was given, skipped buckets and all", () => {
     const lines = invoiceLineDrafts(
       [
-        bucket({ projectId: "c", project: { name: "Charlie", hourlyRateCents: 1000 } }),
+        bucket({
+          projectId: "c",
+          project: { name: "Charlie", hourlyRateCents: 1000 },
+        }),
         bucket({
           projectId: "b",
           unratedBillableMs: HOUR,
           project: { name: "Bravo" },
         }),
-        bucket({ projectId: "a", project: { name: "Alpha", hourlyRateCents: 1000 } }),
+        bucket({
+          projectId: "a",
+          project: { name: "Alpha", hourlyRateCents: 1000 },
+        }),
       ],
       null
     )
     expect(lines.map((line) => line.description)).toEqual(["Charlie", "Alpha"])
+  })
+})
+
+describe("mergeLines", () => {
+  const line = (
+    over: Partial<ReturnType<typeof invoiceLineDrafts>[number]> = {}
+  ): ReturnType<typeof invoiceLineDrafts>[number] => ({
+    description: "Website",
+    quantityCentis: 100,
+    unitCents: 1_000,
+    amountCents: 1_000,
+    projectId: "p1",
+    ...over,
+  })
+
+  it("leaves an empty draft list empty", () => {
+    expect(mergeLines([], SUMMARY_LABEL)).toEqual([])
+  })
+
+  it("rewrites one line with the summary description and no project provenance", () => {
+    expect(mergeLines([line()], "Consulting services")).toEqual([
+      {
+        description: "Consulting services",
+        quantityCentis: 100,
+        unitCents: 1_000,
+        amountCents: 1_000,
+        projectId: null,
+      },
+    ])
+  })
+
+  it("merges equal-rate lines with one rounding from the printed total quantity", () => {
+    expect(
+      mergeLines(
+        [
+          line({ quantityCentis: 4_006, amountCents: 40_060, projectId: "p1" }),
+          line({ quantityCentis: 4_007, amountCents: 40_070, projectId: "p2" }),
+        ],
+        SUMMARY_LABEL
+      )
+    ).toEqual([
+      {
+        description: "Professional services",
+        quantityCentis: 8_013,
+        unitCents: 1_000,
+        amountCents: 80_130,
+        projectId: null,
+      },
+    ])
+  })
+
+  it("returns mixed-rate lines untouched and in order", () => {
+    const first = line({ description: "Alpha", projectId: "a" })
+    const second = line({
+      description: "Bravo",
+      unitCents: 2_000,
+      amountCents: 2_000,
+      projectId: "b",
+    })
+    const result = mergeLines([first, second], SUMMARY_LABEL)
+    expect(result).toEqual([first, second])
+    expect(result[0]).toBe(first)
+    expect(result[1]).toBe(second)
+  })
+
+  it("treats zero as a shared rate rather than as an absent rate", () => {
+    expect(
+      mergeLines(
+        [
+          line({ unitCents: 0, amountCents: 0, projectId: "free-1" }),
+          line({ unitCents: 0, amountCents: 0, projectId: "free-2" }),
+        ],
+        SUMMARY_LABEL
+      )
+    ).toEqual([
+      {
+        description: SUMMARY_LABEL,
+        quantityCentis: 200,
+        unitCents: 0,
+        amountCents: 0,
+        projectId: null,
+      },
+    ])
   })
 })
 
@@ -185,15 +281,20 @@ describe("billableBucketsOf", () => {
    */
   it("leaves a rateless project's rate absent rather than zero", () => {
     const buckets = billableBucketsOf([project({ hourlyRateCents: undefined })])
-    expect(buckets[0]?.project).toEqual({ name: "Website", hourlyRateCents: undefined })
+    expect(buckets[0]?.project).toEqual({
+      name: "Website",
+      hourlyRateCents: undefined,
+    })
     // And the consequence one function along: the account default covers it.
     expect(invoiceLineDrafts(buckets, 2500)[0]?.unitCents).toBe(2500)
   })
 
   it("keeps a zero-rate project at zero", () => {
     expect(
-      invoiceLineDrafts(billableBucketsOf([project({ hourlyRateCents: 0 })]), 2500)[0]
-        ?.unitCents
+      invoiceLineDrafts(
+        billableBucketsOf([project({ hourlyRateCents: 0 })]),
+        2500
+      )[0]?.unitCents
     ).toBe(0)
   })
 
@@ -206,13 +307,22 @@ describe("billableBucketsOf", () => {
    */
   it("hands the unassigned bucket down with no project at all", () => {
     expect(
-      billableBucketsOf([project({ projectId: null, name: "", hourlyRateCents: undefined })])
+      billableBucketsOf([
+        project({ projectId: null, name: "", hourlyRateCents: undefined }),
+      ])
     ).toEqual([
-      { projectId: null, billableMs: HOUR, unratedBillableMs: 0, project: undefined },
+      {
+        projectId: null,
+        billableMs: HOUR,
+        unratedBillableMs: 0,
+        project: undefined,
+      },
     ])
     expect(
       invoiceLineDrafts(
-        billableBucketsOf([project({ projectId: null, name: "", hourlyRateCents: undefined })]),
+        billableBucketsOf([
+          project({ projectId: null, name: "", hourlyRateCents: undefined }),
+        ]),
         2000
       )[0]?.description
     ).toBe(NO_PROJECT_LABEL)

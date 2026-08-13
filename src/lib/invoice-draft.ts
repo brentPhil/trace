@@ -1,6 +1,7 @@
 import { isTraceError } from "@shared/codes"
 import { addDays, dayOf, startOfDay } from "@shared/day"
 import { partyBlockOf } from "@shared/party"
+import { SUMMARY_LABEL } from "@shared/labels"
 import type { DayString } from "@shared/day"
 
 /**
@@ -32,6 +33,7 @@ export const INVOICE_FIELDS = [
   "payTo",
   "purchaseOrder",
   "paymentTerms",
+  "summaryDescription",
   "notes",
   "currency",
   "issuedAt",
@@ -48,10 +50,12 @@ export type InvoiceDraft = {
   payTo: string
   purchaseOrder: string
   paymentTerms: string
+  summaryDescription: string
   notes: string
   currency: string
   issuedOn: DayString
   dueOn: DayString
+  mergeLines: boolean
 }
 
 /**
@@ -88,10 +92,12 @@ export const REFUSAL_FIELD_OF: Record<keyof InvoiceDraft, InvoiceField> = {
   payTo: "payTo",
   purchaseOrder: "purchaseOrder",
   paymentTerms: "paymentTerms",
+  summaryDescription: "summaryDescription",
   notes: "notes",
   currency: "currency",
   issuedOn: "issuedAt",
   dueOn: "dueAt",
+  mergeLines: "summaryDescription",
 }
 
 /**
@@ -166,6 +172,7 @@ export function newInvoiceDraft(opts: {
   timeZone: string
   currency: string
   client: { name: string; address: string } | null
+  mergeInvoiceLines: boolean
 }): InvoiceDraft {
   const issuedOn = dayOf(opts.nowMs, opts.timeZone)
   return {
@@ -173,10 +180,12 @@ export function newInvoiceDraft(opts: {
     payTo: "",
     purchaseOrder: "",
     paymentTerms: "",
+    summaryDescription: SUMMARY_LABEL,
     notes: "",
     currency: opts.currency,
     issuedOn,
     dueOn: addDays(issuedOn, DEFAULT_TERM_DAYS),
+    mergeLines: opts.mergeInvoiceLines,
   }
 }
 
@@ -201,10 +210,12 @@ export function draftArgs(draft: InvoiceDraft, timeZone: string) {
     payTo: draft.payTo,
     purchaseOrder: draft.purchaseOrder,
     paymentTerms: draft.paymentTerms,
+    summaryDescription: draft.summaryDescription,
     notes: draft.notes,
     currency: draft.currency,
     issuedAt: startOfDay(draft.issuedOn, timeZone),
     dueAt: startOfDay(draft.dueOn, timeZone),
+    mergeLines: draft.mergeLines,
   }
 }
 

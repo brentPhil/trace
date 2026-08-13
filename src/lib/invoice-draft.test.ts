@@ -9,6 +9,7 @@ import {
   singleClientId,
 } from "./invoice-draft"
 import { startOfDay } from "@shared/day"
+import { SUMMARY_LABEL } from "@shared/labels"
 import type { InvoiceDraft } from "./invoice-draft"
 
 /*
@@ -31,6 +32,7 @@ function draftOf(over: Partial<InvoiceDraft> = {}): InvoiceDraft {
       timeZone: "UTC",
       currency: "USD",
       client: null,
+      mergeInvoiceLines: true,
     }),
     ...over,
   }
@@ -39,16 +41,24 @@ function draftOf(over: Partial<InvoiceDraft> = {}): InvoiceDraft {
 describe("newInvoiceDraft", () => {
   it("opens on today, net thirty, and the account's currency", () => {
     expect(
-      newInvoiceDraft({ nowMs: NOON, timeZone: "UTC", currency: "EUR", client: null })
+      newInvoiceDraft({
+        nowMs: NOON,
+        timeZone: "UTC",
+        currency: "EUR",
+        client: null,
+        mergeInvoiceLines: true,
+      })
     ).toEqual({
       billedTo: "",
       payTo: "",
       purchaseOrder: "",
       paymentTerms: "",
+      summaryDescription: SUMMARY_LABEL,
       notes: "",
       currency: "EUR",
       issuedOn: "2026-08-05",
       dueOn: "2026-09-04",
+      mergeLines: true,
     })
     expect(DEFAULT_TERM_DAYS).toBe(30)
   })
@@ -63,6 +73,7 @@ describe("newInvoiceDraft", () => {
       timeZone: "Pacific/Auckland",
       currency: "USD",
       client: null,
+      mergeInvoiceLines: true,
     })
     expect(draft.issuedOn).toBe("2026-08-06")
     expect(draft.dueOn).toBe("2026-09-05")
@@ -83,7 +94,11 @@ describe("newInvoiceDraft", () => {
         nowMs: NOON,
         timeZone: "UTC",
         currency: "USD",
-        client: { name: "Vessel Vanguard", address: "Bonita Springs, FL\n34134" },
+        client: {
+          name: "Vessel Vanguard",
+          address: "Bonita Springs, FL\n34134",
+        },
+        mergeInvoiceLines: true,
       }).billedTo
     ).toBe("Vessel Vanguard\nBonita Springs, FL\n34134")
   })
@@ -95,6 +110,7 @@ describe("newInvoiceDraft", () => {
         timeZone: "UTC",
         currency: "USD",
         client: { name: "Acme", address: "   " },
+        mergeInvoiceLines: true,
       }).billedTo
     ).toBe("Acme")
   })
@@ -107,6 +123,20 @@ describe("newInvoiceDraft", () => {
    */
   it("leaves pay to empty, because nothing in the product knows it", () => {
     expect(draftOf().payTo).toBe("")
+  })
+
+  it("prefills the shared summary label and follows the account merge setting", () => {
+    expect(draftOf().summaryDescription).toBe(SUMMARY_LABEL)
+    expect(draftOf().mergeLines).toBe(true)
+    expect(
+      newInvoiceDraft({
+        nowMs: NOON,
+        timeZone: "UTC",
+        currency: "USD",
+        client: null,
+        mergeInvoiceLines: false,
+      }).mergeLines
+    ).toBe(false)
   })
 })
 
@@ -132,6 +162,15 @@ describe("draftArgs", () => {
     expect(args.issuedAt).toBe(startOfDay("2026-08-05", "Pacific/Auckland"))
     expect(args.dueAt).toBe(startOfDay("2026-09-04", "Pacific/Auckland"))
   })
+
+  it("sends the per-invoice merge choice and summary description", () => {
+    const args = draftArgs(
+      draftOf({ mergeLines: false, summaryDescription: "Retainer services" }),
+      "UTC"
+    )
+    expect(args.mergeLines).toBe(false)
+    expect(args.summaryDescription).toBe("Retainer services")
+  })
 })
 
 /*
@@ -155,12 +194,19 @@ describe("dueBeforeIssue", () => {
 
 describe("refusedField", () => {
   const refusal = (field?: unknown) => ({
-    data: { code: "TOO_LONG", message: "Too long.", meta: field === undefined ? undefined : { field } },
+    data: {
+      code: "TOO_LONG",
+      message: "Too long.",
+      meta: field === undefined ? undefined : { field },
+    },
   })
 
   it("reads the field the mutation named", () => {
     expect(refusedField(refusal("payTo"))).toBe("payTo")
     expect(refusedField(refusal("dueAt"))).toBe("dueAt")
+    expect(refusedField(refusal("summaryDescription"))).toBe(
+      "summaryDescription"
+    )
   })
 
   /*
@@ -182,6 +228,7 @@ describe("refusedField", () => {
   it("maps the form's day fields onto the arguments the mutation refuses", () => {
     expect(REFUSAL_FIELD_OF.issuedOn).toBe("issuedAt")
     expect(REFUSAL_FIELD_OF.dueOn).toBe("dueAt")
+    expect(REFUSAL_FIELD_OF.summaryDescription).toBe("summaryDescription")
   })
 })
 
@@ -192,7 +239,8 @@ describe("refusedField", () => {
  * one unambiguous block to put in the box.
  */
 describe("singleClientId", () => {
-  const clientOf = (map: Record<string, string | null>) => (id: string) => map[id] ?? null
+  const clientOf = (map: Record<string, string | null>) => (id: string) =>
+    map[id] ?? null
 
   it("finds the one client the range's billable work belongs to", () => {
     expect(
@@ -267,6 +315,8 @@ describe("singleClientId", () => {
   })
 
   it("answers null for a range with no client anywhere in it", () => {
-    expect(singleClientId([{ projectId: "p1", billableMs: 60_000 }], clientOf({}))).toBe(null)
+    expect(
+      singleClientId([{ projectId: "p1", billableMs: 60_000 }], clientOf({}))
+    ).toBe(null)
   })
 })

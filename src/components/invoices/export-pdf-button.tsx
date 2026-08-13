@@ -23,6 +23,7 @@ type InvoiceForExport = {
   purchaseOrder?: string
   paymentTerms?: string
   notes?: string
+  logoUrl: string | null
   taxes: ReadonlyArray<{ label: string; basisPoints: number }>
   lines: ReadonlyArray<InvoiceDocLine>
 }
@@ -84,6 +85,32 @@ export function ExportPdfButton({
       if (beforeExport !== undefined && !(await beforeExport())) return
 
       const issuedOn = dayOf(invoice.issuedAt, timeZone)
+      let logo: { bytes: Uint8Array; format: "png" | "jpeg" } | undefined
+      if (invoice.logoUrl !== null) {
+        try {
+          const response = await fetch(invoice.logoUrl)
+          if (response.ok) {
+            const contentType = response.headers
+              .get("content-type")
+              ?.split(";", 1)[0]
+              ?.trim()
+            const format =
+              contentType === "image/png"
+                ? "png"
+                : contentType === "image/jpeg"
+                  ? "jpeg"
+                  : undefined
+            if (format !== undefined) {
+              logo = {
+                bytes: new Uint8Array(await response.arrayBuffer()),
+                format,
+              }
+            }
+          }
+        } catch {
+          // Decoration is best-effort. The invoice's money must still export.
+        }
+      }
       const { invoicePdfBlob } = await import("@/lib/export/to-pdf")
       const blob = await invoicePdfBlob({
         number: invoice.number,
@@ -97,6 +124,7 @@ export function ExportPdfButton({
         notes: invoice.notes,
         taxes: invoice.taxes,
         lines: invoice.lines,
+        logo,
       })
       downloadBlob(blob, invoiceFilename(invoice.number, issuedOn))
     } catch {
@@ -115,7 +143,12 @@ export function ExportPdfButton({
   }
 
   return (
-    <Button variant="outline" size="sm" disabled={busy} onClick={() => void run()}>
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={busy}
+      onClick={() => void run()}
+    >
       <Download className="size-4" />
       {busy ? "Exporting…" : "Export PDF"}
     </Button>
