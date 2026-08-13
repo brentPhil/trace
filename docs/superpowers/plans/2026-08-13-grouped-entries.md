@@ -812,6 +812,37 @@ Immediately before the `if (groups.length === 0)` guard, add the expansion state
 
 > **Note on hook order:** `useState` must sit **above** the `groups.length === 0` early return. A hook after a conditional return is a hooks-order violation that React will throw on the first render where the log goes from empty to non-empty.
 
+Immediately after `toggle`, add the row helper. **A child of a sitting and an ungrouped row are the same row**, and the nine props saying so must be written once — otherwise the next prop `EntryRow` gains gets added to one call site and not the other, and grouped children quietly stop honouring it:
+
+```tsx
+  /*
+   * ONE SPELLING OF A ROW, for the two places that draw one: on its own, and
+   * as a member of a sitting. They are the same row — a member is not a
+   * reduced version of an entry — so the props that say so are written here
+   * rather than twice below, where the next one added would land on one call
+   * site and silently skip the other.
+   */
+  const row = (entry: Entry) => (
+    <EntryRow
+      key={entry._id}
+      entry={entry}
+      timeZone={timeZone}
+      use12Hour={use12Hour}
+      weekStartDay={weekStartDay}
+      projects={projects}
+      tags={tags}
+      actions={actions}
+      notesExpanded={notesExpanded}
+    />
+  )
+```
+
+This needs `Entry` on the type imports — change the `group-entries` type import to:
+
+```tsx
+import type { DayGroup, Entry } from "@/lib/group-entries"
+```
+
 Then replace the rows container — currently:
 
 ```tsx
@@ -840,21 +871,7 @@ with:
               ? toLogItems(group.entries)
               : group.entries.map((entry) => ({ kind: "row" as const, entry }))
             ).map((item, index) => {
-              if (item.kind === "row") {
-                return (
-                  <EntryRow
-                    key={item.entry._id}
-                    entry={item.entry}
-                    timeZone={timeZone}
-                    use12Hour={use12Hour}
-                    weekStartDay={weekStartDay}
-                    projects={projects}
-                    tags={tags}
-                    actions={actions}
-                    notesExpanded={notesExpanded}
-                  />
-                )
-              }
+              if (item.kind === "row") return row(item.entry)
 
               const stateKey = `${group.day}\u0000${item.key}`
               // The DOM id cannot carry the NUL the state key does, and it does
@@ -887,19 +904,7 @@ with:
                       id={panelId}
                       className="flex flex-col border-l-2 border-edge-soft pl-4"
                     >
-                      {item.entries.map((entry) => (
-                        <EntryRow
-                          key={entry._id}
-                          entry={entry}
-                          timeZone={timeZone}
-                          use12Hour={use12Hour}
-                          weekStartDay={weekStartDay}
-                          projects={projects}
-                          tags={tags}
-                          actions={actions}
-                          notesExpanded={notesExpanded}
-                        />
-                      ))}
+                      {item.entries.map(row)}
                     </div>
                   ) : null}
                 </div>
@@ -975,19 +980,6 @@ describe("groupEntries", () => {
 
     const settings = await t.query(internal.settings.getAs, { userId: ALICE })
     expect(settings.groupEntries).toBe(true)
-  })
-
-  it("defaults ON, unlike pdfIncludeNotes", () => {
-    /*
-     * Not a matter of taste. `pdfIncludeNotes` is off by default because it
-     * puts prose the user wrote to themselves into an artefact that goes to a
-     * client, so opting in has to be a decision somebody made. Grouping changes
-     * only how rows are drawn on the user's own screen, merges nothing, stores
-     * nothing, and is reversible in one click — so the safe default and the
-     * useful default are the same value here.
-     */
-    expect(SETTINGS_DEFAULTS.groupEntries).toBe(true)
-    expect(SETTINGS_DEFAULTS.pdfIncludeNotes).toBe(false)
   })
 
   it("can be switched off and back on", async () => {
@@ -1087,7 +1079,7 @@ This is not optional housekeeping. That fixture's own header explains why: it is
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `npx vitest run convex/settings.test.ts`
-Expected: PASS, including the three new tests.
+Expected: PASS, including the two new tests.
 
 - [ ] **Step 7: Run the whole suite and typecheck**
 
