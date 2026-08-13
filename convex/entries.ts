@@ -1685,6 +1685,79 @@ export const updateAs = internalMutation({
 })
 
 // ---------------------------------------------------------------------------
+// updateMany — one change, every member of a sitting
+// ---------------------------------------------------------------------------
+
+const updateManyArgs = {
+  // `updateArgs` minus `entryId`, which becomes the array below. Spelled out
+  // rather than derived, because a validator built by subtraction is one a
+  // reader has to reconstruct in their head.
+  entryIds: v.array(v.id("timeEntries")),
+  title: v.optional(v.string()),
+  note: v.optional(v.string()),
+  projectId: v.optional(v.union(v.id("projects"), v.null())),
+  tagIds: v.optional(v.array(v.id("tags"))),
+  billable: v.optional(v.boolean()),
+}
+
+/**
+ * Applies one change to every entry in a sitting.
+ *
+ * ONE MUTATION RATHER THAN A CLIENT LOOP, and the reason is failure rather
+ * than round trips. A loop that writes three members and then refuses the
+ * fourth leaves a sitting whose members disagree — the exact state grouping's
+ * single note exists to eliminate — with no one undo to get back from. A Convex
+ * mutation is a transaction, so "all of them or none" is structural here rather
+ * than something this handler has to be careful about.
+ *
+ * `updateImpl` per id, NOT a reimplementation: ownership, the title check,
+ * project ownership, tag normalisation and the tag join rows all stay in the
+ * one place they already live. That also means every refusal `update` can
+ * raise, this raises, with the same code.
+ *
+ * NOTHING HERE DERIVES `billable`. The caller sends it explicitly or not at
+ * all, exactly like `update` — see that function's comment on why re-inheriting
+ * a project's billable default here would silently reverse a decision the user
+ * made deliberately, and `entries.edit.test.ts`'s "does not re-inherit billable
+ * when the project changes" for the invariant that would otherwise break.
+ */
+async function updateManyImpl(
+  ctx: MutationCtx,
+  userId: string,
+  { entryIds, ...fields }: { entryIds: Array<Id<"timeEntries">> } & Omit<UpdateArgs, "entryId">
+) {
+  // Reusing EMPTY_IMPORT rather than inventing a code: its meaning is exactly
+  // this shape of refusal — a bulk operation handed no rows — and the same
+  // reasoning applies. A no-op that reports success is how a broken caller
+  // stays broken.
+  if (entryIds.length === 0) {
+    traceError("EMPTY_IMPORT", "updateMany needs at least one entry.")
+  }
+
+  for (const entryId of entryIds) {
+    await updateImpl(ctx, userId, { entryId, ...fields })
+  }
+
+  return null
+}
+
+export const updateMany = mutation({
+  args: updateManyArgs,
+  returns: v.null(),
+  handler: async (ctx, args) => await updateManyImpl(ctx, await requireUserId(ctx), args),
+})
+
+// Mirrors `updateAs`: not called by any production caller, but the internal
+// variants are what let this domain logic (ownership, rollback-on-refusal) be
+// tested for real without wiring the better-auth component into the test
+// harness — see the Structure note at the top of this file.
+export const updateManyAs = internalMutation({
+  args: { ...updateManyArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, { userId, ...args }) => await updateManyImpl(ctx, userId, args),
+})
+
+// ---------------------------------------------------------------------------
 // editTime
 // ---------------------------------------------------------------------------
 
