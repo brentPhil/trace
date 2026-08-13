@@ -20,8 +20,6 @@ export type LogItem =
       /** Two or more, newest first. A one-member sitting is never built. */
       entries: Array<Entry>
       totalMs: number
-      /** How many members carry prose — the parent's "n of m noted". */
-      notedCount: number
       /**
        * The tag union — see `tagUnion`. The parent's picker opens on this, and
        * what it writes goes to every member.
@@ -168,14 +166,12 @@ export function toLogItems(entries: Array<Entry>): Array<LogItem> {
     if (members.length === 1) return { kind: "row", entry: first }
 
     let totalMs = 0
-    let notedCount = 0
     let allBillable = true
     let fromMs = first.startedAt
     let toMs = endOf(first)
 
     for (const member of members) {
       totalMs += member.durationMs ?? 0
-      if ((member.note ?? "").trim() !== "") notedCount += 1
       if (!member.billable) allBillable = false
       if (member.startedAt < fromMs) fromMs = member.startedAt
       const end = endOf(member)
@@ -187,7 +183,6 @@ export function toLogItems(entries: Array<Entry>): Array<LogItem> {
       key,
       entries: members,
       totalMs,
-      notedCount,
       tagIds: tagUnion(members),
       allBillable,
       fromMs,

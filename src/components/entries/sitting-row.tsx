@@ -1,49 +1,95 @@
 import { ChevronDown, ChevronRight, Play } from "lucide-react"
-import { ProjectDot } from "@/components/classifiers/project-dot"
+import {
+  BillableToggle,
+  ProjectPicker,
+  TagPicker,
+} from "@/components/classifiers/classifier-pickers"
+import { NoteLine } from "@/components/entries/note-line"
 import { formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
+import { joinNotes } from "@/lib/group-sittings"
 import { cn } from "@/lib/utils"
+import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { Classification } from "@/components/timer/timer-bar"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { LogItem } from "@/lib/group-sittings"
-import type { Doc } from "../../../convex/_generated/dataModel"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 type Sitting = Extract<LogItem, { kind: "sitting" }>
 
 /**
- * Several sittings at one piece of work, behind a count.
+ * The default for `onCreateProject`/`onCreateTag` while `DayList` has not
+ * wired them up yet. Rejects rather than resolving silently, matching this
+ * codebase's `noEntryActions` convention (`test-utils/fixtures.ts`): a
+ * control that reaches a creator nobody supplied should fail loudly — a
+ * `.catch()` printing an error — rather than pretend the create succeeded.
+ */
+function throwingCreator(propName: string): (name: string) => Promise<never> {
+  return () => Promise.reject(new Error(`SittingRow: ${propName} was not supplied`))
+}
+
+/**
+ * Several sittings at one piece of work, and the place that work is edited.
  *
- * DELIBERATELY NOT EDITABLE, unlike every other row in this product. Duration
- * and start/end have no meaning for a group — editing the total would have to
- * pick a member to absorb the change — and a note written here would have to be
- * copied onto every member or stored nowhere. So the parent discloses and
- * resumes, the members carry every edit, and this feature adds no mutations at
- * all.
+ * THE SITTING IS THE UNIT OF WORK; THE ENTRIES UNDER IT ARE THE UNIT OF TIME.
+ * The note, the project, the tags and the billable flag are facts about the
+ * work, so they live here and write through to every member at once. Times are
+ * per-entry facts, so they stay on the member rows — and duration is absent
+ * from this row for the reason it always was: editing a total would have to
+ * pick a member to absorb the change.
  *
- * Tags and the billable mark are absent for a related reason: both can differ
- * between members, this row cannot edit either, and a mark meaning "some of
- * these" is a mark that means nothing. The project is shown because it is part
- * of the grouping key, so every member provably shares it.
+ * THIS ROW USED TO BE READ-ONLY. It changed because shipping grouping showed
+ * the assumption underneath it was wrong: two entries sharing a title usually
+ * carry the SAME note, typed twice by hand, because nothing in this product
+ * copies a note forward. See
+ * docs/superpowers/specs/2026-08-13-sitting-as-the-unit-design.md.
+ *
+ * Still a disclosure and not a merge. Nothing is stored here, nothing is
+ * rewritten behind the user, and every member remains individually present with
+ * its own times one click away.
  */
 export function SittingRow({
   sitting,
   timeZone,
   use12Hour,
   projects,
+  tags = [],
   display,
   expanded,
+  notesExpanded = false,
   onToggle,
   onResume,
+  onClassify = () => {},
+  onNoteOpen = () => {},
+  onCreateProject = throwingCreator("onCreateProject"),
+  onCreateTag = throwingCreator("onCreateTag"),
   controls,
 }: {
   sitting: Sitting
   timeZone: string
   use12Hour: boolean
   projects: Array<Doc<"projects">>
+  /**
+   * `tags` through `onCreateTag` below are all optional for the same reason:
+   * `DayList` does not wire them up yet (wiring it in is the next task), and a
+   * required prop it does not supply would crash every pre-existing grouped-
+   * entries render rather than merely fail to typecheck. Real Task 6 usage
+   * supplies all of them; these defaults exist only so today's incomplete
+   * caller stays inert instead of throwing.
+   */
+  tags?: Array<Doc<"tags">>
   display: DurationDisplay
   expanded: boolean
+  /** Forwarded from the page, exactly as `EntryRow` takes it. */
+  notesExpanded?: boolean
   onToggle: () => void
   /** Resumes the NEWEST member — see `DayList`, which supplies it. */
   onResume: () => void
+  /** Applies a classifier change to EVERY member. See `DayList`. */
+  onClassify?: (change: Partial<Classification>) => void
+  onNoteOpen?: () => void
+  onCreateProject?: EntryRowActions["onCreateProject"]
+  onCreateTag?: EntryRowActions["onCreateTag"]
   /**
    * The `id` of the container this row reveals, for `aria-controls`.
    *
@@ -57,7 +103,31 @@ export function SittingRow({
 }) {
   const newest = sitting.entries[0]
   const title = newest.title.trim()
-  const project = projects.find((candidate) => candidate._id === newest.projectId) ?? null
+  const note = joinNotes(sitting.entries)
+
+  /*
+   * A PROJECT'S DEFAULT, APPLIED ONLY UPWARDS.
+   *
+   * `startImpl` reads `args.billable ?? project?.billableByDefault` for a NEW
+   * entry, and these entries already exist — so the server rule that an
+   * existing entry never re-inherits still holds, and holds literally: the
+   * derivation happens here and travels as an explicit `billable`, which is the
+   * same shape `timer-bar.tsx` uses and for the same reason. What the `$` shows
+   * is provably what was written.
+   *
+   * ONLY EVER ON. A billable-by-default project marks every member billable; a
+   * project that does not bill by default sends no `billable` at all and leaves
+   * each member's flag alone. Adding a mark destroys no decision. Removing one
+   * would — see convex/projects.ts on exactly that.
+   */
+  const chooseProject = (projectId: Id<"projects"> | null) => {
+    const picked = projects.find((project) => project._id === projectId) ?? null
+    onClassify(
+      picked?.billableByDefault === true
+        ? { projectId, billable: true }
+        : { projectId }
+    )
+  }
 
   return (
     <div
@@ -68,8 +138,14 @@ export function SittingRow({
     >
       {/* `px-4` and the row height token, exactly as `EntryRow` and the day
           header use them, so three files that cannot see each other put the
-          left edge and the baseline in the same place. */}
-      <div className="flex min-h-(--entry-row-height) w-full items-center gap-2 px-4">
+          left edge and the baseline in the same place.
+
+          `items-start`, not `items-center` — this row now carries a note
+          beneath its title exactly as `EntryRow` does, and the same reasoning
+          applies: the trailing controls carry the row's own height (below)
+          while the title/note column is left to grow downward without
+          dragging the badge or the trailing cluster into its vertical middle. */}
+      <div className="flex min-h-(--entry-row-height) w-full items-start gap-2 px-4">
         {/*
           THE BADGE IS THE CONTROL, which is what the reference screenshot
           shows: its tooltip is the disclosure's label, not a separate chevron's.
@@ -97,26 +173,52 @@ export function SittingRow({
           {sitting.entries.length}
         </button>
 
-        {/* Static text, not an `EditableTitle`. Retitling a group would be a
-            write to every member — see this component's own note above. */}
-        <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+        {/* The title/note column, mirroring `EntryRow`'s own — see that
+            component for the row-height arithmetic this shares. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {/* Static text, not an `EditableTitle`. Retitling a group would be a
+                write to every member — see this component's own note above. */}
+            <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+          </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          <ProjectDot
-            project={project}
-            className="max-w-[8rem]"
-            nameClassName="hidden md:inline"
-          />
+          <NoteLine note={note} notesExpanded={notesExpanded} onOpen={onNoteOpen} />
+        </div>
 
+        {/* EVERYTHING AFTER THE TEXT, IN ONE BOX — same grouping `EntryRow`
+            uses and for the same reason: the group can hold
+            `min-h-(--entry-row-height) items-center` while the parent
+            top-aligns, which keeps these on the row's first line rather than
+            drifting down beside an expanded note. */}
+        <div className="flex min-h-(--entry-row-height) shrink-0 items-center gap-2">
           {/*
-            THE DAY HEADER'S OWN SENTENCE, in the day header's own words.
-            Collapsing rows must not turn a missing note from visible into
-            absent — that is the one thing this product cannot trade for a
-            tidier list.
+            The classifiers, editable in place like `EntryRow`'s. Always
+            present rather than hover-revealed: these are facts ABOUT the
+            sitting, not per-row affordances, and they write through to every
+            member the moment they change.
           */}
-          <span className="hidden text-xs text-muted-foreground sm:inline">
-            {sitting.notedCount} of {sitting.entries.length} noted
-          </span>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <ProjectPicker
+              projects={projects}
+              value={newest.projectId ?? null}
+              onCreate={onCreateProject}
+              onChange={chooseProject}
+              className="max-w-[8rem]"
+              nameClassName="hidden md:inline"
+            />
+            <TagPicker
+              tags={tags}
+              value={sitting.tagIds}
+              onCreate={onCreateTag}
+              onChange={(tagIds) => onClassify({ tagIds })}
+              className="hidden sm:inline-flex"
+            />
+            <BillableToggle
+              value={sitting.allBillable}
+              onChange={(billable) => onClassify({ billable })}
+              className="hidden sm:inline-flex"
+            />
+          </div>
 
           <span className="hidden text-xs tabular text-muted-foreground sm:inline">
             {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}

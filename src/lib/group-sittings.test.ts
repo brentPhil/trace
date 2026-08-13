@@ -157,7 +157,7 @@ describe("toLogItems", () => {
     expect(rowAt(items, 1).entry._id).toBe(id("b1"))
   })
 
-  it("sums the total, counts the notes, and spans first start to last end", () => {
+  it("sums the total and spans first start to last end", () => {
     const items = toLogItems([
       sitting({
         id: "b",
@@ -172,20 +172,8 @@ describe("toLogItems", () => {
 
     const group = sittingAt(items, 0)
     expect(group.totalMs).toBe(3 * HOUR)
-    expect(group.notedCount).toBe(1)
     expect(group.fromMs).toBe(NOW)
     expect(group.toMs).toBe(NOW + 5 * HOUR)
-  })
-
-  it("does not count a whitespace-only note as noted", () => {
-    // The day header's "n of m noted" nudge means "carries prose", and a
-    // spacebar is not prose. Same `.trim()` rule `groupByDay` applies.
-    const items = toLogItems([
-      sitting({ id: "b", title: "Crew dropdowns", projectId: "p1", startAt: NOW + HOUR, ms: HOUR, note: "   " }),
-      sitting({ id: "a", title: "Crew dropdowns", projectId: "p1", startAt: NOW, ms: HOUR }),
-    ])
-
-    expect(sittingAt(items, 0).notedCount).toBe(0)
   })
 
   it("lets the span exceed the total when the sittings do not abut", () => {

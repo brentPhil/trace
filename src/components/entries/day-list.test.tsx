@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
+import { SittingRow } from "@/components/entries/sitting-row"
+import { toLogItems } from "@/lib/group-sittings"
 import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
-import type { Doc } from "../../../convex/_generated/dataModel"
+import type { Classification } from "@/components/timer/timer-bar"
+import type { LogItem } from "@/lib/group-sittings"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 /*
  * The regression this guards: `/reports` used to fall through to Timer's
@@ -358,18 +362,6 @@ describe("grouped entries", () => {
     expect(screen.getByText("Weekly retro")).toBeTruthy()
   })
 
-  it("states how many of the group carry a note", () => {
-    // The day header's own nudge, moved onto the parent. Collapsing rows must
-    // not turn a missing note from VISIBLE into ABSENT.
-    //
-    // Unscoped: the day header states its own count over all three entries
-    // ("1 of 3 noted"), which is a different string from the sitting's own
-    // ("1 of 2 noted") now that the day holds more than just the sitting — so
-    // this can only match the sitting row.
-    renderLog(true)
-    expect(screen.getByText("1 of 2 noted")).toBeTruthy()
-  })
-
   it("shows the span from first start to last end, and the summed total", () => {
     renderLog(true)
     expect(screen.getByText("00:00 – 02:06")).toBeTruthy()
@@ -457,5 +449,171 @@ describe("grouped entries", () => {
     expect(screen.queryByLabelText("Show grouped entries")).toBeNull()
     expect(screen.getByText("Email")).toBeTruthy()
     expect(screen.getByText("Standup")).toBeTruthy()
+  })
+
+  /*
+   * THE PARENT ROW AS EDITOR.
+   *
+   * Nested here rather than in a sibling describe so it can reuse `twice`,
+   * `groups` and `renderLog` above — the same day, the same sitting, the same
+   * reason the day header's own "1 of 3 noted" and the sitting's figure read
+   * as different strings. `SittingRow` is exercised two ways below: through
+   * `DayList` (`renderLog`) for behaviour that does not depend on the props
+   * `DayList` does not wire up yet — see that component's own doc comment on
+   * why — and directly, via `renderSitting`, for the classifier behaviour
+   * that does.
+   */
+  describe("the parent row is the sitting's editor", () => {
+    /*
+     * The "+ add note" count below wants only the sitting's own two members
+     * in view — `renderLog`'s day also carries `unrelated` ("Weekly retro",
+     * itself unnoted), which is exactly right for scoping the "N of M noted"
+     * assertions above but would add a THIRD hatch to this one. A day of just
+     * `twice`, grouped, isolates the sitting.
+     */
+    const renderTwiceOnly = () =>
+      render(
+        <DayList
+          groups={[
+            {
+              day: "2026-08-09",
+              label: "Today",
+              entries: twice,
+              notedCount: 1,
+              totalMs: 7_200_000,
+              billableMs: 0,
+              runningCount: 0,
+            },
+          ]}
+          timeZone="UTC"
+          use12Hour={false}
+          weekStartDay={0}
+          projects={[]}
+          tags={[]}
+          actions={noActions}
+          grouped
+        />
+      )
+
+    const SEALOGS = {
+      _id: "jd7sealogs" as unknown as Id<"projects">,
+      _creationTime: 0,
+      userId: "user-1",
+      name: "Sealogs",
+      color: "amber",
+      billableByDefault: true,
+      archived: false,
+      updatedAt: 0,
+      deletedAt: null,
+    } as unknown as Doc<"projects">
+
+    const PRO_BONO = {
+      ...SEALOGS,
+      _id: "jd7probono" as unknown as Id<"projects">,
+      name: "Pro bono",
+      billableByDefault: false,
+    } as unknown as Doc<"projects">
+
+    /**
+     * Renders `SittingRow` directly rather than through `DayList`: the
+     * classifier props under test (`onClassify` chief among them) are not
+     * ones `DayList` supplies yet — wiring them in is the next task — so a
+     * test that needs to observe them has to mount the row itself. Built from
+     * `twice` by default, overriding per member when a case needs to.
+     */
+    const renderSitting = ({
+      onClassify = vi.fn(),
+      onNoteOpen = vi.fn(),
+      members,
+    }: {
+      onClassify?: (change: Partial<Classification>) => void
+      onNoteOpen?: () => void
+      members?: Array<Partial<Doc<"timeEntries">>>
+    } = {}) => {
+      const memberEntries = members === undefined
+        ? twice
+        : members.map((over, index) =>
+            makeEntry({
+              _id: `sitting-member-${index}` as unknown as Doc<"timeEntries">["_id"],
+              title: "Crew dropdowns",
+              startedAt: index * 3_600_000,
+              endedAt: (index + 1) * 3_600_000,
+              ...over,
+            })
+          )
+      const sitting = toLogItems(memberEntries).find(
+        (item): item is Extract<LogItem, { kind: "sitting" }> => item.kind === "sitting"
+      )
+      if (sitting === undefined) throw new Error("fixture did not produce a sitting")
+
+      return render(
+        <SittingRow
+          sitting={sitting}
+          timeZone="UTC"
+          use12Hour={false}
+          projects={[SEALOGS, PRO_BONO]}
+          tags={[]}
+          display="hms"
+          expanded={false}
+          onToggle={() => {}}
+          onResume={() => {}}
+          onClassify={onClassify}
+          onNoteOpen={onNoteOpen}
+          onCreateProject={vi.fn()}
+          onCreateTag={vi.fn()}
+          controls="sitting-panel"
+        />
+      )
+    }
+
+    it("writes one note for the whole sitting rather than one per member", () => {
+      renderTwiceOnly()
+      fireEvent.click(screen.getByRole("button", { name: /show grouped entries/i }))
+
+      // The members carry times and controls, but no prose of their own — the
+      // duplication this feature exists to remove.
+      expect(screen.queryAllByRole("button", { name: /\+ add note/i })).toHaveLength(1)
+    })
+
+    it("marks every member billable when the picked project bills by default", () => {
+      const onClassify = vi.fn()
+      renderSitting({ onClassify })
+
+      fireEvent.click(screen.getByLabelText(/^Project/))
+      fireEvent.click(screen.getByRole("option", { name: /Sealogs/ }))
+
+      // Client-derived and sent explicitly, so what the $ shows is what gets
+      // written — see timer-bar.tsx for the same rule on the idle bar.
+      expect(onClassify).toHaveBeenCalledWith({
+        projectId: SEALOGS._id,
+        billable: true,
+      })
+    })
+
+    it("leaves billable alone for a project that does not bill by default", () => {
+      // Inheritance only ever turns billable ON. Removing a mark would
+      // destroy the record of a decision; adding one destroys nothing.
+      const onClassify = vi.fn()
+      renderSitting({ onClassify })
+
+      fireEvent.click(screen.getByLabelText(/^Project/))
+      fireEvent.click(screen.getByRole("option", { name: /Pro bono/ }))
+
+      expect(onClassify).toHaveBeenCalledWith({ projectId: PRO_BONO._id })
+    })
+
+    it("reads unlit while any member is unbillable, and one click makes it uniform", () => {
+      const onClassify = vi.fn()
+      renderSitting({ onClassify, members: [{ billable: true }, { billable: false }] })
+
+      fireEvent.click(screen.getByLabelText("Not billable"))
+
+      expect(onClassify).toHaveBeenCalledWith({ billable: true })
+    })
+
+    it("no longer counts noted members on the parent", () => {
+      renderLog(true)
+      expect(screen.queryByText(/of 2 noted/)).toBeNull()
+    })
   })
 })
