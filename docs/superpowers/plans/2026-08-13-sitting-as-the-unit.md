@@ -288,7 +288,7 @@ In `toLogItems`, add to the accumulator loop and the returned object:
     }
 ```
 
-`notedCount` stays on the type even though Task 5 stops rendering it — `day-list.test.tsx` asserts it today, and removing a field and its assertions in the same task as a UI change makes a failure ambiguous.
+**`notedCount` stays for now, and Task 5 deletes it.** It is still computed here so this task's own tests stay meaningful, and `day-list.test.tsx` still asserts it today. PRE-FLIGHT AMENDMENT (approved before execution): Task 5 removes the field, its accumulator and its assertions in the same commit that stops rendering it, so nothing dead is left behind and the deletion sits with the change that made it dead. Do NOT remove it in this task.
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
@@ -925,8 +925,11 @@ git commit -m "refactor(notes): the sheet writes to a piece of work, which may b
 ### Task 5: `SittingRow` becomes the editor
 
 **Files:**
+- Create: `src/components/entries/note-line.tsx`
 - Modify: `src/components/entries/sitting-row.tsx`
-- Test: `src/components/entries/day-list.test.tsx` (this is where `SittingRow` is exercised today)
+- Modify: `src/components/entries/entry-row.tsx` (extract the note block out; behaviour-preserving)
+- Modify: `src/lib/group-sittings.ts` (remove `notedCount`)
+- Test: `src/components/entries/day-list.test.tsx` (where `SittingRow` is exercised today), and `src/lib/group-sittings.test.ts` for the `notedCount` removal
 
 **Interfaces:**
 - Consumes: `sitting.tagIds`, `sitting.allBillable` (Task 1); `Classification` from `@/components/timer/timer-bar`.
@@ -1026,6 +1029,10 @@ The current comment states the opposite of what this component now does, and a w
  */
 ```
 
+- [ ] **Step 3b: Remove `notedCount` (pre-flight amendment)**
+
+Nothing reads it once the parent stops rendering the count. Delete the field from the `sitting` variant of `LogItem`, the `let notedCount = 0` accumulator and its `if` in `toLogItems`, the `notedCount,` key in the returned object, and every assertion about it in `group-sittings.test.ts` and `day-list.test.tsx`. `npm run typecheck` is the check that none were missed.
+
 - [ ] **Step 4: Add the props**
 
 ```tsx
@@ -1124,9 +1131,50 @@ Replace the `ProjectDot`, the "n of m noted" span, and nothing else, with:
           </div>
 ```
 
-and add the note beneath the title, mirroring `EntryRow`'s two states exactly — the written note as a button that opens the sheet, and the hatched `+ add note` when `joinNotes` is empty. Copy `entry-row.tsx:195-274` verbatim, substituting `note` / `hasNote` from Step 5 and `onNoteOpen()` for `actions.onNoteOpen(entry)`. Its comments explain the fixed 20px slot, the `touch-target` placement and the Hatch Rule; they apply here unchanged.
+and add the note beneath the title.
+
+**PRE-FLIGHT AMENDMENT (approved before execution).** The plan originally said to copy `entry-row.tsx:195-274` verbatim. Extract it instead, because ~80 lines of duplicated JSX carrying the WCAG target reasoning and the Hatch Rule would be two copies to keep in step by hand.
+
+Create `src/components/entries/note-line.tsx`:
+
+```tsx
+/**
+ * A note as the log draws it: the prose itself, or the hatch inviting one.
+ *
+ * EXTRACTED FROM `EntryRow` rather than copied into `SittingRow`, because the
+ * two comments below are the kind that go stale in one copy and not the other
+ * — and a note rendered two different ways in one list is exactly the drift
+ * this component exists to prevent. A row passes its own note; a sitting passes
+ * every member's, joined.
+ */
+export function NoteLine({
+  note,
+  notesExpanded,
+  onOpen,
+}: {
+  /** Already trimmed and, for a sitting, already joined. */
+  note: string
+  notesExpanded: boolean
+  onOpen: () => void
+}) {
+```
+
+Move the whole block at `entry-row.tsx:195-274` into it unchanged — both branches, every comment, every class. Its comments explain the fixed 20px slot, the `touch-target` placement and the Hatch Rule; they apply to both callers unchanged. `EntryRow` then renders:
+
+```tsx
+            <NoteLine
+              note={note}
+              notesExpanded={notesExpanded}
+              onOpen={() => actions.onNoteOpen(entry)}
+            />
+```
+
+and `SittingRow` renders the same element with `note` from Step 5 and `onOpen={onNoteOpen}`.
+
+This is a behaviour-preserving move for `EntryRow`: its existing tests must pass untouched. If any needs editing, the move changed something it should not have.
 
 This means the title and note need the same column wrapper `EntryRow` gives them. Read `entry-row.tsx` around the title for that structure and mirror it.
+
 
 Add `onCreateProject` and `onCreateTag` to the prop block, typed as `EntryRowActions`' are.
 
