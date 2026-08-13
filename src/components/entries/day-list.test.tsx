@@ -581,6 +581,10 @@ describe("grouped entries", () => {
           expanded={false}
           onToggle={() => {}}
           onResume={() => {}}
+          onClassify={() => {}}
+          onNoteOpen={() => {}}
+          onCreateProject={vi.fn()}
+          onCreateTag={vi.fn()}
           controls="sitting-panel"
         />
       )
@@ -666,6 +670,106 @@ describe("grouped entries", () => {
     it("no longer counts noted members on the parent", () => {
       renderLog(true)
       expect(screen.queryByText(/of 2 noted/)).toBeNull()
+    })
+  })
+
+  /*
+   * A MEMBER CARRIES TIME, NOT PROSE.
+   *
+   * `SittingRow` above already owns the note — this is the other half of that
+   * move: `DayList` has to stop a member row from drawing one of its own, or
+   * the same prose reads twice within one disclosure. Scoped to a group of
+   * just `twice` (not `groups`, which also carries the unrelated "Weekly
+   * retro" row) so a billable-toggle or note-button query below matches
+   * exactly the sitting under test, not a second unrelated row sharing the
+   * same unlit state.
+   */
+  describe("a sitting's members carry time, not prose", () => {
+    const sittingOnly = [
+      {
+        day: "2026-08-09",
+        label: "Today",
+        entries: twice,
+        notedCount: 1,
+        totalMs: 7_200_000,
+        billableMs: 0,
+        runningCount: 0,
+      },
+    ]
+
+    const renderGroupedLog = (actions: EntryRowActions = noActions) =>
+      render(
+        <DayList
+          groups={sittingOnly}
+          timeZone="UTC"
+          use12Hour={false}
+          weekStartDay={0}
+          projects={[]}
+          tags={[]}
+          actions={actions}
+          grouped
+        />
+      )
+
+    it("renders no note line on a member row", () => {
+      renderGroupedLog()
+      fireEvent.click(screen.getByLabelText("Show grouped entries"))
+
+      // Both members are on screen with their own times — `formatTimeRange`
+      // over UTC epoch instants, un-padded like every other assertion above.
+      expect(screen.getByText("01:06 – 02:06")).toBeTruthy()
+      expect(screen.getByText("00:00 – 01:00")).toBeTruthy()
+      // ...and exactly one note control between them, on the parent: the
+      // joined note text (member "b" is the only one of `twice` carrying a
+      // note), not a second copy of it and not an empty hatch on either
+      // member.
+      expect(
+        screen.queryAllByRole("button", { name: /Finished the assignment modal\./ })
+      ).toHaveLength(1)
+    })
+
+    it("still renders the note on a lone entry", () => {
+      // A row that is not part of a sitting is untouched by any of this.
+      const lone = [
+        {
+          day: "2026-08-09",
+          label: "Today",
+          entries: [
+            makeEntry({ _id: "lone" as unknown as Doc<"timeEntries">["_id"] }),
+          ],
+          notedCount: 0,
+          totalMs: 3_600_000,
+          billableMs: 0,
+          runningCount: 0,
+        },
+      ]
+      render(
+        <DayList
+          groups={lone}
+          timeZone="UTC"
+          use12Hour={false}
+          weekStartDay={0}
+          projects={[]}
+          tags={[]}
+          actions={noActions}
+          grouped
+        />
+      )
+      expect(screen.getByRole("button", { name: /\+ add note/i })).toBeTruthy()
+    })
+
+    it("hands every member to the classify action", () => {
+      const onSittingClassify = vi.fn()
+      renderGroupedLog({ onSittingClassify } as unknown as EntryRowActions)
+
+      // Collapsed: the sitting's own toggle is the only "Not billable" control
+      // on screen (the members are unmounted at rest — see `day-list.tsx`).
+      fireEvent.click(screen.getByLabelText("Not billable"))
+
+      expect(onSittingClassify).toHaveBeenCalledWith(
+        [expect.objectContaining({ _id: "b" }), expect.objectContaining({ _id: "a" })],
+        { billable: true }
+      )
     })
   })
 })

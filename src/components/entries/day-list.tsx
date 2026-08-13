@@ -95,7 +95,7 @@ export function DayList({
    * rather than twice below, where the next one added would land on one call
    * site and silently skip the other.
    */
-  const row = (entry: Entry) => (
+  const row = (entry: Entry, showNote = true) => (
     <EntryRow
       key={entry._id}
       entry={entry}
@@ -106,6 +106,7 @@ export function DayList({
       tags={tags}
       actions={actions}
       notesExpanded={notesExpanded}
+      showNote={showNote}
     />
   )
 
@@ -212,24 +213,34 @@ export function DayList({
                     timeZone={timeZone}
                     use12Hour={use12Hour}
                     projects={projects}
+                    tags={tags}
                     display={display}
                     expanded={isOpen}
+                    notesExpanded={notesExpanded}
                     onToggle={() => toggle(stateKey)}
                     // The NEWEST member. `useEntryActions`'s resume copies
                     // title, project, tags and billable off whatever it is
                     // given, so this already IS "start this again".
                     onResume={() => actions.onResume(item.entries[0])}
+                    onClassify={(change) => actions.onSittingClassify(item.entries, change)}
+                    onNoteOpen={() => actions.onSittingNoteOpen(item.entries)}
+                    onCreateProject={actions.onCreateProject}
+                    onCreateTag={actions.onCreateTag}
                     controls={panelId}
                   />
                   {isOpen ? (
                     // Indented, and NOT RENDERED while collapsed rather than
                     // merely hidden: a long log of collapsed groups would
                     // otherwise mount every member's pickers for nobody.
+                    //
+                    // `showNote={false}`: the note belongs to the sitting, not
+                    // to each interval of it — see `SittingRow`'s own doc
+                    // comment and `entry-row.tsx`'s `showNote` prop.
                     <div
                       id={panelId}
                       className="flex flex-col border-l-2 border-edge-soft pl-4"
                     >
-                      {item.entries.map(row)}
+                      {item.entries.map((entry) => row(entry, false))}
                     </div>
                   ) : null}
                 </div>

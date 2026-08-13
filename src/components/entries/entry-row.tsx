@@ -30,6 +30,12 @@ export type EntryRowActions = {
   onNoteOpen: (entry: Entry) => void
   onRemove: (entry: Entry) => void
   onResume: (entry: Entry) => void
+  /** `onClassify`, for a sitting: applies one change to every member at once.
+   *  See `SittingRow.onClassify` and `DayList`, which builds this from it. */
+  onSittingClassify: (entries: Array<Entry>, change: Partial<Classification>) => void
+  /** `onNoteOpen`, for a sitting: opens the note editor on every member's note,
+   *  joined. See `SittingRow.onNoteOpen` and `EntryLog`, which implements it. */
+  onSittingNoteOpen: (entries: Array<Entry>) => void
 }
 
 /**
@@ -65,6 +71,7 @@ export function EntryRow({
   tags,
   actions,
   notesExpanded = false,
+  showNote = true,
 }: {
   entry: Entry
   timeZone: string
@@ -87,6 +94,20 @@ export function EntryRow({
    * a day to read the day, which is the gesture this replaces.
    */
   notesExpanded?: boolean
+  /**
+   * Whether this row carries its own note.
+   *
+   * FALSE FOR A SITTING'S MEMBERS, and only there. The note belongs to the
+   * piece of work rather than to each interval of it, so the parent carries it
+   * and the members carry times — see `sitting-row.tsx`. Defaults true, so
+   * every other caller in the product is unaffected and a row rendered without
+   * thinking about this still behaves the way it always has.
+   *
+   * The row is SHORTER without the slot, deliberately: the fixed 20px box
+   * exists to stop a day of mixed written/empty notes rippling, and a member
+   * row has no note to be mixed about.
+   */
+  showNote?: boolean
 }) {
   const title = entry.title.trim()
   const note = (entry.note ?? "").trim()
@@ -186,12 +207,18 @@ export function EntryRow({
             ) : null}
           </div>
 
-          {/* The 20px slot and its `touch-target` sizing are explained in `NoteLine`. */}
-          <NoteLine
-            note={note}
-            notesExpanded={notesExpanded}
-            onOpen={() => actions.onNoteOpen(entry)}
-          />
+          {/* The 20px slot and its `touch-target` sizing are explained in `NoteLine`.
+              Omitted entirely for a sitting's members — see `showNote` above —
+              rather than rendered empty, which is what makes the member row
+              SHORTER than a plain one instead of merely blank where its note
+              would be. */}
+          {showNote ? (
+            <NoteLine
+              note={note}
+              notesExpanded={notesExpanded}
+              onOpen={() => actions.onNoteOpen(entry)}
+            />
+          ) : null}
         </div>
 
         {/*

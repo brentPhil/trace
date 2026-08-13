@@ -87,6 +87,30 @@ export function EntryLog({
       })
       setNoteOpen(true)
     },
+    onSittingClassify: (entries, change) => {
+      void updateMany({
+        entryIds: entries.map((entry) => entry._id),
+        ...change,
+        // `projectId` is already `Id | null` in `Classification`, which is the
+        // shape `updateMany` takes — null clears, absent leaves alone.
+      }).catch(() => {
+        // Same reasoning as the row's own classify: never interrupt the reader
+        // to report that a tag did not stick.
+      })
+    },
+    onSittingNoteOpen: (entries) => {
+      setNoteTarget({
+        entryIds: entries.map((entry) => entry._id),
+        // The day is not available here, and does not need to be: a sitting
+        // cannot cross a day boundary, so title + project is unique within the
+        // set of entries this log is rendering.
+        key: `sitting\u0000${entries[0].title.trim()}\u0000${entries[0].projectId ?? ""}`,
+        title: entries[0].title,
+        note: joinNotes(entries),
+        totalMs: entries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
+      })
+      setNoteOpen(true)
+    },
   }
 
   // The sheet reads the LIVE rows when they are still found in `groups`,
@@ -107,8 +131,15 @@ export function EntryLog({
       // A rename made in another tab or on another device must show up here
       // too — the sheet header, the dialog's accessible name, and the undo
       // toast's label all read `title`. A sitting's members share a title by
-      // construction (it is half the grouping key), so the first live
-      // member's is correct whether this target is a row or a sitting.
+      // construction ONLY AT THE MOMENT THE TARGET IS BUILT — `entryIds` is
+      // fixed then, from `toLogItems`' grouping key, but a member can be
+      // retitled out of the sitting while this sheet stays open (its own
+      // title edit is unreachable from here, but nothing stops a resume,
+      // another tab, or a calendar edit from doing it). If that happens,
+      // `live[0]` may be the departed member, now carrying its new title —
+      // and `joinNotes(live)` and the `totalMs` sum just below share exactly
+      // the same staleness. Nothing to fix here: the sheet re-seeds fresh on
+      // its next open, which is where the target is rebuilt from scratch.
       title: live[0].title,
       note: joinNotes(live),
       totalMs: live.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),

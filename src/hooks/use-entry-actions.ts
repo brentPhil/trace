@@ -21,14 +21,19 @@ import type { Entry } from "@/lib/group-entries"
  * then offer the way back" would be two undo windows, two error postures and two
  * sentences for the same event — and the one that is used less would be the one
  * that quietly stopped matching. `EntryRowActions` is the vocabulary the log row
- * already speaks, so this returns exactly that (less `onNoteOpen`, which is the
- * log's own sheet) plus the one verb the popover adds.
+ * already speaks, so this returns exactly that (less `onNoteOpen`,
+ * `onSittingClassify` and `onSittingNoteOpen`, which are the log's own sheet
+ * and its sitting-shaped writes — a calendar block never renders a
+ * `SittingRow`) plus the one verb the popover adds.
  *
  * Passed DOWN as a prop from there, never reached for inside a row or a block —
  * see `EntryRow`'s own note on why. This hook is the one place the writes
  * originate.
  */
-export type EntryActions = Omit<EntryRowActions, "onNoteOpen"> & {
+export type EntryActions = Omit<
+  EntryRowActions,
+  "onNoteOpen" | "onSittingClassify" | "onSittingNoteOpen"
+> & {
   /**
    * A second entry with the same title, times and classification.
    *

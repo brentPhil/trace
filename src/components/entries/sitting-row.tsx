@@ -18,36 +18,6 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
 type Sitting = Extract<LogItem, { kind: "sitting" }>
 
 /**
- * The default for `onCreateProject`/`onCreateTag` while `DayList` has not
- * wired them up yet. Rejects rather than resolving silently, matching this
- * codebase's `noEntryActions` convention (`test-utils/fixtures.ts`): a
- * control that reaches a creator nobody supplied should fail loudly — a
- * `.catch()` printing an error — rather than pretend the create succeeded.
- */
-function throwingCreator(propName: string): (name: string) => Promise<never> {
-  return () => Promise.reject(new Error(`SittingRow: ${propName} was not supplied`))
-}
-
-/**
- * The default for `onClassify`/`onNoteOpen`, for the same caller-not-wired-up
- * reason as `throwingCreator` above, but a silent no-op is the wrong shape
- * here in a way it is not for `tags = []` below. `tags = []` just leaves the
- * tag picker with nothing to choose. A no-op `onClassify` leaves the project
- * picker, tag picker and billable toggle fully live and clickable anyway —
- * this row does not know its caller forgot to wire it — so a user picks a
- * project, the picker closes as if it worked, and the write silently never
- * happens: no error, no failing test, no console line. Same for `onNoteOpen`:
- * an `+ add note` hatch that opens nothing. Throwing turns that into a stack
- * trace pointing at this file the moment the control is used, which is what
- * `throwingCreator` already buys the two creator props above.
- */
-function throwingHandler(propName: string): () => never {
-  return () => {
-    throw new Error(`SittingRow: ${propName} was not supplied`)
-  }
-}
-
-/**
  * Several sittings at one piece of work, and the place that work is edited.
  *
  * THE SITTING IS THE UNIT OF WORK; THE ENTRIES UNDER IT ARE THE UNIT OF TIME.
@@ -77,31 +47,23 @@ export function SittingRow({
   timeZone,
   use12Hour,
   projects,
-  tags = [],
+  tags,
   display,
   expanded,
   notesExpanded = false,
   onToggle,
   onResume,
-  onClassify = throwingHandler("onClassify"),
-  onNoteOpen = throwingHandler("onNoteOpen"),
-  onCreateProject = throwingCreator("onCreateProject"),
-  onCreateTag = throwingCreator("onCreateTag"),
+  onClassify,
+  onNoteOpen,
+  onCreateProject,
+  onCreateTag,
   controls,
 }: {
   sitting: Sitting
   timeZone: string
   use12Hour: boolean
   projects: Array<Doc<"projects">>
-  /**
-   * `tags` through `onCreateTag` below are all optional for the same reason:
-   * `DayList` does not wire them up yet (wiring it in is the next task), and a
-   * required prop it does not supply would crash every pre-existing grouped-
-   * entries render rather than merely fail to typecheck. Real Task 6 usage
-   * supplies all of them; these defaults exist only so today's incomplete
-   * caller stays inert instead of throwing.
-   */
-  tags?: Array<Doc<"tags">>
+  tags: Array<Doc<"tags">>
   display: DurationDisplay
   expanded: boolean
   /** Forwarded from the page, exactly as `EntryRow` takes it. */
@@ -110,10 +72,10 @@ export function SittingRow({
   /** Resumes the NEWEST member — see `DayList`, which supplies it. */
   onResume: () => void
   /** Applies a classifier change to EVERY member. See `DayList`. */
-  onClassify?: (change: Partial<Classification>) => void
-  onNoteOpen?: () => void
-  onCreateProject?: EntryRowActions["onCreateProject"]
-  onCreateTag?: EntryRowActions["onCreateTag"]
+  onClassify: (change: Partial<Classification>) => void
+  onNoteOpen: () => void
+  onCreateProject: EntryRowActions["onCreateProject"]
+  onCreateTag: EntryRowActions["onCreateTag"]
   /**
    * The `id` of the container this row reveals, for `aria-controls`.
    *
