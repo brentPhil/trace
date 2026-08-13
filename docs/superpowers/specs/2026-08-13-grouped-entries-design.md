@@ -1,7 +1,15 @@
 # Grouped entries, and the billable default the timer bar was dropping
 
 **Date:** 2026-08-13
-**Status:** approved, ready for planning
+**Status:** implemented; **partly superseded**
+
+> **Read [2026-08-13-sitting-as-the-unit-design.md](2026-08-13-sitting-as-the-unit-design.md) before acting on Part 1.**
+> Shipping this revealed that two entries sharing a title usually carry the
+> *same* note, not different ones — the opposite of the assumption Part 1 is
+> built on, and the reason the parent row changed. The parent
+> row is no longer read-only, it no longer shows `"N of M noted"`, and it now
+> carries tags and a billable mark. The grouping key, the day scope, the
+> `groupEntries` setting and the parent's span are unchanged.
 
 Two changes, folded into one spec at the user's request. They share no files, but
 they were raised in the same conversation and both concern what the log and the
