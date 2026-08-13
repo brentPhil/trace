@@ -25,6 +25,7 @@ export const SETTINGS = {
   tabTitleClock: false,
   currency: "USD",
   pdfIncludeNotes: false,
+  groupEntries: true,
 }
 
 /**

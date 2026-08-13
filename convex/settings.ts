@@ -37,6 +37,9 @@ export type Settings = {
   /** Print each row's entry notes in the exported PDF report. See the schema
    *  for why the default is off. */
   pdfIncludeNotes: boolean
+  /** Collapse a day's repeats of one title+project into a single log row. See
+   *  the schema for why this default is on where `pdfIncludeNotes` is off. */
+  groupEntries: boolean
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -48,6 +51,7 @@ export const SETTINGS_DEFAULTS: Settings = {
   tabTitleClock: true,
   currency: "USD",
   pdfIncludeNotes: false,
+  groupEntries: true,
 }
 
 async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
@@ -67,6 +71,7 @@ const settingsReturns = v.object({
   tabTitleClock: v.boolean(),
   currency: v.string(),
   pdfIncludeNotes: v.boolean(),
+  groupEntries: v.boolean(),
 })
 
 async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
@@ -86,6 +91,8 @@ async function getImpl(ctx: QueryCtx, userId: string): Promise<Settings> {
     currency: row.currency ?? SETTINGS_DEFAULTS.currency,
     // Same additive-column fallback as `currency` above.
     pdfIncludeNotes: row.pdfIncludeNotes ?? SETTINGS_DEFAULTS.pdfIncludeNotes,
+    // Same additive-column fallback as `currency` and `pdfIncludeNotes` above.
+    groupEntries: row.groupEntries ?? SETTINGS_DEFAULTS.groupEntries,
   }
 }
 
@@ -194,6 +201,7 @@ const updateArgs = {
   tabTitleClock: v.optional(v.boolean()),
   currency: v.optional(v.string()),
   pdfIncludeNotes: v.optional(v.boolean()),
+  groupEntries: v.optional(v.boolean()),
   /** `null` CLEARS it, `undefined` leaves it alone — the same three-state
    *  shape `projects.update` uses for the same field, because "set it to
    *  nothing" and "do not touch it" are different requests. */
@@ -209,6 +217,7 @@ type UpdateArgs = {
   tabTitleClock?: boolean
   currency?: string
   pdfIncludeNotes?: boolean
+  groupEntries?: boolean
   defaultHourlyRateCents?: number | null
 }
 

@@ -354,6 +354,20 @@ export default defineSchema({
      *  whether `entries.rangeBreakdown` is asked to carry notes at all, so off
      *  costs nothing on the query either. */
     pdfIncludeNotes: v.optional(v.boolean()),
+    /** Collapse repeats of one title+project within a day into one log row.
+     *
+     *  Optional and additive like `currency` and `pdfIncludeNotes` above — a
+     *  row written before this field existed has no opinion, and `settings.get`
+     *  falls back to `SETTINGS_DEFAULTS` rather than this needing a backfill.
+     *
+     *  ON by default, and the difference from `pdfIncludeNotes` is the point:
+     *  that flag governs what reaches a CLIENT, so its default has to be the
+     *  cautious one. This governs only how rows are drawn on the user's own
+     *  screen. Nothing is merged, nothing is stored per group, and every entry
+     *  stays individually present and editable one click away — see
+     *  docs/superpowers/specs/2026-08-13-grouped-entries-design.md, which
+     *  argues that at length against PRODUCT.md's "never silently merges". */
+    groupEntries: v.optional(v.boolean()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
 })

@@ -339,3 +339,44 @@ describe("update", () => {
     )
   })
 })
+
+describe("groupEntries", () => {
+  it("reads as true for a row written before the column existed", async () => {
+    /*
+     * The additive-column contract, and the reason `groupEntries` is
+     * `v.optional` in the schema: every existing user has a settings row with
+     * no opinion about this field, and that is an ordinary state rather than
+     * one worth a backfill migration. Absence has to mean "the default", the
+     * same way `currency` and `pdfIncludeNotes` already work.
+     */
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("userSettings", {
+        userId: ALICE,
+        timezone: "UTC",
+        weekStartDay: 1,
+        durationDisplay: "hms",
+        timeFormat: "24",
+        runawayThresholdMs: 8 * 60 * 60 * 1000,
+        tabTitleClock: true,
+        updatedAt: Date.now(),
+      })
+    })
+
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.groupEntries).toBe(true)
+  })
+
+  it("can be switched off and back on", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.updateAs, { userId: ALICE, groupEntries: false })
+    expect(
+      (await t.query(internal.settings.getAs, { userId: ALICE })).groupEntries
+    ).toBe(false)
+
+    await t.mutation(internal.settings.updateAs, { userId: ALICE, groupEntries: true })
+    expect(
+      (await t.query(internal.settings.getAs, { userId: ALICE })).groupEntries
+    ).toBe(true)
+  })
+})
