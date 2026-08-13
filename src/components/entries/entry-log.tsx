@@ -3,8 +3,10 @@ import { DayList } from "@/components/entries/day-list"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
+import { joinNotes } from "@/lib/group-sittings"
 import type { ReactNode } from "react"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { NoteTarget } from "@/components/entries/note-sheet"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayGroup, Entry } from "@/lib/group-entries"
@@ -67,30 +69,45 @@ export function EntryLog({
    *  why the component's own default is the opposite of the setting's. */
   grouped?: boolean
 }) {
-  const { setNote } = useEntryEditMutations()
+  const { updateMany } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
 
-  const [noteEntry, setNoteEntry] = useState<Entry | null>(null)
+  const [noteTarget, setNoteTarget] = useState<NoteTarget | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)
 
   const actions: EntryRowActions = {
     ...entryActions,
     onNoteOpen: (entry) => {
-      setNoteEntry(entry)
+      setNoteTarget({
+        entryIds: [entry._id],
+        key: entry._id,
+        title: entry.title,
+        note: entry.note ?? "",
+        totalMs: entry.durationMs ?? 0,
+      })
       setNoteOpen(true)
     },
   }
 
-  // The sheet reads the LIVE row when one is still found in `groups`, falling
-  // back to the snapshot only if the entry has since been removed (deleted,
-  // or paginated out from under it) — so it stays in sync with edits made
-  // elsewhere while it is open, rather than going stale mid-sentence.
-  const liveNoteEntry =
-    noteEntry === null
-      ? null
-      : (groups
-          .flatMap((group) => group.entries)
-          .find((entry) => entry._id === noteEntry._id) ?? noteEntry)
+  // The sheet reads the LIVE rows when they are still found in `groups`,
+  // falling back to the snapshot only if every one has since been removed
+  // (deleted, or paginated out from under it) — so it stays in sync with edits
+  // made elsewhere while it is open, rather than going stale mid-sentence.
+  const liveNoteTarget = (() => {
+    if (noteTarget === null) return null
+    const byId = new Map(
+      groups.flatMap((group) => group.entries).map((entry) => [entry._id, entry])
+    )
+    const live = noteTarget.entryIds
+      .map((id) => byId.get(id))
+      .filter((entry): entry is Entry => entry !== undefined)
+    if (live.length === 0) return noteTarget
+    return {
+      ...noteTarget,
+      note: joinNotes(live),
+      totalMs: live.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
+    }
+  })()
 
   return (
     <>
@@ -108,10 +125,10 @@ export function EntryLog({
         grouped={grouped}
       />
       <NoteSheet
-        entry={liveNoteEntry}
+        target={liveNoteTarget}
         open={noteOpen}
         onOpenChange={setNoteOpen}
-        onSave={setNote}
+        onSave={(entryIds, note) => updateMany({ entryIds, note })}
       />
     </>
   )

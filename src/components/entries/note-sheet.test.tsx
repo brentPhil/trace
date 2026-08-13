@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { NoteSheet, clearNoteDrafts } from "@/components/entries/note-sheet"
 import { Toast, ToastViewport } from "@/components/ui/toast"
+import type { NoteTarget } from "@/components/entries/note-sheet"
 import type { Entry } from "@/lib/group-entries"
 import type { Id } from "../../../convex/_generated/dataModel"
 
@@ -36,7 +37,12 @@ function makeEntry(over: Partial<Entry> = {}): Entry {
 
 /** A controlled harness matching how `EntryLog` actually drives the sheet:
  * `entry` is NOT cleared when the sheet closes, only `open` changes — so
- * reopening on the same entry is a real, supported path, not a special case. */
+ * reopening on the same entry is a real, supported path, not a special case.
+ *
+ * Builds a one-member `NoteTarget` from `entry` and unwraps `onSave`'s
+ * `entryIds` back down to a single id before handing it to the caller's spy —
+ * every test below still asserts against one entry's id, which is exactly
+ * what a plain row's target resolves to. */
 function Harness({
   entry,
   onSave,
@@ -45,10 +51,22 @@ function Harness({
   onSave: (id: Id<"timeEntries">, note: string) => Promise<void>
 }) {
   const [open, setOpen] = useState(true)
+  const target: NoteTarget = {
+    entryIds: [entry._id],
+    key: entry._id,
+    title: entry.title,
+    note: entry.note ?? "",
+    totalMs: entry.durationMs ?? 0,
+  }
   return (
     <Toast.Provider>
       <button onClick={() => setOpen(true)}>reopen</button>
-      <NoteSheet entry={entry} open={open} onOpenChange={setOpen} onSave={onSave} />
+      <NoteSheet
+        target={target}
+        open={open}
+        onOpenChange={setOpen}
+        onSave={(entryIds, note) => onSave(entryIds[0], note)}
+      />
       <ToastViewport />
     </Toast.Provider>
   )
@@ -240,5 +258,66 @@ describe("dismissing a note with unsaved text", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "reopen" }))
     expect(textarea().value).toBe("half-typed thought")
+  })
+})
+
+const ID_A = "e1" as unknown as Id<"timeEntries">
+const ID_B = "e2" as unknown as Id<"timeEntries">
+
+describe("a note written for a whole sitting", () => {
+  const TARGET: NoteTarget = {
+    entryIds: [ID_A, ID_B],
+    key: "2026-08-13\u0000[B-CB-343] Fixing the clock input",
+    title: "[B-CB-343] Fixing the clock input",
+    note: "First the parser.\n\nThen the tests.",
+    totalMs: 5_040_000,
+  }
+
+  it("opens on every member's prose joined, not on one member's", () => {
+    // Nothing is resolved behind the user: both accounts are on screen before
+    // anything is written, and they edit down to what they meant.
+    const onSave = vi.fn(async () => {})
+    render(
+      <Toast.Provider>
+        <NoteSheet target={TARGET} open onOpenChange={() => {}} onSave={onSave} />
+      </Toast.Provider>
+    )
+
+    expect(textarea().value).toBe("First the parser.\n\nThen the tests.")
+  })
+
+  it("saves to every member in one call", () => {
+    const onSave = vi.fn(async () => {})
+    render(
+      <Toast.Provider>
+        <NoteSheet target={TARGET} open onOpenChange={() => {}} onSave={onSave} />
+      </Toast.Provider>
+    )
+
+    fireEvent.change(textarea(), { target: { value: "One account." } })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    expect(onSave).toHaveBeenCalledWith([ID_A, ID_B], "One account.")
+  })
+
+  it("still writes a lone entry through the same path", () => {
+    // A row is a one-member target. One code path, so the sheet cannot behave
+    // differently depending on where it was opened from.
+    const onSave = vi.fn(async () => {})
+    render(
+      <Toast.Provider>
+        <NoteSheet
+          target={{ ...TARGET, entryIds: [ID_A], key: ID_A, note: "Just this." }}
+          open
+          onOpenChange={() => {}}
+          onSave={onSave}
+        />
+      </Toast.Provider>
+    )
+
+    fireEvent.change(textarea(), { target: { value: "Edited." } })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    expect(onSave).toHaveBeenCalledWith([ID_A], "Edited.")
   })
 })

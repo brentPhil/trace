@@ -5,15 +5,13 @@ import { Toast } from "@/components/ui/toast"
 import { errorMessage } from "@/lib/error-message"
 import { UNDO_MS, toastWithUndo } from "@/lib/undo-toast"
 import { formatCompactDuration } from "@shared/duration"
-import { elapsedMs } from "@shared/entryTimes"
 import { cn } from "@/lib/utils"
-import type { Entry } from "@/lib/group-entries"
 import type { Id } from "../../../convex/_generated/dataModel"
 
 const MAX_NOTE_LENGTH = 2_000
 
 /**
- * The in-memory backstop, keyed by entry id. MODULE SCOPE, not a ref.
+ * The in-memory backstop, keyed by the target's `key`. MODULE SCOPE, not a ref.
  *
  * It is written when a dismissal starts a save, and dropped the moment that
  * save succeeds (or a dismissal had nothing to save). A failed or still-in-
@@ -68,23 +66,49 @@ export function clearNoteDrafts() {
  * vocabulary delete and re-date use — literally the same, via
  * `toastWithUndo`, rather than a third hand-rolled copy of it — an
  * action already taken, reversible for `UNDO_MS`. `drafts` keeps a copy in
- * memory too, keyed by entry id, so if the save is still in flight (or fails)
- * and the sheet is reopened on the same entry before the page unloads, the
- * user's own text wins over whatever the server most recently agreed to. See
- * `handleDismiss` below, and `drafts` above for why that copy outlives this
- * component rather than the mount it was typed in.
+ * memory too, keyed by the target's `key`, so if the save is still in flight
+ * (or fails) and the sheet is reopened on the same target before the page
+ * unloads, the user's own text wins over whatever the server most recently
+ * agreed to. See `handleDismiss` below, and `drafts` above for why that copy
+ * outlives this component rather than the mount it was typed in.
  */
+
+/**
+ * What a note is being written for.
+ *
+ * A TARGET RATHER THAN AN ENTRY, because a note now belongs to a piece of
+ * work and a piece of work can be several entries — see the
+ * sitting-as-the-unit spec. A row builds a one-member target, so there is
+ * exactly one path through this component and it cannot behave differently
+ * depending on where it was opened from.
+ */
+export type NoteTarget = {
+  /** Every entry this note will be written to. One for a row, many for a sitting. */
+  entryIds: Array<Id<"timeEntries">>
+  /**
+   * Stable identity for re-seeding and for the `drafts` map.
+   *
+   * NOT the first entry's id: a sitting's membership changes when a member is
+   * retitled out of it, and keying on a member would hand the user back a
+   * draft written for a different set of rows.
+   */
+  key: string
+  title: string
+  note: string
+  totalMs: number
+}
+
 export function NoteSheet({
-  entry,
+  target,
   open,
   onOpenChange,
   onSave,
 }: {
-  entry: Entry | null
+  target: NoteTarget | null
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Passed in, not reached for — see TimerBarActions on why. */
-  onSave: (entryId: Id<"timeEntries">, note: string) => Promise<void>
+  onSave: (entryIds: Array<Id<"timeEntries">>, note: string) => Promise<void>
 }) {
   const [value, setValue] = useState("")
   const [saving, setSaving] = useState(false)
@@ -95,52 +119,53 @@ export function NoteSheet({
   /*
    * Seeded when the sheet OPENS, and never again while it is open.
    *
-   * `entry` is a reactive query result, so listing `entry.note` as a dependency
-   * makes this live-bound rather than seeded — and then any change to that note
-   * from anywhere replaces the whole textarea and drops the caret to the end.
-   * "Anywhere" is not exotic: a second tab, another device, or this very
-   * dialog's own optimistic update being rolled back after a failed save. The
-   * user is mid-sentence and their sentences are the product.
+   * `target` is built from a reactive query result, so listing `target.note`
+   * as a dependency makes this live-bound rather than seeded — and then any
+   * change to that note from anywhere replaces the whole textarea and drops
+   * the caret to the end. "Anywhere" is not exotic: a second tab, another
+   * device, or this very dialog's own optimistic update being rolled back
+   * after a failed save. The user is mid-sentence and their sentences are the
+   * product.
    *
-   * Keyed on `_id` as well as `open` so that reopening the sheet on a DIFFERENT
-   * entry re-seeds; an entry cannot change `_id` while a sheet is open on it,
-   * so the optimistic-id instability that affects the timer bar cannot bite
-   * here.
+   * Keyed on `target.key` as well as `open` so that reopening the sheet on a
+   * DIFFERENT target re-seeds. A row's key is its entry's `_id`, which cannot
+   * change while a sheet is open on it, so the optimistic-id instability that
+   * affects the timer bar cannot bite here.
    */
   const seededFor = useRef<string | null>(null)
   useEffect(() => {
-    const id = open ? (entry?._id ?? null) : null
+    const id = open ? (target?.key ?? null) : null
     if (seededFor.current === id) return
     seededFor.current = id
     // A pending draft outranks the server's note: it is either about to
     // overwrite that note anyway (a save is in flight) or already tried to
     // and failed, and either way the user's own words should be what they
     // see, not whatever the last successful write happened to be.
-    if (id !== null) setValue(drafts.get(id) ?? entry?.note ?? "")
+    if (id !== null) setValue(drafts.get(id) ?? target?.note ?? "")
     // Cleared alongside the text. Left behind, a failed save's alarm line was
     // still sitting there the next time the sheet opened — on a different
-    // entry, about a write that is no longer pending.
+    // target, about a write that is no longer pending.
     setError(null)
-  }, [open, entry?._id, entry?.note])
+  }, [open, target?.key, target?.note])
 
-  if (entry === null) return null
+  if (target === null) return null
 
-  const title = entry.title.trim()
-  const duration = formatCompactDuration(elapsedMs(entry, Date.now()))
+  const title = target.title.trim()
+  const duration = formatCompactDuration(target.totalMs)
 
   const save = async () => {
     if (saving) return
     setSaving(true)
     setError(null)
     try {
-      await onSave(entry._id, value)
+      await onSave(target.entryIds, value)
       // Written by the deliberate path, so nothing here still needs the
       // in-memory backstop.
-      drafts.delete(entry._id)
+      drafts.delete(target.key)
       onOpenChange(false)
     } catch (thrown) {
       // Without this the dialog simply stayed open with no explanation, and the
-      // user would close it believing the note was written. The entry being
+      // user would close it believing the note was written. An entry being
       // deleted in another tab while this sheet is open is not a stretch — the
       // undo toast for exactly that is on screen for six seconds.
       setError(errorMessage(thrown))
@@ -156,7 +181,7 @@ export function NoteSheet({
    * explicit Save button above does not run through here: it already awaits
    * `onSave` and only closes once that has succeeded.
    *
-   * If the draft on screen still differs from the entry's saved note, this
+   * If the draft on screen still differs from the target's saved note, this
    * is now the moment that gets written, not the moment it gets thrown away.
    * The sheet still closes immediately — no blocking, no confirm dialog, the
    * same "cheap to leave" the sheet's header comment promises — and a toast
@@ -174,36 +199,36 @@ export function NoteSheet({
    */
   const handleDismiss = (nextOpen: boolean) => {
     if (!nextOpen) {
-      const previous = entry.note ?? ""
+      const previous = target.note
       const draft = value
       if (draft !== previous) {
-        drafts.set(entry._id, draft)
+        drafts.set(target.key, draft)
         const label = title === "" ? "entry" : `“${title}”`
-        void onSave(entry._id, draft)
+        void onSave(target.entryIds, draft)
           .then(() => {
             // The server now holds this text, so the backstop has done its
-            // job. Kept, it would outrank `entry.note` in the seeding effect
+            // job. Kept, it would outrank `target.note` in the seeding effect
             // for the rest of this mount — and the NEXT change to that note
             // from anywhere else would be invisible on reopen, then written
             // back over by the next dismissal. The failed path below
             // deliberately keeps it: there, the draft is the only copy.
-            drafts.delete(entry._id)
+            drafts.delete(target.key)
             toastWithUndo(toasts, {
               title: `Saved note for ${label}`,
               undo: () => {
                 // Re-armed BEFORE the inverse write, for the same reason the
                 // dismissal arms it before its own: from here until that write
                 // lands, the previous note is a value only this tab holds.
-                drafts.set(entry._id, previous)
-                return onSave(entry._id, previous)
+                drafts.set(target.key, previous)
+                return onSave(target.entryIds, previous)
               },
             })
           })
           .catch((thrown: unknown) => {
             // The draft is already sitting in `drafts`, so nothing here is
-            // gone — just not yet on the server. Reopening this entry's sheet
-            // will show it again rather than silently reverting to the old
-            // note.
+            // gone — just not yet on the server. Reopening the sheet on this
+            // target will show it again rather than silently reverting to the
+            // old note.
             toasts.add({
               title: `Note not saved: ${errorMessage(thrown)}`,
               priority: "high",
@@ -211,7 +236,7 @@ export function NoteSheet({
             })
           })
       } else {
-        drafts.delete(entry._id)
+        drafts.delete(target.key)
       }
     }
     onOpenChange(nextOpen)
