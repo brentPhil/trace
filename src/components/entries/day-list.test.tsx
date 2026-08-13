@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
+import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 
 /*
@@ -119,6 +120,84 @@ describe("DayList empty state", () => {
  * looks a row up by id, and a test asserting an attribute no code reads is a
  * test that can only ever fail for the wrong reason.
  */
+
+/*
+ * A NOTE THE READER CAN ACTUALLY READ.
+ *
+ * The log clips a note to one line, which is what makes fifty rows scannable
+ * and what makes the log useless the moment the note is the thing you came
+ * for — a standup, or an invoice line. /timer carries a switch for it now, and
+ * these are the two properties a row owes that switch: the text stops being
+ * ellipsed, and it stops being label-sized.
+ *
+ * ASSERTED AS CLASSES, deliberately. jsdom computes no layout — every element
+ * is zero by zero, so "is this text clipped" has no runtime answer here. The
+ * classes ARE the behaviour in a utility system, and they are exactly what a
+ * careless refactor of the row would drop.
+ */
+describe("a note in the log", () => {
+  const NOTE = "Rewrote the CSV import so a half-finished upload can be resumed."
+
+  const dayWithNote = [
+    {
+      day: "2026-08-09",
+      label: "Today",
+      entries: [makeEntry({ note: NOTE })],
+      notedCount: 1,
+      totalMs: 3_600_000,
+      billableMs: 0,
+      runningCount: 0,
+    },
+  ]
+
+  const renderLog = (notesExpanded: boolean) =>
+    render(
+      <DayList
+        groups={dayWithNote}
+        timeZone="UTC"
+        use12Hour
+        weekStartDay={0}
+        projects={[]}
+        tags={[]}
+        actions={noActions}
+        notesExpanded={notesExpanded}
+      />
+    )
+
+  it("clips it to one line by default", () => {
+    renderLog(false)
+    const note = screen.getByText(NOTE)
+
+    expect(note.className).toContain("truncate")
+    expect(note.className).not.toContain("whitespace-pre-wrap")
+  })
+
+  it("wraps it and steps it up to body size when asked", () => {
+    renderLog(true)
+    const note = screen.getByText(NOTE)
+
+    // `pre-wrap` and not plain wrapping: a note is typed in a textarea where
+    // Enter inserts a newline, so the user's own paragraph breaks are part of
+    // what they wrote. `break-words` is the pasted-URL case.
+    expect(note.className).toContain("whitespace-pre-wrap")
+    expect(note.className).toContain("break-words")
+    expect(note.className).not.toContain("truncate")
+
+    // `text-xs` is a label size. Once the note is what you came to read it is
+    // prose, at the size the note sheet itself writes it.
+    const control = note.closest("button")
+    expect(control).not.toBeNull()
+    expect(control!.className).toContain("text-sm")
+    expect(control!.className).not.toContain("text-xs")
+  })
+
+  it("still opens the note sheet either way", () => {
+    // The clip is a display mode, not a different control: the one gesture the
+    // note line has — open it and edit it — has to survive the switch.
+    renderLog(true)
+    expect(screen.getByText(NOTE).closest("button")?.getAttribute("type")).toBe("button")
+  })
+})
 
 describe("LogSkeleton", () => {
   /*

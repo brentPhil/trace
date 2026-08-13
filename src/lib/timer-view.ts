@@ -4,6 +4,10 @@ export type TimerView = "calendar" | "list"
  *  else this origin ever stores. */
 export const TIMER_VIEW_KEY = "trace.timer.view"
 
+/** The second preference this page remembers: whether a note is clipped to one
+ *  line or written out in full. Same namespace, same rules — see below. */
+export const TIMER_NOTES_KEY = "trace.timer.notes"
+
 /**
  * Whether /timer opens on the calendar or the log, remembered between visits.
  *
@@ -50,5 +54,46 @@ export function writeStoredView(view: TimerView): void {
   } catch {
     // Nothing to do and nothing to say: the preference is a convenience, and
     // the view the user just chose is already on screen.
+  }
+}
+
+/*
+ * WHETHER NOTES ARE WRITTEN OUT IN FULL, remembered the same way and for a
+ * stronger reason than the view is.
+ *
+ * The log clips a note to one line, because a row is a row and fifty of them
+ * have to be scannable. But the thing this product exists to capture is the
+ * prose, and reading it back — at a standup, or writing an invoice line — is
+ * the one moment where a clipped note is the wrong shape entirely. That is a
+ * MODE the reader is in for the length of a meeting, not a per-row gesture, so
+ * it has to survive a reload the way the view does.
+ *
+ * `"full"` / `"clipped"` rather than `"true"` / `"false"`: the same named-value
+ * shape as the view above, which is what lets a value nobody wrote be REFUSED
+ * rather than coerced. `Boolean("false")` is `true`, and a stray key would
+ * otherwise pin the log open with no way to read what went wrong.
+ *
+ * Everything the view's own note says about `localStorage` — read after the
+ * first paint, never in a state initializer, `try`/`catch` around both ends —
+ * applies here unchanged.
+ */
+export function readStoredNotes(): boolean | null {
+  if (typeof window === "undefined") return null
+  try {
+    const stored = window.localStorage.getItem(TIMER_NOTES_KEY)
+    if (stored === "full") return true
+    if (stored === "clipped") return false
+    return null
+  } catch {
+    return null
+  }
+}
+
+export function writeStoredNotes(full: boolean): void {
+  if (typeof window === "undefined") return
+  try {
+    window.localStorage.setItem(TIMER_NOTES_KEY, full ? "full" : "clipped")
+  } catch {
+    // As above: a preference the user has already been given on screen.
   }
 }

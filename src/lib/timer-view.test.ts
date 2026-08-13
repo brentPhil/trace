@@ -7,7 +7,14 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { TIMER_VIEW_KEY, readStoredView, writeStoredView } from "@/lib/timer-view"
+import {
+  TIMER_NOTES_KEY,
+  TIMER_VIEW_KEY,
+  readStoredNotes,
+  readStoredView,
+  writeStoredNotes,
+  writeStoredView,
+} from "@/lib/timer-view"
 
 /*
  * The stored view.
@@ -54,5 +61,50 @@ describe("the remembered view", () => {
       throw new Error("QuotaExceededError")
     })
     expect(() => writeStoredView("list")).not.toThrow()
+  })
+})
+
+/*
+ * The stored note mode, which is the same three failures again — plus one this
+ * preference has and the view does not: it is a BOOLEAN, and the obvious
+ * spelling of a stored boolean is the string `"false"`, which is truthy. The
+ * named values exist so that a value nobody wrote can be refused rather than
+ * coerced into pinning every note open.
+ */
+describe("the remembered note mode", () => {
+  it("round-trips both directions", () => {
+    writeStoredNotes(true)
+    expect(window.localStorage.getItem(TIMER_NOTES_KEY)).toBe("full")
+    expect(readStoredNotes()).toBe(true)
+
+    writeStoredNotes(false)
+    expect(window.localStorage.getItem(TIMER_NOTES_KEY)).toBe("clipped")
+    expect(readStoredNotes()).toBe(false)
+  })
+
+  it("has no opinion when nothing is stored", () => {
+    expect(readStoredNotes()).toBeNull()
+  })
+
+  it("refuses a value that is not one of the two modes", () => {
+    // `"false"` in particular: a stored boolean written the obvious way is a
+    // truthy string, and coercing it would turn "clipped" into "full" for
+    // everyone whose key came from an older build or another tab.
+    window.localStorage.setItem(TIMER_NOTES_KEY, "false")
+    expect(readStoredNotes()).toBeNull()
+  })
+
+  it("survives a localStorage that throws on read", () => {
+    vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("The operation is insecure.")
+    })
+    expect(readStoredNotes()).toBeNull()
+  })
+
+  it("survives a localStorage that throws on write", () => {
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError")
+    })
+    expect(() => writeStoredNotes(true)).not.toThrow()
   })
 })

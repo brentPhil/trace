@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
+import { WrapText } from "lucide-react"
 import { CalendarPanel } from "@/components/calendar/calendar-panel"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
@@ -26,7 +27,12 @@ import {
   presetSize,
   stepRange,
 } from "@/lib/timer-range"
-import { readStoredView, writeStoredView } from "@/lib/timer-view"
+import {
+  readStoredNotes,
+  readStoredView,
+  writeStoredNotes,
+  writeStoredView,
+} from "@/lib/timer-view"
 import { cn } from "@/lib/utils"
 import { pageTitle } from "@shared/brand"
 import { dayOf, dayWindow, weekWindow } from "@shared/day"
@@ -132,6 +138,23 @@ export function Timer() {
   const [range, setRange] = useState<TimerRange>(null)
 
   /*
+   * A FOURTH, AND IT IS ABOUT READING RATHER THAN SELECTING.
+   *
+   * The three above answer "which entries"; this one answers "how much of an
+   * entry do I get to see". `false` is the log this page has always drawn — a
+   * note clipped to one line, so a day is scannable — and `true` writes every
+   * note out in full at body size.
+   *
+   * It exists because the log is doing two jobs. Most of the day it is a table
+   * you glance at. At a standup, or writing up an invoice, it is the record of
+   * what happened, and a note ellipsed at the width of a column is the one
+   * thing on this page you cannot read. That used to mean opening each note's
+   * sheet in turn, or leaving for /reports — a whole page away from the timer
+   * that is still running.
+   */
+  const [notesExpanded, setNotesExpanded] = useState(false)
+
+  /*
    * THE STORED VIEW, ADOPTED AFTER THE FIRST PAINT.
    *
    * Not in the `useState` initializer above: this app server-renders, and
@@ -151,6 +174,11 @@ export function Timer() {
     adopted.current = true
     const stored = readStoredView()
     if (stored !== null) setView(stored)
+    // Both preferences in the one pass, because both are read from the same
+    // unavailable-on-the-server object and a second effect would be a second
+    // place for that argument to be got wrong.
+    const storedNotes = readStoredNotes()
+    if (storedNotes !== null) setNotesExpanded(storedNotes)
   }, [])
 
   const changeView = useCallback((next: TimerView) => {
@@ -158,6 +186,14 @@ export function Timer() {
     // Written here rather than in an effect on `view`: an effect would also
     // fire for the adoption above and write back the value it had just read.
     writeStoredView(next)
+  }, [])
+
+  /* Remembered for the same reason the view is, and a stronger one: this is a
+   * mode the reader stays in for the length of a standup, and a preference that
+   * resets on reload is one they have to set again every morning. */
+  const changeNotes = useCallback((next: boolean) => {
+    setNotesExpanded(next)
+    writeStoredNotes(next)
   }, [])
 
   /*
@@ -512,6 +548,45 @@ export function Timer() {
             </div>
 
             {/*
+              FULL NOTES — the log's second job, given a switch.
+
+              IN LIST ONLY, and it is not a control that could sensibly be
+              greyed out instead: the grid draws blocks, not rows, and has no
+              note line to unclip. A toggle that stayed on screen governing
+              nothing visible would be the range bar's opposite — that one
+              stays in both views precisely BECAUSE it still bounds what is
+              drawn.
+
+              A TOGGLE, spelt `aria-pressed`, and not a third tab. Calendar and
+              List are alternative views of the same entries; this changes
+              nothing about WHICH entries are on screen, only how much of each
+              one is legible, so it must not join the group that decides the
+              former. `aria-pressed` is also what makes the state audible: the
+              label is deliberately the same in both directions, because a
+              button whose name changes when you press it announces the state
+              you just left.
+
+              Beside the tabs rather than out at the left margin: it belongs to
+              the list, and the list is what the control next to it selects.
+            */}
+            {view === "list" ? (
+              <Button
+                variant="outline"
+                aria-pressed={notesExpanded}
+                onClick={() => changeNotes(!notesExpanded)}
+                className={cn(
+                  // The fill the segmented tab beside it uses for "on", so two
+                  // adjacent controls do not spell the same state two ways.
+                  "shrink-0 aria-pressed:border-edge-raised",
+                  "aria-pressed:bg-surface-raised aria-pressed:text-foreground"
+                )}
+              >
+                <WrapText className="size-4" />
+                Full notes
+              </Button>
+            ) : null}
+
+            {/*
               TABS, NOT TWO ROUTES — reports.tsx settled this argument for
               Summary and Detailed and it holds here for the same reason: the
               range bar beside it is ONE control governing both views. A
@@ -689,6 +764,10 @@ export function Timer() {
               use12Hour={settings.timeFormat === "12"}
               weekStartDay={settings.weekStartDay}
               display={settings.durationDisplay}
+              // Set in the header above, remembered between visits, and handed
+              // straight through to every row — see `entry-row.tsx` for what a
+              // row does with it.
+              notesExpanded={notesExpanded}
               /*
                 NOT the onboarding copy, once a range is selected. "Nothing
                 tracked yet" means a new account, and it is flatly false of a

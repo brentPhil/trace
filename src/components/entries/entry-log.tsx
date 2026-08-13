@@ -35,6 +35,7 @@ export function EntryLog({
   display,
   empty,
   actions: entryActions,
+  notesExpanded,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -57,6 +58,10 @@ export function EntryLog({
    * where an entry changes, so there is now literally one instance per page.
    */
   actions: EntryActions
+  /** Forwarded to `DayList`, and from there to every row: whether a note is
+   *  written out in full or clipped to one line. The page owns it, because it
+   *  is a mode the reader is in rather than a property of any one entry. */
+  notesExpanded?: boolean
 }) {
   const { setNote } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
@@ -95,6 +100,7 @@ export function EntryLog({
         actions={actions}
         display={display}
         empty={empty}
+        notesExpanded={notesExpanded}
       />
       <NoteSheet
         entry={liveNoteEntry}

@@ -70,14 +70,28 @@ vi.mock("@/hooks/use-clock", async (importOriginal) => {
  * depends on.
  */
 vi.mock("@/components/entries/entry-log", () => ({
-  EntryLog: ({ groups }: { groups: Array<{ day: string }> }) => {
+  EntryLog: ({
+    groups,
+    notesExpanded,
+  }: {
+    groups: Array<{ day: string }>
+    notesExpanded?: boolean
+  }) => {
     useEffect(() => {
       logLifecycle.mounts += 1
       return () => {
         logLifecycle.unmounts += 1
       }
     }, [])
-    return <div data-testid="entry-log">{groups.length} day groups</div>
+    // The note mode is printed rather than swallowed: this page owns it and
+    // the log merely carries it down, so the only thing assertable here is
+    // that what the header switch says is what the log was handed. What a ROW
+    // then draws is `day-list.test.tsx`.
+    return (
+      <div data-testid="entry-log" data-notes={notesExpanded === true ? "full" : "clipped"}>
+        {groups.length} day groups
+      </div>
+    )
   },
 }))
 
@@ -655,6 +669,74 @@ describe("Timer — the range bar's place in the layout", () => {
     expect(pinned!.contains(screen.getByText("Range total"))).toBe(true)
     expect(pinned!.contains(pill())).toBe(true)
     expect(pinned!.contains(tab("Calendar"))).toBe(true)
+  })
+})
+
+/*
+ * FULL NOTES, WITHOUT LEAVING THE PAGE.
+ *
+ * The log clips a note to one line so a day is scannable, which is right up
+ * until the moment the note is the thing being read — at a standup, or writing
+ * up an invoice. That used to mean opening each note's sheet in turn, or going
+ * to /reports while the timer is still running here.
+ *
+ * What this file can hold is the switch and what it hands down; the row's own
+ * drawing of it — wrapped instead of ellipsed, a size up — is
+ * `day-list.test.tsx`, against a real `EntryRow`.
+ */
+describe("Timer — reading the notes in full", () => {
+  const notesButton = () => screen.getByRole("button", { name: "Full notes" })
+  const logNotes = () => screen.getByTestId("entry-log").getAttribute("data-notes")
+
+  beforeEach(() => {
+    resolvePage(paginatedKey(api.entries.listPage, logRange), {
+      page: [makeEntry({ title: "Client call", note: "Rewrote the import step." })],
+      isDone: true,
+    })
+  })
+
+  it("clips notes until asked, then writes them out in full", () => {
+    renderTimer()
+
+    // The default is the log this page has always drawn.
+    expect(notesButton().getAttribute("aria-pressed")).toBe("false")
+    expect(logNotes()).toBe("clipped")
+
+    fireEvent.click(notesButton())
+
+    expect(notesButton().getAttribute("aria-pressed")).toBe("true")
+    expect(logNotes()).toBe("full")
+
+    // And back — a mode you cannot leave is a mode, not a switch.
+    fireEvent.click(notesButton())
+    expect(logNotes()).toBe("clipped")
+  })
+
+  it("is offered only where there are note lines to unclip", () => {
+    renderTimer()
+    expect(notesButton()).toBeTruthy()
+
+    fireEvent.click(tab("Calendar"))
+
+    // The grid draws blocks, not rows: there is no clipped line for this to
+    // act on, and a switch governing nothing on screen is worse than absent.
+    expect(screen.queryByRole("button", { name: "Full notes" })).toBeNull()
+
+    fireEvent.click(tab("List"))
+    expect(notesButton()).toBeTruthy()
+  })
+
+  it("remembers the mode across a remount", () => {
+    // Someone reading yesterday back at a standup sets this once. Resetting it
+    // on every reload would mean setting it again every morning.
+    renderTimer()
+    fireEvent.click(notesButton())
+
+    cleanup()
+    renderTimer()
+
+    expect(notesButton().getAttribute("aria-pressed")).toBe("true")
+    expect(logNotes()).toBe("full")
   })
 })
 

@@ -26,6 +26,7 @@ export function DayList({
   actions,
   display = "hms",
   empty,
+  notesExpanded = false,
 }: {
   groups: Array<DayGroup>
   timeZone: string
@@ -35,6 +36,9 @@ export function DayList({
   tags: Array<Doc<"tags">>
   actions: EntryRowActions
   display?: DurationDisplay
+  /** Whether every note is written out in full instead of clipped to its line.
+   *  One mode over the whole log, set by the page — see `entry-row.tsx`. */
+  notesExpanded?: boolean
   /**
    * What to show for zero groups. Defaults to the Timer onboarding copy
    * below, which is only true on Timer: an empty Timer log really does mean
@@ -144,6 +148,7 @@ export function DayList({
                 projects={projects}
                 tags={tags}
                 actions={actions}
+                notesExpanded={notesExpanded}
               />
             ))}
           </div>
