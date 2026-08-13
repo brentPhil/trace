@@ -366,7 +366,8 @@ export default defineSchema({
      *  screen. Nothing is merged, nothing is stored per group, and every entry
      *  stays individually present and editable one click away — see
      *  docs/superpowers/specs/2026-08-13-grouped-entries-design.md, which
-     *  argues that at length against PRODUCT.md's "never silently merges". */
+     *  argues that at length against PRODUCT.md's rule that the product
+     *  "never silently rounds, merges, or guesses on the user's behalf". */
     groupEntries: v.optional(v.boolean()),
     updatedAt: v.number(),
   }).index("by_user", ["userId"]),
