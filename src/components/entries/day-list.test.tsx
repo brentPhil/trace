@@ -722,9 +722,15 @@ describe("grouped entries", () => {
       // ...and exactly one note control between them, on the parent: the
       // joined note text (member "b" is the only one of `twice` carrying a
       // note), not a second copy of it and not an empty hatch on either
-      // member.
+      // member. The query has to match BOTH shapes a member's `NoteLine`
+      // could take — the prose button (a copy of "b"'s note) and the
+      // "+ add note" hatch (what "a", note-less, would render) — or an
+      // implementation that only suppressed the note line when the note was
+      // non-empty would leave "a"'s hatch showing and still pass.
       expect(
-        screen.queryAllByRole("button", { name: /Finished the assignment modal\./ })
+        screen.queryAllByRole("button", {
+          name: /add note|Finished the assignment modal\./i,
+        })
       ).toHaveLength(1)
     })
 

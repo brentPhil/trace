@@ -4,6 +4,7 @@ import { NoteSheet } from "@/components/entries/note-sheet"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { joinNotes } from "@/lib/group-sittings"
+import { dayOf } from "@shared/day"
 import type { ReactNode } from "react"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { NoteTarget } from "@/components/entries/note-sheet"
@@ -99,12 +100,29 @@ export function EntryLog({
       })
     },
     onSittingNoteOpen: (entries) => {
+      // Title + project is unique within a single day, NOT within the whole
+      // log -- this log renders many days, and recurring work (the ordinary
+      // case grouping exists to serve) means the same title+project sitting
+      // recurs on different days. Leaving the day out of the key collided
+      // two days' sittings onto one entry in `drafts` (note-sheet.tsx): note
+      // Aug 9's "Crew dropdowns", dismiss before the save lands, then open
+      // Aug 8's "Crew dropdowns" -- it would seed from Aug 9's still-pending
+      // draft, and a second dismissal would write Aug 9's prose onto Aug
+      // 8's entries.
+      //
+      // The day is derived from `entries[0].startedAt` rather than looked
+      // up from `groups[].day`: a sitting cannot cross a day boundary
+      // (`toLogItems` only ever runs on one `DayGroup`'s own `entries`), so
+      // every member's `startedAt` already resolves, via the same `dayOf`,
+      // to exactly the day this sitting was grouped under -- the same
+      // computation `groupByDay` used to place it there in the first place.
+      // That makes it the direct source rather than a stand-in for one, and
+      // it works without re-finding this sitting inside `groups` by
+      // reference.
+      const day = dayOf(entries[0].startedAt, timeZone)
       setNoteTarget({
         entryIds: entries.map((entry) => entry._id),
-        // The day is not available here, and does not need to be: a sitting
-        // cannot cross a day boundary, so title + project is unique within the
-        // set of entries this log is rendering.
-        key: `sitting\u0000${entries[0].title.trim()}\u0000${entries[0].projectId ?? ""}`,
+        key: `sitting\u0000${day}\u0000${entries[0].title.trim()}\u0000${entries[0].projectId ?? ""}`,
         title: entries[0].title,
         note: joinNotes(entries),
         totalMs: entries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
