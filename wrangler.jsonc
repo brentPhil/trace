@@ -4,10 +4,23 @@
   "main": "dist/server/server.js",
   "compatibility_date": "2026-08-12",
   "compatibility_flags": ["nodejs_compat"],
+  // Runtime vars for the SSR server (src/lib/auth-server.ts reads them from
+  // process.env per request, and throws when either is unset). Versioned here —
+  // never set via the dashboard — because `wrangler deploy` (which Workers
+  // Builds runs on every push) applies this file's vars as the Worker's
+  // COMPLETE set: a var set only in the dashboard and omitted here is deleted
+  // on the next deploy. That is what took chroneli.com down with error 1101.
+  // These are public URLs, not secrets: the same values already ship in the
+  // client bundle. Real secrets go on the Convex deployment, never here.
+  "vars": {
+    "VITE_CONVEX_URL": "https://accomplished-shrimp-747.convex.cloud",
+    "VITE_CONVEX_SITE_URL": "https://accomplished-shrimp-747.convex.site",
+    "VITE_SITE_URL": "https://chroneli.com"
+  },
   "assets": {
-    "directory": "dist/client",
+    "directory": "dist/client"
   },
   "observability": {
-    "enabled": true,
-  },
+    "enabled": true
+  }
 }
