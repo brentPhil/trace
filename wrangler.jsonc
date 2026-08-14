@@ -14,8 +14,8 @@
   // and auth-server.ts throws when it is unset. These are public URLs, not
   // secrets: the same values already ship in the client bundle.
   "vars": {
-    "VITE_CONVEX_URL": "https://acoustic-ibis-909.convex.cloud",
-    "VITE_CONVEX_SITE_URL": "https://acoustic-ibis-909.convex.site",
+    "VITE_CONVEX_URL": "https://accomplished-shrimp-747.convex.site",
+    "VITE_CONVEX_SITE_URL": "https://accomplished-shrimp-747.convex.cloud",
   },
   "assets": {
     "directory": "dist/client",
