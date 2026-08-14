@@ -22,7 +22,7 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
  */
 
 const triggerClass = cn(
-  "rounded-md p-2 transition-colors",
+  "rounded-md px-2 py-0 transition-colors",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
 
@@ -102,7 +102,7 @@ export function ProjectPicker({
         ) : (
           <ProjectDot
             project={selected}
-            className="max-w-[9rem]"
+            className="max-w-36"
             nameClassName={nameClassName}
           />
         )}

@@ -4,7 +4,10 @@ import {
   ProjectPicker,
   TagPicker,
 } from "@/components/classifiers/classifier-pickers"
-import { EditableDuration, EditableTitle } from "@/components/entries/editable-fields"
+import {
+  EditableDuration,
+  EditableTitle,
+} from "@/components/entries/editable-fields"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
 import { NoteLine } from "@/components/entries/note-line"
 import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
@@ -21,7 +24,11 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
  */
 export type EntryRowActions = {
   onTitleChange: (entry: Entry, title: string) => Promise<void>
-  onTimeChange: (entry: Entry, field: "start" | "end", instantMs: number) => Promise<void>
+  onTimeChange: (
+    entry: Entry,
+    field: "start" | "end",
+    instantMs: number
+  ) => Promise<void>
   /** The DATE moved. Separate from onTimeChange because it is the one edit that
    *  takes the row off the day it is rendered on, so it owes the user a word. */
   onDayChange: (entry: Entry, day: DayString) => Promise<void>
@@ -34,7 +41,10 @@ export type EntryRowActions = {
   onResume: (entry: Entry) => void
   /** `onClassify`, for a sitting: applies one change to every member at once.
    *  See `SittingRow.onClassify` and `DayList`, which builds this from it. */
-  onSittingClassify: (entries: Array<Entry>, change: Partial<Classification>) => void
+  onSittingClassify: (
+    entries: Array<Entry>,
+    change: Partial<Classification>
+  ) => void
   /** `onNoteOpen`, for a sitting: opens the note editor on every member's note,
    *  joined. See `SittingRow.onNoteOpen` and `EntryLog`, which implements it. */
   onSittingNoteOpen: (entries: Array<Entry>) => void
@@ -60,7 +70,7 @@ export type EntryRowActions = {
  */
 const revealed = cn(
   "opacity-100 sm:opacity-0",
-  "transition-opacity sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
+  "transition-opacity sm:group-focus-within:opacity-100 sm:group-hover:opacity-100",
   "focus-visible:opacity-100 motion-reduce:transition-none"
 )
 
@@ -183,7 +193,7 @@ export function EntryRow({
       {/* `entry-log-row` is what opts this grid's fixed columns into first-line
           alignment — a row can grow a note, and the day header cannot. See
           `styles.css`. */}
-      <div className="entry-log-grid entry-log-row min-h-(--entry-row-height) w-full px-4">
+      <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
@@ -193,7 +203,7 @@ export function EntryRow({
             onToggle={selection.onToggle}
           />
         )}
-        <div className="entry-log-content flex min-w-0 flex-col gap-0.5 py-1.5">
+        <div className="flex flex-col w-full min-w-0 gap-2 py-1.5">
           {/* `min-h-6` PINS THE FIRST LINE. The fixed columns opposite are
               offset by half of exactly this (see `.entry-log-row` in
               styles.css), so the line cannot be allowed to size itself off
@@ -243,7 +253,7 @@ export function EntryRow({
               onCreate={actions.onCreateProject}
               onChange={(projectId) => actions.onClassify(entry, { projectId })}
               className={cn(
-                "max-w-[8rem] shrink-0",
+                "max-w-32 shrink-0",
                 entry.projectId === undefined && revealed
               )}
               // The dot survives at every width; the name is what gets dropped
@@ -258,20 +268,6 @@ export function EntryRow({
                 track is a fixed width, so this content cell is identical in
                 every row and a right-aligned pair stacks down the log instead
                 of ragging along behind titles of different lengths. */}
-            <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
-              <TagPicker
-                tags={tags}
-                value={entry.tagIds}
-                onCreate={actions.onCreateTag}
-                onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
-                className={cn("hidden sm:inline-flex", entry.tagIds.length === 0 && revealed)}
-              />
-              <BillableToggle
-                value={entry.billable}
-                onChange={(billable) => actions.onClassify(entry, { billable })}
-                className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
-              />
-            </div>
           </div>
 
           {/* The 20px slot and its `touch-target` sizing are explained in `NoteLine`.
@@ -288,30 +284,37 @@ export function EntryRow({
           ) : null}
         </div>
 
-        {/* Fixed columns stay on the row's first line when a note expands. */}
-        {/*
-            Visible at EVERY width. The inline fields this replaced were
-            `hidden sm:inline-flex`, so on a phone an entry's times could not be
-            corrected at all — the surface Toggl abandoned, again.
-          */}
-        <div className="entry-log-time">
+        <div className="flex h-full shrink-0 items-center justify-end gap-4">
+          <TagPicker
+            tags={tags}
+            value={entry.tagIds}
+            onCreate={actions.onCreateTag}
+            onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
+            className={cn(
+              "hidden sm:inline-flex",
+              entry.tagIds.length === 0 && revealed
+            )}
+          />
+          <BillableToggle
+            value={entry.billable}
+            onChange={(billable) => actions.onClassify(entry, { billable })}
+            className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
+          />
           <EntryTimePopover
             entry={entry}
             timeZone={timeZone}
             use12Hour={use12Hour}
             weekStartDay={weekStartDay}
-            onCommitTime={(field, value) => actions.onTimeChange(entry, field, value)}
+            onCommitTime={(field, value) =>
+              actions.onTimeChange(entry, field, value)
+            }
             onCommitDay={(day) => actions.onDayChange(entry, day)}
           />
-        </div>
-
-        <div className="entry-log-duration">
           <EditableDuration
             entry={entry}
             onCommit={(ms) => actions.onDurationChange(entry, ms)}
           />
         </div>
-
         {/*
             Row controls stay in the layout at all times and fade in on hover or
             focus, rather than being added and removed. Reserving the space means
@@ -322,7 +325,7 @@ export function EntryRow({
             on a phone, so a hover-revealed control is not subtle there, it is
             absent: delete and resume would be unreachable by any means.
           */}
-        <div className="entry-log-actions flex items-center justify-end gap-0.5">
+        <div className="flex h-full items-center justify-end">
           <RowButton
             label={`Resume ${title === "" ? "this entry" : title}`}
             onClick={() => actions.onResume(entry)}

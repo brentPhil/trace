@@ -1,4 +1,4 @@
-import { Play } from "lucide-react"
+import { Play, Trash2 } from "lucide-react"
 import {
   BillableToggle,
   ProjectPicker,
@@ -136,7 +136,7 @@ export function SittingRow({
           while the title/note column is left to grow downward without
           dragging the badge or the trailing cluster into its vertical middle. */}
       {/* `entry-log-row`, as `EntryRow` — see `styles.css`. */}
-      <div className="entry-log-grid entry-log-row min-h-(--entry-row-height) w-full px-4">
+      <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
@@ -146,7 +146,7 @@ export function SittingRow({
             onToggle={selection.onToggle}
           />
         )}
-        <div className="entry-log-content flex min-w-0 items-start gap-2">
+        <div className="flex w-full min-w-0 items-center gap-2">
           {/* The number is the disclosure, with its accessible state carried by
               the button rather than a separate visible chevron.
 
@@ -172,7 +172,7 @@ export function SittingRow({
             }
             onClick={onToggle}
             className={cn(
-              "mt-1.5 flex h-6 min-w-6 shrink-0 items-center justify-center",
+              "flex h-6 min-w-6 shrink-0 items-center justify-center",
               "rounded-sm border border-edge-soft px-1.5",
               "tabular text-xs text-muted-foreground",
               "transition-colors hover:text-foreground",
@@ -195,7 +195,7 @@ export function SittingRow({
                   `leading-none` with `py-0.5 -my-0.5` for the same reason
                   `EditableTitle` carries them: no half-leading, and no clipped
                   descender inside `truncate`'s `overflow: hidden`. */}
-              <span className="min-w-0 truncate py-0.5 -my-0.5 text-base leading-none font-medium">
+              <span className="-my-0.5 min-w-0 truncate py-0.5 text-base font-medium">
                 {title}
               </span>
               <ProjectPicker
@@ -203,7 +203,7 @@ export function SittingRow({
                 value={newest.projectId ?? null}
                 onCreate={onCreateProject}
                 onChange={chooseProject}
-                className="max-w-[8rem] shrink-0"
+                className="max-w-32 shrink-0"
                 nameClassName="hidden md:inline"
               />
             </div>
@@ -232,25 +232,28 @@ export function SittingRow({
             own padding: both centres then resolve to 6px + half the control
             height, so they stay level even if the pickers change size.
           */}
-          <div className="flex shrink-0 items-center gap-0.5 py-1.5">
-            <TagPicker
-              tags={tags}
-              value={sitting.tagIds}
-              onCreate={onCreateTag}
-              onChange={(tagIds) => onClassify({ tagIds })}
-              className="hidden sm:inline-flex"
-            />
-            <BillableToggle
-              value={sitting.allBillable}
-              onChange={(billable) => onClassify({ billable })}
-            />
-          </div>
         </div>
 
-        {/* Fixed columns stay on the row's first line when a note expands. */}
-        <span className="entry-log-time tabular text-xs text-muted-foreground">
-          {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}
-        </span>
+        <div className="flex h-full shrink-0 items-center justify-end gap-4">
+          <TagPicker
+            tags={tags}
+            value={sitting.tagIds}
+            onCreate={onCreateTag}
+            onChange={(tagIds) => onClassify({ tagIds })}
+            className="hidden sm:inline-flex"
+          />
+          <BillableToggle
+            value={sitting.allBillable}
+            onChange={(billable) => onClassify({ billable })}
+          />
+          {/* Fixed columns stay on the row's first line when a note expands. */}
+          <div className="tabular text-xs text-nowrap px-1 text-muted-foreground">
+            {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}
+          </div>
+          <span className="tabular flex h-full items-center justify-end ps-2.5 pe-1 text-sm font-medium">
+            {formatTotal(sitting.totalMs, display)}
+          </span>
+        </div>
 
         {/*
             `formatTotal`, whose contract says decimal applies to TOTALS and
@@ -267,11 +270,8 @@ export function SittingRow({
             ragged even though their right edges matched. The DAY header total
             stays larger on purpose — it summarises a section rather than
             standing in the list as a row. */}
-        <span className="entry-log-duration tabular text-sm font-medium">
-          {formatTotal(sitting.totalMs, display)}
-        </span>
 
-        <div className="entry-log-actions flex items-center justify-end">
+        <div className="flex h-full items-center justify-end">
           <button
             type="button"
             aria-label={`Resume ${title}`}
@@ -286,6 +286,21 @@ export function SittingRow({
             )}
           >
             <Play className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={`Resume ${title}`}
+            onClick={onResume}
+            className={cn(
+              "rounded-md p-1.5 text-muted-foreground",
+              "opacity-100 sm:opacity-0",
+              "transition-[opacity,color] sm:group-hover:opacity-100",
+              "hover:text-foreground",
+              "focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring",
+              "focus-visible:outline-none motion-reduce:transition-none"
+            )}
+          >
+            <Trash2 className="size-4" />
           </button>
         </div>
       </div>

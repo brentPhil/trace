@@ -37,7 +37,7 @@ export function ProjectDot({
     >
       <span
         aria-hidden="true"
-        className="size-1.5 shrink-0 rounded-full bg-[var(--project-color)]"
+        className="size-1.5 shrink-0 rounded-full bg-(--project-color)"
       />
       {showName ? (
         <span className={cn("truncate", nameClassName)}>

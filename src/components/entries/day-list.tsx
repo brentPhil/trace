@@ -179,7 +179,7 @@ export function DayList({
               The padding lives HERE and not on the header, because the
               header's background and border are meant to stay full-bleed.
             */}
-            <div className="entry-log-grid w-full items-baseline px-4">
+            <div className="entry-log-grid w-full items-baseline ps-4 pe-2">
               {selection === undefined ? null : (
                 <SelectionCheckbox
                   className="entry-log-select"
@@ -221,7 +221,7 @@ export function DayList({
                 // value and the client's first render legitimately differ. See
                 // the same attribute in `totals-row.tsx`.
                 suppressHydrationWarning
-                className="entry-log-duration tabular text-base font-semibold text-muted-foreground"
+                className="entry-log-duration tabular text-base"
               >
                 {formatTotal(group.totalMs, display)}
               </span>
