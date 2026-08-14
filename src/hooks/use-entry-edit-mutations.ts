@@ -292,6 +292,12 @@ export function useEntryEditMutations() {
     })
   )
 
+  const removeManyMutation = useLatest(
+    useConvexMutation(api.entries.removeMany).withOptimisticUpdate((localStore, args) => {
+      for (const entryId of new Set(args.entryIds)) dropEverywhere(localStore, entryId)
+    })
+  )
+
   // An optimistic update only receives the mutation's own args, and `restore`
   // sends nothing but an id — there is no row left in the cache to read, that
   // being what "deleted" means. The snapshot is parked here for the update to
@@ -303,6 +309,15 @@ export function useEntryEditMutations() {
     useConvexMutation(api.entries.restore).withOptimisticUpdate((localStore, args) => {
       const entry = pendingRestore.current.get(args.entryId)
       if (entry !== undefined) insertEverywhere(localStore, entry)
+    })
+  )
+
+  const restoreManyMutation = useLatest(
+    useConvexMutation(api.entries.restoreMany).withOptimisticUpdate((localStore, args) => {
+      for (const entryId of new Set(args.entryIds)) {
+        const entry = pendingRestore.current.get(entryId)
+        if (entry !== undefined) insertEverywhere(localStore, entry)
+      }
     })
   )
 
@@ -350,6 +365,12 @@ export function useEntryEditMutations() {
     [removeMutation]
   )
 
+  const removeMany = useCallback(
+    async (entryIds: Array<Id<"timeEntries">>) =>
+      await removeManyMutation({ entryIds: [...new Set(entryIds)] }),
+    [removeManyMutation]
+  )
+
   /**
    * Undo.
    *
@@ -369,6 +390,21 @@ export function useEntryEditMutations() {
     [restoreMutation]
   )
 
+  const restoreMany = useCallback(
+    async (entries: Array<Entry>) => {
+      const uniqueEntries = [...new Map(entries.map((entry) => [entry._id, entry])).values()]
+      for (const entry of uniqueEntries) pendingRestore.current.set(entry._id, entry)
+      try {
+        return await restoreManyMutation({
+          entryIds: uniqueEntries.map((entry) => entry._id),
+        })
+      } finally {
+        for (const entry of uniqueEntries) pendingRestore.current.delete(entry._id)
+      }
+    },
+    [restoreManyMutation]
+  )
+
   const create = useCallback(
     async (args: {
       title?: string
@@ -386,5 +422,5 @@ export function useEntryEditMutations() {
     [createMutation]
   )
 
-  return { update, updateMany, editTime, remove, restore, create }
+  return { update, updateMany, editTime, remove, removeMany, restore, restoreMany, create }
 }

@@ -1937,9 +1937,47 @@ async function restoreImpl(ctx: MutationCtx, userId: string, entryId: Id<"timeEn
   return { restoredEntryIds: [entry._id] }
 }
 
+function uniqueEntryIds(entryIds: Array<Id<"timeEntries">>): Array<Id<"timeEntries">> {
+  return [...new Set(entryIds)]
+}
+
+async function removeManyImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryIds: Array<Id<"timeEntries">>
+) {
+  if (entryIds.length === 0) {
+    traceError("EMPTY_SELECTION", "removeMany needs at least one entry.")
+  }
+  const removedEntryIds: Array<Id<"timeEntries">> = []
+  for (const entryId of uniqueEntryIds(entryIds)) {
+    const result = await removeImpl(ctx, userId, entryId)
+    removedEntryIds.push(...result.removedEntryIds)
+  }
+  return { removedEntryIds }
+}
+
+async function restoreManyImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryIds: Array<Id<"timeEntries">>
+) {
+  if (entryIds.length === 0) {
+    traceError("EMPTY_SELECTION", "restoreMany needs at least one entry.")
+  }
+  const restoredEntryIds: Array<Id<"timeEntries">> = []
+  for (const entryId of uniqueEntryIds(entryIds)) {
+    const result = await restoreImpl(ctx, userId, entryId)
+    restoredEntryIds.push(...result.restoredEntryIds)
+  }
+  return { restoredEntryIds }
+}
+
 const restoreReturns = v.object({
   restoredEntryIds: v.array(v.id("timeEntries")),
 })
+
+const entryIdsArgs = { entryIds: v.array(v.id("timeEntries")) }
 
 export const restore = mutation({
   args: { entryId: v.id("timeEntries") },
@@ -1952,6 +1990,32 @@ export const restoreAs = internalMutation({
   args: { entryId: v.id("timeEntries"), userId: v.string() },
   returns: restoreReturns,
   handler: async (ctx, args) => await restoreImpl(ctx, args.userId, args.entryId),
+})
+
+export const removeMany = mutation({
+  args: entryIdsArgs,
+  returns: removeReturns,
+  handler: async (ctx, args) =>
+    await removeManyImpl(ctx, await requireUserId(ctx), args.entryIds),
+})
+
+export const removeManyAs = internalMutation({
+  args: { ...entryIdsArgs, userId: v.string() },
+  returns: removeReturns,
+  handler: async (ctx, args) => await removeManyImpl(ctx, args.userId, args.entryIds),
+})
+
+export const restoreMany = mutation({
+  args: entryIdsArgs,
+  returns: restoreReturns,
+  handler: async (ctx, args) =>
+    await restoreManyImpl(ctx, await requireUserId(ctx), args.entryIds),
+})
+
+export const restoreManyAs = internalMutation({
+  args: { ...entryIdsArgs, userId: v.string() },
+  returns: restoreReturns,
+  handler: async (ctx, args) => await restoreManyImpl(ctx, args.userId, args.entryIds),
 })
 
 // ---------------------------------------------------------------------------

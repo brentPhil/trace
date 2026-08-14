@@ -1,18 +1,24 @@
-import { useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useAnnounce } from "@/components/a11y/announcer"
+import { BulkEntryActions } from "@/components/entries/bulk-entry-actions"
 import { DayList } from "@/components/entries/day-list"
 import { NoteSheet } from "@/components/entries/note-sheet"
 import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
+import { pruneSelection, toggleSelection } from "@/lib/entry-selection"
 import { errorMessage } from "@/lib/error-message"
 import { joinNotes } from "@/lib/group-sittings"
+import { cn } from "@/lib/utils"
 import { dayOf } from "@shared/day"
 import type { ReactNode } from "react"
+import type { EntrySelectionController } from "@/components/entries/day-list"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { NoteTarget } from "@/components/entries/note-sheet"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayGroup, Entry } from "@/lib/group-entries"
+import type { Id } from "../../../convex/_generated/dataModel"
 
 /**
  * The log, and everything a row can do to itself.
@@ -25,8 +31,16 @@ import type { DayGroup, Entry } from "@/lib/group-entries"
  * THEY USED TO LIVE IN THIS FILE. They moved out when a calendar block gained
  * an editor of its own: two implementations of "delete, then offer the way
  * back" would be two undo windows and two sentences for one event. All that is
- * left here is the one action a LOG has and a grid does not — opening the note
- * sheet, which this component owns.
+ * left here are the two things a LOG has and a grid does not — opening the note
+ * sheet, and holding the SELECTION, both of which this component owns.
+ *
+ * Selection lives here rather than in `DayList` because it spans days: one set
+ * covers every group on screen, and a day header's own checkbox is just one
+ * more way into it. It is deliberately local and temporary — no schema field,
+ * no setting, gone on reload — because it describes what the reader is doing
+ * this minute, not anything true about an entry. Both `/timer` and `/reports`
+ * therefore get the whole behaviour by rendering this component, with no
+ * selection state of their own.
  *
  * The SHAPE of the undo toast — window, Undo button, what happens when the undo
  * is itself refused — is `src/lib/undo-toast.ts`, so the sheet below can report
@@ -78,6 +92,101 @@ export function EntryLog({
 
   const [noteTarget, setNoteTarget] = useState<NoteTarget | null>(null)
   const [noteOpen, setNoteOpen] = useState(false)
+
+  const [selectedIds, setSelectedIds] = useState<Set<Id<"timeEntries">>>(
+    new Set()
+  )
+  const [deleting, setDeleting] = useState(false)
+  // The control the last toggle came from, so a Clear can put focus back where
+  // the reader left it instead of dropping it on <body>.
+  const lastSelectionControl = useRef<HTMLInputElement | null>(null)
+  const logRef = useRef<HTMLDivElement>(null)
+  const announce = useAnnounce()
+
+  const liveEntries = useMemo(
+    () => groups.flatMap((group) => group.entries),
+    [groups]
+  )
+  const liveIds = useMemo(
+    () => liveEntries.map((entry) => entry._id),
+    [liveEntries]
+  )
+  const liveById = useMemo(
+    () => new Map(liveEntries.map((entry) => [entry._id, entry])),
+    [liveEntries]
+  )
+
+  /*
+   * WHAT IS SELECTED AND STILL ON SCREEN.
+   *
+   * Derived on every render rather than read straight from state, so a row
+   * that vanished between renders — deleted in another tab, filtered out,
+   * paginated away — stops counting toward the bar immediately. The state
+   * itself is pruned by the effect below; this is what makes the render in
+   * between honest.
+   */
+  const selectedLiveIds = pruneSelection(selectedIds, liveIds)
+
+  useEffect(() => {
+    setSelectedIds((current) => {
+      const next = pruneSelection(current, liveIds)
+      // Returning `current` unchanged is what stops this from looping. `groups`
+      // is rebuilt by the page on most renders, so `liveIds` is a fresh array
+      // nearly every time and this effect runs constantly; `pruneSelection`
+      // always allocates a new Set, and handing React a new object every pass
+      // would re-render forever. Pruning only ever REMOVES, so equal size means
+      // equal contents — and the identical reference makes React bail out.
+      return next.size === current.size ? current : next
+    })
+  }, [liveIds])
+
+  const selection: EntrySelectionController = {
+    selectedIds: selectedLiveIds,
+    onToggle: (entryIds, origin) => {
+      lastSelectionControl.current = origin
+      setSelectedIds((current) => {
+        // Prune INSIDE the updater as well: `current` may still hold ids that
+        // died since the last commit, and they would otherwise be counted in
+        // the announcement and revived into the next delete.
+        const next = toggleSelection(pruneSelection(current, liveIds), entryIds)
+        announce(
+          `${next.size} ${next.size === 1 ? "record" : "records"} selected`
+        )
+        return next
+      })
+    },
+  }
+
+  const clearSelection = () => {
+    setSelectedIds(new Set())
+    announce("Selection cleared")
+    requestAnimationFrame(() => lastSelectionControl.current?.focus())
+  }
+
+  const deleteSelection = async () => {
+    // Snapshots, not ids: `onRemoveMany` raises an Undo that has to restore
+    // these rows in full, and after the delete lands they are no longer
+    // anywhere to be read back from.
+    const entries = [...selectedLiveIds]
+      .map((entryId) => liveById.get(entryId))
+      .filter((entry): entry is Entry => entry !== undefined)
+    if (entries.length === 0 || deleting) return
+
+    setDeleting(true)
+    const deleted = await entryActions.onRemoveMany(entries)
+    setDeleting(false)
+    // A refusal keeps the selection exactly as it was. The action has already
+    // said what went wrong; clearing here would make the retry a re-selection.
+    if (!deleted) return
+
+    setSelectedIds(new Set())
+    announce(
+      `Deleted ${entries.length} ${entries.length === 1 ? "record" : "records"}`
+    )
+    // The rows that held focus are gone. Send it to the log itself rather than
+    // letting it fall to <body>, so the next Tab resumes here.
+    requestAnimationFrame(() => logRef.current?.focus())
+  }
 
   const actions: EntryRowActions = {
     ...entryActions,
@@ -182,19 +291,61 @@ export function EntryLog({
 
   return (
     <>
-      <DayList
-        groups={groups}
-        timeZone={timeZone}
-        use12Hour={use12Hour}
-        weekStartDay={weekStartDay}
-        projects={projects}
-        tags={tags}
-        actions={actions}
-        display={display}
-        empty={empty}
-        notesExpanded={notesExpanded}
-        grouped={grouped}
-      />
+      <div
+        ref={logRef}
+        role="region"
+        aria-label="Time entries"
+        // Focusable only programmatically — `deleteSelection` lands focus here
+        // once the selected rows are gone. It is not a tab stop.
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || selectedLiveIds.size === 0) return
+          event.preventDefault()
+          setSelectedIds(new Set())
+          announce("Selection cleared")
+        }}
+        // Only while the bar is up: it is fixed to the viewport, so without
+        // this the last row of the log sits underneath it.
+        className={cn("relative", selectedLiveIds.size > 0 && "pb-20")}
+      >
+        <DayList
+          groups={groups}
+          timeZone={timeZone}
+          use12Hour={use12Hour}
+          weekStartDay={weekStartDay}
+          projects={projects}
+          tags={tags}
+          actions={actions}
+          selection={selection}
+          display={display}
+          empty={empty}
+          notesExpanded={notesExpanded}
+          grouped={grouped}
+        />
+        {/*
+          Fixed to the viewport rather than sticky inside the log, because both
+          Timer and Reports scroll the document and neither gives the log an
+          inner scroll container — a sticky bar would simply scroll away with
+          the rows it acts on.
+
+          `z-40` against the toast viewport's `z-50`, so the Undo raised by the
+          delete this bar triggers always lands ABOVE it rather than behind.
+          The outer layer is `pointer-events-none` so the strip of empty space
+          either side of the bar does not swallow clicks on the log beneath.
+        */}
+        {selectedLiveIds.size === 0 ? null : (
+          <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+            <div className="pointer-events-auto">
+              <BulkEntryActions
+                count={selectedLiveIds.size}
+                deleting={deleting}
+                onDelete={() => void deleteSelection()}
+                onClear={clearSelection}
+              />
+            </div>
+          </div>
+        )}
+      </div>
       <NoteSheet
         target={liveNoteTarget}
         open={noteOpen}
@@ -204,4 +355,3 @@ export function EntryLog({
     </>
   )
 }
-

@@ -1,15 +1,17 @@
-import { ChevronDown, ChevronRight, Play } from "lucide-react"
+import { Play } from "lucide-react"
 import {
   BillableToggle,
   ProjectPicker,
   TagPicker,
 } from "@/components/classifiers/classifier-pickers"
 import { NoteLine } from "@/components/entries/note-line"
+import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
 import { formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { joinNotes } from "@/lib/group-sittings"
 import { cn } from "@/lib/utils"
 import type { EntryRowActions } from "@/components/entries/entry-row"
+import type { SelectionTarget } from "@/components/entries/selection-checkbox"
 import type { Classification } from "@/components/timer/timer-bar"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { LogItem } from "@/lib/group-sittings"
@@ -51,6 +53,7 @@ export function SittingRow({
   display,
   expanded,
   notesExpanded = false,
+  selection,
   onToggle,
   onResume,
   onClassify,
@@ -68,6 +71,7 @@ export function SittingRow({
   expanded: boolean
   /** Forwarded from the page, exactly as `EntryRow` takes it. */
   notesExpanded?: boolean
+  selection?: SelectionTarget
   onToggle: () => void
   /** Resumes the NEWEST member — see `DayList`, which supplies it. */
   onResume: () => void
@@ -131,101 +135,87 @@ export function SittingRow({
           applies: the trailing controls carry the row's own height (below)
           while the title/note column is left to grow downward without
           dragging the badge or the trailing cluster into its vertical middle. */}
-      <div className="flex min-h-(--entry-row-height) w-full items-start gap-2 px-4">
-        {/*
-          THE BADGE IS THE CONTROL, which is what the reference screenshot
-          shows: its tooltip is the disclosure's label, not a separate chevron's.
-          One target rather than two means the count and the gesture cannot
-          drift apart, and the number is the thing the eye is already on.
-        */}
-        <button
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={controls}
-          aria-label={expanded ? "Hide grouped entries" : "Show grouped entries"}
-          onClick={onToggle}
-          className={cn(
-            "flex shrink-0 items-center gap-1 rounded-sm border border-edge-soft",
-            "px-1.5 py-0.5 text-xs tabular text-muted-foreground",
-            "transition-colors hover:text-foreground",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          )}
-        >
-          {expanded ? (
-            <ChevronDown className="size-3" aria-hidden="true" />
-          ) : (
-            <ChevronRight className="size-3" aria-hidden="true" />
-          )}
-          {sitting.entries.length}
-        </button>
+      <div className="entry-log-grid min-h-(--entry-row-height) w-full px-4">
+        {selection === undefined ? null : (
+          <SelectionCheckbox
+            contextual
+            className="entry-log-select"
+            label={selection.label}
+            state={selection.state}
+            onToggle={selection.onToggle}
+          />
+        )}
+        <div className="entry-log-content flex min-w-0 items-start gap-2">
+          {/* The number is the disclosure, with its accessible state carried by
+              the button rather than a separate visible chevron. */}
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={controls}
+            aria-label={
+              expanded ? "Hide grouped entries" : "Show grouped entries"
+            }
+            onClick={onToggle}
+            className={cn(
+              "flex shrink-0 items-center gap-1 rounded-sm border border-edge-soft",
+              "tabular px-1.5 py-0.5 text-xs text-muted-foreground",
+              "transition-colors hover:text-foreground",
+              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            )}
+          >
+            <span className="tabular">{sitting.entries.length}</span>
+          </button>
 
-        {/* The title/note column, mirroring `EntryRow`'s own — see that
-            component for the row-height arithmetic this shares. */}
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
-          <div className="flex min-w-0 items-center gap-1.5">
-            {/* Static text, not an `EditableTitle`. Retitling a group would be a
-                write to every member — see this component's own note above. */}
-            <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
+          {/* The title/note column, mirroring `EntryRow`'s own. */}
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="min-w-0 flex-1 truncate text-base font-medium">{title}</span>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <ProjectPicker
+                  projects={projects}
+                  value={newest.projectId ?? null}
+                  onCreate={onCreateProject}
+                  onChange={chooseProject}
+                  className="max-w-[8rem]"
+                  nameClassName="hidden md:inline"
+                />
+                <TagPicker
+                  tags={tags}
+                  value={sitting.tagIds}
+                  onCreate={onCreateTag}
+                  onChange={(tagIds) => onClassify({ tagIds })}
+                  className="hidden sm:inline-flex"
+                />
+                <BillableToggle
+                  value={sitting.allBillable}
+                  onChange={(billable) => onClassify({ billable })}
+                />
+              </div>
+            </div>
+
+            <NoteLine
+              note={note}
+              notesExpanded={notesExpanded}
+              onOpen={onNoteOpen}
+            />
           </div>
-
-          <NoteLine note={note} notesExpanded={notesExpanded} onOpen={onNoteOpen} />
         </div>
 
-        {/* EVERYTHING AFTER THE TEXT, IN ONE BOX — same grouping `EntryRow`
-            uses and for the same reason: the group can hold
-            `min-h-(--entry-row-height) items-center` while the parent
-            top-aligns, which keeps these on the row's first line rather than
-            drifting down beside an expanded note. */}
-        <div className="flex min-h-(--entry-row-height) shrink-0 items-center gap-2">
-          {/*
-            The classifiers, editable in place like `EntryRow`'s. Always
-            present rather than hover-revealed: these are facts ABOUT the
-            sitting, not per-row affordances, and they write through to every
-            member the moment they change.
-          */}
-          <div className="flex shrink-0 items-center gap-0.5">
-            <ProjectPicker
-              projects={projects}
-              value={newest.projectId ?? null}
-              onCreate={onCreateProject}
-              onChange={chooseProject}
-              className="max-w-[8rem]"
-              nameClassName="hidden md:inline"
-            />
-            <TagPicker
-              tags={tags}
-              value={sitting.tagIds}
-              onCreate={onCreateTag}
-              onChange={(tagIds) => onClassify({ tagIds })}
-              className="hidden sm:inline-flex"
-            />
-            {/* Visible at every width, unlike `TagPicker` above and unlike
-                `EntryRow`'s own toggle (out of scope — see that component).
-                `ProjectPicker`'s `chooseProject` can send `billable: true` on
-                every width there is a project picker, so the one control that
-                can turn it back off has to exist everywhere that control does
-                — a phone included. It also doubles as the row's billable
-                indicator now, which is why the static `$` mark above is
-                gone: this button already shows brass when lit. */}
-            <BillableToggle
-              value={sitting.allBillable}
-              onChange={(billable) => onClassify({ billable })}
-            />
-          </div>
+        {/* Fixed columns stay on the row's first line when a note expands. */}
+        <span className="entry-log-time tabular text-xs text-muted-foreground">
+          {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}
+        </span>
 
-          <span className="hidden text-xs tabular text-muted-foreground sm:inline">
-            {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}
-          </span>
-
-          {/*
+        {/*
             `formatTotal`, whose contract says decimal applies to TOTALS and
             never to a single entry's own row. A sitting's figure is a sum of
             parts, so it is a total, and it is floored like every other one.
           */}
-          <span className="text-base font-semibold tabular text-muted-foreground">
-            {formatTotal(sitting.totalMs, display)}
-          </span>
+        <span className="entry-log-duration tabular text-base font-semibold text-muted-foreground">
+          {formatTotal(sitting.totalMs, display)}
+        </span>
 
+        <div className="entry-log-actions flex items-center justify-end">
           <button
             type="button"
             aria-label={`Resume ${title}`}
