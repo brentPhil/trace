@@ -184,13 +184,20 @@ export function SittingRow({
 
           {/* The title/note column, mirroring `EntryRow`'s own. */}
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
-            <div className="flex min-w-0 items-center gap-1.5">
+            {/* `min-h-6` pins the first line — see `entry-row.tsx`. */}
+            <div className="flex min-h-6 min-w-0 items-center gap-1.5">
               {/* NOT `flex-1`, matching `EditableTitle` on an entry row for the
                   reason argued there: a title that fills the row pushes the
                   project to the far right, where "Sealogs" reads as a property
                   of the times rather than as part of the name of the work. It
-                  sizes to its text and truncates. */}
-              <span className="min-w-0 truncate text-base font-medium">{title}</span>
+                  sizes to its text and truncates.
+
+                  `leading-none` with `py-0.5 -my-0.5` for the same reason
+                  `EditableTitle` carries them: no half-leading, and no clipped
+                  descender inside `truncate`'s `overflow: hidden`. */}
+              <span className="min-w-0 truncate py-0.5 -my-0.5 text-base leading-none font-medium">
+                {title}
+              </span>
               <ProjectPicker
                 projects={projects}
                 value={newest.projectId ?? null}

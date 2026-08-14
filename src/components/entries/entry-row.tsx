@@ -194,11 +194,21 @@ export function EntryRow({
           />
         )}
         <div className="entry-log-content flex min-w-0 flex-col gap-0.5 py-1.5">
-          <div className="flex min-w-0 items-center gap-1.5">
+          {/* `min-h-6` PINS THE FIRST LINE. The fixed columns opposite are
+              offset by half of exactly this (see `.entry-log-row` in
+              styles.css), so the line cannot be allowed to size itself off
+              whichever child happens to be tallest — a picker changing by two
+              pixels would otherwise drag the title out of level with the time
+              range beside it. */}
+          <div className="flex min-h-6 min-w-0 items-center gap-1.5">
             <EditableTitle
               entry={entry}
               onCommit={(next) => actions.onTitleChange(entry, next)}
-              textClassName="text-base"
+              // `leading-none`: the 16px title otherwise reserves a 24px line
+              // box, and that half-leading is dead space above and below every
+              // title in the log. The line's height is `min-h-6` above, set
+              // deliberately, rather than whatever the type happens to imply.
+              textClassName="text-base leading-none"
             />
             {entry.billable ? (
               // Brass means money — The Two Temperatures Rule. Paired with a

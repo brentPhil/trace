@@ -41,7 +41,15 @@ export function EditableTitle({
       display={
         <span
           className={cn(
-            "block truncate font-medium",
+            // `py-0.5 -my-0.5` costs nothing and prevents a clip. `truncate`
+            // is `overflow: hidden`, which clips BOTH axes — so a caller
+            // passing `leading-none` (the log rows do) leaves a 16px box
+            // holding ~19.7px of DM Sans ink, and the descenders of g, y and p
+            // get shaved off inside this span no matter what padding the
+            // trigger around it carries. Two pixels of room each side covers
+            // the overflow; the negative margin hands the height straight back
+            // so no row grows.
+            "block truncate py-0.5 -my-0.5 font-medium",
             textClassName,
             title === "" && "text-muted-foreground italic"
           )}
