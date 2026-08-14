@@ -147,7 +147,21 @@ export function SittingRow({
         )}
         <div className="entry-log-content flex min-w-0 items-start gap-2">
           {/* The number is the disclosure, with its accessible state carried by
-              the button rather than a separate visible chevron. */}
+              the button rather than a separate visible chevron.
+
+              `mt-1.5` and `h-6` together are what put it on the TITLE, not on
+              the row. The column above is `items-start` so that a growing note
+              never drags this downward (see the wrapper's comment), but that
+              alone pins the badge to the top of a two-line column — visibly
+              high of the title it belongs to. The title column's own `py-1.5`
+              is 6px and its `text-base` line box is 24px, so a 24px control
+              offset by 6px shares that line's exact centre.
+
+              `h-6 min-w-6` is also the floor WCAG 2.2 AA asks of a target
+              (24x24). The previous `text-xs px-1.5 py-0.5` came to roughly
+              22px tall — under it, and small enough to be a fussy hit for a
+              control that is on every grouped row. `min-w`, not a fixed
+              square, so a three-digit count still fits. */}
           <button
             type="button"
             aria-expanded={expanded}
@@ -157,46 +171,70 @@ export function SittingRow({
             }
             onClick={onToggle}
             className={cn(
-              "flex shrink-0 items-center gap-1 rounded-sm border border-edge-soft",
-              "tabular px-1.5 py-0.5 text-xs text-muted-foreground",
+              "mt-1.5 flex h-6 min-w-6 shrink-0 items-center justify-center",
+              "rounded-sm border border-edge-soft px-1.5",
+              "tabular text-xs text-muted-foreground",
               "transition-colors hover:text-foreground",
               "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             )}
           >
-            <span className="tabular">{sitting.entries.length}</span>
+            {sitting.entries.length}
           </button>
 
           {/* The title/note column, mirroring `EntryRow`'s own. */}
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="min-w-0 flex-1 truncate text-base font-medium">{title}</span>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <ProjectPicker
-                  projects={projects}
-                  value={newest.projectId ?? null}
-                  onCreate={onCreateProject}
-                  onChange={chooseProject}
-                  className="max-w-[8rem]"
-                  nameClassName="hidden md:inline"
-                />
-                <TagPicker
-                  tags={tags}
-                  value={sitting.tagIds}
-                  onCreate={onCreateTag}
-                  onChange={(tagIds) => onClassify({ tagIds })}
-                  className="hidden sm:inline-flex"
-                />
-                <BillableToggle
-                  value={sitting.allBillable}
-                  onChange={(billable) => onClassify({ billable })}
-                />
-              </div>
+              {/* NOT `flex-1`, matching `EditableTitle` on an entry row for the
+                  reason argued there: a title that fills the row pushes the
+                  project to the far right, where "Sealogs" reads as a property
+                  of the times rather than as part of the name of the work. It
+                  sizes to its text and truncates. */}
+              <span className="min-w-0 truncate text-base font-medium">{title}</span>
+              <ProjectPicker
+                projects={projects}
+                value={newest.projectId ?? null}
+                onCreate={onCreateProject}
+                onChange={chooseProject}
+                className="max-w-[8rem] shrink-0"
+                nameClassName="hidden md:inline"
+              />
             </div>
 
             <NoteLine
               note={note}
               notesExpanded={notesExpanded}
               onOpen={onNoteOpen}
+            />
+          </div>
+
+          {/*
+            A SIBLING OF THE TITLE COLUMN, NOT A CHILD OF IT — this is what
+            puts the marks in the same column as an entry row's.
+
+            Both rows share one `.entry-log-content` track of identical width,
+            so right-aligning inside it is what makes a column. But this row
+            spends the first 32px of that track on the disclosure button and
+            its gap; a pair right-aligned INSIDE the title column therefore
+            landed 32px left of every entry row's pair, which is exactly the
+            ragged edge this layout exists to prevent. Sitting out here, past
+            the `flex-1` title column, it ends on the track's own right edge —
+            the same pixel `ml-auto` reaches on an entry row.
+
+            `py-1.5` rather than a fixed offset, mirroring the title column's
+            own padding: both centres then resolve to 6px + half the control
+            height, so they stay level even if the pickers change size.
+          */}
+          <div className="flex shrink-0 items-center gap-0.5 py-1.5">
+            <TagPicker
+              tags={tags}
+              value={sitting.tagIds}
+              onCreate={onCreateTag}
+              onChange={(tagIds) => onClassify({ tagIds })}
+              className="hidden sm:inline-flex"
+            />
+            <BillableToggle
+              value={sitting.allBillable}
+              onChange={(billable) => onClassify({ billable })}
             />
           </div>
         </div>
@@ -210,8 +248,18 @@ export function SittingRow({
             `formatTotal`, whose contract says decimal applies to TOTALS and
             never to a single entry's own row. A sitting's figure is a sum of
             parts, so it is a total, and it is floored like every other one.
-          */}
-        <span className="entry-log-duration tabular text-base font-semibold text-muted-foreground">
+
+            TYPESET EXACTLY AS `EditableDuration` — `text-sm font-medium` in
+            ink. A sitting row and an entry row are peers in one list, sharing
+            one duration column, and this figure was reading a size and a
+            weight above its members' for no reason the reader can act on. The
+            size difference was also what broke the column visually: these are
+            all right-aligned in the same 4.5rem box, so a 16px figure and a
+            14px figure start at different x-positions and the numbers looked
+            ragged even though their right edges matched. The DAY header total
+            stays larger on purpose — it summarises a section rather than
+            standing in the list as a row. */}
+        <span className="entry-log-duration tabular text-sm font-medium">
           {formatTotal(sitting.totalMs, display)}
         </span>
 

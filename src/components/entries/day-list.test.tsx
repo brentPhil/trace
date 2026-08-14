@@ -456,6 +456,41 @@ describe("grouped entries", () => {
     expect(sittingTitle.className).toContain("font-medium")
   })
 
+  /*
+   * THE REGRESSION THESE PIN: a sitting's total rendered `text-base
+   * font-semibold text-muted-foreground` while its own members rendered
+   * `text-sm font-medium` in ink — one column, three type treatments. Because
+   * every figure is right-aligned in the same 4.5rem box, the size difference
+   * also started the digits at different x-positions, so the column read as
+   * ragged even with its right edge true.
+   */
+  it("typesets a sitting total exactly like an entry duration", () => {
+    const { container } = renderLog(true)
+    const sittingTotal = container.querySelector(
+      ".entry-log-duration.text-sm"
+    )
+    expect(sittingTotal).not.toBeNull()
+    expect(sittingTotal?.className).toContain("font-medium")
+    // The weight and scale it used to carry, which its members never did.
+    expect(sittingTotal?.className).not.toContain("text-base")
+    expect(sittingTotal?.className).not.toContain("font-semibold")
+  })
+
+  it("gives the sitting disclosure a 24px target on the title's line", () => {
+    renderLog(true)
+    const disclosure = screen.getByRole("button", {
+      name: "Show grouped entries",
+    })
+    // WCAG 2.2 AA target minimum; `min-w` rather than a fixed square so a
+    // three-digit count still fits.
+    expect(disclosure.className).toContain("h-6")
+    expect(disclosure.className).toContain("min-w-6")
+    expect(disclosure.className).toContain("justify-center")
+    // Matches the title column's own `py-1.5`, which is what lands the badge
+    // on the title rather than at the top of a two-line column.
+    expect(disclosure.className).toContain("mt-1.5")
+  })
+
   it("draws a stronger full-width boundary before later days", () => {
     const yesterdayEntry = makeEntry({
       _id: "yesterday" as unknown as Doc<"timeEntries">["_id"],

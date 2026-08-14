@@ -219,20 +219,33 @@ export function EntryRow({
                 <span className="sr-only">Billable</span>
               </span>
             ) : null}
-            {/* Classifiers stay beside the title: they describe the work and
-                must give way with it before the fixed time and duration columns. */}
-            <div className="flex shrink-0 items-center gap-0.5">
-              <ProjectPicker
-                projects={projects}
-                value={entry.projectId ?? null}
-                onCreate={actions.onCreateProject}
-                onChange={(projectId) => actions.onClassify(entry, { projectId })}
-                className={cn("max-w-[8rem]", entry.projectId === undefined && revealed)}
-                // The dot survives at every width; the name is what gets dropped
-                // when there is no room, because the dot plus the row's own
-                // context is enough to tell two clients apart at a glance.
-                nameClassName="hidden md:inline"
-              />
+            {/* THE PROJECT READS AS PART OF THE TITLE, so it sits against it —
+                "[B-CB-346] Fixing false status · Sealogs" is one phrase naming
+                one piece of work, and a gap between the two halves makes the
+                client look like a property of the row's numbers instead. This
+                is why `EditableTitle` is deliberately not `flex-1`. */}
+            <ProjectPicker
+              projects={projects}
+              value={entry.projectId ?? null}
+              onCreate={actions.onCreateProject}
+              onChange={(projectId) => actions.onClassify(entry, { projectId })}
+              className={cn(
+                "max-w-[8rem] shrink-0",
+                entry.projectId === undefined && revealed
+              )}
+              // The dot survives at every width; the name is what gets dropped
+              // when there is no room, because the dot plus the row's own
+              // context is enough to tell two clients apart at a glance.
+              nameClassName="hidden md:inline"
+            />
+
+            {/* TAG AND BILLABLE GO TO THE RIGHT EDGE, against the time column.
+                They are marks ON the work rather than part of its name, and
+                `ml-auto` is what lands them in a true column: every other grid
+                track is a fixed width, so this content cell is identical in
+                every row and a right-aligned pair stacks down the log instead
+                of ragging along behind titles of different lengths. */}
+            <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
               <TagPicker
                 tags={tags}
                 value={entry.tagIds}

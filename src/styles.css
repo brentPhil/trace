@@ -133,14 +133,12 @@
    * against this. */
   --entry-row-height: 54px;
 
-  /* THE GAP BETWEEN ONE DAY AND THE NEXT, for the same reason as the row
-   * height above: the log's loading skeleton has to reserve exactly what the
-   * real day group takes, or the page moves under the reader when the answer
-   * arrives. It was a `pb-3` in both places, equal only by inspection — and in
-   * the skeleton, directly beside a comment saying the height is shared rather
-   * than copied. The 12px is argued where it is spent: see
-   * `src/components/entries/day-list.tsx`. */
-  --day-group-gap: 12px;
+  /* REMOVED: `--day-group-gap`, the 12px that used to sit under the last row
+   * of a day. The `border-t-2 border-edge` on the next day's section already
+   * marks the boundary, and paying for it twice made the log read as an airy
+   * page rather than the table it is. Both the real group and the loading
+   * skeleton dropped it together, which is what keeps the first paint from
+   * shifting — see `src/components/entries/day-list.tsx`. */
 
   /* THERE IS NO PAGE MEASURE. Every page takes the full width.
    *
@@ -255,7 +253,13 @@
  * rather than three matching width guesses. */
 .entry-log-grid {
   display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr) 8.5rem 4.5rem 4rem;
+  /* The time column is sized for the WIDEST range this can render, which is
+   * 12-hour with both meridiems: "11:00 AM – 12:02 PM" is 19 characters of
+   * IBM Plex Mono at 12px (~132px), and the entry row's trigger adds `px-1`
+   * on top of it. At the old 8.5rem/136px that overflowed by a few pixels and
+   * the range broke onto a second line, which also pushed the row past
+   * `--entry-row-height`. 9.75rem leaves the padding room plus slack. */
+  grid-template-columns: 1rem minmax(0, 1fr) 9.75rem 4.5rem 4rem;
   grid-template-areas: "select content time duration actions";
   column-gap: 0.5rem;
   align-items: start;
@@ -268,16 +272,24 @@
   grid-area: content;
   min-width: 0;
 }
+/* `nowrap` on both, independent of the widths above. A clock time and a
+ * duration are single indivisible values — a range broken across two lines is
+ * not a smaller version of itself, it is unreadable, and it silently grows the
+ * row past `--entry-row-height`. If a locale ever needs more room than the
+ * column gives, the right failure is to overflow visibly here rather than to
+ * reflow every row in the log. */
 .entry-log-time {
   grid-area: time;
   align-self: center;
   text-align: right;
+  white-space: nowrap;
 }
 .entry-log-duration {
   grid-area: duration;
   align-self: center;
   width: 4.5rem;
   text-align: right;
+  white-space: nowrap;
 }
 .entry-log-actions {
   grid-area: actions;

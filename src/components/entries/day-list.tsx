@@ -230,25 +230,18 @@ export function DayList({
           </header>
 
           {/*
-            `--day-group-gap` — the one deliberately generous gap in the log,
-            and a token rather than a literal because the loading skeleton
-            below has to reserve exactly it (see `LogSkeleton`, and
-            `--entry-row-height` for the same treatment of the row).
-
-            Two rows are the same kind of thing and stay 13px apart
-            (`entry-row.tsx`); a day and the next day are not, and that break
-            has to be visible before the heading is read, not after. 12px of
-            ground here makes it ~26px from the last note to the next day
-            label against 13px between rows — a ratio the eye groups on,
-            without the log turning into an airy page. It is a table.
-
-            It sits on the ROWS rather than on the heading beneath it so that
-            it scrolls away. The heading is sticky for the whole of its day, so
-            anything added to the heading's own box is paid for again on every
-            pixel of that scroll; the heading keeps `py-2` for that reason, and
-            takes its breathing room from the space above it instead.
+            NO GAP BEFORE THE NEXT DAY. This used to carry a 12px
+            `--day-group-gap`, on the argument that a day break has to be
+            visible before the heading is read rather than after it. The
+            `border-t-2 border-edge` on the section itself (above) already does
+            that job, and does it with a rule the eye reads as a boundary
+            rather than as absence — so the space underneath was paying twice
+            for one separation and left the log looking airy where it wants to
+            look like a table. The token is gone with it; `LogSkeleton` below
+            reserves nothing for it either, which is what keeps the first paint
+            from shifting when the real rows land.
           */}
-          <div className="flex flex-col pb-(--day-group-gap)">
+          <div className="flex flex-col">
             {(grouped
               ? toLogItems(group.entries)
               : group.entries.map((entry) => ({ kind: "row" as const, entry }))
@@ -397,12 +390,12 @@ export function LogSkeleton() {
                 <span className="entry-log-actions" />
               </div>
             </div>
-            {/* Both tokens, tracking the real row and the real group gap
-                above — a placeholder that reserves the wrong height moves the
-                page under the reader the moment the answer arrives, which is
-                why each of these is shared rather than copied (see
-                `entry-row.tsx` and the group above). */}
-            <div className="flex flex-col pb-(--day-group-gap)">
+            {/* `--entry-row-height`, tracking the real row — a placeholder
+                that reserves the wrong height moves the page under the reader
+                the moment the answer arrives, which is why it is shared rather
+                than copied (see `entry-row.tsx`). There is no group gap to
+                mirror any more; see the real group above. */}
+            <div className="flex flex-col">
               {[0, 1, 2].map((row) => (
                 <div key={row} className="border-b border-edge-soft">
                   <div className="entry-log-grid h-(--entry-row-height) w-full items-center px-4">
