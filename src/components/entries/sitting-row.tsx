@@ -135,7 +135,8 @@ export function SittingRow({
           applies: the trailing controls carry the row's own height (below)
           while the title/note column is left to grow downward without
           dragging the badge or the trailing cluster into its vertical middle. */}
-      <div className="entry-log-grid min-h-(--entry-row-height) w-full px-4">
+      {/* `entry-log-row`, as `EntryRow` — see `styles.css`. */}
+      <div className="entry-log-grid entry-log-row min-h-(--entry-row-height) w-full px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual

@@ -180,7 +180,10 @@ export function EntryRow({
         eye reads a row left to right along its FIRST line, so that is the line
         everything on it has to sit on.
       */}
-      <div className="entry-log-grid min-h-(--entry-row-height) w-full px-4">
+      {/* `entry-log-row` is what opts this grid's fixed columns into first-line
+          alignment — a row can grow a note, and the day header cannot. See
+          `styles.css`. */}
+      <div className="entry-log-grid entry-log-row min-h-(--entry-row-height) w-full px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
