@@ -99,6 +99,16 @@ export type TraceErrorCode =
    *  same trade `RANGE_TOO_LARGE` and `MIXED_CLIENTS` make — every other
    *  permanent-document risk in this feature refuses rather than mints. */
   | "NO_PRICED_TIME"
+  /** No Google account is linked, so there is nothing to sync or list. Its own
+   *  code rather than NOT_FOUND: the caller's recovery is "connect Google",
+   *  which is a button, not a missing row. */
+  | "GOOGLE_NOT_CONNECTED"
+  /** Google refused the stored refresh token — the user revoked access, or the
+   *  grant expired. Distinct from GOOGLE_NOT_CONNECTED because the account IS
+   *  linked and the recovery is to consent again rather than to connect; a
+   *  caller branching on the code would otherwise offer to link an account that
+   *  is already there. */
+  | "GOOGLE_REAUTH_REQUIRED"
 
 export type TraceErrorData = {
   code: TraceErrorCode

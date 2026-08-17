@@ -1,6 +1,10 @@
 import { v } from "convex/values"
 import {
   clientFields,
+  googleCalendarFields,
+  googleConnectionFields,
+  googleEventFields,
+  googleEventTrackingFields,
   invoiceFields,
   invoiceLineFields,
   projectFields,
@@ -55,4 +59,28 @@ export const invoiceLineDoc = v.object({
   _id: v.id("invoiceLines"),
   _creationTime: v.number(),
   ...invoiceLineFields,
+})
+
+export const googleConnectionDoc = v.object({
+  _id: v.id("googleConnections"),
+  _creationTime: v.number(),
+  ...googleConnectionFields,
+})
+
+export const googleCalendarDoc = v.object({
+  _id: v.id("googleCalendars"),
+  _creationTime: v.number(),
+  ...googleCalendarFields,
+})
+
+export const googleEventDoc = v.object({
+  _id: v.id("googleEvents"),
+  _creationTime: v.number(),
+  ...googleEventFields,
+})
+
+export const googleEventTrackingDoc = v.object({
+  _id: v.id("googleEventTracking"),
+  _creationTime: v.number(),
+  ...googleEventTrackingFields,
 })
