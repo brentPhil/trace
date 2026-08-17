@@ -381,7 +381,19 @@ Then inside `defineSchema({ ... })`, after `entryTags`:
     // The upsert's key.
     .index("by_user_calendar_event", ["userId", "calendarId", "eventId"])
     // The grid's range read, and the prune's scan.
-    .index("by_user_started", ["userId", "startedAt"]),
+    .index("by_user_started", ["userId", "startedAt"])
+    /*
+     * Every row of ONE calendar, which is what two whole-calendar operations
+     * need: hiding a calendar deletes its mirrored events, and a calendar Google
+     * has stopped reporting takes its events with it.
+     *
+     * Without this both would read a page of the user's events and filter by
+     * `calendarId` in JavaScript — and a filter after the index scan does not
+     * reduce rows read, so the cost would be the whole mirror however few rows
+     * the target calendar holds. `startedAt` trails the key so the deletes come
+     * off in a stable order and a bounded page can be resumed.
+     */
+    .index("by_user_calendar_started", ["userId", "calendarId", "startedAt"]),
 
   googleEventTracking: defineTable(googleEventTrackingFields).index(
     "by_user_calendar_event",
@@ -1613,13 +1625,16 @@ export const upsertCalendars = internalMutation({
       .take(250)
     for (const row of rows) {
       if (seen.has(row.googleId)) continue
+      // Through `by_user_calendar_started`, so this reads only the orphaned
+      // calendar's own rows. Filtering a page of every event by `calendarId`
+      // would read the whole mirror once per orphan.
       const orphans = await ctx.db
         .query("googleEvents")
-        .withIndex("by_user_started", (q) => q.eq("userId", args.userId))
+        .withIndex("by_user_calendar_started", (q) =>
+          q.eq("userId", args.userId).eq("calendarId", row.googleId)
+        )
         .take(500)
-      for (const orphan of orphans) {
-        if (orphan.calendarId === row.googleId) await ctx.db.delete(orphan._id)
-      }
+      for (const orphan of orphans) await ctx.db.delete(orphan._id)
       await ctx.db.delete(row._id)
     }
 
@@ -1716,7 +1731,7 @@ Append to `convex/google.test.ts`:
 describe("syncAccount", () => {
   const NOW = Date.parse("2026-08-17T09:00:00.000Z")
 
-  it("flags the connection for re-consent when Google refuses the grant", async () => {
+  it("markConnection records the reauth flag and the error text", async () => {
     const t = setup()
     await t.run(async (ctx) => {
       await ctx.db.insert("googleConnections", {
@@ -2376,25 +2391,37 @@ export const connectForUser = internalMutation({
  * and a tick that outlives its calendar would fire against a reconnected
  * account the user never re-armed.
  */
+/** One drain page. Bounded because a disconnect on a full mirror is a few
+ *  thousand rows — more than one transaction should write — so it continues over
+ *  scheduled calls rather than risking a rollback that undoes the whole thing. */
+const DISCONNECT_PAGE = 500
+
 async function disconnectImpl(ctx: MutationCtx, userId: string) {
-  for (const table of ["googleEvents", "googleEventTracking"] as const) {
-    // Bounded per call. A disconnect on a full mirror is a few thousand rows,
-    // which is more than one transaction should write, so it drains over
-    // scheduled continuations rather than risking a rollback.
-    const rows = await ctx.db
-      .query(table)
-      .withIndex(
-        table === "googleEvents" ? "by_user_started" : "by_user_calendar_event",
-        (q) => q.eq("userId", userId)
-      )
-      .take(500)
-    for (const row of rows) await ctx.db.delete(row._id)
-    if (rows.length === 500) {
-      await ctx.scheduler.runAfter(0, internal.google.disconnectForUser, {
-        userId,
-      })
-      return null
-    }
+  /*
+   * The two tables are drained in SEPARATE blocks rather than a loop over table
+   * names. `ctx.db.query(table)` with a union of names gives the builder a union
+   * of document types and the index names differ between the two, so the loop
+   * form does not typecheck — and the cast that would make it compile is exactly
+   * the cast that hides a wrong index next time one of them changes.
+   */
+  const events = await ctx.db
+    .query("googleEvents")
+    .withIndex("by_user_started", (q) => q.eq("userId", userId))
+    .take(DISCONNECT_PAGE)
+  for (const row of events) await ctx.db.delete(row._id)
+  if (events.length === DISCONNECT_PAGE) {
+    await ctx.scheduler.runAfter(0, internal.google.disconnectForUser, { userId })
+    return null
+  }
+
+  const tracking = await ctx.db
+    .query("googleEventTracking")
+    .withIndex("by_user_calendar_event", (q) => q.eq("userId", userId))
+    .take(DISCONNECT_PAGE)
+  for (const row of tracking) await ctx.db.delete(row._id)
+  if (tracking.length === DISCONNECT_PAGE) {
+    await ctx.scheduler.runAfter(0, internal.google.disconnectForUser, { userId })
+    return null
   }
 
   const calendars = await ctx.db
@@ -2808,13 +2835,15 @@ async function setCalendarShowImpl(
     return null
   }
 
+  // Only this calendar's rows, through the index rather than by filtering a page
+  // of the user's whole mirror.
   const rows = await ctx.db
     .query("googleEvents")
-    .withIndex("by_user_started", (q) => q.eq("userId", userId))
+    .withIndex("by_user_calendar_started", (q) =>
+      q.eq("userId", userId).eq("calendarId", calendarId)
+    )
     .take(1_000)
-  for (const row of rows) {
-    if (row.calendarId === calendarId) await ctx.db.delete(row._id)
-  }
+  for (const row of rows) await ctx.db.delete(row._id)
   return null
 }
 
