@@ -141,7 +141,7 @@ export function InvoiceRecord({
               </dt>
               {/* Tabular on every one of them: a number, a date and an invoice
                   id are all digits somebody reads down a column. */}
-              <dd className="tabular min-w-0 text-sm">{row.value}</dd>
+              <dd className="font-mono tabular-nums tracking-[-0.02em] min-w-0 text-sm">{row.value}</dd>
             </div>
           ))}
         </dl>

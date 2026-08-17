@@ -256,10 +256,10 @@ function measureTotals(
       entries={SPREAD}
     />
   )
-  // `.tabular.text-xs` inside a column header is the day total and only the
-  // day total: the weekday text is not `tabular` and the date is `text-base`.
+  // `.tabular-nums.text-xs` inside a column header is the day total and only the
+  // day total: the weekday text is not `tabular-nums` and the date is `text-base`.
   const columnTotals = [
-    ...container.querySelectorAll('[role="columnheader"] .tabular.text-xs'),
+    ...container.querySelectorAll('[role="columnheader"] .tabular-nums.text-xs'),
   ].map((span) => span.textContent)
   return {
     columns: columnDates(container),

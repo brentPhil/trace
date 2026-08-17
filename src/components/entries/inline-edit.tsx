@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
 
@@ -155,21 +156,26 @@ export function InlineEdit<T>({
 
   if (!editing) {
     return (
-      <button
+      // `px-0`: this trigger wears its caller's text verbatim — a title, a
+      // duration — and the row it sits in aligns on that text's own left edge,
+      // so the size's horizontal padding would shift every field in the log by
+      // 4px against the day header above it.
+      <Button
         ref={triggerRef}
         type="button"
+        variant="quiet"
+        size="row-trigger"
         disabled={disabled}
         onClick={open}
         aria-label={ariaLabel}
         className={cn(
-          "rounded-sm text-left",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          "px-0 py-0 text-left text-[length:inherit] text-inherit",
           !disabled && "hover:bg-surface-raised/70",
           className
         )}
       >
         {display}
-      </button>
+      </Button>
     )
   }
 

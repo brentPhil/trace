@@ -130,8 +130,10 @@ export function TimerDurationPopover({
             }
           }}
           trigger={
-            <button
+            <Button
               type="button"
+              variant="quiet"
+              size="row-trigger"
               // Says what it does, not the digits it wraps — a screen reader
               // hears "Edit start time — running", never "9:12:04, button".
               aria-label="Edit start time — running"
@@ -145,7 +147,7 @@ export function TimerDurationPopover({
                 endedAt={null}
                 className={cn(durationClass, "text-enlarger")}
               />
-            </button>
+            </Button>
           }
         />
         <SpokenElapsed startedAt={entry.startedAt} />
@@ -175,9 +177,11 @@ export function TimerDurationPopover({
  * neutral one the row's own time trigger uses.
  */
 const triggerClass = cn(
-  "touch-target shrink-0 rounded-sm px-1 py-0.5 sm:px-2",
-  "transition-colors hover:bg-surface-raised/70",
-  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+  // WCAG 2.2 SC 2.5.8: the hit area grows by 2px above and below through a
+  // pseudo-element rather than through padding, because the timer bar's height
+  // is measured into `--timer-bar-height` and consumed as a reserved height.
+  "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+  "shrink-0 text-[length:inherit] text-inherit sm:px-2"
 )
 
 const durationClass = "text-base font-medium sm:text-lg"
@@ -376,8 +380,10 @@ function IdleDurationPopover({
     <Popover.Root open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
       <Popover.Trigger
         render={
-          <button
+          <Button
             type="button"
+            variant="quiet"
+            size="row-trigger"
             // Idle, the digits are always 0:00:00 — a name built from them
             // would say nothing. This says what clicking it does instead.
             aria-label="Add a completed entry"
@@ -397,7 +403,7 @@ function IdleDurationPopover({
               endedAt={0}
               className={cn(durationClass, "text-muted-foreground")}
             />
-          </button>
+          </Button>
         }
       />
 
@@ -486,7 +492,7 @@ function ParseEcho({
 
   return (
     // The Tabular Rule: every duration, timestamp and total, at any size.
-    <span className="tabular text-xs text-muted-foreground">
+    <span className="font-mono tabular-nums tracking-[-0.02em] text-xs text-muted-foreground">
       {formatTimeOfDay(interval.start, use12Hour)} –{" "}
       {formatTimeOfDay(interval.end, use12Hour)}
     </span>

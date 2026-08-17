@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button"
 import { useElapsedMs } from "@/hooks/use-clock"
 import { cn } from "@/lib/utils"
 import { formatCompactDuration } from "@shared/duration"
@@ -59,7 +60,7 @@ export function RunawayBanner({
     >
       <span>
         This timer has been running for{" "}
-        <strong className="font-medium tabular">
+        <strong className="font-medium font-mono tabular-nums tracking-[-0.02em]">
           {formatCompactDuration(elapsed)}
         </strong>
         .
@@ -90,12 +91,15 @@ function BannerAction({
   children: React.ReactNode
 }) {
   return (
-    <button
+    // `link` for the underline and offset; everything below is the hue, which
+    // the variant deliberately leaves at `text-primary`.
+    <Button
       type="button"
+      variant="link"
+      size="row-trigger"
       onClick={onClick}
       className={cn(
-        "rounded-sm underline underline-offset-4 transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        "text-sm underline",
         destructive
           ? "text-muted-foreground hover:text-alarm"
           : // NOT `--enlarger`. The banner is genuinely ABOUT a running timer,
@@ -117,6 +121,6 @@ function BannerAction({
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }

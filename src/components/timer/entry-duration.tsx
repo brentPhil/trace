@@ -40,7 +40,7 @@ export function EntryDuration({
       // A clock is time-dependent text by definition; the server's value and
       // the client's are allowed to differ by a second.
       suppressHydrationWarning
-      className={cn("tabular tracking-tight", className)}
+      className={cn("font-mono tabular-nums tracking-[-0.02em] tracking-tight", className)}
     >
       {formatClock(ms)}
     </time>

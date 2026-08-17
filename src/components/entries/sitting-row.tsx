@@ -6,6 +6,7 @@ import {
 } from "@/components/classifiers/classifier-pickers"
 import { NoteLine } from "@/components/entries/note-line"
 import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
+import { Button } from "@/components/ui/button"
 import { formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { joinNotes } from "@/lib/group-sittings"
@@ -56,6 +57,7 @@ export function SittingRow({
   selection,
   onToggle,
   onResume,
+  onRemove,
   onClassify,
   onNoteOpen,
   onCreateProject,
@@ -75,6 +77,10 @@ export function SittingRow({
   onToggle: () => void
   /** Resumes the NEWEST member — see `DayList`, which supplies it. */
   onResume: () => void
+  /** Deletes EVERY member, in one mutation under one Undo. See `DayList` and
+   *  `EntryLog.onSittingRemove`. Not the newest one alone — a sitting names a
+   *  piece of work, and deleting it means deleting the work. */
+  onRemove: () => void
   /** Applies a classifier change to EVERY member. See `DayList`. */
   onClassify: (change: Partial<Classification>) => void
   onNoteOpen: () => void
@@ -135,12 +141,10 @@ export function SittingRow({
           applies: the trailing controls carry the row's own height (below)
           while the title/note column is left to grow downward without
           dragging the badge or the trailing cluster into its vertical middle. */}
-      {/* `entry-log-row`, as `EntryRow` — see `styles.css`. */}
-      <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
+            <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
-            className="entry-log-select"
             label={selection.label}
             state={selection.state}
             onToggle={selection.onToggle}
@@ -163,24 +167,20 @@ export function SittingRow({
               22px tall — under it, and small enough to be a fussy hit for a
               control that is on every grouped row. `min-w`, not a fixed
               square, so a three-digit count still fits. */}
-          <button
+          <Button
             type="button"
+            variant="quiet"
+            size="badge"
             aria-expanded={expanded}
             aria-controls={controls}
             aria-label={
               expanded ? "Hide grouped entries" : "Show grouped entries"
             }
             onClick={onToggle}
-            className={cn(
-              "flex h-6 min-w-6 shrink-0 items-center justify-center",
-              "rounded-sm border border-edge-soft px-1.5",
-              "tabular text-xs text-muted-foreground",
-              "transition-colors hover:text-foreground",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            )}
+            className="font-mono tabular-nums tracking-[-0.02em] shrink-0 rounded-sm border-edge-soft"
           >
             {sitting.entries.length}
-          </button>
+          </Button>
 
           {/* The title/note column, mirroring `EntryRow`'s own. */}
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
@@ -219,7 +219,7 @@ export function SittingRow({
             A SIBLING OF THE TITLE COLUMN, NOT A CHILD OF IT — this is what
             puts the marks in the same column as an entry row's.
 
-            Both rows share one `.entry-log-content` track of identical width,
+            Both rows share one content track of identical width,
             so right-aligning inside it is what makes a column. But this row
             spends the first 32px of that track on the disclosure button and
             its gap; a pair right-aligned INSIDE the title column therefore
@@ -247,10 +247,10 @@ export function SittingRow({
             onChange={(billable) => onClassify({ billable })}
           />
           {/* Fixed columns stay on the row's first line when a note expands. */}
-          <div className="tabular text-xs text-nowrap px-1 text-muted-foreground">
+          <div className="font-mono tabular-nums tracking-[-0.02em] text-xs text-nowrap px-1 text-muted-foreground">
             {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}
           </div>
-          <span className="tabular flex h-full items-center justify-end ps-2.5 pe-1 text-sm font-medium">
+          <span className="font-mono tabular-nums tracking-[-0.02em] flex h-full items-center justify-end ps-2.5 pe-1 text-sm font-medium">
             {formatTotal(sitting.totalMs, display)}
           </span>
         </div>
@@ -272,38 +272,49 @@ export function SittingRow({
             standing in the list as a row. */}
 
         <div className="flex h-full items-center justify-end">
-          <button
-            type="button"
-            aria-label={`Resume ${title}`}
-            onClick={onResume}
-            className={cn(
-              "rounded-md p-1.5 text-muted-foreground",
-              "opacity-100 sm:opacity-0",
-              "transition-[opacity,color] sm:group-hover:opacity-100",
-              "hover:text-foreground",
-              "focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring",
-              "focus-visible:outline-none motion-reduce:transition-none"
-            )}
-          >
+          <SittingAction label={`Resume ${title}`} onClick={onResume}>
             <Play className="size-4" />
-          </button>
-          <button
-            type="button"
-            aria-label={`Resume ${title}`}
-            onClick={onResume}
-            className={cn(
-              "rounded-md p-1.5 text-muted-foreground",
-              "opacity-100 sm:opacity-0",
-              "transition-[opacity,color] sm:group-hover:opacity-100",
-              "hover:text-foreground",
-              "focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring",
-              "focus-visible:outline-none motion-reduce:transition-none"
-            )}
-          >
+          </SittingAction>
+          <SittingAction label={`Delete ${title}`} onClick={onRemove} destructive>
             <Trash2 className="size-4" />
-          </button>
+          </SittingAction>
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * The sitting row's peer of `EntryRow`'s `RowButton` — same size, same fade,
+ * and the same `destructive` warming to `--alarm` rather than to full ink, so
+ * the two rows' delete affordances cannot drift apart.
+ */
+function SittingAction({
+  label,
+  onClick,
+  destructive = false,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  destructive?: boolean
+  children: React.ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      variant="quiet"
+      size="icon-row"
+      aria-label={label}
+      onClick={onClick}
+      className={cn(
+        "opacity-100 sm:opacity-0",
+        "transition-[opacity,color] sm:group-hover:opacity-100",
+        "focus-visible:opacity-100 motion-reduce:transition-none",
+        destructive && "hover:text-alarm"
+      )}
+    >
+      {children}
+    </Button>
   )
 }

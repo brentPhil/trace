@@ -11,11 +11,13 @@ import { Toast } from "@/components/ui/toast"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { errorMessage } from "@/lib/error-message"
 import { formatRate, rateHelp } from "@/lib/format-money"
+import { projectColorVar } from "@/lib/project-color"
 import { cn } from "@/lib/utils"
 import { pageTitle } from "@shared/brand"
 import { PROJECT_COLORS } from "@shared/palette"
 import { parseMoney } from "@shared/money"
 import { api } from "../../../convex/_generated/api"
+import type { CSSProperties } from "react"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 export const Route = createFileRoute("/_authed/projects")({
@@ -206,7 +208,7 @@ function ProjectRow({
         display={
           <span
             className={cn(
-              "tabular",
+              "font-mono tabular-nums tracking-[-0.02em]",
               project.hourlyRateCents === undefined && "italic text-muted-foreground"
             )}
           >
@@ -221,7 +223,7 @@ function ProjectRow({
         ariaLabel={`Hourly rate for ${project.name}`}
         placeholder="No rate"
         className="shrink-0 px-1 py-0.5 text-xs text-muted-foreground"
-        inputClassName="w-20 text-xs tabular"
+        inputClassName="w-20 text-xs font-mono tabular-nums tracking-[-0.02em]"
         parse={(raw) => {
           // `currency` is passed so the user's OWN sign and ISO code are
           // strippable noise rather than a parse failure — an SGD user pasting
@@ -311,8 +313,9 @@ function ColorPicker({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
         data-project-color={project.color}
+        style={{ "--project-color": projectColorVar(project.color) } as CSSProperties}
         className={cn(
-          "size-4 rounded-full bg-[var(--project-color)]",
+          "size-4 rounded-full bg-(--project-color) forced-colors:bg-[currentColor]",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
       />
@@ -338,12 +341,13 @@ function ColorPicker({
                 aria-label={color}
                 aria-pressed={color === project.color}
                 data-project-color={color}
+                style={{ "--project-color": projectColorVar(color) } as CSSProperties}
                 onClick={() => {
                   onPick(color)
                   close()
                 }}
                 className={cn(
-                  "size-5 rounded-full bg-[var(--project-color)]",
+                  "size-5 rounded-full bg-(--project-color) forced-colors:bg-[currentColor]",
                   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
                   color === project.color && "ring-2 ring-foreground ring-offset-2 ring-offset-surface-raised"
                 )}
@@ -440,7 +444,7 @@ function NewProject({ currency }: { currency: string }) {
         aria-label={`Hourly rate in ${currency}, optional`}
         aria-invalid={error !== null}
         className={cn(
-          "w-32 rounded-md border bg-ground px-2 py-1 text-sm tabular",
+          "w-32 rounded-md border bg-ground px-2 py-1 text-sm font-mono tabular-nums tracking-[-0.02em]",
           error === null ? "border-edge" : "border-alarm",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
@@ -483,21 +487,20 @@ function TagRow({ tag }: { tag: Doc<"tags"> }) {
           await renameTag(tag._id, name)
         }}
       />
-      <button
+      <Button
         type="button"
+        variant="quiet"
+        size="icon-xs"
         aria-label={`Delete tag ${tag.name}`}
         onClick={() => {
           void removeTag(tag._id).catch((thrown: unknown) => {
             toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
           })
         }}
-        className={cn(
-          "rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-alarm",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        )}
+        className="hover:text-alarm"
       >
         <Trash2 className="size-3" />
-      </button>
+      </Button>
     </li>
   )
 }
@@ -516,20 +519,20 @@ function IconButton({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="quiet"
+      size="icon-row"
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "rounded-md p-1.5 text-muted-foreground transition-colors",
         "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
-        "focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring",
-        "focus-visible:outline-none motion-reduce:transition-none",
-        destructive ? "hover:text-alarm" : "hover:text-foreground"
+        "focus-visible:opacity-100 motion-reduce:transition-none",
+        destructive && "hover:text-alarm"
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 

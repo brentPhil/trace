@@ -6,7 +6,7 @@ import {
 } from "@/components/classifiers/classifier-pickers"
 import { EditableDuration, EditableTitle } from "@/components/entries/editable-fields"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu"
 import { Popover } from "@/components/ui/popover"
 import { formatTimeOfInstant } from "@/lib/format-time"
@@ -258,13 +258,14 @@ export function CalendarEntryPopover({
               onCommitTime={(field, value) => actions.onTimeChange(entry, field, value)}
               onCommitDay={(day) => actions.onDayChange(entry, day)}
               trigger={
-                <button
+                <Button
                   type="button"
+                  variant="quiet"
+                  size="row-trigger"
                   aria-label={`Edit start, end and day — ${timesLabel(entry, timeZone, use12Hour)}`}
                   className={cn(
-                    "flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1",
-                    "text-sm text-foreground transition-colors hover:bg-surface",
-                    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    "min-w-0 justify-start gap-1.5 rounded-md px-1.5 py-1",
+                    "text-sm text-foreground hover:bg-surface"
                   )}
                 >
                   <CalendarDays
@@ -280,7 +281,7 @@ export function CalendarEntryPopover({
                     button between them made possible. A timestamp broken across
                     lines is not a timestamp; it is two numbers.
                   */}
-                  <span className="tabular whitespace-nowrap">
+                  <span className="font-mono tabular-nums tracking-[-0.02em] whitespace-nowrap">
                     {formatTimeOfInstant(entry.startedAt, timeZone, use12Hour)}
                   </span>
                   <ArrowRight
@@ -292,12 +293,12 @@ export function CalendarEntryPopover({
                     value that looks recorded when it is not — the same
                     ellipsis `formatTimeRange` uses everywhere else.
                   */}
-                  <span className="tabular whitespace-nowrap">
+                  <span className="font-mono tabular-nums tracking-[-0.02em] whitespace-nowrap">
                     {entry.endedAt === null
                       ? "…"
                       : formatTimeOfInstant(entry.endedAt, timeZone, use12Hour)}
                   </span>
-                </button>
+                </Button>
               }
             />
 
@@ -337,11 +338,10 @@ export function CalendarEntryPopover({
  * at full opacity: the row fades its controls in so a log of fifty does not read
  * as a wall of buttons, and a popover holding one entry has no such problem.
  */
-const ICON_BUTTON = cn(
-  "rounded-md p-1.5 text-muted-foreground transition-colors",
-  "hover:text-foreground",
-  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-)
+/* `buttonVariants` rather than a `<Button>`, because two of the three controls
+ * wearing this are not buttons we render: `MenuTrigger` and `Popover.Close`
+ * bring their own element and take only a className. */
+const ICON_BUTTON = buttonVariants({ variant: "quiet", size: "icon-row" })
 
 function IconButton({
   label,
@@ -353,9 +353,15 @@ function IconButton({
   children: React.ReactNode
 }) {
   return (
-    <button type="button" aria-label={label} onClick={onClick} className={ICON_BUTTON}>
+    <Button
+      type="button"
+      variant="quiet"
+      size="icon-row"
+      aria-label={label}
+      onClick={onClick}
+    >
       {children}
-    </button>
+    </Button>
   )
 }
 

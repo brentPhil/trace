@@ -2,6 +2,7 @@ import { useState } from "react"
 import { DollarSign, FolderClosed, Tag } from "lucide-react"
 import { PickerList } from "@/components/classifiers/picker-list"
 import { ProjectDot } from "@/components/classifiers/project-dot"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Popover } from "@/components/ui/popover"
 import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
@@ -21,9 +22,13 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
  * timer bar additionally opens them by typing `@` or `#` inline.
  */
 
+/* `buttonVariants`, not a `<Button>`: two of the three controls wearing this
+ * are `Popover.Trigger`s, which bring their own element and take a className.
+ * `text-[length:inherit]` because a classifier sits inline in a row that has
+ * already chosen a size — the base variant's `text-sm` would override it. */
 const triggerClass = cn(
-  "rounded-md px-2 py-0 transition-colors",
-  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+  buttonVariants({ variant: "quiet", size: "row-trigger" }),
+  "rounded-md px-2 py-0 text-[length:inherit]"
 )
 
 // ---------------------------------------------------------------------------
@@ -136,20 +141,18 @@ export function ProjectPicker({
                 </p>
               )}
               {value === null ? null : (
-                <button
+                <Button
                   type="button"
+                  variant="quiet"
+                  size="sm"
                   onClick={() => {
                     onChange(null)
                     close()
                   }}
-                  className={cn(
-                    "w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground",
-                    "hover:bg-surface hover:text-foreground",
-                    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                  )}
+                  className="w-full justify-start px-2 font-normal hover:bg-surface"
                 >
                   Clear project
-                </button>
+                </Button>
               )}
             </div>
           }
@@ -228,7 +231,7 @@ export function TagPicker({
         <span className="flex items-center gap-1">
           <Tag className="size-4" />
           {value.length > 0 ? (
-            <span className="text-xs tabular">{value.length}</span>
+            <span className="text-xs font-mono tabular-nums tracking-[-0.02em]">{value.length}</span>
           ) : null}
         </span>
       </Popover.Trigger>
@@ -285,18 +288,20 @@ export function BillableToggle({
   className?: string
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="quiet"
+      size="row-trigger"
       aria-pressed={value}
       aria-label={value ? "Billable" : "Not billable"}
       onClick={() => onChange(!value)}
       className={cn(
-        triggerClass,
-        value ? "text-brass" : "text-muted-foreground hover:text-foreground",
+        "rounded-md px-2 py-0 text-[length:inherit]",
+        value && "text-brass",
         className
       )}
     >
       <DollarSign className="size-4" />
-    </button>
+    </Button>
   )
 }

@@ -8,7 +8,7 @@ import { joinNotes, toLogItems } from "@/lib/group-sittings"
 import { makeEntry } from "@/test-utils/fixtures"
 import type { EntryRowActions } from "@/components/entries/entry-row"
 import type { Classification } from "@/components/timer/timer-bar"
-import type { DayGroup } from "@/lib/group-entries"
+import type { DayGroup, Entry } from "@/lib/group-entries"
 import type { LogItem } from "@/lib/group-sittings"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
@@ -439,10 +439,10 @@ describe("grouped entries", () => {
 
   it("uses one duration column for the day, sitting, and entry", () => {
     const { container } = renderLog(true)
-    const durations = container.querySelectorAll(".entry-log-duration")
+    const durations = container.querySelectorAll('[data-log-cell="duration"]')
     expect(durations.length).toBeGreaterThanOrEqual(3)
     for (const duration of durations) {
-      expect(duration.parentElement?.className).toContain("entry-log-grid")
+      expect(duration.parentElement?.className).toContain("grid")
     }
   })
 
@@ -467,7 +467,7 @@ describe("grouped entries", () => {
   it("typesets a sitting total exactly like an entry duration", () => {
     const { container } = renderLog(true)
     const sittingTotal = container.querySelector(
-      ".entry-log-duration.text-sm"
+      '[data-log-cell="duration"].text-sm'
     )
     expect(sittingTotal).not.toBeNull()
     expect(sittingTotal?.className).toContain("font-medium")
@@ -624,6 +624,34 @@ describe("grouped entries", () => {
     expect(onResume.mock.calls[0][0]._id).toBe("b")
   })
 
+  it("names the sitting's resume and delete controls apart", () => {
+    // Both carried `Resume <title>` at one point, which made them one control
+    // as far as anything reading the accessibility tree was concerned: the
+    // trash icon announced "Resume Crew dropdowns", and `getByLabelText`
+    // matched two elements. A destructive control that cannot be told from the
+    // one beside it is the failure worth guarding, not the label text.
+    renderLog(true)
+
+    expect(screen.getByLabelText("Resume Crew dropdowns")).toBeTruthy()
+    expect(screen.getByLabelText("Delete Crew dropdowns")).toBeTruthy()
+  })
+
+  it("deletes EVERY member of a sitting from the parent's delete button", () => {
+    // A sitting is a disclosure over several entries, so its delete is a
+    // fan-out — one call carrying every member, which `EntryLog` routes to
+    // `onRemoveMany` so the whole group goes in one mutation under one Undo.
+    // Deleting only the newest would leave the group half-standing.
+    const onSittingRemove = vi.fn()
+    renderLog(true, { onSittingRemove } as unknown as EntryRowActions)
+
+    fireEvent.click(screen.getByLabelText("Delete Crew dropdowns"))
+
+    expect(onSittingRemove).toHaveBeenCalledTimes(1)
+    expect(
+      onSittingRemove.mock.calls[0][0].map((entry: Entry) => entry._id)
+    ).toEqual(["b", "a"])
+  })
+
   it("leaves a day of unique titles completely alone", () => {
     const unique = [
       {
@@ -735,6 +763,7 @@ describe("grouped entries", () => {
           expanded={false}
           onToggle={() => {}}
           onResume={() => {}}
+          onRemove={() => {}}
           onClassify={onClassify}
           onNoteOpen={onNoteOpen}
           onCreateProject={vi.fn()}
@@ -788,6 +817,7 @@ describe("grouped entries", () => {
           expanded={false}
           onToggle={() => {}}
           onResume={() => {}}
+          onRemove={() => {}}
           onClassify={() => {}}
           onNoteOpen={() => {}}
           onCreateProject={vi.fn()}

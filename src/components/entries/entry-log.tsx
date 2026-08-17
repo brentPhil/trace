@@ -200,6 +200,23 @@ export function EntryLog({
       })
       setNoteOpen(true)
     },
+    /*
+     * THE WHOLE GROUP, IN ONE MUTATION, UNDER ONE UNDO.
+     *
+     * `onRemoveMany` and not `onRemove` per member: it dedupes, deletes in a
+     * single call, and raises one toast that names the count and puts every
+     * row back. A loop would raise a toast per member, and a refusal on the
+     * third would leave the sitting half-standing with two Undos to find.
+     *
+     * The promise is deliberately dropped. `onRemoveMany` reports its own
+     * failure as a toast and answers `false`, and unlike `deleteSelection`
+     * above there is no selection state here to keep or clear on the strength
+     * of that answer — the sitting is a disclosure over rows the query owns,
+     * so a refusal simply leaves the group on screen.
+     */
+    onSittingRemove: (entries) => {
+      void entryActions.onRemoveMany(entries)
+    },
     onSittingClassify: (entries, change) => {
       void updateMany({
         entryIds: entries.map((entry) => entry._id),

@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { formatDayName } from "@/lib/format-time"
 import { addMonths, monthGrid, monthLabel, weekdayLabels } from "@/lib/month-grid"
 import { cn } from "@/lib/utils"
@@ -127,7 +128,7 @@ export function TimePopoverFields({
         </div>
 
         {/*
-          A real table. A date grid IS tabular — the column a cell sits in
+          A real table. A date grid IS font-mono tabular-nums tracking-[-0.02em] — the column a cell sits in
           carries its weekday — and `<th scope="col">` is what tells a screen
           reader that without a word of ARIA.
         */}
@@ -171,7 +172,7 @@ export function TimePopoverFields({
 }
 
 const inputClass = cn(
-  "tabular h-8 w-full rounded-md border border-edge bg-ground px-2 text-sm",
+  "font-mono tabular-nums tracking-[-0.02em] h-8 w-full rounded-md border border-edge bg-ground px-2 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
 
@@ -196,22 +197,21 @@ function MonthButton({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="quiet"
+      size="icon-xs"
       aria-label={label}
       onClick={onClick}
-      className={cn(
-        // `border-edge-raised`: no fill of its own, inside a `surface-raised`
-        // popover, where `--edge` is 2.60:1 — under SC 1.4.11. The inputs
-        // above keep `--edge` because their `bg-ground` fill puts the border
-        // next to ground on its inner side, where it clears at 3.15:1.
-        "rounded-md border border-edge-raised p-1 text-muted-foreground",
-        "transition-colors hover:text-foreground",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      )}
+      // `border-edge-raised`: no fill of its own, inside a `surface-raised`
+      // popover, where `--edge` is 2.60:1 — under SC 1.4.11. The inputs above
+      // keep `--edge` because their `bg-ground` fill puts the border next to
+      // ground on its inner side, where it clears at 3.15:1. The base variant
+      // ships `border border-transparent`, so this only sets the colour.
+      className="border-edge-raised"
     >
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -230,26 +230,29 @@ function DayCell({
   const label = formatDayName(year, month, date)
 
   return (
-    <button
+    // `default` when selected is NOT cold light: this marks which DAY is
+    // selected in a date picker, not whether anything is running — a popover
+    // opened on a completed entry would otherwise show cold light next to a
+    // dash where the end time goes. The variant's `bg-primary` /
+    // `text-primary-foreground` is the same "affirmative action, deliberately
+    // not enlarger" treatment the start/stop button itself uses when idle.
+    //
+    // `quiet` when not, rather than `ghost`: ghost carries a
+    // `dark:hover:bg-muted/50` that outranks a plain `hover:bg-*` override,
+    // and this grid wants `--surface-raised` under the cursor.
+    <Button
       type="button"
+      variant={selected ? "default" : "quiet"}
+      size="icon-sm"
       aria-pressed={selected}
       aria-label={label}
       onClick={onPick}
       className={cn(
-        "tabular size-8 rounded-md text-sm transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        selected
-          ? // NOT cold light: this marks which DAY is selected in a date
-            // picker, not whether anything is running — a popover opened on
-            // a completed entry would otherwise show cold light next to a
-            // dash where the end time goes. `bg-primary`/`text-primary-foreground`
-            // is the same "affirmative action, deliberately not enlarger"
-            // treatment the start/stop button itself uses when idle.
-            "bg-primary font-medium text-primary-foreground"
-          : "text-foreground hover:bg-surface-raised"
+        "font-mono tabular-nums tracking-[-0.02em]",
+        selected ? "font-medium" : "text-foreground hover:bg-surface-raised"
       )}
     >
       {date}
-    </button>
+    </Button>
   )
 }

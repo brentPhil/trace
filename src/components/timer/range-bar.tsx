@@ -208,7 +208,7 @@ export function RangeBar({
           >
             Range total
             {/* The Tabular Rule. */}
-            <span className="tabular text-sm text-foreground">
+            <span className="font-mono tabular-nums tracking-[-0.02em] text-sm text-foreground">
               {formatTotal(rangeMs, display)}
             </span>
             {/* Dimming alone is not enough — DESIGN.md: meaning is never

@@ -174,11 +174,11 @@ export function InvoicePage({ invoiceId }: { invoiceId: Id<"invoices"> }) {
         <PageBreadcrumb
           parentTo="/invoices"
           parentLabel="Invoices"
-          // `tabular`, because this crumb is a number: the digits have to sit
+          // `tabular-nums`, because this crumb is a number: the digits have to sit
           // on the same widths as the same number does in the table you came
           // from.
           current={`#${invoice.number}`}
-          currentClassName="tabular"
+          currentClassName="font-mono tabular-nums tracking-[-0.02em]"
         />
       }
       /*

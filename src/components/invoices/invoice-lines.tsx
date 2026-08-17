@@ -122,19 +122,19 @@ export function InvoiceLines({
               {/* Decimal hours, 2 dp, floored — a QUANTITY, not money, so Ink.
                   A billable duration is time that will become money and renders
                   like every other duration (The Two Temperatures Rule). */}
-              <td className="px-3 py-2 text-right tabular">
+              <td className="px-3 py-2 text-right font-mono tabular-nums tracking-[-0.02em]">
                 {quantityText(line.quantityCentis)}
               </td>
               {/* Muted, the same treatment /projects gives a project's rate:
                   it is the multiplier beside the figure, not the figure. */}
-              <td className="px-3 py-2 text-right tabular text-muted-foreground">
+              <td className="px-3 py-2 text-right font-mono tabular-nums tracking-[-0.02em] text-muted-foreground">
                 {line.kind === "time"
                   ? formatRate(line.unitCents, currency)
                   : formatMoney(line.unitCents, currency)}
               </td>
               {/* The one brass column: a currency amount, in this invoice's own
                   snapshotted currency. */}
-              <td className="pl-3 py-2 text-right font-medium tabular text-brass">
+              <td className="pl-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
                 {formatMoney(line.amountCents, currency)}
               </td>
             </tr>
@@ -182,8 +182,8 @@ export function InvoiceLines({
               <td
                 className={
                   row.strong
-                    ? "pl-3 pt-3 pb-2 text-right text-base font-semibold tabular text-brass"
-                    : "pl-3 py-2 text-right font-medium tabular text-brass"
+                    ? "pl-3 pt-3 pb-2 text-right text-base font-semibold font-mono tabular-nums tracking-[-0.02em] text-brass"
+                    : "pl-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass"
                 }
               >
                 {formatMoney(row.cents, currency)}

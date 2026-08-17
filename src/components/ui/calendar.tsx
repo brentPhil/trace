@@ -3,6 +3,7 @@ import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { DayPicker, getDefaultClassNames } from "react-day-picker"
 import type { DayButton } from "react-day-picker"
 
+import { buttonVariants } from "@/components/ui/button"
 import { formatDayName } from "@/lib/format-time"
 import { weekdayLabels } from "@/lib/month-grid"
 import { cn } from "@/lib/utils"
@@ -39,7 +40,7 @@ import { cn } from "@/lib/utils"
  * `--enlarger`. The endpoints' `bg-primary` is `--ink` on `--ground` (see
  * `styles.css`) — the same affirmative, deliberately-not-cold treatment
  * every other selected/primary control in the app uses. Numbers are
- * `tabular` per the Tabular Rule.
+ * `tabular-nums` per the Tabular Rule.
  *
  * `showOutsideDays` defaults to `false`, not react-day-picker's `true`: a
  * clickable "31" sitting under an August heading, styled to look like a
@@ -92,7 +93,7 @@ function Calendar({
           defaultClassNames.week_number_header
         ),
         week_number: cn(
-          "tabular w-8 text-center text-[0.6875rem] text-muted-foreground select-none",
+          "font-mono tabular-nums tracking-[-0.02em] w-8 text-center text-[0.6875rem] text-muted-foreground select-none",
           defaultClassNames.week_number
         ),
         /*
@@ -167,9 +168,9 @@ function Calendar({
  * 1.4.11's 3:1. See src/styles.css.
  */
 const MONTH_STEPPER = cn(
-  "touch-target rounded-md border border-edge-raised p-1 text-muted-foreground",
-  "transition-colors hover:text-foreground motion-reduce:transition-none",
-  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+  buttonVariants({ variant: "quiet", size: "icon-xs" }),
+  "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+  "border-edge-raised motion-reduce:transition-none",
   "aria-disabled:pointer-events-none aria-disabled:opacity-50"
 )
 
@@ -265,7 +266,7 @@ function CalendarDayButton({
                 : "none"
       }
       className={cn(
-        "tabular relative flex size-8 items-center justify-center rounded-md text-sm",
+        "font-mono tabular-nums tracking-[-0.02em] relative flex size-8 items-center justify-center rounded-md text-sm",
         "text-foreground transition-colors motion-reduce:transition-none",
         // `z-10` because the cell around this button has no padding any more
         // (see `classNames.day`): without it the 2px ring would be painted

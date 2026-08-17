@@ -275,7 +275,7 @@ export function NoteSheet({
               title
             )}
           </Dialog.Title>
-          <span className="shrink-0 text-sm tabular text-muted-foreground">
+          <span className="shrink-0 text-sm font-mono tabular-nums tracking-[-0.02em] text-muted-foreground">
             {duration}
           </span>
         </div>

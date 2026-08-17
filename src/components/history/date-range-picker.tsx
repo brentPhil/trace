@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { CalendarRange } from "lucide-react"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { Chip } from "@/components/history/filter-controls"
+import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover } from "@/components/ui/popover"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -183,18 +184,19 @@ export function DateRangePicker({
     <Popover.Root open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
       <Popover.Trigger
         render={
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             aria-label={`Date range — ${spokenLabel ?? label}`}
             className={cn(
-              "touch-target tabular flex items-center gap-1.5 rounded-md border border-edge",
-              "bg-ground px-2 py-1.5 text-sm",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+              "font-mono tabular-nums tracking-[-0.02em] gap-1.5 border-edge bg-ground px-2 font-normal"
             )}
           >
             <CalendarRange aria-hidden="true" className="size-3.5 text-muted-foreground" />
             {label}
-          </button>
+          </Button>
         }
       />
 

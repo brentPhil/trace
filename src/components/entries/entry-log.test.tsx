@@ -232,3 +232,21 @@ describe("EntryLog — selection lifecycle", () => {
     ).toBeNull()
   })
 })
+
+describe("EntryLog — deleting a whole sitting", () => {
+  it("routes the sitting's delete through onRemoveMany, in one call", async () => {
+    // `onRemoveMany` and not a loop over `onRemove`: it is the one path that
+    // deletes in a single mutation under a single Undo. Fanning out one-by-one
+    // would raise a toast per member and leave a half-deleted group behind if
+    // the third call refused.
+    const onRemoveMany = vi.fn().mockResolvedValue(true)
+    renderEntryLog({ actions: { ...noEntryActions, onRemoveMany } })
+
+    fireEvent.click(screen.getByLabelText("Delete Crew dropdowns"))
+
+    await waitFor(() => expect(onRemoveMany).toHaveBeenCalledTimes(1))
+    expect(
+      onRemoveMany.mock.calls[0][0].map((entry: Entry) => entry._id)
+    ).toEqual(twice.map((entry) => entry._id))
+  })
+})

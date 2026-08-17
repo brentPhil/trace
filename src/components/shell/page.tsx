@@ -241,7 +241,7 @@ export function PageBreadcrumb({
   /** The page you are on. Not a link: `aria-current="page"` is the whole
    *  point, and a link to here is a control that does nothing. */
   current: string
-  /** For a crumb that is a NUMBER rather than a name — `tabular` on
+  /** For a crumb that is a NUMBER rather than a name — `font-mono tabular-nums tracking-[-0.02em]` on
    *  "#1042" — and nothing else. */
   currentClassName?: string
 }) {

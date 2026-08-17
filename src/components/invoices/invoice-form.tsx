@@ -225,7 +225,7 @@ function DateField({
         }}
         className={cn(
           INVOICE_FIELD,
-          "tabular",
+          "font-mono tabular-nums tracking-[-0.02em]",
           fieldBorder(error !== undefined)
         )}
       />

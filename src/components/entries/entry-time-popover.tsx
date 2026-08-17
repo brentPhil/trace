@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { Popover } from "@/components/ui/popover"
 import { TimePopoverFields } from "@/components/entries/time-popover-fields"
 import {
@@ -145,19 +146,21 @@ export function EntryTimePopover({
       <Popover.Trigger
         render={
           trigger ?? (
-            <button
+            <Button
               type="button"
+              variant="quiet"
+              size="row-trigger"
               aria-label={`Edit times — ${formatTimeRange(entry.startedAt, entry.endedAt, timeZone, use12Hour)}`}
               className={cn(
-                // `touch-target`: the box is a 16px `text-xs` line plus
+                // The hit area: the box is a 16px `text-xs` line plus
                 // `py-0.5`, so ~20px — under WCAG 2.2 SC 2.5.8's 24px. That
                 // was survivable while the control was `hidden sm:inline-flex`
                 // and desktop-only; it is now the phone affordance for editing
-                // a time. The class grows the hit area to 24px without growing
-                // the box, which is what `--entry-row-height` depends on.
-                "touch-target tabular shrink-0 rounded-sm px-1 py-0.5 text-xs text-muted-foreground",
-                "transition-colors hover:bg-surface-raised/70 hover:text-foreground",
-                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+                // a time. The pseudo-element grows the target to 24px without
+                // growing the box, which is what `--entry-row-height` depends
+                // on.
+                "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+                "font-mono tabular-nums tracking-[-0.02em] shrink-0 text-xs hover:bg-surface-raised/70",
                 className
               )}
             >
@@ -167,7 +170,7 @@ export function EntryTimePopover({
                 timeZone,
                 use12Hour
               )}
-            </button>
+            </Button>
           )
         }
       />

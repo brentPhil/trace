@@ -116,7 +116,7 @@ export function BillPreview({
       {unratedMs > 0 ? (
         <p role="status" className="max-w-prose text-xs text-muted-foreground">
           {UNPRICED_NOTE} There is{" "}
-          <span className="tabular">
+          <span className="font-mono tabular-nums tracking-[-0.02em]">
             {formatTotal(unratedMs, durationDisplay)}
           </span>{" "}
           of it in this period, and it will not appear on the invoice at all.{" "}

@@ -566,7 +566,7 @@ function RateField({
           }}
           className={cn(
             fieldClass,
-            "tabular w-32",
+            "font-mono tabular-nums tracking-[-0.02em] w-32",
             error !== null && "border-alarm"
           )}
         />
@@ -679,7 +679,7 @@ function Radio({
 /** What the choice actually looks like, rather than a description of it. */
 function Sample({ children }: { children: React.ReactNode }) {
   return (
-    <span className="tabular rounded-sm border border-edge-soft px-1.5 py-0.5 text-xs text-muted-foreground">
+    <span className="font-mono tabular-nums tracking-[-0.02em] rounded-sm border border-edge-soft px-1.5 py-0.5 text-xs text-muted-foreground">
       {children}
     </span>
   )

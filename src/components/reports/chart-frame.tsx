@@ -1,3 +1,4 @@
+import { HATCH_EMPTY } from "@/lib/hatch"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
 
@@ -112,7 +113,7 @@ export const SPAN_AXIS = {
  * The id of the hatch pattern, and the `<defs>` that declares it.
  *
  * The Hatch Rule (DESIGN.md): gaps and untracked time are marked with a
- * texture, never a hue. That rule already exists in CSS as `.hatch-empty`, but
+ * texture, never a hue. That rule is `HATCH_EMPTY` in src/lib/hatch.ts, but
  * an SVG `fill` cannot take a CSS `background-image`, so a chart needs the
  * same texture as a paint server. Same angle, same spacing, same colour token —
  * changing one without the other is how a page ends up with two hatches.
@@ -188,5 +189,10 @@ export function Swatch({ color, className }: { color: string; className?: string
 
 /** The key swatch for the hatch — the same texture the chart paints. */
 export function HatchSwatch() {
-  return <span aria-hidden className="hatch-empty size-2.5 shrink-0 rounded-[2px]" />
+  return (
+    <span
+      aria-hidden
+      className={cn(HATCH_EMPTY, "size-2.5 shrink-0 rounded-[2px]")}
+    />
+  )
 }

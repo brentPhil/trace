@@ -174,7 +174,6 @@
 
 @theme inline {
   --font-sans: "DM Sans Variable", system-ui, sans-serif;
-  --font-heading: "DM Sans Variable", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
   --color-ground: var(--ground);
@@ -221,8 +220,6 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) * 1.4);
   --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
 @layer base {
@@ -240,146 +237,43 @@
     @apply font-sans;
     color-scheme: dark;
   }
-  /* The Tabular Rule: every digit the user reads is monospaced and tabular. */
-  .tabular {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
-  }
 }
 
-/* One geometry for day headers, sitting rows and entry rows. The day total and
- * every row duration occupy the same named column, so alignment is structural
- * rather than three matching width guesses. */
-.entry-log-grid {
-  display: grid;
-  /* The time column is sized for the WIDEST range this can render, which is
-   * 12-hour with both meridiems: "11:00 AM – 12:02 PM" is 19 characters of
-   * IBM Plex Mono at 12px (~132px), and the entry row's trigger adds `px-1`
-   * on top of it. At the old 8.5rem/136px that overflowed by a few pixels and
-   * the range broke onto a second line, which also pushed the row past
-   * `--entry-row-height`. 9.75rem leaves the padding room plus slack. */
-  grid-template-columns: 1rem minmax(0, 1fr) 9.75rem 4.5rem 4rem;
-  grid-template-areas: "select content time duration actions";
-  column-gap: 0.5rem;
-  align-items: start;
-}
-.entry-log-select {
-  grid-area: select;
-  align-self: center;
-}
-.entry-log-content {
-  grid-area: content;
-  min-width: 0;
-}
-/* `nowrap` on both, independent of the widths above. A clock time and a
- * duration are single indivisible values — a range broken across two lines is
- * not a smaller version of itself, it is unreadable, and it silently grows the
- * row past `--entry-row-height`. If a locale ever needs more room than the
- * column gives, the right failure is to overflow visibly here rather than to
- * reflow every row in the log. */
-.entry-log-time {
-  grid-area: time;
-  align-self: center;
-  text-align: right;
-  white-space: nowrap;
-}
-.entry-log-duration {
-  grid-area: duration;
-  align-self: center;
-  width: 4.5rem;
-  text-align: right;
-  white-space: nowrap;
-}
-.entry-log-actions {
-  grid-area: actions;
-  align-self: center;
-  width: 4rem;
-}
+/* The Tabular Rule — every digit the user reads is monospaced and tabular — is
+ * spelled `font-mono tabular-nums tracking-[-0.02em]` at each call site. It used
+ * to be a `.tabular` class here; it is three utilities because this file holds
+ * tokens and unavoidable at-rules, not a second styling system. */
 
-/*
- * A ROW'S FIXED COLUMNS BELONG TO ITS FIRST LINE.
+/* THE `.entry-log-*` GRID IS GONE — see `LOG_GRID` and its cell constants in
+ * src/components/entries/day-list.tsx, which turns out to be the only file that
+ * ever drew it. Three things are worth carrying over rather than losing:
  *
- * `align-self: center` above is right for the day header, which is always one
- * line. It is wrong for a row, because a row grows a second line whenever it
- * carries a note: the content column is top-aligned so the note can flow
- * beneath the title, but the time, duration and actions went on centring in
- * the GROWN box. A noted row is ~58px, so the title and the classifier marks
- * sat at 18px while the time range sat at 29px — eleven pixels of drift on
- * every row with a note, and the reason the marks never looked level with the
- * time they read next to.
+ *   - The time column is 9.75rem because it is sized for the WIDEST range it
+ *     can render: 12-hour with both meridiems, "11:00 AM – 12:02 PM", is 19
+ *     characters of IBM Plex Mono at 12px (~132px), and the entry row's trigger
+ *     adds `px-1` on top. At the old 8.5rem/136px that overflowed by a few
+ *     pixels and the range broke onto a second line, which also pushed the row
+ *     past `--entry-row-height`.
  *
- * 0.375rem is the content column's own `py-1.5`, and 1.5rem is the `text-base`
- * line box the title establishes inside it. Every column therefore resolves to
- * the same centre — 6px plus half a line — instead of three files each
- * guessing. The checkbox gets 0.625rem because it is a 1rem box, not a full
- * line: 6px + (24-16)/2 lands its centre on the same 18px.
- */
-.entry-log-row .entry-log-time,
-.entry-log-row .entry-log-duration,
-.entry-log-row .entry-log-actions {
-  align-self: start;
-  margin-top: 0.375rem;
-  min-height: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-.entry-log-row .entry-log-select {
-  align-self: start;
-  margin-top: 0.625rem;
-}
-
-@media (max-width: 639px) {
-  .entry-log-grid {
-    grid-template-columns: 1rem minmax(0, 1fr) 4.5rem 4rem;
-    grid-template-areas: "select content duration actions";
-  }
-  /* Both selectors, and the row-scoped one is not optional: the rule above is
-   * `.entry-log-row .entry-log-time` at specificity (0,2,0), so a bare
-   * `.entry-log-time { display: none }` here loses to it and the time column
-   * would keep rendering on a phone. */
-  .entry-log-time,
-  .entry-log-row .entry-log-time {
-    display: none;
-  }
-}
-
-/* Defaults visible for touch/non-hover devices. Only a precise hover-capable
- * pointer gets the quieter contextual state. Keyboard focus always reveals. */
-@media (hover: hover) and (pointer: fine) {
-  .entry-selection-contextual {
-    opacity: 0;
-  }
-  .group:hover .entry-selection-contextual,
-  .group:focus-within .entry-selection-contextual,
-  .entry-selection-contextual:focus-visible {
-    opacity: 1;
-  }
-}
-
-/* The Hatch Rule: gaps, untracked time, and entries missing a note are marked
- * with a texture, never a colour. Absence is a hatch, not a hue — which is what
- * makes it survive colour blindness and peripheral vision alike, and keeps it
- * an invitation rather than a warning.
+ *   - `whitespace-nowrap` on the time and duration cells is independent of
+ *     those widths. A clock time and a duration are single indivisible values;
+ *     a range broken across two lines is not a smaller version of itself, it is
+ *     unreadable, and it silently grows the row. If a locale ever needs more
+ *     room than the column gives, the right failure is to overflow visibly
+ *     rather than to reflow every row in the log.
  *
- * The dashed border is the load-bearing carrier: in forced-colors mode the
- * gradient is dropped entirely by the UA, and the border is what remains. */
-.hatch-empty {
-  border: 1px dashed var(--edge-soft);
-  background-image: repeating-linear-gradient(
-    -45deg,
-    color-mix(in oklch, var(--edge-soft) 55%, transparent) 0 1px,
-    transparent 1px 6px
-  );
-}
+ *   - The `.entry-log-row …` first-line alignment rules that used to sit here
+ *     were DEAD CODE: nothing in the product ever carried `entry-log-row`.
+ *     Entry and sitting rows are flex rows levelled by their own
+ *     `items-center` and never used this grid at all, so they are not
+ *     reproduced anywhere. */
 
-@media (forced-colors: active) {
-  .hatch-empty {
-    background-image: none;
-    border-color: currentColor;
-  }
-}
+/* `.entry-selection-contextual` and `.hatch-empty` were here.
+ *
+ * The first is four `[@media(hover:hover)_and_(pointer:fine)]:` utilities in
+ * `selection-checkbox.tsx` — Tailwind spells that media query inline. The
+ * second is `HATCH_EMPTY` in `src/lib/hatch.ts`: the same utilities, named once
+ * in TypeScript because three surfaces draw it and the gradient is long. */
 
 /* The project palette.
  *
@@ -420,56 +314,19 @@
   --project-plum: oklch(0.72 0.13 330);
 }
 
-/* Fallback FIRST, deliberately. `[data-project-color]` and
- * `[data-project-color="slate"]` have identical specificity, so ordering is the
- * only thing deciding the winner — declared after the named hues, this would
- * override every one of them and paint the whole palette grey. */
-[data-project-color] {
-  --project-color: var(--ink-muted);
-}
-
-[data-project-color="slate"] {
-  --project-color: var(--project-slate);
-}
-[data-project-color="rose"] {
-  --project-color: var(--project-rose);
-}
-[data-project-color="coral"] {
-  --project-color: var(--project-coral);
-}
-[data-project-color="amber"] {
-  --project-color: var(--project-amber);
-}
-[data-project-color="olive"] {
-  --project-color: var(--project-olive);
-}
-[data-project-color="moss"] {
-  --project-color: var(--project-moss);
-}
-[data-project-color="sage"] {
-  --project-color: var(--project-sage);
-}
-[data-project-color="teal"] {
-  --project-color: var(--project-teal);
-}
-[data-project-color="cyan"] {
-  --project-color: var(--project-cyan);
-}
-[data-project-color="indigo"] {
-  --project-color: var(--project-indigo);
-}
-[data-project-color="violet"] {
-  --project-color: var(--project-violet);
-}
-[data-project-color="plum"] {
-  --project-color: var(--project-plum);
-}
-
-@media (forced-colors: active) {
-  [data-project-color] {
-    --project-color: currentColor;
-  }
-}
+/* THE THIRTEEN `[data-project-color="…"]` RULES ARE GONE. They mapped the
+ * attribute to `--project-color`, and every one of them was a second place a
+ * hue could be spelled. `--project-color` is now set INLINE from
+ * `projectColorVar` (src/lib/project-color.ts) — the same function /reports
+ * already had to use for SVG, where a variable scoped to an attribute the
+ * element does not carry cannot resolve. One function, one hue per project,
+ * everywhere.
+ *
+ * `data-project-color` itself survives as a hook (tests query it, and it names
+ * the hue in the DOM for anyone reading it), and the forced-colors fallback
+ * that used to live here is `forced-colors:bg-[currentColor]` at the call
+ * sites. The tokens above stay: they are tokens, which is what this file is
+ * for. */
 
 /* WCAG 2.2 AA, 2.5.8 Target Size (Minimum): 24x24 CSS pixels.
  *
@@ -480,37 +337,37 @@
  * row past it; this grows the TARGET without growing the box, by hanging an
  * invisible pseudo-element off it.
  *
- * `inset-inline: 0` rather than a fixed inset, so the target tracks the
- * control's own width however long its label is. */
-.touch-target {
-  position: relative;
-}
-.touch-target::after {
-  content: "";
-  position: absolute;
-  /* Exactly -2px: 20 + 2 + 2 = 24. Any more and the target reaches up into the
-   * title's own hit area on the line above, so a tap meant for the note would
-   * sometimes open the title editor instead. */
-  inset-block: -2px;
-  inset-inline: 0;
-}
+ * `inset-x-0` rather than a fixed inset, so the target tracks the control's
+ * own width however long its label is.
+ *
+ * REMOVED as a class; it is now written inline at each call site as
+ *
+ *   relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']
+ *
+ * `-inset-y-0.5` is exactly -2px: 20 + 2 + 2 = 24. Any more and the target
+ * reaches up into the title's own hit area on the line above, so a tap meant
+ * for the note would sometimes open the title editor instead. `note-line.tsx`
+ * additionally explains why `truncate` has to sit on the inner span rather
+ * than on the control — the pseudo-element is clipped otherwise. */
 
-/* Entrance. Deliberately a plain keyframe with no fill-mode and no class
- * toggle: if the animation never runs (reduced motion, headless render,
- * hidden tab) the element is already in its natural, visible state. */
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
+/* Entrance.
+ *
+ * THE ONE THING ON THIS PAGE TAILWIND CANNOT EXPRESS INLINE: `@keyframes` has
+ * no utility form. So it is declared the Tailwind-native way — `--animate-*` in
+ * `@theme` — which makes it reachable as `animate-rise` rather than as a
+ * hand-written `.rise` class. The call site adds `motion-reduce:animate-none`,
+ * which is where the reduced-motion opt-out belongs now that it is a utility.
+ *
+ * Deliberately a plain keyframe with no fill-mode: if the animation never runs
+ * (reduced motion, headless render, hidden tab) the element is already in its
+ * natural, visible state. */
+@theme {
+  --animate-rise: rise 380ms cubic-bezier(0.16, 1, 0.3, 1);
 
-.rise {
-  animation: rise 380ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rise {
-    animation: none;
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
   }
 }

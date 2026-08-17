@@ -204,7 +204,7 @@ function Figure({
     <div className="flex min-w-0 flex-col gap-0.5">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
-        className={`tabular text-xl leading-tight ${money ? "text-brass" : "text-foreground"}`}
+        className={`font-mono tabular-nums tracking-[-0.02em] text-xl leading-tight ${money ? "text-brass" : "text-foreground"}`}
       >
         {value}
       </dd>

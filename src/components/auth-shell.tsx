@@ -33,7 +33,13 @@ export function AuthShell({
   }, [focusHeading])
 
   return (
-    <div className={cn("rise flex flex-col gap-8", className)} {...props}>
+    <div
+      className={cn(
+        "animate-rise motion-reduce:animate-none flex flex-col gap-8",
+        className
+      )}
+      {...props}
+    >
       <div className="flex flex-col gap-2">
         <span className="text-base font-medium tracking-tight">{APP_NAME}</span>
         <h1

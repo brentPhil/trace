@@ -734,7 +734,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
             "Totalling this period…"
           ) : filtering ? (
             <span {...staleProps(logIsStale, "inline")}>
-              <strong className="font-medium tabular text-foreground">
+              <strong className="font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
                 {formatTotal(shownMs, settings.durationDisplay)}
               </strong>{" "}
               across {completed.length} {completed.length === 1 ? "entry" : "entries"}{" "}
@@ -745,7 +745,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
             </span>
           ) : (
             <span {...staleProps(summaryIsStale, "inline")}>
-              <strong className="font-medium tabular text-foreground">
+              <strong className="font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
                 {formatTotal(shownSummary.totalMs, settings.durationDisplay)}
               </strong>{" "}
               across {shownSummary.count} {shownSummary.count === 1 ? "entry" : "entries"}
@@ -755,10 +755,10 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                   {/*
                     NOT `text-brass` — the Two Temperatures Rule reserves brass
                     for money, and this is a duration. `text-foreground`
-                    matches the total above it; the strong/tabular weight is
+                    matches the total above it; the strong/font-mono tabular-nums tracking-[-0.02em] weight is
                     what marks it as a figure, not the colour.
                   */}
-                  <strong className="font-medium tabular text-foreground">
+                  <strong className="font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
                     {formatTotal(shownSummary.billableMs, settings.durationDisplay)}
                   </strong>{" "}
                   billable
@@ -786,7 +786,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                         total rounded to the nearest cent exactly once, so this
                         figure is reproducible by hand from the entries below.
                       */}
-                      <strong className="font-medium tabular text-brass">
+                      <strong className="font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
                         {formatMoney(shownSummary.billableCents, settings.currency)}
                       </strong>
                       )
@@ -810,7 +810,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                     "None of it is priced: no rate is set for that work, and no default rate either."
                   ) : (
                     <>
-                      <strong className="font-medium tabular text-foreground">
+                      <strong className="font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
                         {formatTotal(
                           shownSummary.unratedBillableMs,
                           settings.durationDisplay

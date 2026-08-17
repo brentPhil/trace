@@ -47,7 +47,7 @@ export function TooltipCard({
               {row.label}
             </span>
             <span
-              className={cn("tabular font-medium", row.money ? "text-brass" : undefined)}
+              className={cn("font-mono tabular-nums tracking-[-0.02em] font-medium", row.money ? "text-brass" : undefined)}
             >
               {row.value}
             </span>

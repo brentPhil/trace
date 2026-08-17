@@ -148,7 +148,7 @@ function renderedDays(container: HTMLElement): Array<string | null> {
 
 /** The hour rail's labels, top to bottom. */
 function railLabels(container: HTMLElement): Array<string> {
-  return [...container.querySelectorAll("[data-time] .tabular")].map(
+  return [...container.querySelectorAll("[data-time] .tabular-nums")].map(
     (label) => label.textContent
   )
 }
@@ -358,7 +358,7 @@ describe("CalendarPanel", () => {
       expect(drawn).toHaveLength(2)
 
       const hatched = drawn.filter((block) =>
-        block.className.includes("hatch-empty")
+        block.className.includes("border-dashed")
       )
       expect(hatched).toHaveLength(1)
 
@@ -370,9 +370,17 @@ describe("CalendarPanel", () => {
         "Night deploy — continued from the previous day"
       )
 
-      // And the tail's dashed border is `.hatch-empty`'s own, so no Tailwind
-      // border class sits in the list unable to render.
-      expect(tail.className).not.toContain("border-")
+      // The dashed edge is the Hatch Rule's load-bearing carrier — it is what
+      // survives forced-colors once the UA drops the gradient. It used to come
+      // from an unlayered `.hatch-empty` class, and this asserted the INVERSE
+      // (that no Tailwind `border-` class was present at all) because any that
+      // were would have been outranked and invisible. `HATCH_EMPTY` is
+      // utilities now, so the real property is assertable directly: the tail
+      // carries the dashed edge, and none of the hue borders a head gets.
+      expect(tail.className).toContain("border-dashed")
+      expect(tail.className).toContain("border-edge-soft")
+      expect(tail.className).not.toContain("border-enlarger")
+      expect(tail.className).not.toContain("border-edge-raised")
     })
 
     it("gives the tail the same Untitled fallback the head has", () => {
@@ -382,7 +390,7 @@ describe("CalendarPanel", () => {
         entries: [entry({ ...crosser, title: "" })],
       })
       const [tail] = blocks(container).filter((block) =>
-        block.className.includes("hatch-empty")
+        block.className.includes("border-dashed")
       )
       expect(tail.textContent).toBe(
         "Untitled — continued from the previous day"
@@ -790,7 +798,7 @@ describe("CalendarPanel — clicking a block", () => {
     })
 
     const tail = blocks(container).find((block) =>
-      block.className.includes("hatch-empty")
+      block.className.includes("border-dashed")
     )
     fireEvent.click(tail!)
 
@@ -900,7 +908,7 @@ describe("CalendarPanel — a block shows only what it can hold", () => {
     // 60 minutes is 48px, which holds two rows.
     const short = blockOf(60)
     expect(short.querySelector("[data-project-color]")).toBeNull()
-    expect(short.querySelector(".tabular")?.textContent).toBe("09:00 – 10:00")
+    expect(short.querySelector(".tabular-nums")?.textContent).toBe("09:00 – 10:00")
     expect(short.querySelector(".sr-only")?.textContent).toBe("Sealogs")
   })
 
@@ -910,7 +918,7 @@ describe("CalendarPanel — a block shows only what it can hold", () => {
     expect(tiny.querySelector(".truncate")?.textContent).toBe(
       "Fixing the logbook"
     )
-    expect(tiny.querySelector(".tabular")).toBeNull()
+    expect(tiny.querySelector(".tabular-nums")).toBeNull()
     expect(tiny.querySelector(".sr-only")?.textContent).toBe(
       "09:00 – 09:30 — Sealogs"
     )
@@ -955,7 +963,7 @@ describe("CalendarPanel — a block shows only what it can hold", () => {
       projectsById,
     })
     const head = blocks(container).find(
-      (block) => !block.className.includes("hatch-empty")
+      (block) => !block.className.includes("border-dashed")
     )
     expect(head!.querySelector(".line-clamp-2")).toBeNull()
     expect(head!.querySelector(".truncate")?.textContent).toBe("Night deploy")

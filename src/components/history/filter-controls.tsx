@@ -1,5 +1,6 @@
 import { Search } from "lucide-react"
 import { NO_PROJECT_FILTER } from "@shared/entryFilter"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { NO_PROJECT_LABEL } from "@/lib/report-series"
 import type { QuickFilters } from "@/lib/history-filters"
@@ -120,21 +121,23 @@ export function Chip({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="quiet"
+      size="chip"
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "touch-target rounded-full border px-2.5 py-1 text-xs transition-colors",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        "motion-reduce:transition-none",
-        active
-          ? activeClassName
-          : "border-edge-raised text-muted-foreground hover:text-foreground"
+        // WCAG 2.2 SC 2.5.8, 24x24: a chip's own box is ~22px and the band it
+        // sits in is measured, so the target grows through a pseudo-element
+        // rather than through padding. Exactly -2px vertically: 22 + 2 + 2.
+        "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+        "border-edge-raised motion-reduce:transition-none",
+        active ? activeClassName : null
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 

@@ -14,6 +14,41 @@ import type { DayGroup, Entry } from "@/lib/group-entries"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
+/*
+ * THE LOG'S COLUMN GEOMETRY, as Tailwind utilities.
+ *
+ * One grid for the day header and both skeleton shapes, so the day total and
+ * every placeholder duration occupy the same track. It was `.entry-log-*` in
+ * styles.css, built on `grid-template-areas`; the areas are gone because
+ * `col-start-*` says the same thing where the markup is, and because the areas
+ * were carrying a trap — see below.
+ *
+ * COLUMNS ARE PLACED EXPLICITLY, not by source order. The checkbox is
+ * conditional (`selection` may be undefined), and under source-order placement
+ * its absence would slide every following cell one track left.
+ *
+ * THE TIME COLUMN IS DROPPED BELOW `sm`, which is why the two `grid-cols` and
+ * the two sets of `col-start` differ by one from the third column on. The old
+ * media query was `max-width: 639px`, exactly Tailwind's `sm` boundary.
+ *
+ * WHAT SILENTLY CHANGED WHEN THIS MOVED, and the reason it was worth moving:
+ * `.entry-log-grid` was UNLAYERED, so its `align-items: start` outranked the
+ * `items-baseline` and `items-center` the call sites below also carried. Those
+ * two utilities were in the class list and had never rendered. They are gone
+ * rather than honoured — `items-start` is what the log has always actually
+ * looked like, and this keeps it that way.
+ */
+const LOG_GRID = cn(
+  "grid items-start gap-x-2",
+  "grid-cols-[1rem_minmax(0,1fr)_4.5rem_4rem]",
+  "sm:grid-cols-[1rem_minmax(0,1fr)_9.75rem_4.5rem_4rem]"
+)
+const LOG_SELECT = "col-start-1 self-center"
+const LOG_CONTENT = "col-start-2 min-w-0"
+const LOG_TIME = "hidden self-center text-right whitespace-nowrap sm:col-start-3 sm:block"
+const LOG_DURATION = "col-start-3 w-18 self-center text-right whitespace-nowrap sm:col-start-4"
+const LOG_ACTIONS = "col-start-4 w-16 self-center sm:col-start-5"
+
 export type EntrySelectionController = {
   selectedIds: ReadonlySet<Id<"timeEntries">>
   onToggle: (
@@ -179,10 +214,10 @@ export function DayList({
               The padding lives HERE and not on the header, because the
               header's background and border are meant to stay full-bleed.
             */}
-            <div className="entry-log-grid w-full items-baseline ps-4 pe-2">
+            <div className={cn(LOG_GRID, "w-full ps-4 pe-2")}>
               {selection === undefined ? null : (
                 <SelectionCheckbox
-                  className="entry-log-select"
+                  className={LOG_SELECT}
                   label={`Select all records for ${group.label}`}
                   state={selectionState(
                     group.entries.map((entry) => entry._id),
@@ -196,7 +231,7 @@ export function DayList({
                   }
                 />
               )}
-              <div className="entry-log-content flex min-w-0 items-baseline gap-2">
+              <div className={cn(LOG_CONTENT, "flex items-baseline gap-2")}>
                 <h2 className="text-sm font-medium">{group.label}</h2>
                 {/*
                   The note count, not a badge or a score. It states a fact and
@@ -215,17 +250,21 @@ export function DayList({
                   </span>
                 )}
               </div>
-              <span aria-hidden="true" className="entry-log-time" />
+              <span aria-hidden="true" className={LOG_TIME} />
               <span
                 // Includes a running entry's live elapsed time, so the server's
                 // value and the client's first render legitimately differ. See
                 // the same attribute in `totals-row.tsx`.
                 suppressHydrationWarning
-                className="entry-log-duration tabular text-base"
+                data-log-cell="duration"
+                className={cn(
+                  LOG_DURATION,
+                  "font-mono tabular-nums tracking-[-0.02em] text-base"
+                )}
               >
                 {formatTotal(group.totalMs, display)}
               </span>
-              <span aria-hidden="true" className="entry-log-actions" />
+              <span aria-hidden="true" className={LOG_ACTIONS} />
             </div>
           </header>
 
@@ -277,6 +316,10 @@ export function DayList({
                     // title, project, tags and billable off whatever it is
                     // given, so this already IS "start this again".
                     onResume={() => actions.onResume(item.entries[0])}
+                    // EVERY member, unlike resume's newest-only above: a
+                    // sitting's delete removes the work, not one interval of
+                    // it. `EntryLog` sends this to `onRemoveMany`.
+                    onRemove={() => actions.onSittingRemove(item.entries)}
                     onClassify={(change) => actions.onSittingClassify(item.entries, change)}
                     onNoteOpen={() => actions.onSittingNoteOpen(item.entries)}
                     onCreateProject={actions.onCreateProject}
@@ -382,12 +425,12 @@ export function LogSkeleton() {
             <div className="border-b border-edge-soft py-2">
               {/* Same `w-full px-4` as the header it stands in for, so the
                   page does not shift sideways when the real rows arrive. */}
-              <div className="entry-log-grid w-full items-baseline px-4">
-                <span className="entry-log-select" />
-                <Skeleton className="entry-log-content h-4 w-32" />
-                <span className="entry-log-time" />
-                <Skeleton className="entry-log-duration h-4" />
-                <span className="entry-log-actions" />
+              <div className={cn(LOG_GRID, "w-full px-4")}>
+                <span className={LOG_SELECT} />
+                <Skeleton className={cn(LOG_CONTENT, "h-4 w-32")} />
+                <span className={LOG_TIME} />
+                <Skeleton className={cn(LOG_DURATION, "h-4")} />
+                <span className={LOG_ACTIONS} />
               </div>
             </div>
             {/* `--entry-row-height`, tracking the real row — a placeholder
@@ -398,12 +441,14 @@ export function LogSkeleton() {
             <div className="flex flex-col">
               {[0, 1, 2].map((row) => (
                 <div key={row} className="border-b border-edge-soft">
-                  <div className="entry-log-grid h-(--entry-row-height) w-full items-center px-4">
-                    <span className="entry-log-select" />
-                    <Skeleton className="entry-log-content h-4 max-w-64" />
-                    <span className="entry-log-time" />
-                    <Skeleton className="entry-log-duration h-4" />
-                    <span className="entry-log-actions" />
+                  <div
+                    className={cn(LOG_GRID, "h-(--entry-row-height) w-full px-4")}
+                  >
+                    <span className={LOG_SELECT} />
+                    <Skeleton className={cn(LOG_CONTENT, "h-4 max-w-64")} />
+                    <span className={LOG_TIME} />
+                    <Skeleton className={cn(LOG_DURATION, "h-4")} />
+                    <span className={LOG_ACTIONS} />
                   </div>
                 </div>
               ))}

@@ -9,6 +9,7 @@ import { ProjectDot } from "@/components/classifiers/project-dot"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TimerDurationPopover } from "@/components/timer/timer-duration-popover"
+import { Button } from "@/components/ui/button"
 import { isOptimisticId } from "@/lib/optimistic-id"
 import { describeStagedStart, resolveStagedStart } from "@/lib/staged-start"
 import { cn } from "@/lib/utils"
@@ -922,7 +923,7 @@ export function TimerBar({
             {/* The Tabular Rule: every timestamp, at any size. The date and
                 the "(3 days ago)" are part of the same stamp, so the whole
                 phrase is set in it rather than only the digits. */}
-            <span className="tabular">
+            <span className="font-mono tabular-nums tracking-[-0.02em]">
               Starts{" "}
               {describeStagedStart(
                 effectiveStagedStartAt,
@@ -932,17 +933,18 @@ export function TimerBar({
               )}
             </span>
           </span>
-          <button
+          <Button
             type="button"
+            variant="quiet"
+            size="row-trigger"
             onClick={() => clearStagedStart()}
             className={cn(
-              "touch-target flex items-center rounded-md px-2 py-1 text-xs text-muted-foreground",
-              "transition-colors hover:text-foreground",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+              "rounded-md px-2 py-1 text-xs"
             )}
           >
             Use now
-          </button>
+          </Button>
         </div>
       ) : null}
     </section>

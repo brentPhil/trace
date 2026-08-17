@@ -164,7 +164,7 @@ export function Invoices() {
                           disappears with the column it sits under, rather than
                           shunting the total one place left on a phone. */}
                       <td className={DATE_COL} />
-                      <td className="px-3 py-2 text-right font-medium tabular text-brass">
+                      <td className="px-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
                         {formatMoney(totalCents, currency)}
                       </td>
                     </tr>
@@ -225,7 +225,7 @@ function totalLabel(currency: string, manyCurrencies: boolean, truncated: boolea
  * Wide enough for the number, and `whitespace-nowrap` so it cannot wrap even
  * if it is not.
  *
- * `MMDDYY-NNNN` at the body size is ~92pt of tabular digits, and `w-28` (112px)
+ * `MMDDYY-NNNN` at the body size is ~92pt of monospaced digits, and `w-28` (112px)
  * minus `px-3` on both sides leaves 88 — four short. The hyphen is a break
  * opportunity, so the cell took it and rendered `081126-` above `0002`: an
  * identifier split across two lines, which reads as two things and is the one
@@ -309,7 +309,7 @@ function InvoiceRowItem({
           exactly how the number came to wrap while the header did not. */}
       <th
         scope="row"
-        className="px-3 py-2 text-left font-normal whitespace-nowrap tabular"
+        className="px-3 py-2 text-left font-normal whitespace-nowrap font-mono tabular-nums tracking-[-0.02em]"
       >
         <Link
           to="/invoices/$invoiceId"
@@ -363,7 +363,7 @@ function InvoiceRowItem({
         is set to today. `formatMoney` because there is exactly one money
         formatter in the product.
       */}
-      <td className="px-3 py-2 text-right font-medium tabular text-brass">
+      <td className="px-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
         {formatMoney(invoice.totalCents, invoice.currency)}
       </td>
     </tr>

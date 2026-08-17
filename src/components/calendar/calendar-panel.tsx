@@ -6,6 +6,7 @@ import { ProjectDot } from "@/components/classifiers/project-dot"
 import { MIN_SPAN_MS, calendarEvents, drawnDays } from "@/lib/calendar-events"
 import { formatTimeOfInstant, formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
+import { HATCH_EMPTY } from "@/lib/hatch"
 import { cn } from "@/lib/utils"
 import { dayOf, dayWindow } from "@shared/day"
 import { formatClock } from "@shared/duration"
@@ -196,7 +197,7 @@ const RAIL_RULE = "border-r border-edge-soft"
  * THE FOCUS RING IS AN OUTLINE, NOT A BORDER SHIFT — DESIGN.md's second focus
  * pattern, for a control whose border already carries state. This border says
  * three different things already (`enlarger` = running, `edge-raised` =
- * completed, `.hatch-empty`'s dashed rule = a midnight continuation), and
+ * completed, the hatch's dashed rule = a midnight continuation), and
  * spending it on focus would delete whichever one the focused block was saying.
  *
  * `-outline-offset-2`, INSET, where the timer bar's version of this pattern
@@ -633,7 +634,7 @@ export function CalendarPanel({
        * every author NORMAL declaration, whatever layer either sits in and
        * whatever their specificity. Layers never entered it. (It is separately
        * true that unlayered NORMAL declarations beat layered ones — that is
-       * what makes our own unlayered `.hatch-empty` in `styles.css` win — but
+       * what made our own unlayered `.hatch-empty` win before it became utilities — but
        * that is a different rule and it is not what happened here.)
        *
        * WHY THE `!` WINS. It makes ours important too, and for IMPORTANT
@@ -680,7 +681,7 @@ export function CalendarPanel({
          * the right, and the first column's blocks add 2px of their own (see
          * `columnEventClass`).
          */
-        <span className="tabular px-3 text-xs text-muted-foreground">
+        <span className="font-mono tabular-nums tracking-[-0.02em] px-3 text-xs text-muted-foreground">
           {formatTimeOfInstant(info.date.getTime(), timeZone, use12Hour)}
         </span>
       )}
@@ -793,7 +794,7 @@ export function CalendarPanel({
               */}
               <span
                 className={cn(
-                  "tabular flex size-6 items-center justify-center text-sm",
+                  "font-mono tabular-nums tracking-[-0.02em] flex size-6 items-center justify-center text-sm",
                   isToday
                     ? "rounded-full bg-foreground font-medium text-ground"
                     : "text-foreground"
@@ -807,7 +808,7 @@ export function CalendarPanel({
              * and `formatCompactDuration` refuses to print `0m` for the same
              * reason: a zero total reads as a defect. */}
             {total === 0 ? null : (
-              <span className="tabular text-xs text-muted-foreground">
+              <span className="font-mono tabular-nums tracking-[-0.02em] text-xs text-muted-foreground">
                 {formatTotal(total, display)}
               </span>
             )}
@@ -859,11 +860,14 @@ export function CalendarPanel({
            * it across both columns and `isStart` says which half this is. A
            * continuation is a TEXTURE, never a hue — the Hatch Rule.
            *
-           * The border is stated per branch rather than once above, because
-           * `.hatch-empty` carries its own `1px dashed` and is unlayered — it
-           * outranks every Tailwind utility, so a `border-enlarger` beside it
-           * would be in the class list and absent from the screen. Here the
-           * class list says what renders.
+           * The border is stated per branch rather than once above, and the
+           * three branches are mutually exclusive so nothing competes. This
+           * used to be load-bearing for a different reason: `.hatch-empty` was
+           * an unlayered CSS class carrying its own `1px dashed`, so it
+           * outranked every Tailwind utility and a `border-enlarger` beside it
+           * would be in the class list and absent from the screen. `HATCH_EMPTY`
+           * is utilities now and competes normally — the class list says what
+           * renders either way.
            */
           info.isStart
             ? running
@@ -871,7 +875,7 @@ export function CalendarPanel({
               : // A block sits on a panel, not on ground, so Edge Raised is
                 // the token that clears 3:1 there — the Adjacent Colour Rule.
                 "border border-edge-raised"
-            : "hatch-empty"
+            : HATCH_EMPTY
         )
       }}
       eventContent={(info) => {
@@ -969,7 +973,7 @@ export function CalendarPanel({
               </span>
             )}
             {fit.time ? (
-              <span className="tabular truncate text-[0.6875rem] text-muted-foreground">
+              <span className="font-mono tabular-nums tracking-[-0.02em] truncate text-[0.6875rem] text-muted-foreground">
                 {timeText}
               </span>
             ) : null}

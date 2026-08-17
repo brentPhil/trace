@@ -164,7 +164,7 @@ describe("the focus indicator, split into the two things it is", () => {
      * turned INWARD (`-outline-offset-2`).
      *
      * A block's border is already spent — `enlarger` while running,
-     * `edge-raised` when complete, `.hatch-empty`'s dashed rule on a midnight
+     * `edge-raised` when complete, the hatch's dashed rule on a midnight
      * continuation — so focus cannot be a border shift there. And it cannot be
      * an OUTWARD outline either: a block is inset from its harness by 2px and an
      * overlapping block is packed against it, so the ring would be drawn across

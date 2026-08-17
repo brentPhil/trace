@@ -78,7 +78,7 @@ function Total({
         // of the subtree, essentially every load. `EntryDuration` already
         // carries this for the same reason; the aggregate needs it too.
         suppressHydrationWarning
-        className="font-medium tabular text-foreground"
+        className="font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground"
       >
         {formatTotal(value, display)}
       </span>

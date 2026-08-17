@@ -11,6 +11,7 @@ import {
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
 import { NoteLine } from "@/components/entries/note-line"
 import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SelectionTarget } from "@/components/entries/selection-checkbox"
 import type { Classification } from "@/components/timer/timer-bar"
@@ -48,6 +49,15 @@ export type EntryRowActions = {
   /** `onNoteOpen`, for a sitting: opens the note editor on every member's note,
    *  joined. See `SittingRow.onNoteOpen` and `EntryLog`, which implements it. */
   onSittingNoteOpen: (entries: Array<Entry>) => void
+  /**
+   * `onRemove`, for a sitting: deletes every member at once.
+   *
+   * A separate verb rather than the row's `onRemove` in a loop, because a
+   * sitting's delete has to be ONE mutation under ONE Undo — see `EntryLog`,
+   * which routes this to `onRemoveMany`. Looping would raise a toast per member
+   * and could leave the group half-deleted if a later call were refused.
+   */
+  onSittingRemove: (entries: Array<Entry>) => void
 }
 
 /**
@@ -190,14 +200,14 @@ export function EntryRow({
         eye reads a row left to right along its FIRST line, so that is the line
         everything on it has to sit on.
       */}
-      {/* `entry-log-row` is what opts this grid's fixed columns into first-line
-          alignment — a row can grow a note, and the day header cannot. See
-          `styles.css`. */}
+      {/* A FLEX ROW, not the day header's grid. `.entry-log-row` used to be
+          named here as the opt-in to first-line column alignment; it was never
+          actually applied to anything, and the rules it gated in styles.css
+          were dead. The row's own `items-center` is what levels it. */}
       <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
-            className="entry-log-select"
             label={selection.label}
             state={selection.state}
             onToggle={selection.onToggle}
@@ -205,8 +215,7 @@ export function EntryRow({
         )}
         <div className="flex flex-col w-full min-w-0 gap-2 py-1.5">
           {/* `min-h-6` PINS THE FIRST LINE. The fixed columns opposite are
-              offset by half of exactly this (see `.entry-log-row` in
-              styles.css), so the line cannot be allowed to size itself off
+              offset by half of exactly this, so the line cannot be allowed to size itself off
               whichever child happens to be tallest — a picker changing by two
               pixels would otherwise drag the title out of level with the time
               range beside it. */}
@@ -357,21 +366,21 @@ function RowButton({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="quiet"
+      size="icon-row"
       aria-label={label}
       onClick={onClick}
       className={cn(
-        "rounded-md p-1.5 text-muted-foreground",
         "opacity-100 sm:opacity-0",
         "transition-[opacity,color] sm:group-hover:opacity-100",
-        "focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring",
-        "focus-visible:outline-none",
-        destructive ? "hover:text-alarm" : "hover:text-foreground",
+        "focus-visible:opacity-100",
+        destructive && "hover:text-alarm",
         "motion-reduce:transition-none"
       )}
     >
       {children}
-    </button>
+    </Button>
   )
 }

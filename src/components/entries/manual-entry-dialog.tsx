@@ -199,7 +199,7 @@ export function ManualEntryDialog({
                 onChange={(event) => setFrom(event.target.value)}
                 placeholder="9:15"
                 inputMode="numeric"
-                className={cn(fieldClass, "tabular")}
+                className={cn(fieldClass, "font-mono tabular-nums tracking-[-0.02em]")}
               />
             </Labelled>
             <Labelled label="To" htmlFor="manual-to">
@@ -209,7 +209,7 @@ export function ManualEntryDialog({
                 onChange={(event) => setTo(event.target.value)}
                 placeholder="17:30"
                 inputMode="numeric"
-                className={cn(fieldClass, "tabular")}
+                className={cn(fieldClass, "font-mono tabular-nums tracking-[-0.02em]")}
               />
             </Labelled>
           </div>

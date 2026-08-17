@@ -142,7 +142,7 @@ export function EditableDuration({
       initialInput={hhmmss(current)}
       ariaLabel="Duration"
       className={cn(durationClass, "px-1 py-0.5")}
-      inputClassName="text-right text-sm font-medium tabular"
+      inputClassName="text-right text-sm font-medium font-mono tabular-nums tracking-[-0.02em]"
       parse={(raw) => {
         const parsed = parseDuration(raw)
         if (parsed.ok) return { ok: true, value: parsed.ms }

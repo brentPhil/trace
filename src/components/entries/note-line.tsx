@@ -1,3 +1,5 @@
+import { Button } from "@/components/ui/button"
+import { HATCH_EMPTY } from "@/lib/hatch"
 import { cn } from "@/lib/utils"
 
 /**
@@ -41,14 +43,18 @@ export function NoteLine({
       )}
     >
       {hasNote ? (
-        <button
+        <Button
           type="button"
+          variant="quiet"
+          size="row-trigger"
           onClick={onOpen}
           className={cn(
-            "touch-target -mx-1 min-w-0 max-w-full rounded-sm px-1 py-0.5 text-left",
-            "text-muted-foreground transition-colors",
-            "hover:bg-surface-raised/70 hover:text-foreground",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+            // The hit-area pseudo-element described above, inline: WCAG 2.2
+            // SC 2.5.8 wants 24px and this box is 20px, so exactly -2px above
+            // and below gets there without the row growing.
+            "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+            "-mx-1 min-w-0 max-w-full justify-start text-left whitespace-normal",
+            "hover:bg-surface-raised/70",
             // A STEP UP IN SIZE, and not only in room. `text-xs` is a
             // label size — right for a line you glance past on the way to
             // the duration, wrong for the only prose in the product once
@@ -85,7 +91,7 @@ export function NoteLine({
           >
             {note}
           </span>
-        </button>
+        </Button>
       ) : (
         // ALWAYS visible, never a hover reveal. PRODUCT.md: missing notes are
         // "visible, not absent". Hiding this until hover would make the one
@@ -96,18 +102,20 @@ export function NoteLine({
         // never a colour, so it survives colour blindness and reads in
         // peripheral vision. It is an invitation, not a warning — which is
         // why it is quiet, and why nothing about it blocks or nags.
-        <button
+        <Button
           type="button"
+          variant="quiet"
+          size="row-trigger"
           onClick={onOpen}
           className={cn(
-            "hatch-empty touch-target -mx-0.5 flex h-5 items-center rounded-sm px-1.5 text-xs",
-            "text-muted-foreground/70 transition-colors",
-            "hover:text-foreground focus-visible:text-foreground",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
+            HATCH_EMPTY,
+            "-mx-0.5 h-5 px-1.5 text-xs",
+            "text-muted-foreground/70 focus-visible:text-foreground"
           )}
         >
           + add note
-        </button>
+        </Button>
       )}
     </div>
   )

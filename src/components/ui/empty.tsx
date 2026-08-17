@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
  *
  * Dashed rather than solid, because the border marks a space that WILL hold
  * something rather than a panel that holds nothing — the same distinction
- * `.hatch-empty` draws for a missing note.
+ * `HATCH_EMPTY` (src/lib/hatch.ts) draws for a missing note.
  *
  * It is a component rather than a copied `className` because DESIGN.md asks
  * every empty state to teach the interface, and that only reads as one voice

@@ -1,4 +1,6 @@
+import { projectColorVar } from "@/lib/project-color"
 import { cn } from "@/lib/utils"
+import type { CSSProperties } from "react"
 import type { Doc } from "../../../convex/_generated/dataModel"
 
 /**
@@ -6,8 +8,13 @@ import type { Doc } from "../../../convex/_generated/dataModel"
  *
  * The dot is never alone. Colour is a fast-recognition aid for the people who
  * can see it and nothing more — the NAME is the information, so removing the
- * colour must lose speed and never meaning. `data-project-color` resolves to a
- * palette hue in styles.css, and to `currentColor` under forced colours.
+ * colour must lose speed and never meaning.
+ *
+ * `--project-color` is set INLINE from `projectColorVar`, the same function
+ * /reports' charts paint SVG with, so a project is one hue everywhere or
+ * neither. It used to be thirteen `[data-project-color="…"]` rules in
+ * styles.css. The attribute stays as a hook for tests and for the forced-colors
+ * variant below; only the painting moved.
  */
 export function ProjectDot({
   project,
@@ -26,18 +33,22 @@ export function ProjectDot({
   return (
     <span
       data-project-color={project.color}
+      style={{ "--project-color": projectColorVar(project.color) } as CSSProperties}
       className={cn(
         "inline-flex min-w-0 items-center gap-1.5 text-xs",
         // The project's own hue as text, not a generic muted grey: at this size
         // a 6px dot alone is easy to miss, and the tint is what makes the name
         // scannable down a column.
         "text-[color-mix(in_oklch,var(--project-color)_82%,var(--ink))]",
+        // Forced colours drop the hue entirely and the NAME carries it alone —
+        // which was always the contract this component's doc comment states.
+        "forced-colors:text-[currentColor]",
         className
       )}
     >
       <span
         aria-hidden="true"
-        className="size-1.5 shrink-0 rounded-full bg-(--project-color)"
+        className="size-1.5 shrink-0 rounded-full bg-(--project-color) forced-colors:bg-[currentColor]"
       />
       {showName ? (
         <span className={cn("truncate", nameClassName)}>

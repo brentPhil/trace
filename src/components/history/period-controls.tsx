@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { DateRangePicker } from "@/components/history/date-range-picker"
+import { Button } from "@/components/ui/button"
 import {
   REPORTS_DEFAULT_PRESET,
   REPORTS_PRESETS,
@@ -10,7 +11,6 @@ import {
   reportsPresetFilters,
 } from "@/lib/date-range-picker"
 import { stepPeriod } from "@/lib/history-filters"
-import { cn } from "@/lib/utils"
 import type { ReportsPreset } from "@/lib/date-range-picker"
 import type { Filters } from "@/lib/history-filters"
 
@@ -156,21 +156,19 @@ function IconButton({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="quiet"
+      size="icon-row"
       aria-label={label}
       onClick={onClick}
-      className={cn(
-        // `border-edge`, and this row is the reason the distinction is worth
-        // keeping: it sits on the page's own GROUND, above the band, where
-        // --edge measures 3.15:1. The chips beside it are fill-less and could
-        // land on either layer, which is why `Chip` hard-codes --edge-raised.
-        "rounded-md border border-edge p-1.5 text-muted-foreground transition-colors",
-        "hover:text-foreground motion-reduce:transition-none",
-        "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      )}
+      // `border-edge`, and this row is the reason the distinction is worth
+      // keeping: it sits on the page's own GROUND, above the band, where
+      // --edge measures 3.15:1. The chips beside it are fill-less and could
+      // land on either layer, which is why `Chip` hard-codes --edge-raised.
+      className="border-edge motion-reduce:transition-none"
     >
       {children}
-    </button>
+    </Button>
   )
 }
