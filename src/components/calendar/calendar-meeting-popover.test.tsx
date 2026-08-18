@@ -108,4 +108,19 @@ describe("CalendarMeetingPopover", () => {
     expect(screen.queryAllByRole("textbox")).toEqual([])
     expect(screen.queryAllByRole("combobox")).toEqual([])
   })
+
+  it("renders a readable label for attendees with no name and no email", () => {
+    show({
+      attendees: [
+        { response: "accepted" },
+        { response: "declined" },
+      ],
+      attendeeCount: 2,
+    })
+    // Resource rooms and hidden guests (guests cannot see each other setting)
+    // both arrive with no name and no email. Both rows should render "Guest"
+    // rather than blank, so the user knows they exist.
+    const guests = screen.getAllByText("Guest")
+    expect(guests).toHaveLength(2)
+  })
 })

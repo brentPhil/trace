@@ -96,13 +96,20 @@ export function CalendarMeetingPopover({
 
           {listed === 0 ? null : (
             <ul className="grid gap-1">
-              {meeting.attendees.map((attendee) => (
+              {meeting.attendees.map((attendee, index) => (
                 <li
-                  key={attendee.email ?? attendee.name}
+                  key={index}
                   className="flex items-baseline justify-between gap-3 text-xs"
                 >
                   <span className="truncate text-foreground">
-                    {attendee.name ?? attendee.email}
+                    {/* Index as key is safe here: this list is not reorderable or
+                        filterable, and is always re-rendered fresh from a query
+                        result, so the usual index-key hazards do not apply. */}
+                    {attendee.name ?? attendee.email ?? "Guest"}
+                    {/* An attendee with no name and no email is either a resource
+                        room or a guest hidden by the organiser's "guests cannot
+                        see each other" setting. "Guest" is what Google itself
+                        calls such an attendee when it will not name them. */}
                   </span>
                   {/* The RSVP as TEXT, never as a colour alone — PRODUCT.md's rule
                       that meaning is never encoded in hue, which matters here

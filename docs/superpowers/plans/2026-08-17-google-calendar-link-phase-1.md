@@ -3907,7 +3907,7 @@ export function CalendarMeetingPopover({
                 className="flex items-baseline justify-between gap-3 text-xs"
               >
                 <span className="truncate text-foreground">
-                  {attendee.name ?? attendee.email}
+                  {attendee.name ?? attendee.email ?? "Guest"}
                 </span>
                 {/* The RSVP as TEXT, never as a colour alone — PRODUCT.md's rule
                     that meaning is never encoded in hue, which matters here
