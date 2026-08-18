@@ -71,15 +71,15 @@ function obj(value: unknown): Record<string, unknown> | undefined {
  * being drawn. Nothing downstream may treat an all-day span as a working window.
  */
 function instantOf(
-  end: Record<string, unknown> | undefined
+  side: Record<string, unknown> | undefined
 ): { ms: number; allDay: boolean } | null {
-  if (end === undefined) return null
-  const dateTime = str(end.dateTime)
+  if (side === undefined) return null
+  const dateTime = str(side.dateTime)
   if (dateTime !== undefined) {
     const ms = Date.parse(dateTime)
     return Number.isFinite(ms) ? { ms, allDay: false } : null
   }
-  const date = str(end.date)
+  const date = str(side.date)
   if (date !== undefined) {
     const ms = Date.parse(`${date}T00:00:00.000Z`)
     return Number.isFinite(ms) ? { ms, allDay: true } : null
@@ -92,12 +92,13 @@ function instantOf(
 function conferenceUrlOf(raw: Record<string, unknown>): string | undefined {
   const data = obj(raw.conferenceData)
   const points = data === undefined ? undefined : data.entryPoints
-  if (!Array.isArray(points)) return str(obj(raw)?.hangoutLink)
-  for (const point of points) {
-    const entry = obj(point)
-    if (entry !== undefined && entry.entryPointType === "video") {
-      const uri = str(entry.uri)
-      if (uri !== undefined) return uri
+  if (Array.isArray(points)) {
+    for (const point of points) {
+      const entry = obj(point)
+      if (entry !== undefined && entry.entryPointType === "video") {
+        const uri = str(entry.uri)
+        if (uri !== undefined) return uri
+      }
     }
   }
   return str(raw.hangoutLink)
@@ -160,7 +161,13 @@ export function mapGoogleEvent(
       // to an entry, for the same reason.
       endedAt: Math.max(end.ms, start.ms + 60_000),
       isAllDay: start.allDay || end.allDay,
-      status: str(event.status) ?? "confirmed",
+      // schema.ts documents this column as "confirmed" | "tentative", never
+      // "cancelled" — but the validator is v.string(), so nothing at the
+      // database layer enforces that. This narrowing is what makes the
+      // invariant true rather than merely something Google happens to send
+      // today; "cancelled" is already routed to a delete tombstone above, so
+      // anything else Google sends collapses to "confirmed".
+      status: event.status === "tentative" ? "tentative" : "confirmed",
       myResponse,
       location: str(event.location),
       description:

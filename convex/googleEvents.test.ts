@@ -7,7 +7,7 @@
 // the document limit.
 import { describe, expect, it } from "vitest"
 import { isDrawable, mapGoogleEvent } from "./googleEvents"
-import { MAX_ATTENDEES } from "./schema"
+import { MAX_ATTENDEES, MAX_DESCRIPTION_LENGTH } from "./schema"
 
 const CAL = "primary"
 
@@ -114,6 +114,47 @@ describe("mapGoogleEvent", () => {
 
   it("returns null for a timed event with an unparseable start", () => {
     expect(mapGoogleEvent(raw({ start: { dateTime: "nonsense" } }), CAL)).toBeNull()
+  })
+
+  it("narrows an unrecognised status to 'confirmed', never passing it through raw", () => {
+    // schema.ts documents this column as "confirmed" | "tentative" only. The
+    // validator is v.string(), so nothing but this narrowing keeps some other
+    // string Google sends (a future status, a typo) out of the mirror.
+    const item = mapGoogleEvent(raw({ status: "needsAction" }), CAL)
+    if (item?.kind !== "upsert") throw new Error("expected upsert")
+    expect(item.row.status).toBe("confirmed")
+  })
+
+  it("truncates a description to MAX_DESCRIPTION_LENGTH", () => {
+    const description = "x".repeat(MAX_DESCRIPTION_LENGTH + 500)
+    const item = mapGoogleEvent(raw({ description }), CAL)
+    if (item?.kind !== "upsert") throw new Error("expected upsert")
+    expect(item.row.description).toHaveLength(MAX_DESCRIPTION_LENGTH)
+  })
+
+  it("falls back googleUpdatedAt to the start instant when 'updated' is missing or unparseable", () => {
+    const item = mapGoogleEvent(raw({ updated: "not-a-date" }), CAL)
+    if (item?.kind !== "upsert") throw new Error("expected upsert")
+    expect(item.row.googleUpdatedAt).toBe(item.row.startedAt)
+  })
+
+  it("reads the RSVP off a self attendee past MAX_ATTENDEES", () => {
+    // The highest-risk case in this file: the self attendee is read off EVERY
+    // element, not the capped slice. A large invite with the current user
+    // seated late in the array must not silently report "none".
+    const attendees: Array<Record<string, unknown>> = Array.from(
+      { length: MAX_ATTENDEES + 20 },
+      (_, i) => ({ email: `a${i}@example.com`, responseStatus: "needsAction" })
+    )
+    attendees[60] = {
+      email: "me@example.com",
+      self: true,
+      responseStatus: "tentative",
+    }
+    const item = mapGoogleEvent(raw({ attendees }), CAL)
+    if (item?.kind !== "upsert") throw new Error("expected upsert")
+    expect(item.row.myResponse).toBe("tentative")
+    expect(item.row.attendees).toHaveLength(MAX_ATTENDEES)
   })
 })
 
