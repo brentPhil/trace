@@ -58,8 +58,11 @@ sync returns 403 and the connection lands in `reauth`.
   required while the app is unpublished.
 - **Scopes:** add `https://www.googleapis.com/auth/calendar.readonly`. It is a
   *sensitive* scope, which is what makes step 5's warning matter.
-- **Test users:** add your own Google address. While the app is in "Testing",
-  only listed test users can consent at all.
+- **Test users:** add your own Google address. **Do not skip this.** While the
+  app is in "Testing", Google refuses anyone not on this list with a bare
+  `Error 403: access_denied`, before it will even draw a consent screen — there
+  is nothing in that error naming the test-user list as the cause, which is why
+  it costs people an afternoon.
 
 ### 4. Create the client
 
@@ -136,7 +139,9 @@ redirect URI added to the client — `https://your-domain/api/auth/callback/goog
 | --- | --- |
 | `redirect_uri_mismatch` | The URI in the client does not match `{SITE_URL}/api/auth/callback/google` exactly. Check port and trailing slash. This bit once already: the client was registered against port 3000 and the app moved to 3100, so the two disagreed by four characters. Google's error names the URI it received — register exactly that |
 | `CLIENT_ID_AND_SECRET_REQUIRED` on clicking Connect | The two variables are not set on the deployment |
-| `access_blocked` / "app not verified" and no way through | Your address is not in Test users, or the app is unpublished and you skipped the Advanced link |
+| `access_denied` before any consent screen | The app is in Testing and your address is not under Test users. Add it (step 3). If it IS there, check the publishing status: a Production app requesting the sensitive `calendar.readonly` scope is blocked outright until it passes Google's verification review |
+| `access_blocked` / "app not verified" with a way past | Expected on an unpublished app — **Advanced → Go to … (unsafe)** |
+| Sign-in asks for calendar access | `convex/auth.ts` was edited but not pushed. The provider config runs on the DEPLOYMENT, so `npx convex dev` has to have re-pushed it — editing the file is not enough |
 | Connects, then every sync 403s | The Calendar API was never enabled on the project (step 2) |
 | Worked for a week, now says access lost | Testing-mode 7-day refresh-token expiry — see step 5 |
 | Calendars list is empty | Expected on an account with no calendars; otherwise check the deployment logs for the `googleSync` action |
