@@ -27,14 +27,23 @@ type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
  * outcomes rather than leaving one to be inferred from an unchecked box.
  */
 
-const { update, generateLogoUploadUrl, clearLogo, setLogo } = vi.hoisted(
-  () => ({
+const { update, generateLogoUploadUrl, clearLogo, setLogo, listAccounts } =
+  vi.hoisted(() => ({
     update: vi.fn(async () => null),
     generateLogoUploadUrl: vi.fn(async () => "https://upload.example/logo"),
     clearLogo: vi.fn(async () => null),
     setLogo: vi.fn(async () => null),
-  })
-)
+    // Not connected in any of this file's fixtures, so nothing here exercises
+    // the Google section's connect round-trip — but the settings page's own
+    // effect calls `authClient.listAccounts()` unconditionally while
+    // disconnected, and a real network call in jsdom would hang the whole
+    // suite reaching for a server that does not exist in a unit test.
+    listAccounts: vi.fn(async () => ({ data: [] })),
+  }))
+
+vi.mock("@/lib/auth-client", () => ({
+  authClient: { listAccounts, linkSocial: vi.fn() },
+}))
 
 vi.mock("@convex-dev/react-query", async (importOriginal) => {
   const actual = await importOriginal<ConvexReactQueryModule>()
@@ -57,6 +66,7 @@ afterEach(() => {
   generateLogoUploadUrl.mockClear()
   clearLogo.mockClear()
   setLogo.mockClear()
+  listAccounts.mockClear()
   vi.unstubAllGlobals()
 })
 
@@ -69,6 +79,17 @@ function renderSettings(over: Partial<SettingsFixture> = {}) {
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
   client.setQueryData(convexKey(api.settings.get, {}), { ...SETTINGS, ...over })
+  // Google Calendar's section renders inside this same page and its three
+  // reads (`useSuspenseQuery`, not `useQuery`) would otherwise suspend forever
+  // with no data ever arriving in this test's fake client — nothing here
+  // exercises that section, so "not connected, nothing to show" is enough.
+  client.setQueryData(convexKey(api.google.connection, {}), {
+    connected: false,
+    status: "ok",
+    lastSyncedAt: null,
+  })
+  client.setQueryData(convexKey(api.google.listCalendars, {}), [])
+  client.setQueryData(convexKey(api.projects.list, {}), [])
   return render(
     <QueryClientProvider client={client}>
       <Toast.Provider>

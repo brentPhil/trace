@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import {
@@ -6,9 +6,11 @@ import {
   useConvexAction,
   useConvexMutation,
 } from "@convex-dev/react-query"
+import { GoogleCalendarSection } from "@/components/settings/google-calendar-section"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
+import { authClient } from "@/lib/auth-client"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
@@ -28,7 +30,11 @@ export const Route = createFileRoute("/_authed/settings")({
   head: () => ({ meta: [{ title: pageTitle("Settings") }] }),
   component: Settings,
   loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
+    await Promise.all([
+      context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.google.connection, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.google.listCalendars, {})),
+    ])
   },
 })
 
@@ -65,6 +71,82 @@ export function Settings() {
       toasts.add({ title: errorMessage(thrown), priority: "high" })
     })
   }
+
+  // `useLatest`-wrapped for a stable identity, so it can sit in the connect
+  // effect's dependency array below without re-running that effect on every
+  // render — the same reason every mutation on this page is wrapped.
+  const report = useLatest((thrown: unknown) => {
+    toasts.add({ title: errorMessage(thrown), priority: "high" })
+  })
+
+  /*
+   * Google Calendar.
+   *
+   * `projects` is already ensured by `_authed.tsx`'s own loader for every page
+   * under it — timer.tsx and projects.tsx read it the same way, with no
+   * `ensureQueryData` of their own — so this is a cache read, not a second
+   * round trip.
+   */
+  const { data: connection } = useSuspenseQuery(
+    convexQuery(api.google.connection, {})
+  )
+  const { data: calendars } = useSuspenseQuery(
+    convexQuery(api.google.listCalendars, {})
+  )
+  const { data: projects } = useSuspenseQuery(convexQuery(api.projects.list, {}))
+
+  const connectMutation = useLatest(useConvexMutation(api.google.connect))
+  const disconnectMutation = useLatest(useConvexMutation(api.google.disconnect))
+  const setCalendarShowMutation = useLatest(
+    useConvexMutation(api.google.setCalendarShow)
+  )
+  const setCalendarProjectMutation = useLatest(
+    useConvexMutation(api.google.setCalendarProject)
+  )
+  const createProjectMutation = useLatest(useConvexMutation(api.projects.create))
+
+  /*
+   * `linkSocial`, never `signIn.social`.
+   *
+   * This ADDS Google to an existing email-and-password identity rather than
+   * replacing it: the password login keeps working, and
+   * `revokeSessionsOnPasswordReset` keeps meaning what it says. Signing in with
+   * Google instead would strand anyone who set this up on a second device.
+   */
+  const connectGoogle = () => {
+    void authClient.linkSocial({
+      provider: "google",
+      callbackURL: window.location.href,
+    })
+  }
+
+  /*
+   * HOP TWO, after Google redirects back.
+   *
+   * `linkSocial` leaves the page, so nothing can be awaited after it — the
+   * `google.connect` mutation has to run on the way BACK IN. This effect is
+   * that moment: a Google account now exists on the identity, and our
+   * `googleConnections` row does not.
+   *
+   * The mutation is idempotent (it patches an existing row to "ok" rather than
+   * inserting a second), so the guard below is an optimisation and not a
+   * correctness condition — which is what makes it safe to run on every load.
+   * `connection` can never be `undefined` here (this is a `useSuspenseQuery`,
+   * not a `useQuery`), so the guard is simply "already connected".
+   */
+  useEffect(() => {
+    if (connection.connected) return
+    let cancelled = false
+    void authClient.listAccounts().then((result) => {
+      const linked = (result.data ?? []).some(
+        (account) => account.providerId === "google"
+      )
+      if (linked && !cancelled) void connectMutation({}).catch(report)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [connection.connected, connectMutation, report])
 
   const uploadLogo = async (file: File) => {
     if (!isAcceptedLogoContentType(file.type) || file.size > MAX_LOGO_BYTES) {
@@ -420,6 +502,30 @@ export function Settings() {
               PNG or JPEG, up to {MAX_LOGO_BYTES / (1024 * 1024)} MB.
             </p>
           </div>
+        </Section>
+
+        <Section
+          title="Google Calendar"
+          hint="Draw your meetings on the calendar view and read their attendees and agenda without leaving this tab. Chroneli only ever reads from Google — nothing here is written back, and no meeting starts a timer on its own."
+        >
+          <GoogleCalendarSection
+            connection={connection}
+            calendars={calendars}
+            projects={projects}
+            timeZone={settings.timezone}
+            use12Hour={settings.timeFormat === "12"}
+            actions={{
+              connect: connectGoogle,
+              disconnect: () => void disconnectMutation({}).catch(report),
+              setShow: (calendarId, show) =>
+                void setCalendarShowMutation({ calendarId, show }).catch(report),
+              setProject: (calendarId, projectId) =>
+                void setCalendarProjectMutation({ calendarId, projectId }).catch(
+                  report
+                ),
+              createProject: (name) => createProjectMutation({ name }),
+            }}
+          />
         </Section>
       </div>
     </Page>
