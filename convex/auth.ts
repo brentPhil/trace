@@ -87,6 +87,44 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
          */
       },
     },
+    /*
+     * GOOGLE IS TRUSTED TO HAVE VERIFIED THE ADDRESS IT REPORTS.
+     *
+     * Without this, signing in with Google against an address that already has
+     * a Chroneli account fails with `account_not_linked`, and the user is shown
+     * a dead end: the account exists, they own the mailbox, and the only path
+     * back is a password they may have created this way precisely to avoid.
+     *
+     * The reason it fails is a real safeguard, not a bug. Implicit linking on
+     * sign-in hands control of an existing account to whoever completes the
+     * OAuth flow, so Better Auth only does it when it can believe the address —
+     * either the local user is already `emailVerified`, or the provider is
+     * named here. `emailAndPassword` above runs with
+     * `requireEmailVerification: false`, by deliberate choice, so every account
+     * created that way is unverified and the first branch never fires.
+     *
+     * Naming Google is the right way to satisfy it. Google verifies mailbox
+     * ownership before it will assert an address, which is exactly the fact the
+     * safeguard is looking for, and it is the same trust every "Sign in with
+     * Google" button on the internet makes.
+     *
+     * WHAT IT MEANS, stated plainly because it is a real trade: anyone who
+     * controls the Google account for an address can sign in as the Chroneli
+     * account holding that address. That is the intended behaviour — they are
+     * the same person — and it is only sound while the trusted provider
+     * actually verifies. Do not add a provider here that does not.
+     *
+     * `allowDifferentEmails` is left at its default of false: linking is only
+     * ever automatic between MATCHING addresses. Turning it on would let a link
+     * attach an unrelated mailbox to an account, which is the takeover this
+     * whole mechanism exists to prevent.
+     */
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ["google"],
+      },
+    },
     plugins: [
       // Required for Convex compatibility.
       convex({ authConfig }),
