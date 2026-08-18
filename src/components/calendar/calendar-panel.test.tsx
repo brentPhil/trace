@@ -727,6 +727,61 @@ describe("CalendarPanel", () => {
       expect(blockSaying(container, "Standup")).toBeTruthy()
     })
 
+    /*
+     * `eventOrder` REPLACES FullCalendar's default rather than extending it.
+     *
+     * `parseFieldSpecs` turns a function input into a ONE-spec list, so
+     * `compareByFieldSpecs` returned 0 for any two blocks of the same
+     * population and `Array.sort`'s stability left them in the events array's
+     * order — which is `entries.listRange`'s `.order("desc")`, i.e. latest
+     * first. Overlapping entries packed latest-start leftmost, inverting
+     * behaviour that predates this feature entirely. Both cases below read the
+     * blocks in DOM order, which is the order the packer emitted them in.
+     */
+    it("packs two overlapping entries earliest-start first", () => {
+      const { container } = renderPanel({
+        entries: [
+          // Handed over newest-first, exactly as `entries.listRange` returns
+          // them — the input that made the defect visible.
+          entry({
+            _id: "e_late" as Id<"timeEntries">,
+            title: "Started later",
+            startedAt: Date.parse("2026-08-11T02:00:00Z"),
+            endedAt: Date.parse("2026-08-11T03:00:00Z"),
+          }),
+          entry({
+            _id: "e_early" as Id<"timeEntries">,
+            title: "Started earlier",
+            startedAt: Date.parse("2026-08-11T01:30:00Z"),
+            endedAt: Date.parse("2026-08-11T03:00:00Z"),
+          }),
+        ],
+      })
+      const drawn = blocks(container).map((block) => block.textContent)
+      expect(drawn[0]).toContain("Started earlier")
+      expect(drawn[1]).toContain("Started later")
+    })
+
+    it("still sorts a meeting after an entry in the same window", () => {
+      // The rank comparator is the FIRST spec, so it outranks `start`: the
+      // meeting starts FIRST here, and still draws second. Built that way round
+      // deliberately — an entry that also started earlier would pass on
+      // `start` alone and prove nothing about the comparator.
+      const { container } = renderPanel({
+        entries: [
+          entry({
+            title: "Real work",
+            startedAt: Date.parse("2026-08-11T02:15:00Z"),
+            endedAt: Date.parse("2026-08-11T03:15:00Z"),
+          }),
+        ],
+        meetings: [meetingFixture()], // 02:00Z – 02:30Z, the earlier start
+      })
+      const drawn = blocks(container).map((block) => block.textContent)
+      expect(drawn[0]).toContain("Real work")
+      expect(drawn[1]).toContain("Standup")
+    })
+
     it("opens the meeting popover rather than the entry editor on click", () => {
       const { container } = renderPanel({ meetings: [meetingFixture()] })
       // `fireEvent.click` targets the element directly rather than through an

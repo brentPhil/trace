@@ -289,6 +289,53 @@ const MEETING_BLOCK = cn(
  */
 export const NO_MEETINGS: Array<Meeting> = []
 
+/*
+ * ENTRIES FIRST when a meeting and an entry share a window — AND FullCalendar's
+ * OWN ORDER FOR EVERYTHING ELSE.
+ *
+ * The first spec is ours. Two blocks in the same hour only happens on a
+ * calendar that is shown but whose meetings have produced no entries — a
+ * tracked meeting's ghost is not drawn at all — and in that case the RECORDED
+ * thing should hold the left column: it is the one that counts toward the total
+ * and can be edited. A comparator rather than a field name, because the
+ * ordering key is which population a block belongs to and that lives on
+ * `extendedProps`, which no field-spec string can reach.
+ *
+ * THE FOUR STRINGS AFTER IT ARE NOT DECORATION. `parseFieldSpecs` REPLACES the
+ * `eventOrder` default (`'start,-duration,allDay,title'`) with whatever it is
+ * given; handed a bare function it produces a ONE-spec list, and
+ * `compareByFieldSpecs` then returns 0 for any two blocks of the same
+ * population. `Array.sort` is stable, so those ties fell back to the order of
+ * the events array — which comes from `entries.listRange`'s `.order("desc")`.
+ * Two overlapping ENTRIES therefore packed latest-start leftmost, silently
+ * inverting pre-existing behaviour that this feature had no business touching.
+ * Restating the defaults after the comparator puts them back.
+ *
+ * `as` BECAUSE THE TYPE IS NARROWER THAN THE PARSER. `FieldSpecInput<Subject>`
+ * is `string | string[] | Func | Func[]` — it has no member for a MIXED array,
+ * while `parseFieldSpecs` itself walks the array and switches on `typeof token`
+ * per element, handling strings and functions in any arrangement (verified in
+ * node_modules/@fullcalendar/react/chunks). `unknown` in the comparator's
+ * signature is honest for the same reason the old inline version documented:
+ * `CalendarOptions` instantiates `parseFieldSpecs<Subject>` with nothing to
+ * infer `Subject` from, so `(a: EventApi, b: EventApi) => number` is rejected
+ * outright. `propsOf` recovers the real shape.
+ *
+ * Module-level rather than inline, so the prop is reference-stable across the
+ * once-a-second re-render this component lives under.
+ */
+const EVENT_ORDER = [
+  (a: unknown, b: unknown) => {
+    const rank = (event: unknown) =>
+      isMeetingEvent(propsOf(event as EventApi)) ? 1 : 0
+    return rank(a) - rank(b)
+  },
+  "start",
+  "-duration",
+  "allDay",
+  "title",
+] as unknown as Parameters<typeof Calendar>[0]["eventOrder"]
+
 /**
  * The calendar grid.
  *
@@ -648,36 +695,7 @@ export function CalendarPanel({
         }
         setSelected({ entryId: props.entryId, anchor: info.el })
       }}
-      /*
-       * ENTRIES FIRST when a meeting and an entry share a window.
-       *
-       * This only happens on a calendar that is shown but whose meetings have
-       * produced no entries — a tracked meeting's ghost is not drawn at all. In
-       * that case the two pack side by side, which is the honest picture of
-       * working through a meeting, and the RECORDED thing should hold the left
-       * column: it is the one that counts toward the total and can be edited.
-       *
-       * A comparator rather than a field-spec string, because the ordering key
-       * is which population a block belongs to and that lives on
-       * `extendedProps` — nothing FullCalendar's own field-spec parser can read
-       * off an `EventApi`.
-       */
-      eventOrder={(a: unknown, b: unknown) => {
-        /*
-         * `unknown`, HONESTLY — not a shortcut. `eventOrder`'s refiner is the
-         * generic `parseFieldSpecs<Subject>`, and `CalendarOptions` (built from
-         * `RawOptionsFromRefiners`) instantiates that generic with nothing to
-         * infer `Subject` from, so the prop's real type is
-         * `FieldSpecInput<unknown> | OrderSpec<unknown>[] | undefined` —
-         * confirmed by `tsc` rejecting `(a: EventApi, b: EventApi) => number`
-         * outright (`Type 'unknown' is not assignable to type 'EventApi'`).
-         * `propsOf` is what recovers the real shape, the same cast every other
-         * hook on this component already trusts FullCalendar for.
-         */
-        const rank = (event: unknown) =>
-          isMeetingEvent(propsOf(event as EventApi)) ? 1 : 0
-        return rank(a) - rank(b)
-      }}
+      eventOrder={EVENT_ORDER}
       // ---- Styling. One prop per element; no stylesheet override anywhere. --
       className="text-sm"
       /*
