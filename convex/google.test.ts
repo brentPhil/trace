@@ -10,7 +10,12 @@ import { convexTest } from "convex-test"
 import { describe, expect, it, vi } from "vitest"
 import schema from "./schema"
 import { api, internal } from "./_generated/api"
-import { mirrorWindow, TOKEN_FAILURE_LIMIT } from "./google"
+import {
+  mirrorWindow,
+  TOKEN_FAILURE_LIMIT,
+  MEETINGS_PER_CALENDAR_LIMIT,
+  HIDE_DRAIN_PAGE,
+} from "./google"
 import { traceErrorCode } from "./lib/codes"
 
 // `syncAccount` fetches its access token through Better Auth's full stack —
@@ -1005,6 +1010,103 @@ describe("listMeetings", () => {
       "UNAUTHENTICATED"
     )
   })
+
+  // Regression for the truncate-before-filter defect: the OLD implementation
+  // read up to MEETINGS_PER_CALENDAR_LIMIT rows through a single WHOLE-ACCOUNT
+  // index range (`by_user_started`), ordered by `startedAt`, and only
+  // afterward discarded hidden-calendar rows and all-day rows. So enough
+  // discardable rows sorting earlier in the range than a real timed meeting
+  // could exhaust that shared cap before the real meeting was ever read.
+  //
+  // This seeds exactly that: MEETINGS_PER_CALENDAR_LIMIT filler rows — half on
+  // a HIDDEN calendar, half ALL-DAY rows on the SHOWN calendar — all sorting
+  // before two real timed meetings on the shown calendar. Against the old
+  // shape this exhausts the cap on filler and returns zero real meetings.
+  // Against the fixed per-calendar-indexed read, the hidden calendar costs
+  // nothing (it's never read at all) and the filler only competes against the
+  // real meetings within the ONE shown calendar's own page, which is nowhere
+  // near its own cap.
+  it("still returns real meetings after hidden and all-day rows that would exhaust the old whole-account cap", async () => {
+    const t = setup()
+    const fromMs = Date.parse("2026-08-17T00:00:00.000Z")
+    const toMs = Date.parse("2026-08-18T00:00:00.000Z")
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Brent",
+        show: true,
+        syncToken: null,
+        lastSyncedAt: null,
+        updatedAt: fromMs,
+      })
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "holidays",
+        summary: "Holidays",
+        show: false,
+        syncToken: null,
+        lastSyncedAt: null,
+        updatedAt: fromMs,
+      })
+
+      for (let i = 0; i < MEETINGS_PER_CALENDAR_LIMIT; i++) {
+        // One minute apart, all well before the real meetings seeded below —
+        // this is what makes them sort first in `by_user_started` order.
+        const startedAt = fromMs + i * 60_000
+        const onHidden = i % 2 === 0
+        await ctx.db.insert("googleEvents", {
+          userId: ALICE,
+          calendarId: onHidden ? "holidays" : "primary",
+          eventId: `filler_${i}`,
+          title: `filler ${i}`,
+          startedAt,
+          endedAt: startedAt + 1_800_000,
+          // On the hidden calendar the row is timed (discarded for being
+          // hidden); on the shown calendar it is all-day (discarded for
+          // having no clock). Both are the discardable kinds the old code
+          // let eat the shared budget.
+          isAllDay: !onHidden,
+          status: "confirmed",
+          myResponse: "accepted",
+          attendees: [],
+          attendeeCount: 0,
+          googleUpdatedAt: startedAt,
+          updatedAt: startedAt,
+        })
+      }
+
+      for (const eventId of ["standup", "one_on_one"]) {
+        const startedAt = fromMs + (MEETINGS_PER_CALENDAR_LIMIT + 10) * 60_000
+        await ctx.db.insert("googleEvents", {
+          userId: ALICE,
+          calendarId: "primary",
+          eventId,
+          title: eventId,
+          startedAt,
+          endedAt: startedAt + 1_800_000,
+          isAllDay: false,
+          status: "confirmed",
+          myResponse: "accepted",
+          attendees: [],
+          attendeeCount: 0,
+          googleUpdatedAt: startedAt,
+          updatedAt: startedAt,
+        })
+      }
+    })
+
+    const meetings = await t.query(internal.google.listMeetingsForUser, {
+      userId: ALICE,
+      fromMs,
+      toMs,
+    })
+    expect(meetings.map((m) => m.eventId).sort()).toEqual([
+      "one_on_one",
+      "standup",
+    ])
+  })
 })
 
 describe("setCalendarShow", () => {
@@ -1074,6 +1176,77 @@ describe("setCalendarShow", () => {
       calendarId: "primary",
       show: false,
     })
+
+    expect(
+      await t.query(internal.google.allEventsForTest, { userId: ALICE })
+    ).toEqual([])
+  })
+
+  it("resumes draining past one page rather than orphaning the remainder", async () => {
+    // Regression for the non-resumable hide: the OLD code did a single
+    // `.take(1_000)` with no check for a full page, so a calendar with more
+    // than 1,000 mirrored rows (the mirror window is 60 days back / 90
+    // forward, and heavy recurring expansion can reach that) kept its
+    // remainder forever. Seed more than HIDE_DRAIN_PAGE rows on one calendar
+    // so the first page alone cannot finish the job.
+    const t = setup()
+    const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+    const EVENT_COUNT = HIDE_DRAIN_PAGE + 20
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Brent",
+        show: true,
+        syncToken: "tok",
+        lastSyncedAt: NOW,
+        updatedAt: NOW,
+      })
+      for (let i = 0; i < EVENT_COUNT; i++) {
+        const startedAt = NOW + i * 60_000
+        await ctx.db.insert("googleEvents", {
+          userId: ALICE,
+          calendarId: "primary",
+          eventId: `evt_${i}`,
+          title: `evt ${i}`,
+          startedAt,
+          endedAt: startedAt + 900_000,
+          isAllDay: false,
+          status: "confirmed",
+          myResponse: "accepted",
+          attendees: [],
+          attendeeCount: 0,
+          googleUpdatedAt: startedAt,
+          updatedAt: startedAt,
+        })
+      }
+    })
+
+    await t.mutation(internal.google.setCalendarShowForUser, {
+      userId: ALICE,
+      calendarId: "primary",
+      show: false,
+    })
+
+    // Right after the mutation returns, the first bounded page is gone but the
+    // remainder beyond HIDE_DRAIN_PAGE has NOT been touched yet — proving a
+    // continuation is doing the rest of the work rather than one oversized
+    // delete finishing it inline. (`allEventsForTest` itself is capped at 100
+    // rows, well under what's left, so a non-empty page here already shows
+    // rows survived the first pass.)
+    const afterFirstPage = await t.query(internal.google.allEventsForTest, {
+      userId: ALICE,
+    })
+    expect(afterFirstPage.length).toBeGreaterThan(0)
+
+    // Drive the scheduled `dropCalendarEvents` continuation(s) to completion.
+    vi.useFakeTimers()
+    try {
+      await t.finishAllScheduledFunctions(vi.runAllTimers)
+    } finally {
+      vi.useRealTimers()
+    }
 
     expect(
       await t.query(internal.google.allEventsForTest, { userId: ALICE })

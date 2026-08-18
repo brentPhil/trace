@@ -657,10 +657,12 @@ const meetingDoc = v.object({
   entryId: v.union(v.id("timeEntries"), v.null()),
 })
 
-/** The most meetings one range read returns. A week of a busy calendar is tens;
- *  250 is a ceiling that cannot be reached by a human's diary and stops an
- *  unbounded read if one ever is. */
-const MEETING_LIMIT = 250
+/** The most meetings one CALENDAR's range read returns. A week of one busy
+ *  calendar is tens of events; this is a backstop against a runaway read, not
+ *  a count real usage should ever reach — and because it is per calendar
+ *  rather than per account, hitting it can only cost that one calendar its
+ *  overflow, never a sibling calendar's meetings. */
+export const MEETINGS_PER_CALENDAR_LIMIT = 250
 
 async function listMeetingsImpl(
   ctx: QueryCtx,
@@ -674,20 +676,55 @@ async function listMeetingsImpl(
     .query("googleCalendars")
     .withIndex("by_user_show", (q) => q.eq("userId", userId).eq("show", true))
     .take(50)
-  const shown = new Set(calendars.map((calendar) => calendar.googleId))
-  if (shown.size === 0) return []
+  if (calendars.length === 0) return []
 
-  const rows = await ctx.db
-    .query("googleEvents")
-    .withIndex("by_user_started", (q) =>
-      // Half-open, matching `dayWindow` and every other range in the product.
-      q.eq("userId", userId).gte("startedAt", fromMs).lt("startedAt", toMs)
-    )
-    .take(MEETING_LIMIT)
+  // Read PER SHOWN CALENDAR through `by_user_calendar_started`, rather than one
+  // whole-account read through `by_user_started` filtered down afterward. The
+  // whole-account read let a row on a HIDDEN calendar, or an all-day row (a
+  // subscribed holidays/birthdays calendar, commonly all-day and commonly
+  // present in a real Google account), consume the shared cap before a real
+  // timed meeting on a shown calendar was even read — a plausible-looking but
+  // silently incomplete week, with no error and no truncation indicator.
+  // Scoping the read to each shown calendar means a hidden calendar costs
+  // nothing and cannot consume any budget, and an all-day flood on one shown
+  // calendar can only crowd out THAT calendar's own timed meetings.
+  const rows = []
+  for (const calendar of calendars) {
+    const page = await ctx.db
+      .query("googleEvents")
+      .withIndex("by_user_calendar_started", (q) =>
+        // Half-open, matching `dayWindow` and every other range in the product.
+        q
+          .eq("userId", userId)
+          .eq("calendarId", calendar.googleId)
+          .gte("startedAt", fromMs)
+          .lt("startedAt", toMs)
+      )
+      .take(MEETINGS_PER_CALENDAR_LIMIT)
+    if (page.length === MEETINGS_PER_CALENDAR_LIMIT) {
+      // A full page means this calendar's read is silently incomplete. This
+      // product does not silently truncate data people bill from — the same
+      // device `CalendarPanel` uses when the drawn range disagrees with the
+      // requested one. `console.error`, not a throw: a partial grid is better
+      // than a blank page.
+      console.error("listMeetings truncated a calendar's range read.", {
+        userId,
+        calendarId: calendar.googleId,
+        fromMs,
+        toMs,
+      })
+    }
+    rows.push(...page)
+  }
 
+  // `rows` is grouped by calendar, and within each group ordered by
+  // `startedAt` — NOT one `startedAt`-ordered sequence across the whole range.
+  // That is enough for this caller: the grid positions every block by its OWN
+  // `startedAt`/`endedAt`, never by its position in this array, so nothing
+  // downstream depends on cross-calendar order. A caller that read only the
+  // first N of this array would not be so lucky.
   const meetings = []
   for (const row of rows) {
-    if (!shown.has(row.calendarId)) continue
     // All-day events have no clock and the grid has no rail for them.
     if (!isDrawable(row)) continue
 
@@ -743,6 +780,64 @@ export const listCalendars = query({
     await listCalendarsImpl(ctx, await requireUserId(ctx)),
 })
 
+/** One page of a hidden calendar's mirror, deleted. Bounded for the same
+ *  reason `DISCONNECT_PAGE` is: the mirror window (`MIRROR_BACK_DAYS` /
+ *  `MIRROR_FORWARD_DAYS`) can hold more rows than one transaction should
+ *  delete for a calendar with heavy recurring expansion, so a full page
+ *  reschedules a continuation — `dropCalendarEvents` — rather than risking
+ *  the transaction write limit. */
+export const HIDE_DRAIN_PAGE = 500
+
+/** Deletes one bounded page of `calendarId`'s mirrored events and, if the page
+ *  came back full, schedules `dropCalendarEvents` to continue in a fresh
+ *  transaction. Shared by the hide path's first page and by the continuation
+ *  itself, since both are the identical bounded-page-then-reschedule step. */
+async function dropCalendarEventsPage(
+  ctx: MutationCtx,
+  userId: string,
+  calendarId: string
+) {
+  // Only this calendar's rows, through the index rather than by filtering a page
+  // of the user's whole mirror.
+  const rows = await ctx.db
+    .query("googleEvents")
+    .withIndex("by_user_calendar_started", (q) =>
+      q.eq("userId", userId).eq("calendarId", calendarId)
+    )
+    .take(HIDE_DRAIN_PAGE)
+  for (const row of rows) await ctx.db.delete(row._id)
+  if (rows.length === HIDE_DRAIN_PAGE) {
+    await ctx.scheduler.runAfter(0, internal.google.dropCalendarEvents, {
+      userId,
+      calendarId,
+    })
+  }
+}
+
+/**
+ * Continuation of hiding a calendar, for when a drain page comes back full.
+ * See `setCalendarShowImpl`'s "HIDING DELETES THE MIRRORED EVENTS" doc.
+ *
+ * RACE: if the calendar is shown again while this is still draining,
+ * `setCalendarShowImpl`'s show path has already cleared `syncToken` and
+ * scheduled a fresh `syncAccount`, which refetches the whole window from
+ * Google. This continuation may then delete rows that sync just wrote back
+ * in — wasted work racing a fresh sync, not silent data loss, because the
+ * sync that was just scheduled (or the next cron tick) refetches and
+ * restores whatever this deletes. The loop itself cannot run forever: it
+ * stops the moment a page comes back under `HIDE_DRAIN_PAGE`, i.e. once
+ * nothing with this `calendarId` is left to delete, whether or not a
+ * re-show raced it.
+ */
+export const dropCalendarEvents = internalMutation({
+  args: { userId: v.string(), calendarId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await dropCalendarEventsPage(ctx, args.userId, args.calendarId)
+    return null
+  },
+})
+
 /**
  * Show or hide a calendar.
  *
@@ -751,9 +846,12 @@ export const listCalendars = query({
  * reusing it would silently skip everything that happened while the calendar was
  * hidden, and the mirror would look healthy while missing a fortnight.
  *
- * HIDING DELETES THE MIRRORED EVENTS. Leaving them would draw a calendar that is
- * no longer syncing, which is worse than drawing nothing: the blocks are stale
- * and nothing on screen says so.
+ * HIDING DELETES THE MIRRORED EVENTS, ONE BOUNDED PAGE AT A TIME. Leaving them
+ * would draw a calendar that is no longer syncing, which is worse than drawing
+ * nothing: the blocks are stale and nothing on screen says so. A calendar with
+ * heavy recurring expansion across the mirror window can hold more than one
+ * page, so a full first page schedules `dropCalendarEvents` to keep going
+ * rather than leaving the remainder undeleted forever.
  */
 async function setCalendarShowImpl(
   ctx: MutationCtx,
@@ -778,15 +876,7 @@ async function setCalendarShowImpl(
     return null
   }
 
-  // Only this calendar's rows, through the index rather than by filtering a page
-  // of the user's whole mirror.
-  const rows = await ctx.db
-    .query("googleEvents")
-    .withIndex("by_user_calendar_started", (q) =>
-      q.eq("userId", userId).eq("calendarId", calendarId)
-    )
-    .take(1_000)
-  for (const row of rows) await ctx.db.delete(row._id)
+  await dropCalendarEventsPage(ctx, userId, calendarId)
   return null
 }
 
