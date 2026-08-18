@@ -9,26 +9,49 @@
 import { convexTest } from "convex-test"
 import { describe, expect, it, vi } from "vitest"
 import schema from "./schema"
-import { internal } from "./_generated/api"
+import { api, internal } from "./_generated/api"
 import { mirrorWindow, TOKEN_FAILURE_LIMIT } from "./google"
+import { traceErrorCode } from "./lib/codes"
 
 // `syncAccount` fetches its access token through Better Auth's full stack —
 // component tables, encrypted-token storage, a real OAuth refresh call — none
 // of which this suite seeds. Stubbing `createAuth` here is what lets the
 // `gone`-restart test below exercise the loop without also standing up a
 // fake Google account inside the Better Auth component.
-vi.mock("./auth", () => ({
-  createAuth: () => ({
-    api: {
-      getAccessToken: async () => ({ accessToken: "fake-access-token" }),
-    },
-  }),
-}))
+//
+// Only `createAuth` is replaced — `requireUserId` and everything else stay
+// real via `importOriginal`. The public connection surface (`connection`,
+// `connect`, `disconnect`) calls `requireUserId`, and a full-module mock would
+// silently turn it into `undefined`, not a stub that behaves like auth.
+vi.mock("./auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./auth")>()
+  return {
+    ...actual,
+    createAuth: () => ({
+      api: {
+        getAccessToken: async () => ({ accessToken: "fake-access-token" }),
+      },
+    }),
+  }
+})
 
 const modules = import.meta.glob("./**/*.*s")
 const setup = () => convexTest(schema, modules)
 
 const ALICE = "user_alice"
+
+async function expectCode(
+  promise: Promise<unknown>,
+  code: string
+): Promise<void> {
+  try {
+    await promise
+  } catch (error) {
+    expect(traceErrorCode(error) ?? String(error)).toBe(code)
+    return
+  }
+  throw new Error(`expected rejection with code ${code}, but it resolved`)
+}
 
 describe("the mirror tables", () => {
   it("round-trips a full event row", async () => {
@@ -745,5 +768,77 @@ describe("markConnection's token-failure counter", () => {
     })
     expect(rows[0].status).toBe("ok")
     expect(rows[0].tokenFailures).toBe(2)
+  })
+})
+
+describe("the public connection surface", () => {
+  it("rejects anonymous callers", async () => {
+    const t = setup()
+    await expectCode(t.query(api.google.connection, {}), "UNAUTHENTICATED")
+    await expectCode(t.mutation(api.google.connect, {}), "UNAUTHENTICATED")
+    await expectCode(t.mutation(api.google.disconnect, {}), "UNAUTHENTICATED")
+  })
+
+  it("reports not connected before anything is linked", async () => {
+    const t = setup()
+    const status = await t.query(internal.google.connectionForUser, {
+      userId: ALICE,
+    })
+    expect(status).toEqual({
+      connected: false,
+      status: "ok",
+      lastSyncedAt: null,
+    })
+  })
+
+  it("disconnect removes the connection, calendars, and mirrored events", async () => {
+    const t = setup()
+    const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: NOW,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Brent",
+        show: true,
+        syncToken: "tok",
+        lastSyncedAt: NOW,
+        updatedAt: NOW,
+      })
+      await ctx.db.insert("googleEvents", {
+        userId: ALICE,
+        calendarId: "primary",
+        eventId: "evt_1",
+        title: "Standup",
+        startedAt: NOW,
+        endedAt: NOW + 900_000,
+        isAllDay: false,
+        status: "confirmed",
+        myResponse: "accepted",
+        attendees: [],
+        attendeeCount: 0,
+        googleUpdatedAt: NOW,
+        updatedAt: NOW,
+      })
+    })
+
+    await t.mutation(internal.google.disconnectForUser, { userId: ALICE })
+
+    expect(
+      await t.query(internal.google.allEventsForTest, { userId: ALICE })
+    ).toEqual([])
+    expect(
+      await t.query(internal.google.allCalendarsForTest, { userId: ALICE })
+    ).toEqual([])
+    expect(
+      await t.query(internal.google.allConnectionsForTest, { userId: ALICE })
+    ).toEqual([])
   })
 })

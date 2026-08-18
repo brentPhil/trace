@@ -1,7 +1,13 @@
 import { v } from "convex/values"
-import { internalAction, internalMutation, internalQuery } from "./_generated/server"
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server"
 import { internal } from "./_generated/api"
-import { createAuth } from "./auth"
+import { createAuth, requireUserId } from "./auth"
 import {
   GoogleAuthError,
   GoogleTransientError,
@@ -15,7 +21,7 @@ import {
   googleEventTrackingDoc,
 } from "./lib/docs"
 import { mapGoogleEvent } from "./googleEvents"
-import type { MutationCtx } from "./_generated/server"
+import type { MutationCtx, QueryCtx } from "./_generated/server"
 
 /*
  * Google Calendar: the read side.
@@ -628,4 +634,156 @@ export const clearSyncToken = internalMutation({
     }
     return null
   },
+})
+
+const connectionStatus = v.object({
+  connected: v.boolean(),
+  status: v.union(v.literal("ok"), v.literal("reauth")),
+  lastSyncedAt: v.union(v.number(), v.null()),
+})
+
+async function connectionStatusImpl(ctx: QueryCtx, userId: string) {
+  const row = await ctx.db
+    .query("googleConnections")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .unique()
+  // "Not connected" is a valid state the settings page renders, not an error.
+  if (row === null) {
+    return { connected: false, status: "ok" as const, lastSyncedAt: null }
+  }
+  return {
+    connected: true,
+    status: row.status,
+    lastSyncedAt: row.lastSyncedAt,
+  }
+}
+
+export const connection = query({
+  args: {},
+  returns: connectionStatus,
+  handler: async (ctx) =>
+    await connectionStatusImpl(ctx, await requireUserId(ctx)),
+})
+
+export const connectionForUser = internalQuery({
+  args: { userId: v.string() },
+  returns: connectionStatus,
+  handler: async (ctx, args) => await connectionStatusImpl(ctx, args.userId),
+})
+
+async function connectImpl(ctx: MutationCtx, userId: string) {
+  const nowMs = Date.now()
+  const existing = await ctx.db
+    .query("googleConnections")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .unique()
+
+  if (existing === null) {
+    await ctx.db.insert("googleConnections", {
+      userId,
+      status: "ok",
+      // null, so the first sync fetches the calendar list immediately rather
+      // than waiting out the TTL against a timestamp nobody earned.
+      calendarsRefreshedAt: null,
+      lastSyncedAt: null,
+      lastErrorAt: null,
+      updatedAt: nowMs,
+    })
+  } else {
+    // Re-consenting clears the flag. This is the ONLY thing that does.
+    await ctx.db.patch(existing._id, { status: "ok", updatedAt: nowMs })
+  }
+
+  // Don't make the user wait 15 minutes to see their calendars.
+  await ctx.scheduler.runAfter(0, internal.google.syncAccount, { userId })
+  return null
+}
+
+/** Called by the client once `linkSocial` has returned. The OAuth grant itself
+ *  is Better Auth's; this records that Chroneli should now be syncing. */
+export const connect = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => await connectImpl(ctx, await requireUserId(ctx)),
+})
+
+export const connectForUser = internalMutation({
+  args: { userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => await connectImpl(ctx, args.userId),
+})
+
+/**
+ * Disconnect: the mirror goes, the ticks go, the entries STAY.
+ *
+ * Everything mirrored from Google is Google's and is deleted — leaving a stale
+ * mirror behind would draw meetings that no longer sync. Entries already
+ * materialised from meetings are the user's own tracked time and are NOT
+ * touched: they may already be on an invoice, and a disconnect is not a request
+ * to delete a week of work.
+ *
+ * `googleEventTracking` DOES go here, unlike everywhere else in this feature.
+ * Its rows survive a prune and a cancellation because the event may come back;
+ * they do not survive a disconnect, because the account they describe is gone
+ * and a tick that outlives its calendar would fire against a reconnected
+ * account the user never re-armed.
+ */
+/** One drain page. Bounded because a disconnect on a full mirror is a few
+ *  thousand rows — more than one transaction should write — so it continues over
+ *  scheduled calls rather than risking a rollback that undoes the whole thing. */
+const DISCONNECT_PAGE = 500
+
+async function disconnectImpl(ctx: MutationCtx, userId: string) {
+  /*
+   * The two tables are drained in SEPARATE blocks rather than a loop over table
+   * names. `ctx.db.query(table)` with a union of names gives the builder a union
+   * of document types and the index names differ between the two, so the loop
+   * form does not typecheck — and the cast that would make it compile is exactly
+   * the cast that hides a wrong index next time one of them changes.
+   */
+  const events = await ctx.db
+    .query("googleEvents")
+    .withIndex("by_user_started", (q) => q.eq("userId", userId))
+    .take(DISCONNECT_PAGE)
+  for (const row of events) await ctx.db.delete(row._id)
+  if (events.length === DISCONNECT_PAGE) {
+    await ctx.scheduler.runAfter(0, internal.google.disconnectForUser, { userId })
+    return null
+  }
+
+  const tracking = await ctx.db
+    .query("googleEventTracking")
+    .withIndex("by_user_calendar_event", (q) => q.eq("userId", userId))
+    .take(DISCONNECT_PAGE)
+  for (const row of tracking) await ctx.db.delete(row._id)
+  if (tracking.length === DISCONNECT_PAGE) {
+    await ctx.scheduler.runAfter(0, internal.google.disconnectForUser, { userId })
+    return null
+  }
+
+  const calendars = await ctx.db
+    .query("googleCalendars")
+    .withIndex("by_user_googleId", (q) => q.eq("userId", userId))
+    .take(250)
+  for (const calendar of calendars) await ctx.db.delete(calendar._id)
+
+  const connectionRow = await ctx.db
+    .query("googleConnections")
+    .withIndex("by_user", (q) => q.eq("userId", userId))
+    .unique()
+  if (connectionRow !== null) await ctx.db.delete(connectionRow._id)
+
+  return null
+}
+
+export const disconnect = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => await disconnectImpl(ctx, await requireUserId(ctx)),
+})
+
+export const disconnectForUser = internalMutation({
+  args: { userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => await disconnectImpl(ctx, args.userId),
 })

@@ -39,6 +39,32 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
         })
       },
     },
+    /*
+     * Google, for the calendar link — and LINKED rather than signed in with.
+     *
+     * `accessType: "offline"` and `prompt: "consent"` are BOTH required. Without
+     * them Google issues an access token with no refresh token, and the link
+     * dies about an hour later with nothing on screen to say why: the sync just
+     * starts failing, and the failure looks like a revoked grant.
+     *
+     * `calendar.readonly` and nothing wider. This feature never writes to
+     * Google, and a scope that permits writing is a scope somebody will
+     * eventually write through.
+     *
+     * The connect flow calls `linkSocial()` from the client rather than
+     * `signIn.social`, so the Google account is ADDED to an existing
+     * email-and-password identity. The password login keeps working, and
+     * `revokeSessionsOnPasswordReset` above keeps meaning what it says.
+     */
+    socialProviders: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        accessType: "offline",
+        prompt: "consent",
+        scope: ["https://www.googleapis.com/auth/calendar.readonly"],
+      },
+    },
     plugins: [
       // Required for Convex compatibility.
       convex({ authConfig }),
