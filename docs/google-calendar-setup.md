@@ -19,10 +19,11 @@ almost everybody hits:
 {SITE_URL}/api/auth/callback/google
 ```
 
-For this project's dev deployment (`SITE_URL` is `http://localhost:3000`):
+For this project's dev deployment (`SITE_URL` is `http://localhost:3100`, and
+the dev server is always started on that port — see `.claude/launch.json`):
 
 ```
-http://localhost:3000/api/auth/callback/google
+http://localhost:3100/api/auth/callback/google
 ```
 
 **Not** the `.convex.site` domain, even though Better Auth's routes are mounted
@@ -115,7 +116,8 @@ redirect URI added to the client — `https://your-domain/api/auth/callback/goog
 
 ### 7. Walk it through
 
-1. `npm run dev`, and `npx convex dev` in another terminal.
+1. Start the dev server on port 3100 (the `chroneli-dev` config in
+   `.claude/launch.json`), and `npx convex dev` in another terminal.
 2. Sign in, go to **/settings**, find **Google Calendar**, click **Connect
    Google Calendar**.
 3. Google's consent screen appears. An unpublished app shows a "Google hasn't
@@ -132,7 +134,7 @@ redirect URI added to the client — `https://your-domain/api/auth/callback/goog
 
 | Symptom | Cause |
 | --- | --- |
-| `redirect_uri_mismatch` | The URI in the client does not match `{SITE_URL}/api/auth/callback/google` exactly. Check port and trailing slash |
+| `redirect_uri_mismatch` | The URI in the client does not match `{SITE_URL}/api/auth/callback/google` exactly. Check port and trailing slash. This bit once already: the client was registered against port 3000 and the app moved to 3100, so the two disagreed by four characters. Google's error names the URI it received — register exactly that |
 | `CLIENT_ID_AND_SECRET_REQUIRED` on clicking Connect | The two variables are not set on the deployment |
 | `access_blocked` / "app not verified" and no way through | Your address is not in Test users, or the app is unpublished and you skipped the Advanced link |
 | Connects, then every sync 403s | The Calendar API was never enabled on the project (step 2) |
