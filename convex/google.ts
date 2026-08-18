@@ -2,6 +2,7 @@ import { v } from "convex/values"
 import { internalAction, internalMutation, internalQuery } from "./_generated/server"
 import { internal } from "./_generated/api"
 import { createAuth } from "./auth"
+import { APIError } from "better-auth/api"
 import {
   GoogleAuthError,
   GoogleTransientError,
@@ -366,6 +367,33 @@ const CALENDAR_LIST_TTL_MS = 24 * 60 * 60 * 1_000
  *  one afternoon. */
 const MAX_PAGES = 20
 
+/**
+ * Whether a `getAccessToken` failure means the grant is dead, versus
+ * transient — a network blip reaching Google's token endpoint, or an
+ * unrelated bug in `createAuth(ctx)`.
+ *
+ * Better Auth's `getValidAccessToken` (node_modules/better-auth/dist/api/
+ * routes/account.mjs) wraps EVERY failure from `provider.refreshAccessToken`
+ * — a revoked refresh token and a flaky network alike — in the same shape: an
+ * `APIError` with `status: "BAD_REQUEST"` / `statusCode: 400`, `body.code:
+ * "FAILED_TO_GET_ACCESS_TOKEN"`, and no `cause` (the original error is
+ * discarded, not attached). So an `APIError` with statusCode 400 or 401 IS
+ * the token-exchange-failure signal — that is as fine-grained as this call
+ * lets us see period, not a simplification we chose.
+ *
+ * Getting this wrong in one direction costs a user a pointless trip through
+ * Google's consent screen for something that would have healed itself in 15
+ * minutes; getting it wrong in the other means an account whose grant is
+ * truly gone sits `status: "ok"` and silently stops syncing forever, because
+ * nothing ever asks `markConnection` to flag it.
+ */
+export function isDeadGrant(error: unknown): boolean {
+  if (error instanceof APIError) {
+    return error.statusCode === 400 || error.statusCode === 401
+  }
+  return false
+}
+
 export const syncAccount = internalAction({
   args: { userId: v.string() },
   returns: v.null(),
@@ -384,9 +412,22 @@ export const syncAccount = internalAction({
       })
       accessToken = result.accessToken
     } catch (error) {
+      if (isDeadGrant(error)) {
+        await ctx.runMutation(internal.google.markConnection, {
+          userId: args.userId,
+          status: "reauth",
+          nowMs,
+          error: `Could not get an access token: ${String(error)}`,
+        })
+        return null
+      }
+      // Not a dead grant, so this must not stop syncing: leave `status: "ok"`
+      // and let the next cron tick retry. `error` is still recorded through
+      // `markConnection` so a persistent problem is visible in Settings
+      // instead of failing silently.
       await ctx.runMutation(internal.google.markConnection, {
         userId: args.userId,
-        status: "reauth",
+        status: "ok",
         nowMs,
         error: `Could not get an access token: ${String(error)}`,
       })
@@ -422,7 +463,15 @@ export const syncAccount = internalAction({
         let syncToken = calendar.syncToken
         let pages = 0
 
-        do {
+        // `while (pages < MAX_PAGES)` with explicit `break`s, not a
+        // `do/while`: this loop's real bound is the page count and its real
+        // exits are "no more pages" and "gone twice in a row", and a
+        // `do/while`'s `continue` jumps straight to the condition check —
+        // which, right after a `gone` branch sets `pageToken = null`, would
+        // exit the loop instead of re-entering it. That silently skipped the
+        // rest of this calendar's sync for the whole run, with the restart
+        // only happening on the NEXT cron tick 15 minutes later.
+        while (pages < MAX_PAGES) {
           const page = await fetchEventsPage(fetch, accessToken, {
             calendarId: calendar.googleId,
             syncToken,
@@ -430,10 +479,16 @@ export const syncAccount = internalAction({
             timeMaxMs: window.toMs,
             pageToken,
           })
+          pages += 1
 
           if (page.gone) {
-            // Routine. The token aged out; drop it and start the window again on
-            // the next iteration of this same loop.
+            // Routine: the stored syncToken aged out. Clear it and loop again
+            // with syncToken and pageToken both null, which makes the next
+            // fetch a full WINDOW fetch rather than an incremental one. A
+            // window fetch carries no syncToken, so it cannot itself come
+            // back `gone` — that is what makes this restart terminate rather
+            // than alternate forever, with MAX_PAGES as the backstop if
+            // Google still misbehaves.
             await ctx.runMutation(internal.google.clearSyncToken, {
               userId: args.userId,
               calendarId: calendar.googleId,
@@ -441,7 +496,6 @@ export const syncAccount = internalAction({
             })
             syncToken = null
             pageToken = null
-            pages += 1
             continue
           }
 
@@ -457,8 +511,8 @@ export const syncAccount = internalAction({
           })
 
           pageToken = page.nextPageToken
-          pages += 1
-        } while (pageToken !== null && pages < MAX_PAGES)
+          if (pageToken === null) break
+        }
       }
 
       await ctx.runMutation(internal.google.pruneEvents, {
@@ -539,6 +593,11 @@ export const shownCalendars = internalQuery({
       .withIndex("by_user_show", (q) =>
         q.eq("userId", args.userId).eq("show", true)
       )
+      // Assumes no user shows more than 50 calendars. A user past that bound
+      // has their 51st-and-later shown calendars silently skipped by every
+      // sync — no error, no log, just events that never arrive for a
+      // calendar the user believes is on — with no signal here that the read
+      // was truncated.
       .take(50),
 })
 

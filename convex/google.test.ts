@@ -7,10 +7,24 @@
 // `googleEventTracking` holds the user's tick and is never pruned. A field on
 // the wrong side of that line is lost on the next poll, with no error anywhere.
 import { convexTest } from "convex-test"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { APIError } from "better-auth/api"
 import schema from "./schema"
 import { internal } from "./_generated/api"
-import { mirrorWindow } from "./google"
+import { isDeadGrant, mirrorWindow } from "./google"
+
+// `syncAccount` fetches its access token through Better Auth's full stack —
+// component tables, encrypted-token storage, a real OAuth refresh call — none
+// of which this suite seeds. Stubbing `createAuth` here is what lets the
+// `gone`-restart test below exercise the loop without also standing up a
+// fake Google account inside the Better Auth component.
+vi.mock("./auth", () => ({
+  createAuth: () => ({
+    api: {
+      getAccessToken: async () => ({ accessToken: "fake-access-token" }),
+    },
+  }),
+}))
 
 const modules = import.meta.glob("./**/*.*s")
 const setup = () => convexTest(schema, modules)
@@ -546,5 +560,117 @@ describe("syncAccount", () => {
     })
     const due = await t.query(internal.google.connectionsToSync, { cursor: null })
     expect(due.userIds).toEqual([ALICE])
+  })
+
+  it("refetches the window in the same run after a `gone` response", async () => {
+    // Defect 1: a `do/while`'s `continue` jumps straight to the condition
+    // check, so a `gone` branch that just set `pageToken = null` would exit
+    // the loop instead of restarting it, and the calendar would fetch zero
+    // pages until the next cron tick. This proves the restart happens
+    // WITHIN one `syncAccount` call: the syncToken-bearing first request is
+    // answered 410, and a second, syncToken-less request follows before the
+    // action returns.
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        // Not stale, so syncAccount skips fetchCalendarList and the mocked
+        // fetch below only ever has to answer events.list.
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: null,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Alice",
+        show: true,
+        syncToken: "stale-token",
+        lastSyncedAt: null,
+        updatedAt: NOW,
+      })
+    })
+
+    const calls: Array<string> = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(url)
+        if (calls.length === 1) {
+          return new Response(null, { status: 410 })
+        }
+        return new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      })
+    )
+
+    try {
+      await t.action(internal.google.syncAccount, { userId: ALICE })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).toContain("syncToken=stale-token")
+    expect(calls[1]).not.toContain("syncToken")
+    expect(calls[1]).toContain("timeMin")
+
+    const rows = await t.query(internal.google.allCalendarsForTest, {
+      userId: ALICE,
+    })
+    // The window fetch's empty page carried no nextSyncToken (the mock
+    // response omits it), so the calendar's syncToken stays cleared — proof
+    // the second fetch actually ran and its outcome was applied.
+    expect(rows[0].syncToken).toBeNull()
+  })
+})
+
+describe("isDeadGrant", () => {
+  // What Better Auth's getValidAccessToken actually throws when Google
+  // rejects a refresh — confirmed by reading node_modules/better-auth/dist/
+  // api/routes/account.mjs, which swallows the original error entirely and
+  // rethrows this exact shape regardless of WHY the refresh failed.
+  it("treats a 400 APIError (the shape Google's invalid_grant produces) as a dead grant", () => {
+    const error = APIError.from("BAD_REQUEST", {
+      message: "Failed to get a valid access token",
+      code: "FAILED_TO_GET_ACCESS_TOKEN",
+    })
+    expect(isDeadGrant(error)).toBe(true)
+  })
+
+  it("treats a 401 APIError as a dead grant", () => {
+    const error = APIError.from("UNAUTHORIZED", {
+      message: "Unauthorized",
+      code: "UNAUTHORIZED",
+    })
+    expect(isDeadGrant(error)).toBe(true)
+  })
+
+  it("does not treat a 500 APIError as a dead grant", () => {
+    // Not a shape getAccessToken actually produces today, but the function
+    // must not over-fire if Better Auth ever surfaces a server-side status —
+    // that is exactly the kind of transient failure that must leave the
+    // connection `status: "ok"` and retry next run.
+    const error = APIError.from(500, {
+      message: "Internal error",
+      code: "INTERNAL_SERVER_ERROR",
+    })
+    expect(isDeadGrant(error)).toBe(false)
+  })
+
+  it("does not treat a plain Error as a dead grant", () => {
+    // A network failure reaching Google's token endpoint, or a bug in
+    // createAuth(ctx), throws as an ordinary Error — never an APIError. This
+    // is Defect 2's whole point: it must not be mistaken for a revoked grant.
+    expect(isDeadGrant(new Error("fetch failed"))).toBe(false)
+  })
+
+  it("does not treat a non-error value as a dead grant", () => {
+    expect(isDeadGrant("boom")).toBe(false)
+    expect(isDeadGrant(undefined)).toBe(false)
   })
 })
