@@ -5,6 +5,7 @@ import { dayTotals, rangeOf } from "@/lib/calendar-events"
 import { noEntryActions } from "@/test-utils/fixtures"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { CalendarSize } from "@/lib/calendar-label"
+import type { Meeting } from "@/lib/calendar-meetings"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as CalendarEventsModuleType from "@/lib/calendar-events"
 
@@ -85,6 +86,46 @@ function entry(over: Partial<Doc<"timeEntries">>): Doc<"timeEntries"> {
     deletedAt: null,
     ...over,
   } as unknown as Doc<"timeEntries">
+}
+
+/**
+ * A Google meeting fixture, matching `entry`'s shape above.
+ *
+ * `startedAt` is 10:00 Manila on 2026-08-11 — inside the default `renderPanel`
+ * week (Mon 10 – Sun 16 August), unlike the brief's own sample instant of
+ * 2026-08-17, which falls in the FOLLOWING week and so is a day FullCalendar
+ * never draws a column for: `visibleRange` bounds what is rendered, so a
+ * meeting outside it would produce no block at all and every assertion below
+ * would fail for a reason unrelated to the feature under test.
+ *
+ * `htmlLink` is set even though the brief's own sample omits it: without it
+ * `CalendarMeetingPopover` renders no "Open in Google Calendar" link at all —
+ * see that component's `meeting.htmlLink === undefined ? null : <a>…` branch
+ * — and the click test below asserts exactly that link exists.
+ */
+function meetingFixture(over: Partial<Meeting> = {}): Meeting {
+  const startedAt = Date.parse("2026-08-11T02:00:00.000Z")
+  return {
+    _id: "ge_1" as Id<"googleEvents">,
+    _creationTime: startedAt,
+    userId: "user_alice",
+    calendarId: "primary",
+    eventId: "evt_1",
+    title: "Standup",
+    startedAt,
+    endedAt: startedAt + 1_800_000,
+    isAllDay: false,
+    status: "confirmed",
+    myResponse: "accepted",
+    attendees: [],
+    attendeeCount: 0,
+    googleUpdatedAt: startedAt,
+    updatedAt: startedAt,
+    htmlLink: "https://calendar.google.com/event?eid=evt_1",
+    trackOnStart: false,
+    entryId: null,
+    ...over,
+  }
 }
 
 type PanelProps = Parameters<typeof CalendarPanel>[0]
@@ -639,6 +680,66 @@ describe("CalendarPanel", () => {
     it("renders one column for a single day", () => {
       const { container } = renderPanel({ size: "day" })
       expect(renderedDays(container)).toEqual(["2026-08-11"])
+    })
+  })
+
+  describe("google meetings", () => {
+    /*
+     * `blockSaying`/`blocks`, NOT `screen.getByRole`, for finding the block
+     * itself — the same substitution every other describe block in this file
+     * already makes, and for the reason `blocks`' own comment gives: jsdom has
+     * no layout, so FullCalendar's packer never finishes measuring column
+     * widths and leaves every block's harness at `visibility: hidden` while it
+     * waits for a resize that will never come. That inline style is honoured by
+     * `getComputedStyle`, and `screen.getByRole` excludes anything the
+     * accessibility tree calls hidden — so it can never find a block in this
+     * environment, meeting or entry alike, which is exactly why the file's own
+     * block-clicking tests below reach for `blockSaying` and `fireEvent.click`
+     * on the raw element rather than `screen.getByRole`. `role="button"` is
+     * still assertable directly off the element, which is what the block's own
+     * "is a button" describe block above does.
+     */
+    it("draws a meeting as an unfilled block with a soft border", () => {
+      const { container } = renderPanel({ meetings: [meetingFixture()] })
+      const block = blockSaying(container, "Standup")
+      expect(block.getAttribute("role")).toBe("button")
+      // Fill means recorded, outline means scheduled. `surface-raised` is an
+      // entry's fill and must NOT appear here, and `enlarger` is reserved for a
+      // running timer by the Cold Light Rule.
+      expect(block.className).toContain("border-edge-soft")
+      expect(block.className).not.toContain("bg-surface-raised")
+      expect(block.className).not.toContain("enlarger")
+    })
+
+    it("does not draw a meeting whose entry already exists", () => {
+      const { container } = renderPanel({
+        meetings: [meetingFixture({ entryId: "te_1" as Id<"timeEntries"> })],
+      })
+      expect(blocks(container)).toHaveLength(0)
+    })
+
+    it("draws entries and meetings side by side when both are present", () => {
+      const { container } = renderPanel({
+        entries: [entry({ title: "Real work" })],
+        meetings: [meetingFixture()],
+      })
+      expect(blockSaying(container, "Real work")).toBeTruthy()
+      expect(blockSaying(container, "Standup")).toBeTruthy()
+    })
+
+    it("opens the meeting popover rather than the entry editor on click", () => {
+      const { container } = renderPanel({ meetings: [meetingFixture()] })
+      // `fireEvent.click` targets the element directly rather than through an
+      // accessibility query, so the `visibility: hidden` harness above does not
+      // stop the click from reaching it.
+      fireEvent.click(blockSaying(container, "Standup"))
+      // The popover itself is an ordinary mounted React tree, outside
+      // FullCalendar's own packer, so it carries none of that hazard and
+      // `screen.getByRole` finds it normally. Read-only, and says so: it
+      // carries a link out to Google, which the entry editor never does.
+      expect(
+        screen.getByRole("link", { name: /Google Calendar/i })
+      ).toBeTruthy()
     })
   })
 })

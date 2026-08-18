@@ -2,8 +2,10 @@ import { useMemo, useState } from "react"
 import Calendar from "@fullcalendar/react"
 import timeGridPlugin from "@fullcalendar/react/timegrid"
 import { CalendarEntryPopover } from "@/components/calendar/calendar-entry-popover"
+import { CalendarMeetingPopover } from "@/components/calendar/calendar-meeting-popover"
 import { ProjectDot } from "@/components/classifiers/project-dot"
 import { MIN_SPAN_MS, calendarEvents, drawnDays } from "@/lib/calendar-events"
+import { isMeetingEvent, meetingEvents } from "@/lib/calendar-meetings"
 import { formatTimeOfInstant, formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { HATCH_EMPTY } from "@/lib/hatch"
@@ -14,6 +16,7 @@ import type {
   CalendarEventProps,
   CalendarRange,
 } from "@/lib/calendar-events"
+import type { Meeting, MeetingEventProps } from "@/lib/calendar-meetings"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DayString } from "@shared/day"
 import type { DurationDisplay } from "@/lib/format-total"
@@ -249,6 +252,43 @@ const BLOCK_HOVER =
  */
 const RUNNING_HOVER = "hover:bg-enlarger/25"
 
+/*
+ * A MEETING IS AN OUTLINE, AN ENTRY IS A FILL.
+ *
+ * DESIGN.md leaves exactly one axis free here and it happens to be the right
+ * one. `enlarger` means *a timer is running* (the Cold Light Rule) and cannot be
+ * spent on a meeting. Hue means money under the Two Temperatures Rule and blocks
+ * take none. A dashed border plus hatch is the Hatch Rule's midnight
+ * continuation and is already spoken for.
+ *
+ * What is left is FILL, and an unfilled block is a true statement: this is
+ * scheduled time, not recorded time. It also reads correctly in peripheral
+ * vision, which is where this page lives — the filled blocks are the day's
+ * substance and the outlines are its plan.
+ *
+ * `bg-transparent` is stated rather than omitted: the lane behind it is
+ * `surface`, and letting the block inherit nothing is what makes the ghost read
+ * as a hole in the grid rather than as a second surface.
+ */
+const MEETING_BLOCK = cn(
+  "mx-0.5 mb-px overflow-hidden rounded-md px-1 py-0.5 text-left",
+  "border border-edge-soft bg-transparent text-muted-foreground",
+  "hover:bg-[color-mix(in_oklch,var(--surface),var(--foreground)_5%)]"
+)
+
+/**
+ * The empty meetings list, ONE allocation for the life of the module.
+ *
+ * A `meetings = []` default — or a `?? []` in the page above — mints a fresh
+ * array on every render, and this component re-renders once a second. That array
+ * is in the `events` memo's dependency list, so a new one busts the memo every
+ * tick and reallocates the whole events array forever: exactly the defect the
+ * `clockMs` comment below was written to fix, reintroduced through the door
+ * beside it. Exported so the page uses the same constant rather than its own
+ * literal.
+ */
+export const NO_MEETINGS: Array<Meeting> = []
+
 /**
  * The calendar grid.
  *
@@ -275,6 +315,7 @@ export function CalendarPanel({
   projectsById,
   tags,
   actions,
+  meetings = NO_MEETINGS,
 }: {
   entries: Array<Doc<"timeEntries">>
   /**
@@ -322,6 +363,14 @@ export function CalendarPanel({
    * it, and every write in the product still originates in one hook.
    */
   actions: EntryActions
+  /**
+   * Google meetings for this range, from `google.listMeetings`.
+   *
+   * A SECOND POPULATION on one grid, and the block styling is what keeps them
+   * apart. Defaults to `NO_MEETINGS` so a caller with no Google link — and every
+   * existing test — renders exactly as before.
+   */
+  meetings?: Array<Meeting>
 }) {
   /*
    * THE CLOCK, ADMITTED ONLY WHEN SOMETHING IS ACTUALLY RUNNING.
@@ -396,7 +445,42 @@ export function CalendarPanel({
       ? null
       : (entries.find((entry) => entry._id === selected.entryId) ?? null)
 
-  const events = useMemo(() => calendarEvents(entries, clockMs), [entries, clockMs])
+  /*
+   * The MEETING being read, looked up from `meetings` on every render for the
+   * same reason `editing` is looked up from `entries`: a sync that removes the
+   * event — cancelled in Google, or the calendar hidden — closes the popover by
+   * simply not finding it, with no second flag that could disagree.
+   */
+  const [selectedMeeting, setSelectedMeeting] = useState<{
+    calendarId: string
+    eventId: string
+    anchor: HTMLElement
+  } | null>(null)
+
+  const reading =
+    selectedMeeting === null
+      ? null
+      : (meetings.find(
+          (meeting) =>
+            meeting.calendarId === selectedMeeting.calendarId &&
+            meeting.eventId === selectedMeeting.eventId
+        ) ?? null)
+
+  /*
+   * ONE ARRAY, TWO POPULATIONS.
+   *
+   * FullCalendar takes a single `events` array and hands back a single
+   * `EventApi` from `eventClick`, so the discriminator has to travel on
+   * `extendedProps` rather than in a second source. `isMeetingEvent` is the only
+   * place that is read.
+   *
+   * `meetings` is NOT in the clock's dependency: a meeting's end is a stored
+   * instant, so nothing in that half of the array moves with `nowMs`.
+   */
+  const events = useMemo(
+    () => [...calendarEvents(entries, clockMs), ...meetingEvents(meetings)],
+    [entries, clockMs, meetings]
+  )
 
   /*
    * NAVIGATION, and the one hazard this prop carries.
@@ -553,7 +637,46 @@ export function CalendarPanel({
        */
       eventClick={(info) => {
         info.jsEvent.preventDefault()
-        setSelected({ entryId: propsOf(info.event).entryId, anchor: info.el })
+        const props = propsOf(info.event)
+        if (isMeetingEvent(props)) {
+          setSelectedMeeting({
+            calendarId: props.calendarId,
+            eventId: props.eventId,
+            anchor: info.el,
+          })
+          return
+        }
+        setSelected({ entryId: props.entryId, anchor: info.el })
+      }}
+      /*
+       * ENTRIES FIRST when a meeting and an entry share a window.
+       *
+       * This only happens on a calendar that is shown but whose meetings have
+       * produced no entries — a tracked meeting's ghost is not drawn at all. In
+       * that case the two pack side by side, which is the honest picture of
+       * working through a meeting, and the RECORDED thing should hold the left
+       * column: it is the one that counts toward the total and can be edited.
+       *
+       * A comparator rather than a field-spec string, because the ordering key
+       * is which population a block belongs to and that lives on
+       * `extendedProps` — nothing FullCalendar's own field-spec parser can read
+       * off an `EventApi`.
+       */
+      eventOrder={(a: unknown, b: unknown) => {
+        /*
+         * `unknown`, HONESTLY — not a shortcut. `eventOrder`'s refiner is the
+         * generic `parseFieldSpecs<Subject>`, and `CalendarOptions` (built from
+         * `RawOptionsFromRefiners`) instantiates that generic with nothing to
+         * infer `Subject` from, so the prop's real type is
+         * `FieldSpecInput<unknown> | OrderSpec<unknown>[] | undefined` —
+         * confirmed by `tsc` rejecting `(a: EventApi, b: EventApi) => number`
+         * outright (`Type 'unknown' is not assignable to type 'EventApi'`).
+         * `propsOf` is what recovers the real shape, the same cast every other
+         * hook on this component already trusts FullCalendar for.
+         */
+        const rank = (event: unknown) =>
+          isMeetingEvent(propsOf(event as EventApi)) ? 1 : 0
+        return rank(a) - rank(b)
       }}
       // ---- Styling. One prop per element; no stylesheet override anywhere. --
       className="text-sm"
@@ -824,7 +947,10 @@ export function CalendarPanel({
       // what the themes do with their own `border-width`/`margin` pair.
       nowIndicatorDotClass="-m-1 size-2 rounded-full bg-muted-foreground"
       columnEventClass={(info) => {
-        const running = propsOf(info.event).endedAt === null
+        const props = propsOf(info.event)
+        if (isMeetingEvent(props)) return cn(MEETING_BLOCK, BLOCK_INTERACTIVE)
+
+        const running = props.endedAt === null
         return cn(
           // No transition anywhere: the running block's height changes with
           // the clock, and an eased height change is continuous motion with no
@@ -879,7 +1005,31 @@ export function CalendarPanel({
         )
       }}
       eventContent={(info) => {
-        const { projectId, startedAt, endedAt } = propsOf(info.event)
+        const props = propsOf(info.event)
+        if (isMeetingEvent(props)) {
+          return (
+            <div
+              title={`${titleOf(info.event)} — ${formatTimeRange(props.startedAt, props.endedAt, timeZone, use12Hour)}`}
+              className="flex min-w-0 flex-col gap-0.5"
+            >
+              <span className="truncate text-xs font-medium">
+                {titleOf(info.event)}
+              </span>
+              <span className="font-mono tabular-nums tracking-[-0.02em] truncate text-[0.6875rem]">
+                {formatTimeRange(
+                  props.startedAt,
+                  props.endedAt,
+                  timeZone,
+                  use12Hour
+                )}
+              </span>
+            </div>
+          )
+        }
+
+        // Narrowed to an entry from here down. This is the line that used to
+        // open the hook.
+        const { projectId, startedAt, endedAt } = props
         const project =
           projectId === undefined ? null : (projectsById.get(projectId) ?? null)
 
@@ -1005,13 +1155,29 @@ export function CalendarPanel({
           actions={actions}
         />
       )}
+
+      {/*
+        THE MEETING POPOVER, mounted only while a ghost is selected — the same
+        unmount-closes-it discipline as the entry editor above, and the same
+        reason: `reading` going `null` because the meeting was cancelled or the
+        calendar was hidden closes this for free.
+      */}
+      {selectedMeeting === null || reading === null ? null : (
+        <CalendarMeetingPopover
+          meeting={reading}
+          anchor={selectedMeeting.anchor}
+          onClose={() => setSelectedMeeting(null)}
+          timeZone={timeZone}
+          use12Hour={use12Hour}
+        />
+      )}
     </>
   )
 }
 
 /** The typed half of an event, which FullCalendar hands back as a `Dictionary`. */
-function propsOf(event: EventApi): CalendarEventProps {
-  return event.extendedProps as CalendarEventProps
+function propsOf(event: EventApi): CalendarEventProps | MeetingEventProps {
+  return event.extendedProps as CalendarEventProps | MeetingEventProps
 }
 
 /** A block's heading. An entry with no title is normal — starting the timer
