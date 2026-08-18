@@ -222,6 +222,189 @@ describe("applySyncPage", () => {
   })
 })
 
+describe("upsertCalendars", () => {
+  const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+
+  function event(userId: string, calendarId: string, eventId: string, startIso: string) {
+    const startedAt = Date.parse(startIso)
+    return {
+      userId,
+      calendarId,
+      eventId,
+      title: eventId,
+      startedAt,
+      endedAt: startedAt + 1_800_000,
+      isAllDay: false,
+      status: "confirmed",
+      myResponse: "accepted",
+      attendees: [],
+      attendeeCount: 0,
+      googleUpdatedAt: startedAt,
+      updatedAt: startedAt,
+    }
+  }
+
+  function calendarRow(userId: string, googleId: string) {
+    return {
+      userId,
+      googleId,
+      summary: googleId,
+      show: true,
+      syncToken: null,
+      lastSyncedAt: null,
+      updatedAt: NOW,
+    }
+  }
+
+  it("gives a calendar Google reports for the first time show: false", async () => {
+    // A shared team calendar or a subscribed holiday feed must not appear on
+    // the grid the moment Google mentions it — the user has to opt in.
+    const t = setup()
+    await t.mutation(internal.google.upsertCalendars, {
+      userId: ALICE,
+      calendars: [{ googleId: "cal_new", summary: "Team Calendar" }],
+      nowMs: NOW,
+    })
+
+    const rows = await t.query(internal.google.allCalendarsForTest, { userId: ALICE })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].show).toBe(false)
+    expect(rows[0].summary).toBe("Team Calendar")
+  })
+
+  it("keeps show and defaultProjectId across a re-sync, refreshing only the summary", async () => {
+    const t = setup()
+    const projectId = await t.run((ctx) =>
+      ctx.db.insert("projects", {
+        userId: ALICE,
+        name: "Client Work",
+        color: "blue",
+        archived: false,
+        billableByDefault: true,
+        updatedAt: NOW,
+        deletedAt: null,
+      })
+    )
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "cal_1",
+        summary: "Old Name",
+        show: true,
+        defaultProjectId: projectId,
+        syncToken: null,
+        lastSyncedAt: null,
+        updatedAt: NOW,
+      })
+    })
+
+    await t.mutation(internal.google.upsertCalendars, {
+      userId: ALICE,
+      calendars: [{ googleId: "cal_1", summary: "New Name" }],
+      nowMs: NOW + 1,
+    })
+
+    const rows = await t.query(internal.google.allCalendarsForTest, { userId: ALICE })
+    expect(rows).toHaveLength(1)
+    // The user's own choices on the row must outlive a sync that only
+    // reconciles Google's facts against ours.
+    expect(rows[0].show).toBe(true)
+    expect(rows[0].defaultProjectId).toBe(projectId)
+    expect(rows[0].summary).toBe("New Name")
+  })
+
+  it("deletes a calendar Google no longer reports, along with its mirrored events", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", calendarRow(ALICE, "cal_keep"))
+      await ctx.db.insert("googleCalendars", calendarRow(ALICE, "cal_gone"))
+      await ctx.db.insert(
+        "googleEvents",
+        event(ALICE, "cal_keep", "evt_keep_1", "2026-08-17T10:00:00.000Z")
+      )
+      await ctx.db.insert(
+        "googleEvents",
+        event(ALICE, "cal_gone", "evt_gone_1", "2026-08-17T10:00:00.000Z")
+      )
+      await ctx.db.insert(
+        "googleEvents",
+        event(ALICE, "cal_gone", "evt_gone_2", "2026-08-17T11:00:00.000Z")
+      )
+    })
+
+    await t.mutation(internal.google.upsertCalendars, {
+      userId: ALICE,
+      calendars: [{ googleId: "cal_keep", summary: "cal_keep" }],
+      nowMs: NOW,
+    })
+
+    const calendars = await t.query(internal.google.allCalendarsForTest, { userId: ALICE })
+    expect(calendars.map((c) => c.googleId)).toEqual(["cal_keep"])
+
+    const events = await t.query(internal.google.allEventsForTest, { userId: ALICE })
+    expect(events.map((e) => e.eventId)).toEqual(["evt_keep_1"])
+  })
+
+  it("does not touch the surviving calendar's events during orphan cleanup", async () => {
+    // This is the property a wrong index range would break: reading events
+    // across all calendars instead of just the orphan's own would delete rows
+    // a still-reported calendar owns.
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", calendarRow(ALICE, "cal_keep"))
+      await ctx.db.insert("googleCalendars", calendarRow(ALICE, "cal_gone"))
+      await ctx.db.insert(
+        "googleEvents",
+        event(ALICE, "cal_keep", "evt_keep_1", "2026-08-17T10:00:00.000Z")
+      )
+      await ctx.db.insert(
+        "googleEvents",
+        event(ALICE, "cal_keep", "evt_keep_2", "2026-08-17T11:00:00.000Z")
+      )
+      await ctx.db.insert(
+        "googleEvents",
+        event(ALICE, "cal_gone", "evt_gone_1", "2026-08-17T10:00:00.000Z")
+      )
+    })
+
+    await t.mutation(internal.google.upsertCalendars, {
+      userId: ALICE,
+      calendars: [{ googleId: "cal_keep", summary: "cal_keep" }],
+      nowMs: NOW,
+    })
+
+    const events = await t.query(internal.google.allEventsForTest, { userId: ALICE })
+    expect(events.map((e) => e.eventId).sort()).toEqual(["evt_keep_1", "evt_keep_2"])
+  })
+
+  it("does not touch another user's calendars or events", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", calendarRow("user_bob", "cal_bob"))
+      await ctx.db.insert(
+        "googleEvents",
+        event("user_bob", "cal_bob", "evt_bob_1", "2026-08-17T10:00:00.000Z")
+      )
+    })
+
+    await t.mutation(internal.google.upsertCalendars, {
+      userId: ALICE,
+      calendars: [{ googleId: "cal_alice", summary: "cal_alice" }],
+      nowMs: NOW,
+    })
+
+    const bobCalendars = await t.query(internal.google.allCalendarsForTest, {
+      userId: "user_bob",
+    })
+    expect(bobCalendars.map((c) => c.googleId)).toEqual(["cal_bob"])
+
+    const bobEvents = await t.query(internal.google.allEventsForTest, {
+      userId: "user_bob",
+    })
+    expect(bobEvents.map((e) => e.eventId)).toEqual(["evt_bob_1"])
+  })
+})
+
 describe("pruneEvents", () => {
   const NOW = Date.parse("2026-08-17T09:00:00.000Z")
 
@@ -261,5 +444,41 @@ describe("pruneEvents", () => {
 
     const rows = await t.query(internal.google.allEventsForTest, { userId: ALICE })
     expect(rows.map((row) => row.eventId)).toEqual(["inside"])
+  })
+
+  it("keeps a row exactly at fromMs and deletes one exactly at toMs", async () => {
+    // The window is half-open [fromMs, toMs), the convention the rest of this
+    // product uses: `.lt("startedAt", fromMs)` does not touch fromMs itself,
+    // and `.gte("startedAt", toMs)` catches toMs itself. A row sitting on
+    // either boundary pins which side of the inequality is which.
+    const t = setup()
+    const { fromMs, toMs } = mirrorWindow(NOW)
+    await t.run(async (ctx) => {
+      for (const [eventId, startedAt] of [
+        ["at_from", fromMs],
+        ["at_to", toMs],
+      ] as const) {
+        await ctx.db.insert("googleEvents", {
+          userId: ALICE,
+          calendarId: "primary",
+          eventId,
+          title: eventId,
+          startedAt,
+          endedAt: startedAt + 1_800_000,
+          isAllDay: false,
+          status: "confirmed",
+          myResponse: "accepted",
+          attendees: [],
+          attendeeCount: 0,
+          googleUpdatedAt: startedAt,
+          updatedAt: startedAt,
+        })
+      }
+    })
+
+    await t.mutation(internal.google.pruneEvents, { userId: ALICE, fromMs, toMs })
+
+    const rows = await t.query(internal.google.allEventsForTest, { userId: ALICE })
+    expect(rows.map((row) => row.eventId)).toEqual(["at_from"])
   })
 })

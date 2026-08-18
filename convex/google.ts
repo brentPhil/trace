@@ -217,6 +217,14 @@ export const upsertCalendars = internalMutation({
       // Through `by_user_calendar_started`, so this reads only the orphaned
       // calendar's own rows. Filtering a page of every event by `calendarId`
       // would read the whole mirror once per orphan.
+      //
+      // Bounded at 500, and unlike `pruneEvents`'s bound this one is NOT
+      // self-draining: nothing re-invokes this cleanup on a timer for a
+      // calendar that is already gone. A calendar mirrored with more than 500
+      // events in the window is deleted here while its excess event rows
+      // survive, pointing at a `calendarId` that no longer has a calendar row.
+      // Those survivors self-heal only if the same calendar reappears in a
+      // later `calendars` list and is fully re-synced.
       const orphans = await ctx.db
         .query("googleEvents")
         .withIndex("by_user_calendar_started", (q) =>
