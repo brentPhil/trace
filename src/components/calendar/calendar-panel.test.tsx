@@ -711,6 +711,54 @@ describe("CalendarPanel", () => {
       expect(block.className).not.toContain("enlarger")
     })
 
+    /*
+     * A meeting's text is MEASURED, exactly as an entry's is.
+     *
+     * The meeting branch used to render a title line and a time line
+     * unconditionally — 34px of content — while a half-hour meeting has 17px
+     * of content box and a quarter-hour one has 11px. `overflow-hidden` cut
+     * the title through the middle of its glyphs, and half-hour meetings are
+     * the common case.
+     */
+    it("keeps only a half-hour meeting's title, and still says the time", () => {
+      // 30 minutes is 24px: one 16px row over the 7px the block spends on
+      // itself. `meetingFixture` is 10:00 – 10:30 Manila.
+      const { container } = renderPanel({ meetings: [meetingFixture()] })
+      const block = blockSaying(container, "Standup")
+      expect(block.querySelector(".truncate")?.textContent).toBe("Standup")
+      expect(block.querySelector(".tabular-nums")).toBeNull()
+      expect(block.querySelector(".sr-only")?.textContent).toBe("10:00 – 10:30")
+    })
+
+    it("draws no text at all in a meeting at the minimum height", () => {
+      const startedAt = Date.parse("2026-08-11T02:00:00.000Z")
+      const { container } = renderPanel({
+        meetings: [meetingFixture({ endedAt: startedAt + 60_000 })],
+      })
+      const block = blocks(container)[0]
+      expect(block.querySelector("span:not(.sr-only)")).toBeNull()
+      // Never silent: the whole description is on the screen-reader line, and
+      // the title and times are both on the native tooltip.
+      expect(block.querySelector(".sr-only")?.textContent).toBe(
+        "Standup — 10:00 – 10:01"
+      )
+      expect(block.querySelector("[title]")?.getAttribute("title")).toBe(
+        "Standup — 10:00 – 10:01"
+      )
+    })
+
+    it("shows a long meeting both lines", () => {
+      const startedAt = Date.parse("2026-08-11T02:00:00.000Z")
+      const { container } = renderPanel({
+        meetings: [meetingFixture({ endedAt: startedAt + 3_600_000 })],
+      })
+      const block = blockSaying(container, "Standup")
+      expect(block.querySelector(".tabular-nums")?.textContent).toBe(
+        "10:00 – 11:00"
+      )
+      expect(block.querySelector(".sr-only")).toBeNull()
+    })
+
     it("does not draw a meeting whose entry already exists", () => {
       const { container } = renderPanel({
         meetings: [meetingFixture({ entryId: "te_1" as Id<"timeEntries"> })],

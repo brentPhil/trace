@@ -1025,22 +1025,65 @@ export function CalendarPanel({
       eventContent={(info) => {
         const props = propsOf(info.event)
         if (isMeetingEvent(props)) {
+          const meetingTimeText = formatTimeRange(
+            props.startedAt,
+            props.endedAt,
+            timeZone,
+            use12Hour
+          )
+
+          /*
+           * MEASURED, not assumed — the same discipline as the entry branch
+           * below, through the same `blockFit`/`blockHeightPx` pair rather
+           * than a second measurement that could disagree with it.
+           *
+           * A title line and a time line unconditionally is 34px of content,
+           * and by this file's own constants a HALF-HOUR meeting has 17px of
+           * content box (24px of block, less the 7px it spends on its margin,
+           * borders and padding) and a quarter-hour one has 11px. So
+           * `overflow-hidden` cut the title through the middle of its glyphs
+           * on the commonest block this feature draws. What does not fit is
+           * dropped and said on the screen-reader line instead, so the block's
+           * accessible name stays complete however short it is.
+           *
+           * `hasProject: false`, HONESTLY: a meeting has no project line at
+           * all. Claiming one would spend the third row on something that
+           * never renders instead of on the title's second line.
+           */
+          const meetingFit = blockFit(
+            blockHeightPx(props.startedAt, props.endedAt, nowMs, timeZone),
+            false
+          )
+          const meetingSpoken = [
+            meetingFit.titleLines === 0 ? titleOf(info.event) : null,
+            meetingFit.time ? null : meetingTimeText,
+          ]
+            .filter((part) => part !== null)
+            .join(" — ")
+
           return (
             <div
-              title={`${titleOf(info.event)} — ${formatTimeRange(props.startedAt, props.endedAt, timeZone, use12Hour)}`}
+              title={`${titleOf(info.event)} — ${meetingTimeText}`}
               className="flex min-w-0 flex-col gap-0.5"
             >
-              <span className="truncate text-xs font-medium">
-                {titleOf(info.event)}
-              </span>
-              <span className="font-mono tabular-nums tracking-[-0.02em] truncate text-[0.6875rem]">
-                {formatTimeRange(
-                  props.startedAt,
-                  props.endedAt,
-                  timeZone,
-                  use12Hour
-                )}
-              </span>
+              {meetingFit.titleLines === 0 ? null : (
+                <span
+                  className={cn(
+                    "text-xs font-medium",
+                    meetingFit.titleLines === 1 ? "truncate" : "line-clamp-2"
+                  )}
+                >
+                  {titleOf(info.event)}
+                </span>
+              )}
+              {meetingFit.time ? (
+                <span className="font-mono tabular-nums tracking-[-0.02em] truncate text-[0.6875rem]">
+                  {meetingTimeText}
+                </span>
+              ) : null}
+              {meetingSpoken === "" ? null : (
+                <span className="sr-only">{meetingSpoken}</span>
+              )}
             </div>
           )
         }
