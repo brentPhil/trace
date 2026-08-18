@@ -91,10 +91,27 @@ failures — about 45 minutes — and flags the connection `reauth`, at which po
 Settings shows "Chroneli has lost access to your Google Calendar" and the user
 reconnects.
 
-That is the system behaving correctly, not a bug. To stop it recurring weekly,
-**Publish** the app on the consent screen. For a single-user personal project
-publishing is enough; Google's verification review is only required once an app
-requests sensitive scopes for users beyond the owner.
+That is the system behaving correctly, not a bug.
+
+**Publish the app** to end it: OAuth consent screen → Publishing status →
+**Publish app**. That does two things at once — it stops the 7-day refresh
+token expiry, and it drops the test-user list, so accounts no longer have to be
+enrolled one at a time.
+
+On a Workspace account, setting **User type: Internal** is better still: no
+test-user list, no verification, and no unverified-app warning for anyone in
+the org. It is not offered on personal Gmail accounts.
+
+What publishing does NOT remove, because `calendar.readonly` is sensitive and
+the app is unverified: the one-time "Google hasn't verified this app"
+interstitial (**Advanced → Go to …** past it), and a 100-user cap. Neither
+matters for a personal tool; verification is only worth pursuing to let
+strangers sign up without seeing the warning.
+
+Consent itself cannot be switched off — OAuth requires the account holder to
+approve the scopes at least once. The only alternative is a Workspace service
+account with domain-wide delegation, which is the wrong shape for a product
+where each user links their own calendar.
 
 ### 6. Set them on the deployment
 
