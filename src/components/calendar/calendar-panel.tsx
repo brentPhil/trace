@@ -270,11 +270,19 @@ const RUNNING_HOVER = "hover:bg-enlarger/25"
  * `surface`, and letting the block inherit nothing is what makes the ghost read
  * as a hole in the grid rather than as a second surface.
  */
-const MEETING_BLOCK = cn(
+/*
+ * Split in two so the midnight TAIL can take the box without the outline —
+ * `HATCH_EMPTY` carries its own dashed border, and a solid `border-edge-soft`
+ * beside it would win on source order and erase the dash. The head is
+ * `MEETING_BLOCK_BOX + MEETING_BLOCK_OUTLINE`, which is what `MEETING_BLOCK`
+ * used to be in one piece.
+ */
+const MEETING_BLOCK_BOX = cn(
   "mx-0.5 mb-px overflow-hidden rounded-md px-1 py-0.5 text-left",
-  "border border-edge-soft bg-transparent text-muted-foreground",
+  "bg-transparent text-muted-foreground",
   "hover:bg-[color-mix(in_oklch,var(--surface),var(--foreground)_5%)]"
 )
+const MEETING_BLOCK_OUTLINE = "border border-edge-soft"
 
 /**
  * The empty meetings list, ONE allocation for the life of the module.
@@ -966,7 +974,30 @@ export function CalendarPanel({
       nowIndicatorDotClass="-m-1 size-2 rounded-full bg-muted-foreground"
       columnEventClass={(info) => {
         const props = propsOf(info.event)
-        if (isMeetingEvent(props)) return cn(MEETING_BLOCK, BLOCK_INTERACTIVE)
+        if (isMeetingEvent(props)) {
+          /*
+           * A MEETING CROSSES MIDNIGHT THE SAME WAY AN ENTRY DOES.
+           *
+           * FullCalendar segments it across both columns and `isStart` says
+           * which half this is. Without a branch here the tail got the plain
+           * `MEETING_BLOCK` — no hatch, no dashed edge — and `eventContent`
+           * repeated the full title on it, so one overnight meeting drew as
+           * two identical-looking meetings on consecutive days.
+           *
+           * `HATCH_EMPTY` REPLACES the outline rather than joining it: it
+           * carries its own `border border-dashed border-edge-soft`, and a
+           * second solid `border-edge-soft` from `MEETING_BLOCK` would win on
+           * source order and erase the dash. So the tail takes the block's
+           * box (margins, padding, radius, the transparent fill that makes a
+           * ghost a ghost) and the hatch's edge — a continuation is a texture,
+           * never a hue, and a ghost stays unfilled either way.
+           */
+          return cn(
+            MEETING_BLOCK_BOX,
+            BLOCK_INTERACTIVE,
+            info.isStart ? MEETING_BLOCK_OUTLINE : HATCH_EMPTY
+          )
+        }
 
         const running = props.endedAt === null
         return cn(
@@ -1025,6 +1056,19 @@ export function CalendarPanel({
       eventContent={(info) => {
         const props = propsOf(info.event)
         if (isMeetingEvent(props)) {
+          // A tail carries no title, for the reason an entry's tail does not:
+          // it is the same meeting as the block at the bottom of the previous
+          // column, and repeating the title reads as a second meeting rather
+          // than as a continuation. The hatch says "continued" visually; this
+          // says it out loud.
+          if (!info.isStart) {
+            return (
+              <span className="sr-only">
+                {titleOf(info.event)} — continued from the previous day
+              </span>
+            )
+          }
+
           const meetingTimeText = formatTimeRange(
             props.startedAt,
             props.endedAt,

@@ -759,6 +759,52 @@ describe("CalendarPanel", () => {
       expect(block.querySelector(".sr-only")).toBeNull()
     })
 
+    describe("a meeting that crosses midnight", () => {
+      /** 23:00 Manila on the 12th to 01:30 on the 13th. */
+      const crosser = meetingFixture({
+        title: "Night handover",
+        startedAt: Date.parse("2026-08-12T15:00:00Z"),
+        endedAt: Date.parse("2026-08-12T17:30:00Z"),
+      })
+
+      it("hatches the tail and does not repeat the title on it", () => {
+        // `columnEventClass` had no `isStart` branch for a meeting, so the
+        // tail got neither the dashed edge nor the hatch, and `eventContent`
+        // printed the whole title again: one overnight meeting drew as two
+        // identical-looking meetings on consecutive days.
+        const { container } = renderPanel({ meetings: [crosser] })
+
+        const drawn = blocks(container)
+        expect(drawn).toHaveLength(2)
+
+        const hatched = drawn.filter((block) =>
+          block.className.includes("border-dashed")
+        )
+        expect(hatched).toHaveLength(1)
+
+        const [tail] = hatched
+        expect(within(tail).queryByText("Night handover")).toBeNull()
+        expect(tail.textContent).toBe(
+          "Night handover — continued from the previous day"
+        )
+        // A continuation is a texture, never a hue — and a ghost stays
+        // unfilled, so neither segment may pick up an entry's fill.
+        expect(tail.className).toContain("border-dashed")
+        expect(tail.className).not.toContain("bg-surface-raised")
+        expect(tail.className).not.toContain("enlarger")
+      })
+
+      it("leaves the head an ordinary outlined meeting block", () => {
+        const { container } = renderPanel({ meetings: [crosser] })
+        const head = blocks(container).find(
+          (block) => !block.className.includes("border-dashed")
+        )
+        expect(head!.className).toContain("border-edge-soft")
+        expect(head!.className).not.toContain("border-dashed")
+        expect(head!.textContent).toContain("Night handover")
+      })
+    })
+
     it("does not draw a meeting whose entry already exists", () => {
       const { container } = renderPanel({
         meetings: [meetingFixture({ entryId: "te_1" as Id<"timeEntries"> })],
