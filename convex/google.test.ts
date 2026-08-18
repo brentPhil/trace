@@ -8,10 +8,9 @@
 // the wrong side of that line is lost on the next poll, with no error anywhere.
 import { convexTest } from "convex-test"
 import { describe, expect, it, vi } from "vitest"
-import { APIError } from "better-auth/api"
 import schema from "./schema"
 import { internal } from "./_generated/api"
-import { isDeadGrant, mirrorWindow } from "./google"
+import { mirrorWindow, TOKEN_FAILURE_LIMIT } from "./google"
 
 // `syncAccount` fetches its access token through Better Auth's full stack —
 // component tables, encrypted-token storage, a real OAuth refresh call — none
@@ -629,48 +628,122 @@ describe("syncAccount", () => {
   })
 })
 
-describe("isDeadGrant", () => {
-  // What Better Auth's getValidAccessToken actually throws when Google
-  // rejects a refresh — confirmed by reading node_modules/better-auth/dist/
-  // api/routes/account.mjs, which swallows the original error entirely and
-  // rethrows this exact shape regardless of WHY the refresh failed.
-  it("treats a 400 APIError (the shape Google's invalid_grant produces) as a dead grant", () => {
-    const error = APIError.from("BAD_REQUEST", {
-      message: "Failed to get a valid access token",
-      code: "FAILED_TO_GET_ACCESS_TOKEN",
+describe("markConnection's token-failure counter", () => {
+  // A single `getAccessToken` failure cannot tell a revoked grant from a
+  // network blip reaching Google's token endpoint — Better Auth collapses
+  // both into the identical error shape (see TOKEN_FAILURE_LIMIT's comment
+  // in convex/google.ts). These tests are what proves counting consecutive
+  // failures, rather than flagging on the first one, actually behaves.
+  const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+
+  const seedConnection = async (t: ReturnType<typeof setup>) => {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: null,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
     })
-    expect(isDeadGrant(error)).toBe(true)
-  })
+  }
 
-  it("treats a 401 APIError as a dead grant", () => {
-    const error = APIError.from("UNAUTHORIZED", {
-      message: "Unauthorized",
-      code: "UNAUTHORIZED",
+  it("a single token failure leaves status ok and records the error, so the next run retries", async () => {
+    const t = setup()
+    await seedConnection(t)
+
+    await t.mutation(internal.google.markConnection, {
+      userId: ALICE,
+      nowMs: NOW,
+      error: "Could not get an access token: fetch failed",
+      tokenFailed: true,
     })
-    expect(isDeadGrant(error)).toBe(true)
-  })
 
-  it("does not treat a 500 APIError as a dead grant", () => {
-    // Not a shape getAccessToken actually produces today, but the function
-    // must not over-fire if Better Auth ever surfaces a server-side status —
-    // that is exactly the kind of transient failure that must leave the
-    // connection `status: "ok"` and retry next run.
-    const error = APIError.from(500, {
-      message: "Internal error",
-      code: "INTERNAL_SERVER_ERROR",
+    const rows = await t.query(internal.google.allConnectionsForTest, {
+      userId: ALICE,
     })
-    expect(isDeadGrant(error)).toBe(false)
+    expect(rows[0].status).toBe("ok")
+    expect(rows[0].tokenFailures).toBe(1)
+    expect(rows[0].lastError).toContain("fetch failed")
   })
 
-  it("does not treat a plain Error as a dead grant", () => {
-    // A network failure reaching Google's token endpoint, or a bug in
-    // createAuth(ctx), throws as an ordinary Error — never an APIError. This
-    // is Defect 2's whole point: it must not be mistaken for a revoked grant.
-    expect(isDeadGrant(new Error("fetch failed"))).toBe(false)
+  it("failures below the limit keep status ok and accumulate", async () => {
+    const t = setup()
+    await seedConnection(t)
+
+    for (let i = 0; i < TOKEN_FAILURE_LIMIT - 1; i++) {
+      await t.mutation(internal.google.markConnection, {
+        userId: ALICE,
+        nowMs: NOW,
+        error: "Could not get an access token: fetch failed",
+        tokenFailed: true,
+      })
+    }
+
+    const rows = await t.query(internal.google.allConnectionsForTest, {
+      userId: ALICE,
+    })
+    expect(rows[0].status).toBe("ok")
+    expect(rows[0].tokenFailures).toBe(TOKEN_FAILURE_LIMIT - 1)
   })
 
-  it("does not treat a non-error value as a dead grant", () => {
-    expect(isDeadGrant("boom")).toBe(false)
-    expect(isDeadGrant(undefined)).toBe(false)
+  it("reaching TOKEN_FAILURE_LIMIT consecutive failures flips status to reauth", async () => {
+    const t = setup()
+    await seedConnection(t)
+
+    for (let i = 0; i < TOKEN_FAILURE_LIMIT; i++) {
+      await t.mutation(internal.google.markConnection, {
+        userId: ALICE,
+        nowMs: NOW,
+        error: "Could not get an access token: fetch failed",
+        tokenFailed: true,
+      })
+    }
+
+    const rows = await t.query(internal.google.allConnectionsForTest, {
+      userId: ALICE,
+    })
+    expect(rows[0].status).toBe("reauth")
+    expect(rows[0].tokenFailures).toBe(TOKEN_FAILURE_LIMIT)
+  })
+
+  it("a successful run resets the count, so two failures, a success, then two more failures do not trip the limit", async () => {
+    // The test that proves the counter is CONSECUTIVE rather than cumulative.
+    // Without the reset, 2 + 2 = 4 failures would exceed a limit of 3 even
+    // though none of them were consecutive.
+    const t = setup()
+    await seedConnection(t)
+
+    for (let i = 0; i < 2; i++) {
+      await t.mutation(internal.google.markConnection, {
+        userId: ALICE,
+        nowMs: NOW,
+        error: "Could not get an access token: fetch failed",
+        tokenFailed: true,
+      })
+    }
+
+    await t.mutation(internal.google.markConnection, {
+      userId: ALICE,
+      status: "ok",
+      nowMs: NOW,
+      calendarsRefreshed: true,
+    })
+
+    for (let i = 0; i < 2; i++) {
+      await t.mutation(internal.google.markConnection, {
+        userId: ALICE,
+        nowMs: NOW,
+        error: "Could not get an access token: fetch failed",
+        tokenFailed: true,
+      })
+    }
+
+    const rows = await t.query(internal.google.allConnectionsForTest, {
+      userId: ALICE,
+    })
+    expect(rows[0].status).toBe("ok")
+    expect(rows[0].tokenFailures).toBe(2)
   })
 })

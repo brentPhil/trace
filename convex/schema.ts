@@ -288,6 +288,15 @@ export const googleConnectionFields = {
   lastSyncedAt: v.union(v.number(), v.null()),
   lastErrorAt: v.union(v.number(), v.null()),
   lastError: v.optional(v.string()),
+  /** Consecutive `getAccessToken` token-exchange failures. See
+   *  `TOKEN_FAILURE_LIMIT` in convex/google.ts for why this counts rather than
+   *  flagging `reauth` on the first failure, and why it resets to 0 on any run
+   *  that does not fail this specific way.
+   *
+   *  Optional and additive, matching how `currency` and `pdfIncludeNotes` were
+   *  added to `userSettings` — a row written before this field existed simply
+   *  has no opinion and needs no backfill. */
+  tokenFailures: v.optional(v.number()),
   updatedAt: v.number(),
 }
 

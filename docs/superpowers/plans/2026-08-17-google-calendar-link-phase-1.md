@@ -244,6 +244,15 @@ export const googleConnectionFields = {
   lastSyncedAt: v.union(v.number(), v.null()),
   lastErrorAt: v.union(v.number(), v.null()),
   lastError: v.optional(v.string()),
+  /** Consecutive `getAccessToken` token-exchange failures. See
+   *  `TOKEN_FAILURE_LIMIT` in convex/google.ts for why this counts rather than
+   *  flagging `reauth` on the first failure, and why it resets to 0 on any run
+   *  that does not fail this specific way.
+   *
+   *  Optional and additive, matching how `currency` and `pdfIncludeNotes` were
+   *  added to `userSettings` — a row written before this field existed simply
+   *  has no opinion and needs no backfill. */
+  tokenFailures: v.optional(v.number()),
   updatedAt: v.number(),
 }
 
@@ -1856,10 +1865,17 @@ export const connectionsToSync = internalQuery({
 export const markConnection = internalMutation({
   args: {
     userId: v.string(),
-    status: v.union(v.literal("ok"), v.literal("reauth")),
+    /** Omit when `tokenFailed` is true: that path decides `status` itself
+     *  from the accumulated count, so the caller has nothing correct to pass. */
+    status: v.optional(v.union(v.literal("ok"), v.literal("reauth"))),
     nowMs: v.number(),
     error: v.optional(v.string()),
     calendarsRefreshed: v.optional(v.boolean()),
+    /** True exactly on a `getAccessToken` token-exchange failure — see
+     *  `TOKEN_FAILURE_LIMIT`. Every other call site omits this, which is what
+     *  resets the counter: it measures CONSECUTIVE token-exchange failures,
+     *  not lifetime ones. */
+    tokenFailed: v.optional(v.boolean()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -1869,9 +1885,22 @@ export const markConnection = internalMutation({
       .unique()
     if (row === null) return null
 
+    const tokenFailures =
+      args.tokenFailed === true ? (row.tokenFailures ?? 0) + 1 : 0
+    // Below the limit, status stays "ok" so `connectionsToSync` still picks
+    // this account up next run — the whole point of counting instead of
+    // flagging on the first failure.
+    const status =
+      args.tokenFailed === true
+        ? tokenFailures >= TOKEN_FAILURE_LIMIT
+          ? "reauth"
+          : "ok"
+        : (args.status ?? row.status)
+
     await ctx.db.patch(row._id, {
-      status: args.status,
-      lastSyncedAt: args.status === "ok" ? args.nowMs : row.lastSyncedAt,
+      status,
+      tokenFailures,
+      lastSyncedAt: status === "ok" ? args.nowMs : row.lastSyncedAt,
       lastErrorAt: args.error === undefined ? row.lastErrorAt : args.nowMs,
       ...(args.error === undefined ? {} : { lastError: args.error }),
       ...(args.calendarsRefreshed === true
@@ -1897,7 +1926,6 @@ Add to `convex/google.ts`:
 import { internalAction } from "./_generated/server"
 import { internal } from "./_generated/api"
 import { createAuth } from "./auth"
-import { APIError } from "better-auth/api"
 import {
   GoogleAuthError,
   GoogleTransientError,
@@ -1917,31 +1945,35 @@ const CALENDAR_LIST_TTL_MS = 24 * 60 * 60 * 1_000
 const MAX_PAGES = 20
 
 /**
- * Whether a `getAccessToken` failure means the grant is dead, versus
- * transient — a network blip reaching Google's token endpoint, or an
- * unrelated bug in `createAuth(ctx)`.
+ * Consecutive `getAccessToken` failures a connection tolerates before
+ * `markConnection` flags it `reauth`.
  *
- * Better Auth's `getValidAccessToken` (node_modules/better-auth/dist/api/
- * routes/account.mjs) wraps EVERY failure from `provider.refreshAccessToken`
- * — a revoked refresh token and a flaky network alike — in the same shape: an
- * `APIError` with `status: "BAD_REQUEST"` / `statusCode: 400`, `body.code:
+ * A single failure cannot tell a revoked grant from a network blip reaching
+ * Google's token endpoint. Better Auth's `getValidAccessToken`
+ * (node_modules/better-auth/dist/api/routes/account.mjs) wraps EVERY failure
+ * from `provider.refreshAccessToken` — a revoked refresh token and a flaky
+ * network alike — in the same shape: an `APIError` with `status:
+ * "BAD_REQUEST"` / `statusCode: 400`, `body.code:
  * "FAILED_TO_GET_ACCESS_TOKEN"`, and no `cause` (the original error is
- * discarded, not attached). So an `APIError` with statusCode 400 or 401 IS
- * the token-exchange-failure signal — that is as fine-grained as this call
- * lets us see period, not a simplification we chose.
+ * discarded, not attached). A revoked grant and a blip arrive identically, so
+ * no amount of inspecting one error tells them apart.
+ *
+ * Persistence is the signal that does. The cron runs every 15 minutes, so 3
+ * consecutive failures means the problem has lasted about 45 minutes, which
+ * no ordinary network blip does — while a revoked grant fails every single
+ * time and so reaches this limit within the same window. Below the limit
+ * `markConnection` leaves `status: "ok"` so the next run retries; a run that
+ * succeeds, or fails a different way, resets the count to 0 — see
+ * `markConnection`'s `tokenFailed` handling — so this measures CONSECUTIVE
+ * failures, not lifetime ones.
  *
  * Getting this wrong in one direction costs a user a pointless trip through
- * Google's consent screen for something that would have healed itself in 15
- * minutes; getting it wrong in the other means an account whose grant is
- * truly gone sits `status: "ok"` and silently stops syncing forever, because
- * nothing ever asks `markConnection` to flag it.
+ * Google's consent screen for something that would have healed itself on its
+ * own; getting it wrong in the other means an account whose grant is truly
+ * gone keeps retrying for 45 minutes before it stops. Both are bounded costs,
+ * unlike the single-failure guess this replaced.
  */
-export function isDeadGrant(error: unknown): boolean {
-  if (error instanceof APIError) {
-    return error.statusCode === 400 || error.statusCode === 401
-  }
-  return false
-}
+export const TOKEN_FAILURE_LIMIT = 3
 
 export const syncAccount = internalAction({
   args: { userId: v.string() },
@@ -1961,24 +1993,15 @@ export const syncAccount = internalAction({
       })
       accessToken = result.accessToken
     } catch (error) {
-      if (isDeadGrant(error)) {
-        await ctx.runMutation(internal.google.markConnection, {
-          userId: args.userId,
-          status: "reauth",
-          nowMs,
-          error: `Could not get an access token: ${String(error)}`,
-        })
-        return null
-      }
-      // Not a dead grant, so this must not stop syncing: leave `status: "ok"`
-      // and let the next cron tick retry. `error` is still recorded through
-      // `markConnection` so a persistent problem is visible in Settings
-      // instead of failing silently.
+      // `markConnection` decides `status` itself from the consecutive count —
+      // see `TOKEN_FAILURE_LIMIT` — so this must not guess `reauth` from one
+      // failure. `error` is still recorded so a persistent problem is visible
+      // in Settings before it reaches the limit.
       await ctx.runMutation(internal.google.markConnection, {
         userId: args.userId,
-        status: "ok",
         nowMs,
         error: `Could not get an access token: ${String(error)}`,
+        tokenFailed: true,
       })
       return null
     }
