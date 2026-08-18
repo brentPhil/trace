@@ -931,7 +931,11 @@ const PAGE_ARGS = {
 
 describe("fetchEventsPage", () => {
   it("sends the token, the window, and singleEvents on a full fetch", async () => {
-    const fetchImpl = vi.fn(async () =>
+    // The parameters are DECLARED, though unused: `vi.fn(async () => ...)`
+    // records its calls as the empty tuple, so reading `mock.calls[0]` back as
+    // `[string, RequestInit]` is an illegal cast (TS2352) and the only way past
+    // it is a cast through `unknown` that throws the typing away entirely.
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) =>
       jsonResponse({ items: [], nextSyncToken: "tok_1" })
     )
     const page = await fetchEventsPage(
@@ -940,12 +944,12 @@ describe("fetchEventsPage", () => {
       PAGE_ARGS
     )
 
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toContain("/calendars/primary/events")
     expect(url).toContain("singleEvents=true")
     expect(url).toContain("timeMin=2026-06-01T00%3A00%3A00.000Z")
     expect(url).toContain("timeMax=2026-12-01T00%3A00%3A00.000Z")
-    expect((init.headers as Record<string, string>).Authorization).toBe(
+    expect((init?.headers as Record<string, string>).Authorization).toBe(
       "Bearer at_abc"
     )
     expect(page.nextSyncToken).toBe("tok_1")
@@ -953,12 +957,12 @@ describe("fetchEventsPage", () => {
   })
 
   it("sends syncToken instead of the window when it has one", async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ items: [] }))
+    const fetchImpl = vi.fn(async (_url: string) => jsonResponse({ items: [] }))
     await fetchEventsPage(fetchImpl as unknown as typeof fetch, "at_abc", {
       ...PAGE_ARGS,
       syncToken: "tok_1",
     })
-    const [url] = fetchImpl.mock.calls[0] as [string]
+    const [url] = fetchImpl.mock.calls[0]
     expect(url).toContain("syncToken=tok_1")
     // Google rejects the combination outright, so this is not a preference.
     expect(url).not.toContain("timeMin")
@@ -994,7 +998,7 @@ describe("fetchEventsPage", () => {
   })
 
   it("passes a page token through", async () => {
-    const fetchImpl = vi.fn(async () =>
+    const fetchImpl = vi.fn(async (_url: string) =>
       jsonResponse({ items: [], nextPageToken: "pg_2" })
     )
     const page = await fetchEventsPage(
@@ -1002,7 +1006,7 @@ describe("fetchEventsPage", () => {
       "at",
       { ...PAGE_ARGS, pageToken: "pg_1" }
     )
-    const [url] = fetchImpl.mock.calls[0] as [string]
+    const [url] = fetchImpl.mock.calls[0]
     expect(url).toContain("pageToken=pg_1")
     expect(page.nextPageToken).toBe("pg_2")
   })
