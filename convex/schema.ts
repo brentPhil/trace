@@ -319,6 +319,17 @@ export const googleCalendarFields = {
    *  issued. `null` means the next fetch is a full window fetch, which is both
    *  the first-run state and the recovery from a 410. */
   syncToken: v.union(v.string(), v.null()),
+  /** When this calendar last completed a FULL window fetch rather than a
+   *  delta. What makes the mirror converge: see `FULL_RESYNC_TTL_MS` in
+   *  convex/google.ts for the two ways a delta-only loop loses an event
+   *  permanently, and why a periodic full fetch is the only thing that finds
+   *  it again.
+   *
+   *  Optional and additive, the pattern `tokenFailures` and `currency`
+   *  already follow — a row written before this field existed simply has no
+   *  opinion, which reads as "never", which is the safe answer: its next run
+   *  does one full fetch and then settles into the TTL. No backfill. */
+  fullSyncedAt: v.optional(v.number()),
   lastSyncedAt: v.union(v.number(), v.null()),
   updatedAt: v.number(),
 }

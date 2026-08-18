@@ -15,6 +15,7 @@ import {
   TOKEN_FAILURE_LIMIT,
   MEETINGS_PER_CALENDAR_LIMIT,
   HIDE_DRAIN_PAGE,
+  FULL_RESYNC_TTL_MS,
 } from "./google"
 import { traceErrorCode } from "./lib/codes"
 
@@ -145,6 +146,8 @@ describe("applySyncPage", () => {
         timed("evt_1", "2026-08-17T10:00:00.000Z", "2026-08-17T10:30:00.000Z"),
       ],
       nextSyncToken: "tok_1",
+      lastPage: true,
+      windowFetch: true,
       nowMs: NOW,
     })
 
@@ -183,6 +186,8 @@ describe("applySyncPage", () => {
         },
       ],
       nextSyncToken: null,
+      lastPage: true,
+      windowFetch: true,
       nowMs: NOW,
     })
 
@@ -203,6 +208,8 @@ describe("applySyncPage", () => {
         timed("evt_1", "2026-08-17T10:00:00.000Z", "2026-08-17T10:30:00.000Z"),
       ],
       nextSyncToken: null,
+      lastPage: true,
+      windowFetch: true,
       nowMs: NOW,
     })
     await t.mutation(internal.google.applySyncPage, {
@@ -210,6 +217,8 @@ describe("applySyncPage", () => {
       calendarId: "primary",
       items: [{ id: "evt_1", status: "cancelled" }],
       nextSyncToken: null,
+      lastPage: true,
+      windowFetch: true,
       nowMs: NOW,
     })
 
@@ -237,6 +246,8 @@ describe("applySyncPage", () => {
       calendarId: "primary",
       items: [{ id: "evt_1", status: "cancelled" }],
       nextSyncToken: null,
+      lastPage: true,
+      windowFetch: true,
       nowMs: NOW,
     })
 
@@ -256,6 +267,8 @@ describe("applySyncPage", () => {
         timed("evt_1", "2026-08-17T10:00:00.000Z", "2026-08-17T10:30:00.000Z"),
       ],
       nextSyncToken: null,
+      lastPage: true,
+      windowFetch: true,
       nowMs: NOW,
     })
     const alice = await t.query(internal.google.allEventsForTest, { userId: ALICE })
@@ -624,6 +637,13 @@ describe("syncAccount", () => {
         summary: "Alice",
         show: true,
         syncToken: "stale-token",
+        // Freshly full-synced, so `FULL_RESYNC_TTL_MS` does not force a window
+        // fetch and the stored token is actually SENT — which is what this
+        // test needs, since a 410 can only be provoked by a request carrying
+        // one. `Date.now()` rather than the `NOW` fixture for the reason the
+        // `calendarsRefreshedAt` comment above gives: an action reads the real
+        // clock, and a fixed instant makes this a time bomb.
+        fullSyncedAt: Date.now(),
         lastSyncedAt: null,
         updatedAt: NOW,
       })
@@ -661,6 +681,151 @@ describe("syncAccount", () => {
     // The window fetch's empty page carried no nextSyncToken (the mock
     // response omits it), so the calendar's syncToken stays cleared — proof
     // the second fetch actually ran and its outcome was applied.
+    expect(rows[0].syncToken).toBeNull()
+  })
+
+  /*
+   * THE PERIODIC FULL REFETCH — `FULL_RESYNC_TTL_MS`.
+   *
+   * Without it, `mirrorWindow` was recomputed every run and only ever reached
+   * Google on the `syncToken === null` branch, so an event skipped by
+   * `mapGoogleEvent` (an unparseable start, say) was skipped FOREVER: Google
+   * never mentions it again on a delta, and only a 410 cleared the token.
+   */
+  async function seedForFullResync(
+    t: ReturnType<typeof setup>,
+    fullSyncedAt: number | undefined
+  ) {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: Date.now(),
+        lastSyncedAt: null,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Alice",
+        show: true,
+        syncToken: "delta-token",
+        ...(fullSyncedAt === undefined ? {} : { fullSyncedAt }),
+        lastSyncedAt: null,
+        updatedAt: NOW,
+      })
+    })
+  }
+
+  /** One 200 with an empty page and a fresh token, recording every URL. */
+  function stubOnePage(calls: Array<string>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(url)
+        return new Response(
+          JSON.stringify({ items: [], nextSyncToken: "fresh-token" }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      })
+    )
+  }
+
+  it("keeps sending the stored token while the full-resync TTL holds", async () => {
+    const t = setup()
+    await seedForFullResync(t, Date.now())
+    const calls: Array<string> = []
+    stubOnePage(calls)
+    try {
+      await t.action(internal.google.syncAccount, { userId: ALICE })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(calls[0]).toContain("syncToken=delta-token")
+  })
+
+  it("forces a window fetch once the full-resync TTL has expired", async () => {
+    const t = setup()
+    // One millisecond past the TTL, so the assertion is about the boundary
+    // rather than about an arbitrary age.
+    await seedForFullResync(t, Date.now() - FULL_RESYNC_TTL_MS - 1)
+    const calls: Array<string> = []
+    stubOnePage(calls)
+    try {
+      await t.action(internal.google.syncAccount, { userId: ALICE })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).not.toContain("syncToken")
+    expect(calls[0]).toContain("timeMin")
+
+    const rows = await t.query(internal.google.allCalendarsForTest, {
+      userId: ALICE,
+    })
+    // Stamped, so the NEXT run goes back to deltas — the TTL costs one full
+    // fetch per calendar per period, not one per run.
+    expect(rows[0].fullSyncedAt).toBeGreaterThan(0)
+    expect(rows[0].syncToken).toBe("fresh-token")
+  })
+
+  it("forces a window fetch for a calendar row written before the field existed", async () => {
+    const t = setup()
+    await seedForFullResync(t, undefined)
+    const calls: Array<string> = []
+    stubOnePage(calls)
+    try {
+      await t.action(internal.google.syncAccount, { userId: ALICE })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+    expect(calls[0]).not.toContain("syncToken")
+  })
+
+  it("clears the token when a run is truncated at MAX_PAGES", async () => {
+    /*
+     * A delta run that hits the page bound keeps the old token, so the next
+     * run asks the same question, gets the same oversized answer, and stops in
+     * the same place — every 15 minutes, forever, with nothing in the logs.
+     * Clearing it makes the next run a window fetch, which re-states the whole
+     * window instead of resuming a stream already ahead of us.
+     */
+    const t = setup()
+    await seedForFullResync(t, Date.now())
+    const calls: Array<string> = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(url)
+        // Never the last page: `nextPageToken` is always present, so the loop
+        // can only end at MAX_PAGES.
+        return new Response(
+          JSON.stringify({ items: [], nextPageToken: `p${calls.length}` }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+      })
+    )
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    let logged: Array<Array<unknown>> = []
+    try {
+      await t.action(internal.google.syncAccount, { userId: ALICE })
+    } finally {
+      vi.unstubAllGlobals()
+      // Copied out BEFORE restoring: `mockRestore` resets the mock as well as
+      // putting `console.error` back, so the recorded calls are gone by the
+      // time an assertion could read them off the spy.
+      logged = errors.mock.calls
+      errors.mockRestore()
+    }
+
+    expect(logged).toContainEqual([
+      "google sync truncated at MAX_PAGES.",
+      expect.objectContaining({ calendarId: "primary" }),
+    ])
+    const rows = await t.query(internal.google.allCalendarsForTest, {
+      userId: ALICE,
+    })
     expect(rows[0].syncToken).toBeNull()
   })
 })

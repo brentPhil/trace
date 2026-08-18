@@ -120,6 +120,15 @@ export const applySyncPage = internalMutation({
      *  are exhausted, and storing it earlier would declare covered a page that
      *  was never fetched. */
     nextSyncToken: v.union(v.string(), v.null()),
+    /** Whether this page is the last of the run — `nextPageToken === null`.
+     *  Separate from `nextSyncToken` because Google can end a run without
+     *  issuing one, and "the pages are exhausted" and "here is a token" are
+     *  then two different facts. */
+    lastPage: v.boolean(),
+    /** Whether this run carried NO `syncToken`, i.e. it re-read the whole
+     *  mirror window rather than a delta. Only such a run may stamp
+     *  `fullSyncedAt` — see `FULL_RESYNC_TTL_MS`. */
+    windowFetch: v.boolean(),
     nowMs: v.number(),
   },
   returns: v.object({ upserted: v.number(), deleted: v.number() }),
@@ -172,6 +181,13 @@ export const applySyncPage = internalMutation({
     if (calendar !== null) {
       await ctx.db.patch(calendar._id, {
         ...(args.nextSyncToken === null ? {} : { syncToken: args.nextSyncToken }),
+        // Stamped only when a WINDOW fetch reached its last page. A truncated
+        // window fetch must not claim one, or the TTL would declare the
+        // calendar converged on the strength of a run that stopped early —
+        // the same reasoning as `nextSyncToken` above.
+        ...(args.windowFetch && args.lastPage
+          ? { fullSyncedAt: args.nowMs }
+          : {}),
         lastSyncedAt: args.nowMs,
         updatedAt: args.nowMs,
       })
@@ -397,6 +413,34 @@ const CALENDAR_LIST_TTL_MS = 24 * 60 * 60 * 1_000
 const MAX_PAGES = 20
 
 /**
+ * How long a calendar may go without re-reading its whole mirror window.
+ *
+ * WHAT IT BUYS IS CONVERGENCE. `mirrorWindow(nowMs)` is recomputed every run
+ * but only reaches Google on the `syncToken === null` branch; once a token
+ * exists every request is a pure delta, and `clearSyncToken` fires only on a
+ * 410. Two things are then permanently lost with nothing in the logs:
+ *
+ *  - an event whose `start`/`end` will not parse is skipped by
+ *    `mapGoogleEvent`, and Google will never mention it again until somebody
+ *    edits it. Absent from the grid forever, on a healthy-looking cron.
+ *  - anything lost to `MAX_PAGES` truncation keeps the old token and
+ *    re-truncates identically every 15 minutes — a loop that cannot converge.
+ *
+ * A delta stream has no way to say "and here is what you missed". Only a
+ * window fetch re-states the truth, so one is forced periodically. STORED PER
+ * CALENDAR (`googleCalendars.fullSyncedAt`) rather than run off a second
+ * cron, for the reason `CALENDAR_LIST_TTL_MS` is: the interval is then a fact
+ * in the data, readable from a row, rather than a schedule nobody can see.
+ *
+ * THE COST IS ONE FULL FETCH PER CALENDAR PER PERIOD — a handful of pages for
+ * a busy diary, against 672 delta polls in the same week. Seven days rather
+ * than one because the failures it repairs are rare and not urgent: a
+ * mis-parsed event is a block missing from a plan, not a number missing from
+ * an invoice, and nothing in this phase writes a `timeEntries` row.
+ */
+export const FULL_RESYNC_TTL_MS = 7 * 24 * 60 * 60 * 1_000
+
+/**
  * Consecutive `getAccessToken` failures a connection tolerates before
  * `markConnection` flags it `reauth`.
  *
@@ -483,8 +527,29 @@ export const syncAccount = internalAction({
       })
 
       for (const calendar of shown) {
+        /*
+         * THE PERIODIC FULL REFETCH — see `FULL_RESYNC_TTL_MS`.
+         *
+         * The token is cleared BEFORE the loop rather than simply passing
+         * `null` into the first fetch, so the intent survives a crash: a run
+         * that dies mid-window would otherwise leave the old token in place
+         * and the calendar would go another full period without converging.
+         * A row with no `fullSyncedAt` at all — every row written before the
+         * field existed — reads as "never", which is the safe answer.
+         */
+        const fullDue =
+          calendar.fullSyncedAt === undefined ||
+          nowMs - calendar.fullSyncedAt >= FULL_RESYNC_TTL_MS
+        if (fullDue && calendar.syncToken !== null) {
+          await ctx.runMutation(internal.google.clearSyncToken, {
+            userId: args.userId,
+            calendarId: calendar.googleId,
+            nowMs,
+          })
+        }
+
         let pageToken: string | null = null
-        let syncToken = calendar.syncToken
+        let syncToken = fullDue ? null : calendar.syncToken
         let pages = 0
 
         // `while (pages < MAX_PAGES)` with explicit `break`s, not a
@@ -496,6 +561,12 @@ export const syncAccount = internalAction({
         // rest of this calendar's sync for the whole run, with the restart
         // only happening on the NEXT cron tick 15 minutes later.
         while (pages < MAX_PAGES) {
+          // Read BEFORE the fetch, because the `gone` branch below nulls
+          // `syncToken` mid-loop: after a 410 restart every remaining page of
+          // this run genuinely is part of a window fetch, and reading it
+          // afterwards would say so about the delta page that failed too.
+          const windowFetch = syncToken === null
+
           const page = await fetchEventsPage(fetch, accessToken, {
             calendarId: calendar.googleId,
             syncToken,
@@ -531,11 +602,40 @@ export const syncAccount = internalAction({
             // exhausted, and storing it earlier would declare covered a page
             // that was never fetched.
             nextSyncToken: page.nextPageToken === null ? page.nextSyncToken : null,
+            lastPage: page.nextPageToken === null,
+            windowFetch,
             nowMs,
           })
 
           pageToken = page.nextPageToken
           if (pageToken === null) break
+        }
+
+        /*
+         * TRUNCATED AT `MAX_PAGES`, with pages still owing.
+         *
+         * On a delta run this was unrecoverable: the old token survived, so
+         * the next run asked the same question, got the same oversized answer
+         * and stopped in the same place, every 15 minutes, forever. Clearing
+         * the token makes the next run a window fetch, which re-states the
+         * whole window from the start instead of resuming a stream that is
+         * already ahead of us.
+         *
+         * Logged rather than thrown, on `listMeetings`' argument: a partial
+         * mirror is better than a failed run, but this product does not
+         * silently truncate.
+         */
+        if (pageToken !== null) {
+          console.error("google sync truncated at MAX_PAGES.", {
+            userId: args.userId,
+            calendarId: calendar.googleId,
+            pages,
+          })
+          await ctx.runMutation(internal.google.clearSyncToken, {
+            userId: args.userId,
+            calendarId: calendar.googleId,
+            nowMs,
+          })
         }
       }
 
