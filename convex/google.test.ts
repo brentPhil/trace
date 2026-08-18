@@ -482,3 +482,69 @@ describe("pruneEvents", () => {
     expect(rows.map((row) => row.eventId)).toEqual(["at_from"])
   })
 })
+
+describe("syncAccount", () => {
+  const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+
+  it("markConnection records the reauth flag and the error text", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: null,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
+    })
+
+    await t.mutation(internal.google.markConnection, {
+      userId: ALICE,
+      status: "reauth",
+      nowMs: NOW,
+      error: "Google refused the grant (401)",
+    })
+
+    const rows = await t.query(internal.google.allConnectionsForTest, {
+      userId: ALICE,
+    })
+    expect(rows[0].status).toBe("reauth")
+    expect(rows[0].lastError).toContain("401")
+  })
+
+  it("skips an account already flagged for re-consent", async () => {
+    // The whole point of the flag: a revoked grant must stop being retried, or
+    // one user's dead token costs a Google API call every 15 minutes forever.
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "reauth",
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: null,
+        lastErrorAt: NOW,
+        updatedAt: NOW,
+      })
+    })
+
+    const due = await t.query(internal.google.connectionsToSync, { cursor: null })
+    expect(due.userIds).toEqual([])
+  })
+
+  it("returns an ok connection as due", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: null,
+        lastSyncedAt: null,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
+    })
+    const due = await t.query(internal.google.connectionsToSync, { cursor: null })
+    expect(due.userIds).toEqual([ALICE])
+  })
+})

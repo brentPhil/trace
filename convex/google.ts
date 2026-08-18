@@ -1,7 +1,16 @@
 import { v } from "convex/values"
-import { internalMutation, internalQuery } from "./_generated/server"
+import { internalAction, internalMutation, internalQuery } from "./_generated/server"
+import { internal } from "./_generated/api"
+import { createAuth } from "./auth"
+import {
+  GoogleAuthError,
+  GoogleTransientError,
+  fetchCalendarList,
+  fetchEventsPage,
+} from "./googleApi"
 import {
   googleCalendarDoc,
+  googleConnectionDoc,
   googleEventDoc,
   googleEventTrackingDoc,
 } from "./lib/docs"
@@ -272,5 +281,278 @@ export const pruneEvents = internalMutation({
       removed += 1
     }
     return removed
+  },
+})
+
+/** How many accounts one cron run picks up. A page, not the world: the cron
+ *  fires every 15 minutes and each account's work is scheduled separately, so a
+ *  slow or failing account cannot starve the others. */
+const SYNC_PAGE_SIZE = 100
+
+export const allConnectionsForTest = internalQuery({
+  args: { userId: v.string() },
+  returns: v.array(googleConnectionDoc),
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("googleConnections")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .take(10),
+})
+
+/**
+ * Which accounts are due a sync.
+ *
+ * `status: "ok"` only. An account flagged `reauth` is skipped entirely until a
+ * human consents again — see the schema comment on that field. Read through
+ * `by_status`, which is the one index in this feature not led by `userId`,
+ * because this caller has no user to scope to.
+ */
+export const connectionsToSync = internalQuery({
+  args: { cursor: v.union(v.string(), v.null()) },
+  returns: v.object({
+    userIds: v.array(v.string()),
+    cursor: v.union(v.string(), v.null()),
+  }),
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("googleConnections")
+      .withIndex("by_status", (q) => q.eq("status", "ok"))
+      .paginate({ numItems: SYNC_PAGE_SIZE, cursor: args.cursor })
+    return {
+      userIds: page.page.map((row) => row.userId),
+      cursor: page.isDone ? null : page.continueCursor,
+    }
+  },
+})
+
+export const markConnection = internalMutation({
+  args: {
+    userId: v.string(),
+    status: v.union(v.literal("ok"), v.literal("reauth")),
+    nowMs: v.number(),
+    error: v.optional(v.string()),
+    calendarsRefreshed: v.optional(v.boolean()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("googleConnections")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique()
+    if (row === null) return null
+
+    await ctx.db.patch(row._id, {
+      status: args.status,
+      lastSyncedAt: args.status === "ok" ? args.nowMs : row.lastSyncedAt,
+      lastErrorAt: args.error === undefined ? row.lastErrorAt : args.nowMs,
+      ...(args.error === undefined ? {} : { lastError: args.error }),
+      ...(args.calendarsRefreshed === true
+        ? { calendarsRefreshedAt: args.nowMs }
+        : {}),
+      updatedAt: args.nowMs,
+    })
+    return null
+  },
+})
+
+/** How stale the calendar LIST may get. Events are polled every 15 minutes;
+ *  the set of calendars changes about never, and refetching it every run is
+ *  a quota call spent on an answer that has not moved. */
+const CALENDAR_LIST_TTL_MS = 24 * 60 * 60 * 1_000
+
+/** A hard stop on pages per calendar per run. A full window fetch of a busy
+ *  calendar is a handful of pages; a hundred means something is wrong with the
+ *  loop, and an unbounded `while` in an action is how a quota gets burned in
+ *  one afternoon. */
+const MAX_PAGES = 20
+
+export const syncAccount = internalAction({
+  args: { userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const nowMs = Date.now()
+
+    // The access token comes from Better Auth, which refreshes it from the
+    // stored refresh token. One token store — so revoking access in a Google
+    // account page actually stops this, rather than stopping it whenever a copy
+    // we cached happened to expire.
+    let accessToken: string
+    try {
+      const auth = createAuth(ctx)
+      const result = await auth.api.getAccessToken({
+        body: { providerId: "google", userId: args.userId },
+      })
+      accessToken = result.accessToken
+    } catch (error) {
+      await ctx.runMutation(internal.google.markConnection, {
+        userId: args.userId,
+        status: "reauth",
+        nowMs,
+        error: `Could not get an access token: ${String(error)}`,
+      })
+      return null
+    }
+
+    try {
+      const connection = await ctx.runQuery(
+        internal.google.connectionForSync,
+        { userId: args.userId }
+      )
+      if (connection === null) return null
+
+      const stale =
+        connection.calendarsRefreshedAt === null ||
+        nowMs - connection.calendarsRefreshedAt > CALENDAR_LIST_TTL_MS
+      if (stale) {
+        const calendars = await fetchCalendarList(fetch, accessToken)
+        await ctx.runMutation(internal.google.upsertCalendars, {
+          userId: args.userId,
+          calendars,
+          nowMs,
+        })
+      }
+
+      const window = mirrorWindow(nowMs)
+      const shown = await ctx.runQuery(internal.google.shownCalendars, {
+        userId: args.userId,
+      })
+
+      for (const calendar of shown) {
+        let pageToken: string | null = null
+        let syncToken = calendar.syncToken
+        let pages = 0
+
+        do {
+          const page = await fetchEventsPage(fetch, accessToken, {
+            calendarId: calendar.googleId,
+            syncToken,
+            timeMinMs: window.fromMs,
+            timeMaxMs: window.toMs,
+            pageToken,
+          })
+
+          if (page.gone) {
+            // Routine. The token aged out; drop it and start the window again on
+            // the next iteration of this same loop.
+            await ctx.runMutation(internal.google.clearSyncToken, {
+              userId: args.userId,
+              calendarId: calendar.googleId,
+              nowMs,
+            })
+            syncToken = null
+            pageToken = null
+            pages += 1
+            continue
+          }
+
+          await ctx.runMutation(internal.google.applySyncPage, {
+            userId: args.userId,
+            calendarId: calendar.googleId,
+            items: page.items,
+            // Stored ONLY on the last page. Google issues it when the pages are
+            // exhausted, and storing it earlier would declare covered a page
+            // that was never fetched.
+            nextSyncToken: page.nextPageToken === null ? page.nextSyncToken : null,
+            nowMs,
+          })
+
+          pageToken = page.nextPageToken
+          pages += 1
+        } while (pageToken !== null && pages < MAX_PAGES)
+      }
+
+      await ctx.runMutation(internal.google.pruneEvents, {
+        userId: args.userId,
+        fromMs: window.fromMs,
+        toMs: window.toMs,
+      })
+
+      await ctx.runMutation(internal.google.markConnection, {
+        userId: args.userId,
+        status: "ok",
+        nowMs,
+        calendarsRefreshed: stale,
+      })
+    } catch (error) {
+      if (error instanceof GoogleAuthError) {
+        await ctx.runMutation(internal.google.markConnection, {
+          userId: args.userId,
+          status: "reauth",
+          nowMs,
+          error: error.message,
+        })
+        return null
+      }
+      if (error instanceof GoogleTransientError) {
+        // Stale-but-present is the whole reason there is a mirror. Record it and
+        // let the next run try; no backoff state to get wrong.
+        await ctx.runMutation(internal.google.markConnection, {
+          userId: args.userId,
+          status: "ok",
+          nowMs,
+          error: error.message,
+        })
+        return null
+      }
+      throw error
+    }
+
+    return null
+  },
+})
+
+export const syncAll = internalAction({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    let cursor: string | null = null
+    do {
+      const due: { userIds: Array<string>; cursor: string | null } =
+        await ctx.runQuery(internal.google.connectionsToSync, { cursor })
+      for (const userId of due.userIds) {
+        // One scheduled action per account, so a slow or failing account cannot
+        // starve the rest — and so a thrown error is scoped to one user.
+        await ctx.scheduler.runAfter(0, internal.google.syncAccount, { userId })
+      }
+      cursor = due.cursor
+    } while (cursor !== null)
+    return null
+  },
+})
+
+export const connectionForSync = internalQuery({
+  args: { userId: v.string() },
+  returns: v.union(googleConnectionDoc, v.null()),
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("googleConnections")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique(),
+})
+
+export const shownCalendars = internalQuery({
+  args: { userId: v.string() },
+  returns: v.array(googleCalendarDoc),
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("googleCalendars")
+      .withIndex("by_user_show", (q) =>
+        q.eq("userId", args.userId).eq("show", true)
+      )
+      .take(50),
+})
+
+export const clearSyncToken = internalMutation({
+  args: { userId: v.string(), calendarId: v.string(), nowMs: v.number() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const calendar = await calendarRow(ctx, args.userId, args.calendarId)
+    if (calendar !== null) {
+      await ctx.db.patch(calendar._id, {
+        syncToken: null,
+        updatedAt: args.nowMs,
+      })
+    }
+    return null
   },
 })
