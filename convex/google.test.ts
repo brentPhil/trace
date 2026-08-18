@@ -604,7 +604,16 @@ describe("syncAccount", () => {
         status: "ok",
         // Not stale, so syncAccount skips fetchCalendarList and the mocked
         // fetch below only ever has to answer events.list.
-        calendarsRefreshedAt: NOW,
+        //
+        // Date.now(), NOT the `NOW` fixture, and that is the whole point:
+        // `syncAccount` is an action, so it reads the REAL clock, and staleness
+        // is `Date.now() - calendarsRefreshedAt > CALENDAR_LIST_TTL_MS`. Seeding
+        // a fixed instant made this test a time bomb — it passed while the wall
+        // clock was within a day of the fixture and then began failing on its
+        // own, with the calendar-list fetch silently consuming the first stubbed
+        // response. A test whose result depends on the date it is run is worse
+        // than no test: it spends someone's afternoon on a defect that is not there.
+        calendarsRefreshedAt: Date.now(),
         lastSyncedAt: null,
         lastErrorAt: null,
         updatedAt: NOW,
