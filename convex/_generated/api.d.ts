@@ -15,6 +15,7 @@ import type * as entries from "../entries.js";
 import type * as entryTags from "../entryTags.js";
 import type * as errors from "../errors.js";
 import type * as google from "../google.js";
+import type * as googleEvents from "../googleEvents.js";
 import type * as healthcheck from "../healthcheck.js";
 import type * as http from "../http.js";
 import type * as import_ from "../import.js";
@@ -57,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   entryTags: typeof entryTags;
   errors: typeof errors;
   google: typeof google;
+  googleEvents: typeof googleEvents;
   healthcheck: typeof healthcheck;
   http: typeof http;
   import: typeof import_;
