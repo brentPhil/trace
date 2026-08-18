@@ -529,12 +529,24 @@ export function CalendarPanel({
    * `extendedProps` rather than in a second source. `isMeetingEvent` is the only
    * place that is read.
    *
-   * `meetings` is NOT in the clock's dependency: a meeting's end is a stored
-   * instant, so nothing in that half of the array moves with `nowMs`.
+   * THE TWO HALVES ARE MEMOISED SEPARATELY, and that is what makes the claim
+   * below true rather than merely stated. A meeting's start and end are stored
+   * instants, so nothing in that half moves with the clock — but while a timer
+   * is running `clockMs` ticks every second, and with one combined memo that
+   * tick re-ran `meetingEvents(meetings)` too, allocating two `Date`s per
+   * meeting per second for an array that had not changed. The comment here
+   * used to assert `meetings` was not in the clock's dependency while the
+   * dependency array beside it read `[entries, clockMs, meetings]`.
+   *
+   * Keyed on `meetings` alone, which is why `NO_MEETINGS` above is a module
+   * constant: a fresh `[]` default would bust this memo on every render and
+   * put the cost straight back.
    */
+  const meetingBlocks = useMemo(() => meetingEvents(meetings), [meetings])
+
   const events = useMemo(
-    () => [...calendarEvents(entries, clockMs), ...meetingEvents(meetings)],
-    [entries, clockMs, meetings]
+    () => [...calendarEvents(entries, clockMs), ...meetingBlocks],
+    [entries, clockMs, meetingBlocks]
   )
 
   /*

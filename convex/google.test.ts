@@ -16,6 +16,7 @@ import {
   MEETINGS_PER_CALENDAR_LIMIT,
   HIDE_DRAIN_PAGE,
   FULL_RESYNC_TTL_MS,
+  DISCONNECT_PAGE,
 } from "./google"
 import { traceErrorCode } from "./lib/codes"
 
@@ -1153,9 +1154,8 @@ describe("the public connection surface", () => {
     const t = setup()
     const NOW = Date.parse("2026-08-17T09:00:00.000Z")
 
-    // Seed more calendars than the drain page size. The exact count depends on
-    // the bound; we use a number we know exceeds it.
-    const CALENDAR_COUNT = 520
+    // Twenty past the bound, so exactly twenty must survive the first page.
+    const CALENDAR_COUNT = DISCONNECT_PAGE + 20
 
     await t.run(async (ctx) => {
       await ctx.db.insert("googleConnections", {
@@ -1191,12 +1191,23 @@ describe("the public connection surface", () => {
     expect(connections).toHaveLength(1)
     expect(connections[0].status).toBe("ok")
 
-    // The first page of calendars must be gone
-    const calendars = await t.query(internal.google.allCalendarsForTest, {
-      userId: ALICE,
-    })
-    expect(calendars.length).toBeGreaterThan(0)
-    expect(calendars.length).toBeLessThan(CALENDAR_COUNT)
+    /*
+     * EXACTLY one page must be gone, and the assertion has to be able to say
+     * so. `allCalendarsForTest` reads through `.take(100)`, so a `> 0 &&
+     * < CALENDAR_COUNT` bound passed identically whether the drain deleted 500
+     * rows or none at all — 520 surviving rows still come back as 100. Reading
+     * the true count in a `t.run` is what makes this pin the drain.
+     */
+    const remaining = await t.run(
+      async (ctx) =>
+        (
+          await ctx.db
+            .query("googleCalendars")
+            .withIndex("by_user_googleId", (q) => q.eq("userId", ALICE))
+            .collect()
+        ).length
+    )
+    expect(remaining).toBe(CALENDAR_COUNT - DISCONNECT_PAGE)
   })
 })
 

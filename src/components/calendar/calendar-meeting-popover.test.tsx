@@ -101,6 +101,27 @@ describe("CalendarMeetingPopover", () => {
     expect(screen.queryByRole("link", { name: /Join/i })).toBeNull()
   })
 
+  it("renders no link at all for a URL that is not http(s)", () => {
+    /*
+     * Both URLs arrive from a Google event, which means from whoever sent the
+     * invite. React neutralises `javascript:` and browsers block a top-level
+     * `data:` navigation, so this is defence in depth — but the content is a
+     * stranger's and the check is one line. A rejected URL is treated exactly
+     * as an absent one: no link, rather than a dead one.
+     */
+    show({
+      conferenceUrl: "javascript:alert(1)",
+      htmlLink: "data:text/html,<script>alert(1)</script>",
+    })
+    expect(screen.queryByRole("link", { name: /Join/i })).toBeNull()
+    expect(screen.queryByRole("link", { name: /Google Calendar/i })).toBeNull()
+  })
+
+  it("renders no link for a relative URL, which would point at Chroneli itself", () => {
+    show({ conferenceUrl: "/settings" })
+    expect(screen.queryByRole("link", { name: /Join/i })).toBeNull()
+  })
+
   it("has no editable control anywhere in it", () => {
     show({ description: "Agenda: everything" })
     // Read-only by decision. Phase 2 adds exactly one control here — the tick —

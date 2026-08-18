@@ -11,6 +11,36 @@ const RESPONSE_LABEL: Record<string, string> = {
   needsAction: "No response",
 }
 
+/**
+ * A URL this component is willing to put in an `href`, or null.
+ *
+ * `conferenceUrl` and `htmlLink` come from a Google event, which means they
+ * come from whoever sent the invite — a stranger, in the general case. React
+ * already neutralises a `javascript:` href and browsers already block a
+ * top-level `data:` navigation, so this is DEFENCE IN DEPTH rather than the
+ * only thing standing between a user and a scripted link; it is here because
+ * the whole cost is one check and the content is third-party.
+ *
+ * An ALLOWLIST rather than a blocklist, for the reason allowlists always win:
+ * the set of schemes a browser will honour is open-ended and grows, while the
+ * set this popover has any use for is exactly two. A rejected URL renders no
+ * link at all — the same treatment an absent one gets, which the branches
+ * below already handle.
+ */
+function safeHref(url: string | undefined): string | null {
+  if (url === undefined) return null
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? url
+      : null
+  } catch {
+    // Not a parseable absolute URL. A relative one would resolve against
+    // Chroneli's own origin, which is not what a Google link ever means.
+    return null
+  }
+}
+
 export function CalendarMeetingPopover({
   meeting,
   anchor,
@@ -36,6 +66,8 @@ export function CalendarMeetingPopover({
   const title = meeting.title.trim() === "" ? "Untitled" : meeting.title
   const listed = meeting.attendees.length
   const unlisted = Math.max(0, meeting.attendeeCount - listed)
+  const conferenceHref = safeHref(meeting.conferenceUrl)
+  const htmlHref = safeHref(meeting.htmlLink)
 
   return (
     <Popover.Root
@@ -76,9 +108,9 @@ export function CalendarMeetingPopover({
             </span>
           )}
 
-          {meeting.conferenceUrl === undefined ? null : (
+          {conferenceHref === null ? null : (
             <a
-              href={meeting.conferenceUrl}
+              href={conferenceHref}
               target="_blank"
               rel="noreferrer"
               className="text-xs text-foreground underline underline-offset-2"
@@ -138,9 +170,9 @@ export function CalendarMeetingPopover({
             </p>
           )}
 
-          {meeting.htmlLink === undefined ? null : (
+          {htmlHref === null ? null : (
             <a
-              href={meeting.htmlLink}
+              href={htmlHref}
               target="_blank"
               rel="noreferrer"
               className="text-xs text-muted-foreground underline underline-offset-2"

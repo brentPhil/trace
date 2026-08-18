@@ -735,6 +735,22 @@ export const connectionForSync = internalQuery({
       .unique(),
 })
 
+/**
+ * How many SHOWN calendars either reader will look at.
+ *
+ * Assumes no user shows more than this. A user past the bound has their
+ * 51st-and-later shown calendars silently skipped — no error, no log, just
+ * events that never arrive for a calendar they believe is on, and meetings
+ * that never draw for it.
+ *
+ * Named once and exported because BOTH readers must agree: `shownCalendars`
+ * decides what the cron fetches and `listMeetingsImpl` decides what the grid
+ * reads, and if those two bounds ever drifted apart a calendar would be
+ * mirrored and never drawn, or drawn from a mirror nothing refreshes. It was
+ * an unnamed `50` in both places.
+ */
+export const SHOWN_CALENDARS_LIMIT = 50
+
 export const shownCalendars = internalQuery({
   args: { userId: v.string() },
   returns: v.array(googleCalendarDoc),
@@ -744,12 +760,7 @@ export const shownCalendars = internalQuery({
       .withIndex("by_user_show", (q) =>
         q.eq("userId", args.userId).eq("show", true)
       )
-      // Assumes no user shows more than 50 calendars. A user past that bound
-      // has their 51st-and-later shown calendars silently skipped by every
-      // sync — no error, no log, just events that never arrive for a
-      // calendar the user believes is on — with no signal here that the read
-      // was truncated.
-      .take(50),
+      .take(SHOWN_CALENDARS_LIMIT),
 })
 
 export const clearSyncToken = internalMutation({
@@ -802,7 +813,7 @@ async function listMeetingsImpl(
   const calendars = await ctx.db
     .query("googleCalendars")
     .withIndex("by_user_show", (q) => q.eq("userId", userId).eq("show", true))
-    .take(50)
+    .take(SHOWN_CALENDARS_LIMIT)
   if (calendars.length === 0) return []
 
   // Read PER SHOWN CALENDAR through `by_user_calendar_started`, rather than one
@@ -1204,7 +1215,7 @@ export const connectForUser = internalMutation({
 /** One drain page. Bounded because a disconnect on a full mirror is a few
  *  thousand rows — more than one transaction should write — so it continues over
  *  scheduled calls rather than risking a rollback that undoes the whole thing. */
-const DISCONNECT_PAGE = 500
+export const DISCONNECT_PAGE = 500
 
 async function disconnectImpl(ctx: MutationCtx, userId: string) {
   /*

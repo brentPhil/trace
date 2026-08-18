@@ -271,6 +271,12 @@ function CalendarShowSwitch({
       onClick={() => onChange(!checked)}
       className={cn(
         "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
+        // Reduced motion is a house rule, honoured AT THE CALL SITE the way
+        // every other transition in this codebase does it. Both halves of this
+        // control animate — the track's colour and the thumb's travel — and
+        // the state is carried by `aria-checked` and the thumb's POSITION, so
+        // removing the tween costs the control nothing it was using to speak.
+        "motion-reduce:transition-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         checked ? "border-foreground bg-foreground" : "border-edge bg-ground"
       )}
@@ -278,6 +284,7 @@ function CalendarShowSwitch({
       <span
         className={cn(
           "inline-block size-3.5 rounded-full shadow transition-transform",
+          "motion-reduce:transition-none",
           checked ? "translate-x-4 bg-ground" : "translate-x-0.5 bg-foreground"
         )}
       />
