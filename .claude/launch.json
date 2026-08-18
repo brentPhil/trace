@@ -9,9 +9,15 @@
     {
       "name": "chroneli-dev",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["exec", "vite", "dev", "--port", "3101", "--host", "127.0.0.1"],
-      "port": 3101,
-      "url": "http://localhost:3101"
+      "runtimeArgs": [
+        "exec",
+        "vite",
+        "dev",
+        "--port",
+        "3100"
+      ],
+      "port": 3100,
+      "url": "http://localhost:3100"
     }
   ]
 }

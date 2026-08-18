@@ -93,7 +93,21 @@ afterEach(() => {
   generateLogoUploadUrl.mockClear()
   clearLogo.mockClear()
   setLogo.mockClear()
-  listAccounts.mockClear()
+  // `mockReset`, NOT `mockClear`, and the difference is the whole bug it fixes.
+  //
+  // `mockClear` empties the call list and nothing else: a `mockResolvedValue`
+  // stays installed, and — worse — an unconsumed `mockResolvedValueOnce` stays
+  // QUEUED. Several tests here queue a one-shot account list and then assert
+  // that `listAccounts` is never called, so their value is still sitting in the
+  // queue when the suite moves on, waiting to be handed to whichever later test
+  // calls it first. That is not hypothetical: it made the disconnect tests
+  // silently take the sole-Google-account branch and skip the unlink they exist
+  // to assert.
+  //
+  // `mockReset` drains the queue and drops the implementation, so the default
+  // below is re-established from a clean slate every time.
+  listAccounts.mockReset()
+  listAccounts.mockResolvedValue({ data: [] })
   linkSocial.mockClear()
   unlinkAccount.mockClear()
   unlinkAccount.mockResolvedValue({ data: { status: true }, error: null })
@@ -471,11 +485,21 @@ describe("/settings — Google disconnect", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Connect Google/i })).toBeTruthy()
     )
-    expect(listAccounts).not.toHaveBeenCalled()
+    // EXACTLY ONE call, not zero: `disconnectGoogle` reads the account list
+    // itself, to find out whether Google is the only way into this account. A
+    // SECOND call would mean the round-trip effect had fired — which is the
+    // regression this test exists to catch, since disconnecting flips
+    // `connected` to false and that is precisely what used to re-trigger it.
+    expect(listAccounts).toHaveBeenCalledTimes(1)
     expect(googleConnect).not.toHaveBeenCalled()
   })
 
   it("revokes the Google grant rather than only forgetting the mirror", async () => {
+    // A password account that later linked Google — two rows, so the unlink is
+    // safe to attempt.
+    listAccounts.mockResolvedValue({
+      data: [{ providerId: "credential" }, { providerId: "google" }],
+    })
     renderSettings({}, { connected: true, status: "ok" })
     fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
     await waitFor(() =>
@@ -488,7 +512,31 @@ describe("/settings — Google disconnect", () => {
     )
   })
 
+  it("does not unlink Google when it is the only way into the account", async () => {
+    // What `signIn.social` on the auth screens now creates: an identity whose
+    // ONLY account row is the Google one. Unlinking it would revoke the user's
+    // sole credential and lock them out, and Better Auth refuses it anyway
+    // (FAILED_TO_UNLINK_LAST_ACCOUNT) — so the attempt is not made, and the
+    // user is told where the grant actually lives instead of being advised to
+    // press a button that can never work for them.
+    listAccounts.mockResolvedValue({ data: [{ providerId: "google" }] })
+    renderSettings({}, { connected: true, status: "ok" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+    await waitFor(() => expect(googleDisconnect).toHaveBeenCalledWith({}))
+
+    expect(unlinkAccount).not.toHaveBeenCalled()
+    // `getAllBy`, because the toast renders its title in a live region as well
+    // as on screen, so the sentence legitimately appears more than once.
+    await waitFor(() =>
+      expect(screen.getAllByText(/myaccount/).length).toBeGreaterThan(0)
+    )
+  })
+
   it("says so when the grant could not be revoked", async () => {
+    listAccounts.mockResolvedValue({
+      data: [{ providerId: "credential" }, { providerId: "google" }],
+    })
     unlinkAccount.mockResolvedValue({
       data: null,
       error: { message: "session is not fresh" },

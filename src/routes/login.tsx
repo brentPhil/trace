@@ -1,4 +1,5 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
+import { AuthBackdrop } from "@/components/auth-backdrop"
 import { AuthForm } from "@/components/auth-form"
 import { safeRedirect } from "@/lib/redirect"
 import { pageTitle } from "@shared/brand"
@@ -20,7 +21,8 @@ function LoginRoute() {
   const search = Route.useSearch()
 
   return (
-    <main className="flex min-h-svh items-center justify-center p-6">
+    <main className="relative flex min-h-svh [align-items:safe_center] justify-center p-6">
+      <AuthBackdrop />
       <AuthForm
         mode="signin"
         redirectTo={safeRedirect(search.redirect)}

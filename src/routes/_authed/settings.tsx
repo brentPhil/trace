@@ -174,6 +174,23 @@ export function Settings() {
     void authClient.linkSocial({
       provider: "google",
       callbackURL: window.location.href,
+      /*
+       * THE CALENDAR SCOPE IS REQUESTED HERE, not on the provider.
+       *
+       * `convex/auth.ts` deliberately leaves the provider on Google's default
+       * profile-and-email scopes so the SIGN-IN screens do not ask a stranger
+       * to hand over their calendar. This is the moment the permission is
+       * actually about to be used, which is what Google's incremental
+       * authorisation asks for — and Better Auth documents `scopes` as
+       * "additional scopes to request when linking the account … compared to
+       * the initial authentication", so it upgrades an account that already
+       * exists from signing in with Google rather than rejecting it.
+       *
+       * If this list ever stops matching what `convex/googleApi.ts` calls, the
+       * failure is a 403 on every sync and a connection flagged `reauth` —
+       * with a consent screen that looked like it succeeded.
+       */
+      scopes: ["https://www.googleapis.com/auth/calendar.readonly"],
     })
   }
 
@@ -196,22 +213,52 @@ export function Settings() {
    * and the user is shown a "lost access" banner for something they asked for.
    * So the recoverable failure is the one placed last-but-one.
    *
-   * Better Auth REFUSES to unlink a sole account (`unlinkAccount` throws
-   * FAILED_TO_UNLINK_LAST_ACCOUNT when `findAccounts` returns one row and
-   * `allowUnlinkingAll` is off). It cannot bite here: every account on this
-   * product is created through email-and-password, and `linkSocial` ADDS
-   * Google beside that credential row rather than replacing it — see the
-   * `linkSocial` note above — so there are always two.
+   * WHEN GOOGLE IS THE ONLY WAY IN, THE UNLINK IS NOT ATTEMPTED.
    *
-   * The failure is REPORTED, never swallowed. "Disconnected" while a live
-   * grant survives is the one outcome a user cannot detect from this screen.
-   * Toasted here rather than thrown through `report`, because `errorMessage`
+   * Better Auth refuses to unlink a sole account (`unlinkAccount` throws
+   * FAILED_TO_UNLINK_LAST_ACCOUNT when `findAccounts` returns one row and
+   * `allowUnlinkingAll` is off). That used to be unreachable — every account
+   * was created through email-and-password and `linkSocial` only ever ADDED
+   * Google beside the credential row — and it stopped being unreachable the
+   * moment the auth screens grew `signIn.social`: somebody who signed up with
+   * Google has exactly one account row, and it is the Google one.
+   *
+   * Calling it anyway would fail correctly and advise wrongly, because the old
+   * message told the user to press Disconnect again — which for them can never
+   * work. And succeeding would be worse than failing: it would revoke the only
+   * credential they have and lock them out of the product.
+   *
+   * So the sole-account case is detected first and told the truth: the mirror
+   * is deleted, the grant is left alone because it is their key, and revoking
+   * calendar access is pointed at Google's own permissions page, which is the
+   * only place that can do it without taking their sign-in with it.
+   *
+   * A failure is REPORTED, never swallowed. "Disconnected" while a live grant
+   * survives is the one outcome a user cannot detect from this screen. Toasted
+   * here rather than thrown through `report`, because `errorMessage`
    * deliberately flattens anything that is not a Trace error to "That didn't
    * save. Try again." — which would be the wrong sentence twice over: the
    * removal DID save, and trying again is not the only recovery.
    */
   const disconnectGoogle = async () => {
+    // Read BEFORE the mirror is deleted. Nothing here depends on that order
+    // today, and putting the read first keeps it independent of it.
+    const accounts = await authClient.listAccounts()
+    const googleIsOnlyAccount =
+      (accounts.data ?? []).filter((account) => account.providerId === "google")
+        .length === (accounts.data ?? []).length && (accounts.data ?? []).length > 0
+
     await disconnectMutation({})
+
+    if (googleIsOnlyAccount) {
+      toasts.add({
+        title:
+          "Your calendar data was removed. Chroneli's Google access was left in place because signing in with Google is how you get into your account — remove it at myaccount.google.com/permissions if you want it gone.",
+        priority: "high",
+      })
+      return
+    }
+
     const result = await authClient.unlinkAccount({ providerId: "google" })
     if (result.error) {
       toasts.add({

@@ -62,7 +62,29 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
         clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
         accessType: "offline",
         prompt: "consent",
-        scope: ["https://www.googleapis.com/auth/calendar.readonly"],
+        /*
+         * NO CALENDAR SCOPE HERE, and its absence is the design.
+         *
+         * This provider is now the front door as well as the calendar link:
+         * `signIn.social` on the auth screens uses it, so anything requested
+         * here is requested of somebody who has not yet decided whether to try
+         * the product. Asking to read their calendar at that moment — on top of
+         * the unverified-app warning Google shows an unpublished client — is a
+         * heavy first impression for a tracker they have not used yet.
+         *
+         * So sign-in takes Google's default profile-and-email scopes, and the
+         * calendar permission is requested later by `linkSocial` in Settings,
+         * at the moment somebody actually clicks Connect Google Calendar. That
+         * is Google's own recommendation, incremental authorisation, and Better
+         * Auth supports it directly: `linkSocial`'s `scopes` argument is
+         * documented as "additional scopes to request when linking the account
+         * … compared to the initial authentication".
+         *
+         * The consequence to keep in mind: an account linked by SIGN-IN alone
+         * holds a token that cannot read the Calendar API. `syncAccount` would
+         * see a 403 and flag the connection `reauth`, which is why nothing
+         * creates a `googleConnections` row until Connect has run.
+         */
       },
     },
     plugins: [

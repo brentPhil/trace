@@ -35,22 +35,49 @@ export function AuthShell({
   return (
     <div
       className={cn(
-        "animate-rise motion-reduce:animate-none flex flex-col gap-8",
+        // `relative` is load-bearing, not tidying: `AuthBackdrop` is an
+        // ABSOLUTE sibling, and a positioned element paints above a static one
+        // whatever the source order — so without this the ruled ground is drawn
+        // over the panel and the form is unreachable.
+        "animate-rise motion-reduce:animate-none relative flex flex-col gap-6",
         className
       )}
       {...props}
     >
-      <div className="flex flex-col gap-2">
-        <span className="text-base font-medium tracking-tight">{APP_NAME}</span>
+      {/*
+        THE WORDMARK SITS OUTSIDE THE PANEL, on the ground.
+
+        It used to be the panel's first line at `text-base` — the same size and
+        weight as the body copy under it — so the brand never registered as
+        anything but another label. Lifting it out gives the screen two planes:
+        whose app this is, and the thing you are being asked to do. The gap
+        between them is what makes the panel read as an object rather than as
+        the page.
+      */}
+      <span className="self-start text-base font-medium tracking-tight text-foreground">
+        {APP_NAME}
+      </span>
+
+      {/*
+        A PANEL ON GROUND, which is the tonal elevation this product uses
+        everywhere else — `surface` over `ground` is the same 0.04 lightness
+        step a calendar block uses to stand off its lane. DESIGN.md is explicit
+        that depth here is tonal rather than cast, so there is no shadow: the
+        step and the hairline do the work.
+
+        The form was previously bare on `ground`, which on a 1300px window left
+        it a small island in a large void with nothing anchoring the eye.
+      */}
+      <div className="flex flex-col gap-6 rounded-lg border border-edge-soft bg-surface p-6">
         <h1
           ref={headingRef}
           tabIndex={focusHeading ? -1 : undefined}
-          className="text-2xl font-medium tracking-tight text-balance outline-none"
+          className="text-xl font-medium tracking-tight text-balance outline-none"
         >
           {heading}
         </h1>
+        {children}
       </div>
-      {children}
     </div>
   )
 }

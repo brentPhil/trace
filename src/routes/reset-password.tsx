@@ -8,6 +8,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { AuthBackdrop } from "@/components/auth-backdrop"
 import { AUTH_ERROR_ID, AuthError, AuthShell } from "@/components/auth-shell"
 import { authClient } from "@/lib/auth-client"
 import { cn } from "@/lib/utils"
@@ -30,7 +31,8 @@ function ResetPasswordRoute() {
   const { token, error } = Route.useSearch()
 
   return (
-    <main className="flex min-h-svh items-center justify-center p-6">
+    <main className="relative flex min-h-svh [align-items:safe_center] justify-center p-6">
+      <AuthBackdrop />
       {!token || error ? (
         <InvalidLink className="w-full max-w-sm" />
       ) : (
