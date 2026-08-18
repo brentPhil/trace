@@ -4375,16 +4375,29 @@ that is the thing to get right:
    * HOP TWO, after Google redirects back.
    *
    * `linkSocial` leaves the page, so nothing can be awaited after it — the
-   * `google.connect` mutation has to run on the way BACK IN. This effect is that
-   * moment: a Google account now exists on the identity, and our
-   * `googleConnections` row does not.
+   * `google.connect` mutation has to run on the way BACK IN. There are two
+   * moments that need it:
    *
-   * The mutation is idempotent (it patches an existing row to "ok" rather than
-   * inserting a second), so the guard is an optimisation and not a correctness
-   * condition — which is what makes it safe to run on every load.
+   *  - First connect: a Google account now exists on the identity, and our
+   *    `googleConnections` row does not (`connection.data.connected` is
+   *    false).
+   *  - Reconnect: the row exists but is flagged `reauth` (Google access was
+   *    revoked), and `connect` is the ONLY thing that clears that flag. A
+   *    guard that only checked `connected` would return early here too — a
+   *    `reauth` row is still `connected: true` — leaving the "lost access"
+   *    banner up until the next cron tick, up to 15 minutes later, even
+   *    though the user just finished Google's consent screen.
+   *
+   * The healthy state (`connected` and `status === "ok"`) is excluded on
+   * purpose: without it this effect would call the mutation on every
+   * settings page load, forever. The mutation is idempotent within either
+   * firing case (it patches an existing row rather than inserting a second),
+   * so a redundant call inside those cases is harmless — it just must not
+   * run on every render.
    */
   useEffect(() => {
-    if (connection.data === undefined || connection.data.connected) return
+    if (connection.data === undefined) return
+    if (connection.data.connected && connection.data.status !== "reauth") return
     let cancelled = false
     void authClient.listAccounts().then((result) => {
       const linked = (result.data ?? []).some(

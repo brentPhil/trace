@@ -38,7 +38,9 @@ const { update, generateLogoUploadUrl, clearLogo, setLogo, listAccounts } =
     // effect calls `authClient.listAccounts()` unconditionally while
     // disconnected, and a real network call in jsdom would hang the whole
     // suite reaching for a server that does not exist in a unit test.
-    listAccounts: vi.fn(async () => ({ data: [] })),
+    listAccounts: vi.fn(async () => ({
+      data: [] as Array<{ providerId: string }>,
+    })),
   }))
 
 vi.mock("@/lib/auth-client", () => ({
@@ -74,7 +76,16 @@ type SettingsFixture = Omit<typeof SETTINGS, "logoUrl"> & {
   logoUrl: string | null
 }
 
-function renderSettings(over: Partial<SettingsFixture> = {}) {
+type ConnectionFixture = {
+  connected: boolean
+  status: "ok" | "reauth"
+  lastSyncedAt: number | null
+}
+
+function renderSettings(
+  over: Partial<SettingsFixture> = {},
+  connectionOver: Partial<ConnectionFixture> = {}
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
@@ -82,11 +93,13 @@ function renderSettings(over: Partial<SettingsFixture> = {}) {
   // Google Calendar's section renders inside this same page and its three
   // reads (`useSuspenseQuery`, not `useQuery`) would otherwise suspend forever
   // with no data ever arriving in this test's fake client — nothing here
-  // exercises that section, so "not connected, nothing to show" is enough.
+  // exercises that section, so "not connected, nothing to show" is enough
+  // unless a test overrides it (the reconnect-effect tests below do).
   client.setQueryData(convexKey(api.google.connection, {}), {
     connected: false,
     status: "ok",
     lastSyncedAt: null,
+    ...connectionOver,
   })
   client.setQueryData(convexKey(api.google.listCalendars, {}), [])
   client.setQueryData(convexKey(api.projects.list, {}), [])
@@ -322,5 +335,38 @@ describe("/settings — invoice logo", () => {
     renderSettings({ logoUrl: "https://files.example/current.png" })
     fireEvent.click(screen.getByRole("button", { name: "Remove logo" }))
     await waitFor(() => expect(clearLogo).toHaveBeenCalledWith({}))
+  })
+})
+
+/*
+ * /settings' HOP TWO effect — the round-trip that fires `google.connect`
+ * after `linkSocial` redirects back from Google.
+ *
+ * `google.connect` is, by its own comment in convex/google.ts, the ONLY
+ * thing that clears a connection's `reauth` flag. A guard that only checked
+ * `connected` would return early for a reconnect, because a `reauth` row is
+ * still `connected: true` — leaving the "lost access" banner up until the
+ * next cron tick, up to 15 minutes later, even though the user just finished
+ * Google's consent screen. The first test below is that reconnect case; the
+ * second is the healthy state that must NOT retrigger the mutation on every
+ * settings page load.
+ */
+describe("/settings — Google reconnect after reauth", () => {
+  it("fires google.connect when a reauth-flagged connection comes back from Google", async () => {
+    listAccounts.mockResolvedValueOnce({
+      data: [{ providerId: "google" }],
+    })
+    renderSettings({}, { connected: true, status: "reauth" })
+    await waitFor(() => expect(update).toHaveBeenCalledWith({}))
+  })
+
+  it("does not call google.connect for an already-healthy connection", async () => {
+    listAccounts.mockResolvedValueOnce({
+      data: [{ providerId: "google" }],
+    })
+    renderSettings({}, { connected: true, status: "ok" })
+    await waitFor(() => expect(screen.getByText("Settings")).toBeTruthy())
+    expect(listAccounts).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
   })
 })

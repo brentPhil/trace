@@ -124,18 +124,27 @@ export function Settings() {
    * HOP TWO, after Google redirects back.
    *
    * `linkSocial` leaves the page, so nothing can be awaited after it — the
-   * `google.connect` mutation has to run on the way BACK IN. This effect is
-   * that moment: a Google account now exists on the identity, and our
-   * `googleConnections` row does not.
+   * `google.connect` mutation has to run on the way BACK IN. There are two
+   * moments that need it:
    *
-   * The mutation is idempotent (it patches an existing row to "ok" rather than
-   * inserting a second), so the guard below is an optimisation and not a
-   * correctness condition — which is what makes it safe to run on every load.
-   * `connection` can never be `undefined` here (this is a `useSuspenseQuery`,
-   * not a `useQuery`), so the guard is simply "already connected".
+   *  - First connect: a Google account now exists on the identity, and our
+   *    `googleConnections` row does not (`connection.connected` is false).
+   *  - Reconnect: the row exists but is flagged `reauth` (Google access was
+   *    revoked), and `connect` is — per its own comment in `convex/google.ts`
+   *    — the ONLY thing that clears that flag. Without firing here, a user
+   *    who completes Google's consent screen and lands back on this page
+   *    would keep seeing the "lost access" banner until the next cron tick,
+   *    up to 15 minutes later.
+   *
+   * The healthy state (`connected` and `status === "ok"`) is excluded on
+   * purpose: without it this effect would call the mutation on every
+   * settings page load, forever. The mutation is idempotent within either
+   * firing case (it patches an existing row rather than inserting a second),
+   * so a redundant call inside those cases is harmless — it just must not run
+   * on every render.
    */
   useEffect(() => {
-    if (connection.connected) return
+    if (connection.connected && connection.status !== "reauth") return
     let cancelled = false
     void authClient.listAccounts().then((result) => {
       const linked = (result.data ?? []).some(
@@ -146,7 +155,7 @@ export function Settings() {
     return () => {
       cancelled = true
     }
-  }, [connection.connected, connectMutation, report])
+  }, [connection.connected, connection.status, connectMutation, report])
 
   const uploadLogo = async (file: File) => {
     if (!isAcceptedLogoContentType(file.type) || file.size > MAX_LOGO_BYTES) {
