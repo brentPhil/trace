@@ -4,7 +4,7 @@ import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { WrapText } from "lucide-react"
-import { CalendarPanel } from "@/components/calendar/calendar-panel"
+import { CalendarPanel, NO_MEETINGS } from "@/components/calendar/calendar-panel"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
@@ -322,6 +322,26 @@ export function Timer() {
      */
     placeholderData: (previous) => previous,
   })
+
+  /*
+   * Google meetings for the drawn range, read-only ghost blocks on the grid.
+   *
+   * `rangeArgs` — NOT `plan.range` or a second `rangeOf` call — because that is
+   * the exact pair of instants `rangeQuery` above is keyed on. Two computations
+   * of "the same" range is precisely the defect `rangeArgs`'s own comment warns
+   * about (`calendar-range-label.test.tsx`); sharing the variable is what keeps
+   * the grid from ever drawing meetings for one week and entries for another.
+   *
+   * NOT keyed on `nowMs`: a meeting's window is stored, so nothing here moves
+   * with the clock, and including it would refetch once a second for the life
+   * of the tab on a page this product calls an always-open companion.
+   *
+   * Not gated by `rangeEnabled` and not a suspense query: the grid is useful
+   * the instant the entries arrive, so this stays a plain fallback rather than
+   * a second thing the page waits on. An unconnected account's `listMeetings`
+   * always answers `[]`, so nothing here changes what that account sees.
+   */
+  const meetingsQuery = useQuery(convexQuery(api.google.listMeetings, rangeArgs))
 
   /*
    * The unbounded log, exactly as before: all the way back, 50 rows at a time.
@@ -717,6 +737,7 @@ export function Timer() {
 
             <CalendarPanel
               entries={calendarEntries}
+              meetings={meetingsQuery.data ?? NO_MEETINGS}
               range={plan.range}
               timeZone={settings.timezone}
               weekStartDay={settings.weekStartDay}
