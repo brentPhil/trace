@@ -639,6 +639,11 @@ export function Settings() {
             projects={projects}
             timeZone={settings.timezone}
             use12Hour={settings.timeFormat === "12"}
+            /* Read once per render rather than through `useClock`: "Last
+               synced" only needs to know which local DAY it is, and a ticking
+               clock would re-render this whole page every second to answer a
+               question whose answer changes at midnight. */
+            nowMs={Date.now()}
             actions={{
               connect: connectGoogle,
               disconnect: () => void disconnectGoogle().catch(report),

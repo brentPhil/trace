@@ -950,6 +950,129 @@ describe("markConnection's token-failure counter", () => {
   })
 })
 
+/*
+ * "Last synced" HAS TO MEAN "DATA LAST ARRIVED".
+ *
+ * `lastSyncedAt` used to be stamped on any `status === "ok"` — which both the
+ * transient-error handler and the below-limit token-failure path pass, because
+ * they want the account picked up again next run rather than because anything
+ * synced. A connection 5xx-ing every fifteen minutes therefore showed a
+ * freshly-updated time in Settings while the mirror rotted.
+ */
+describe("markConnection's lastSyncedAt", () => {
+  const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+  const EARLIER = NOW - 3 * 86_400_000
+
+  const seedSynced = async (t: ReturnType<typeof setup>) => {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: EARLIER,
+        lastSyncedAt: EARLIER,
+        lastErrorAt: null,
+        updatedAt: EARLIER,
+      })
+    })
+  }
+
+  const connectionRow = async (t: ReturnType<typeof setup>) =>
+    (await t.query(internal.google.allConnectionsForTest, { userId: ALICE }))[0]
+
+  it("does not move on a transient failure that keeps the status ok", async () => {
+    const t = setup()
+    await seedSynced(t)
+    await t.mutation(internal.google.markConnection, {
+      userId: ALICE,
+      status: "ok",
+      nowMs: NOW,
+      error: "events.list failed (503)",
+    })
+    const row = await connectionRow(t)
+    expect(row.lastSyncedAt).toBe(EARLIER)
+    // …and the failure is now readable, which is what replaces the signal the
+    // moving timestamp used to (wrongly) provide.
+    expect(row.lastError).toContain("503")
+  })
+
+  it("does not move on a token failure below the limit", async () => {
+    const t = setup()
+    await seedSynced(t)
+    await t.mutation(internal.google.markConnection, {
+      userId: ALICE,
+      nowMs: NOW,
+      error: "Could not get an access token: fetch failed",
+      tokenFailed: true,
+    })
+    expect((await connectionRow(t)).lastSyncedAt).toBe(EARLIER)
+  })
+
+  it("moves, and clears the recorded error, on a run that genuinely synced", async () => {
+    const t = setup()
+    await seedSynced(t)
+    await t.mutation(internal.google.markConnection, {
+      userId: ALICE,
+      status: "ok",
+      nowMs: EARLIER,
+      error: "events.list failed (503)",
+    })
+    await t.mutation(internal.google.markConnection, {
+      userId: ALICE,
+      status: "ok",
+      nowMs: NOW,
+      synced: true,
+    })
+    const row = await connectionRow(t)
+    expect(row.lastSyncedAt).toBe(NOW)
+    // An error that outlives the failure it describes is the same lie the
+    // other way round: Settings would keep saying syncing was broken.
+    expect(row.lastError).toBeUndefined()
+    expect(row.lastErrorAt).toBeNull()
+  })
+})
+
+describe("the connection query's error fields", () => {
+  const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+
+  it("returns the recorded failure, so Settings can say syncing is failing", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: NOW,
+        lastErrorAt: NOW,
+        lastError: "events.list failed (429)",
+        updatedAt: NOW,
+      })
+    })
+    const status = await t.query(internal.google.connectionForUser, {
+      userId: ALICE,
+    })
+    expect(status.lastError).toBe("events.list failed (429)")
+    expect(status.lastErrorAt).toBe(NOW)
+  })
+
+  it("normalises a never-failed connection to null rather than an absent key", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: NOW,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
+    })
+    const status = await t.query(internal.google.connectionForUser, {
+      userId: ALICE,
+    })
+    expect(status.lastError).toBeNull()
+  })
+})
+
 describe("the public connection surface", () => {
   it("rejects anonymous callers", async () => {
     const t = setup()
@@ -967,6 +1090,8 @@ describe("the public connection surface", () => {
       connected: false,
       status: "ok",
       lastSyncedAt: null,
+      lastError: null,
+      lastErrorAt: null,
     })
   })
 

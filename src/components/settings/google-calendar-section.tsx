@@ -1,8 +1,9 @@
 import { FolderClosed } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ProjectPicker } from "@/components/classifiers/classifier-pickers"
-import { formatTimeOfInstant } from "@/lib/format-time"
+import { formatShortDate, formatTimeOfInstant } from "@/lib/format-time"
 import { cn } from "@/lib/utils"
+import { dayOf } from "@shared/day"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 /*
@@ -25,6 +26,36 @@ export type GoogleConnectionStatus = {
   connected: boolean
   status: "ok" | "reauth"
   lastSyncedAt: number | null
+  /** The last thing that went wrong, cleared by the next run that actually
+   *  syncs. Present while `status` is still "ok" is the case this section
+   *  exists to speak for: the cron keeps retrying, so nothing else on screen
+   *  would say the mirror had stopped moving. */
+  lastError: string | null
+  lastErrorAt: number | null
+}
+
+/**
+ * "Last synced" — with the DATE whenever it is not today's.
+ *
+ * A time of day alone reads as today, so a mirror three days stale said
+ * "Last synced 09:12" and looked healthy, which is the precise opposite of
+ * what this line is here for. The same shape `describeStagedStart` uses for
+ * the timer bar's armed row: bare time while the day matches, time plus a
+ * short date once it does not.
+ *
+ * `nowMs` is a parameter rather than a `Date.now()` here, for the reason every
+ * other date helper in this app takes one — a component that reads the clock
+ * itself cannot be pinned by a test.
+ */
+function describeLastSynced(
+  instantMs: number,
+  timeZone: string,
+  use12Hour: boolean,
+  nowMs: number
+): string {
+  const time = formatTimeOfInstant(instantMs, timeZone, use12Hour)
+  if (dayOf(instantMs, timeZone) === dayOf(nowMs, timeZone)) return time
+  return `${formatShortDate(instantMs, timeZone)}, ${time}`
 }
 
 export type GoogleCalendarActions = {
@@ -46,6 +77,7 @@ export function GoogleCalendarSection({
   projects,
   timeZone,
   use12Hour,
+  nowMs,
   actions,
 }: {
   connection: GoogleConnectionStatus
@@ -55,6 +87,10 @@ export function GoogleCalendarSection({
    *  formatted time on this page gets them from the account's own settings. */
   timeZone: string
   use12Hour: boolean
+  /** What "today" is measured against, so "Last synced" can say a date when
+   *  the sync was not today's. A prop like everything else here — this
+   *  component reads no clock of its own. */
+  nowMs: number
   actions: GoogleCalendarActions
 }) {
   if (!connection.connected) {
@@ -100,6 +136,24 @@ export function GoogleCalendarSection({
             Reconnect
           </button>
         </div>
+      ) : null}
+
+      {/*
+        SYNCING IS FAILING, but the grant is still good.
+        A transient failure — a 429, a 5xx, a token exchange that has not yet
+        reached `TOKEN_FAILURE_LIMIT` — leaves `status` at "ok" on purpose, so
+        the cron keeps retrying. With `lastSyncedAt` no longer moving on a
+        failed run, this sentence is the ONLY thing that explains why the time
+        below has stopped. Text, never a colour: the same rule the re-consent
+        banner above follows. The reauth branch already says its own piece, so
+        this is the "ok" case only rather than two messages at once.
+      */}
+      {connection.status === "ok" && connection.lastError !== null ? (
+        <p className="text-sm text-muted-foreground">
+          Chroneli’s last few attempts to sync this calendar have failed, so
+          meetings may be out of date. It keeps retrying — nothing needs doing
+          unless this stays here.
+        </p>
       ) : null}
 
       {calendars.length === 0 ? (
@@ -173,7 +227,7 @@ export function GoogleCalendarSection({
         <span className="text-xs text-muted-foreground">
           {connection.lastSyncedAt === null
             ? "Not synced yet"
-            : `Last synced ${formatTimeOfInstant(connection.lastSyncedAt, timeZone, use12Hour)}`}
+            : `Last synced ${describeLastSynced(connection.lastSyncedAt, timeZone, use12Hour, nowMs)}`}
         </span>
         <button
           type="button"

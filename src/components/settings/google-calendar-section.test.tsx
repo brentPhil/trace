@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { GoogleCalendarSection } from "@/components/settings/google-calendar-section"
+import type { GoogleConnectionStatus } from "@/components/settings/google-calendar-section"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 afterEach(cleanup)
@@ -38,6 +39,22 @@ function project(over: Partial<Doc<"projects">> = {}) {
   } as Doc<"projects">
 }
 
+/** A connection, with the fields a case is not about filled in. `lastError`
+ *  defaults to null so only the tests that are about a failing sync see the
+ *  "attempts have failed" line. */
+function conn(
+  over: Partial<GoogleConnectionStatus> = {}
+): GoogleConnectionStatus {
+  return {
+    connected: true,
+    status: "ok",
+    lastSyncedAt: NOW,
+    lastError: null,
+    lastErrorAt: null,
+    ...over,
+  }
+}
+
 const noActions = {
   connect: vi.fn(),
   disconnect: vi.fn(),
@@ -58,11 +75,12 @@ describe("GoogleCalendarSection", () => {
   it("offers to connect when nothing is linked", () => {
     render(
       <GoogleCalendarSection
-        connection={{ connected: false, status: "ok", lastSyncedAt: null }}
+        connection={conn({ connected: false, status: "ok", lastSyncedAt: null })}
         calendars={[]}
         projects={[]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={noActions}
       />
     )
@@ -73,7 +91,7 @@ describe("GoogleCalendarSection", () => {
   it("lists calendars with a Show control once connected", () => {
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: NOW })}
         calendars={[
           calendar(),
           calendar({ _id: "gc_2" as Id<"googleCalendars">, googleId: "team", summary: "Team" }),
@@ -81,6 +99,7 @@ describe("GoogleCalendarSection", () => {
         projects={[]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={noActions}
       />
     )
@@ -93,11 +112,12 @@ describe("GoogleCalendarSection", () => {
     const setShow = vi.fn()
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: NOW })}
         calendars={[calendar()]}
         projects={[]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={{ ...noActions, setShow }}
       />
     )
@@ -108,11 +128,12 @@ describe("GoogleCalendarSection", () => {
   it("shows the re-consent banner when the grant was revoked", () => {
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "reauth", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "reauth", lastSyncedAt: NOW })}
         calendars={[calendar({ show: true })]}
         projects={[]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={noActions}
       />
     )
@@ -128,11 +149,12 @@ describe("GoogleCalendarSection", () => {
     // entry, so a default project on it would be a setting with no effect.
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: NOW })}
         calendars={[calendar({ show: false })]}
         projects={[]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={noActions}
       />
     )
@@ -144,11 +166,12 @@ describe("GoogleCalendarSection", () => {
     const setProject = vi.fn()
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: NOW })}
         calendars={[calendar({ show: false })]}
         projects={[project()]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={{ ...noActions, setProject }}
       />
     )
@@ -161,11 +184,12 @@ describe("GoogleCalendarSection", () => {
     const setProject = vi.fn()
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: NOW })}
         calendars={[calendar({ show: true })]}
         projects={[project()]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={{ ...noActions, setProject }}
       />
     )
@@ -177,11 +201,12 @@ describe("GoogleCalendarSection", () => {
   it("formats Last synced through the app's own time formatter, in the caller's zone and clock", () => {
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: NOW })}
         calendars={[]}
         projects={[]}
         timeZone="America/New_York"
         use12Hour={true}
+        nowMs={NOW}
         actions={noActions}
       />
     )
@@ -189,14 +214,75 @@ describe("GoogleCalendarSection", () => {
     expect(screen.getByText(/Last synced 5:00 AM/)).toBeTruthy()
   })
 
-  it("renders nothing about syncing before the first sync ever completes — 'never' as a date reads as a fault", () => {
+  it("says the date too when the last sync was not today", () => {
+    // A time of day alone reads as today, so a three-day-old mirror looked
+    // freshly synced — the precise opposite of what this line is for.
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: null }}
+        connection={conn({ lastSyncedAt: NOW - 3 * 86_400_000 })}
         calendars={[]}
         projects={[]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
+        actions={noActions}
+      />
+    )
+    expect(screen.getByText(/Last synced 14 Aug, 09:00/)).toBeTruthy()
+  })
+
+  it("says syncing is failing while the grant itself is still good", () => {
+    /*
+     * A 429 or a 5xx leaves `status` at "ok" on purpose, so the cron keeps
+     * retrying. With `lastSyncedAt` no longer stamped on a failed run, this
+     * sentence is the only thing on the screen that explains why the time has
+     * stopped moving. As TEXT, never a colour.
+     */
+    render(
+      <GoogleCalendarSection
+        connection={conn({ lastError: "events.list failed (429)", lastErrorAt: NOW })}
+        calendars={[]}
+        projects={[]}
+        timeZone="UTC"
+        use12Hour={false}
+        nowMs={NOW}
+        actions={noActions}
+      />
+    )
+    expect(screen.getByText(/attempts to sync this calendar have failed/i)).toBeTruthy()
+    // The re-consent banner is a different state and must not appear too.
+    expect(screen.queryByText(/lost access/i)).toBeNull()
+  })
+
+  it("does not repeat itself when the grant is gone — the re-consent banner already says it", () => {
+    render(
+      <GoogleCalendarSection
+        connection={conn({
+          status: "reauth",
+          lastError: "Google refused the refresh token",
+          lastErrorAt: NOW,
+        })}
+        calendars={[]}
+        projects={[]}
+        timeZone="UTC"
+        use12Hour={false}
+        nowMs={NOW}
+        actions={noActions}
+      />
+    )
+    expect(screen.getByText(/lost access/i)).toBeTruthy()
+    expect(screen.queryByText(/attempts to sync/i)).toBeNull()
+  })
+
+  it("renders nothing about syncing before the first sync ever completes — 'never' as a date reads as a fault", () => {
+    render(
+      <GoogleCalendarSection
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: null })}
+        calendars={[]}
+        projects={[]}
+        timeZone="UTC"
+        use12Hour={false}
+        nowMs={NOW}
         actions={noActions}
       />
     )
@@ -208,11 +294,12 @@ describe("GoogleCalendarSection", () => {
     const disconnect = vi.fn()
     render(
       <GoogleCalendarSection
-        connection={{ connected: true, status: "ok", lastSyncedAt: NOW }}
+        connection={conn({ connected: true, status: "ok", lastSyncedAt: NOW })}
         calendars={[]}
         projects={[]}
         timeZone="UTC"
         use12Hour={false}
+        nowMs={NOW}
         actions={{ ...noActions, disconnect }}
       />
     )

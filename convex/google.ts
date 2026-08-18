@@ -360,6 +360,9 @@ export const markConnection = internalMutation({
     nowMs: v.number(),
     error: v.optional(v.string()),
     calendarsRefreshed: v.optional(v.boolean()),
+    /** True ONLY on a run that actually finished syncing. What stamps
+     *  `lastSyncedAt` — see the handler. */
+    synced: v.optional(v.boolean()),
     /** True exactly on a `getAccessToken` token-exchange failure — see
      *  `TOKEN_FAILURE_LIMIT`. Every other call site omits this, which is what
      *  resets the counter: it measures CONSECUTIVE token-exchange failures,
@@ -386,12 +389,33 @@ export const markConnection = internalMutation({
           : "ok"
         : (args.status ?? row.status)
 
+    /*
+     * `lastSyncedAt` MEANS "DATA LAST ARRIVED", and this is the line that
+     * makes it true.
+     *
+     * It used to be stamped on any `status === "ok"`, which the transient-error
+     * handler and the below-limit token-failure path BOTH pass — they pass it
+     * so the account keeps being picked up next run, not because anything
+     * synced. A connection 429-ing or 5xx-ing every fifteen minutes therefore
+     * showed a freshly-updated "Last synced" in Settings while the mirror
+     * rotted, which is the exact opposite of what that field is surfaced for.
+     * A failed run now leaves it alone, so the displayed time keeps telling
+     * the truth about when meetings last came in.
+     *
+     * A synced run also CLEARS the recorded error. Settings shows a "syncing
+     * is failing" line off `lastError`, and an error that outlives the failure
+     * it describes is the same lie in the other direction.
+     */
+    const synced = args.synced === true
     await ctx.db.patch(row._id, {
       status,
       tokenFailures,
-      lastSyncedAt: status === "ok" ? args.nowMs : row.lastSyncedAt,
-      lastErrorAt: args.error === undefined ? row.lastErrorAt : args.nowMs,
-      ...(args.error === undefined ? {} : { lastError: args.error }),
+      ...(synced
+        ? { lastSyncedAt: args.nowMs, lastError: undefined, lastErrorAt: null }
+        : {
+            lastErrorAt: args.error === undefined ? row.lastErrorAt : args.nowMs,
+            ...(args.error === undefined ? {} : { lastError: args.error }),
+          }),
       ...(args.calendarsRefreshed === true
         ? { calendarsRefreshedAt: args.nowMs }
         : {}),
@@ -645,11 +669,14 @@ export const syncAccount = internalAction({
         toMs: window.toMs,
       })
 
+      // The ONE call site that reached the end of a run, and so the one
+      // allowed to stamp `lastSyncedAt`.
       await ctx.runMutation(internal.google.markConnection, {
         userId: args.userId,
         status: "ok",
         nowMs,
         calendarsRefreshed: stale,
+        synced: true,
       })
     } catch (error) {
       if (error instanceof GoogleAuthError) {
@@ -1060,7 +1087,24 @@ export const setCalendarProjectForUser = internalMutation({
 const connectionStatus = v.object({
   connected: v.boolean(),
   status: googleConnectionFields.status,
-  lastSyncedAt: v.union(v.number(), v.null()),
+  lastSyncedAt: googleConnectionFields.lastSyncedAt,
+  /*
+   * WHAT THE SETTINGS SECTION SAYS OUT LOUD WHEN SYNCING IS FAILING.
+   *
+   * `status` cannot carry this: a connection that is 429-ing every run is
+   * still `"ok"` — deliberately, so `connectionsToSync` keeps picking it up —
+   * so with `lastSyncedAt` no longer moving on a failed run there was NO
+   * signal at all on that screen. The section had a stale timestamp and no
+   * explanation for it.
+   *
+   * `v.union(v.string(), v.null())` rather than
+   * `googleConnectionFields.lastError`'s `v.optional`: the stored field is
+   * optional because a connection that has never failed simply has no
+   * opinion, but a RETURN shape with an absent key makes every caller write
+   * `?? null` for itself. Normalised once, here.
+   */
+  lastError: v.union(v.string(), v.null()),
+  lastErrorAt: googleConnectionFields.lastErrorAt,
 })
 
 async function connectionStatusImpl(ctx: QueryCtx, userId: string) {
@@ -1070,12 +1114,20 @@ async function connectionStatusImpl(ctx: QueryCtx, userId: string) {
     .unique()
   // "Not connected" is a valid state the settings page renders, not an error.
   if (row === null) {
-    return { connected: false, status: "ok" as const, lastSyncedAt: null }
+    return {
+      connected: false,
+      status: "ok" as const,
+      lastSyncedAt: null,
+      lastError: null,
+      lastErrorAt: null,
+    }
   }
   return {
     connected: true,
     status: row.status,
     lastSyncedAt: row.lastSyncedAt,
+    lastError: row.lastError ?? null,
+    lastErrorAt: row.lastErrorAt,
   }
 }
 
