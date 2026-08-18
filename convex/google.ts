@@ -21,6 +21,7 @@ import {
   googleEventTrackingDoc,
 } from "./lib/docs"
 import { mapGoogleEvent } from "./googleEvents"
+import { googleConnectionFields } from "./schema"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 
 /*
@@ -638,7 +639,7 @@ export const clearSyncToken = internalMutation({
 
 const connectionStatus = v.object({
   connected: v.boolean(),
-  status: v.union(v.literal("ok"), v.literal("reauth")),
+  status: googleConnectionFields.status,
   lastSyncedAt: v.union(v.number(), v.null()),
 })
 
@@ -735,11 +736,16 @@ const DISCONNECT_PAGE = 500
 
 async function disconnectImpl(ctx: MutationCtx, userId: string) {
   /*
-   * The two tables are drained in SEPARATE blocks rather than a loop over table
+   * The three tables are drained in SEPARATE blocks rather than a loop over table
    * names. `ctx.db.query(table)` with a union of names gives the builder a union
-   * of document types and the index names differ between the two, so the loop
+   * of document types and the index names differ between the tables, so the loop
    * form does not typecheck — and the cast that would make it compile is exactly
    * the cast that hides a wrong index next time one of them changes.
+   *
+   * All three drains share one rule: the connection row is deleted LAST, and only
+   * once every table it owns is empty. If the connection row were deleted earlier
+   * and a table drain was incomplete, stale rows would survive with nothing
+   * declaring the account still connected, and the disconnect would report success.
    */
   const events = await ctx.db
     .query("googleEvents")
@@ -764,8 +770,12 @@ async function disconnectImpl(ctx: MutationCtx, userId: string) {
   const calendars = await ctx.db
     .query("googleCalendars")
     .withIndex("by_user_googleId", (q) => q.eq("userId", userId))
-    .take(250)
+    .take(DISCONNECT_PAGE)
   for (const calendar of calendars) await ctx.db.delete(calendar._id)
+  if (calendars.length === DISCONNECT_PAGE) {
+    await ctx.scheduler.runAfter(0, internal.google.disconnectForUser, { userId })
+    return null
+  }
 
   const connectionRow = await ctx.db
     .query("googleConnections")

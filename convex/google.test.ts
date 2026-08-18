@@ -841,4 +841,57 @@ describe("the public connection surface", () => {
       await t.query(internal.google.allConnectionsForTest, { userId: ALICE })
     ).toEqual([])
   })
+
+  it("calendar drain reschedules rather than orphaning when over the bound", async () => {
+    // Prove that disconnectImpl drains calendars with the same guard as events
+    // and tracking: if the page came back full, reschedule and return rather than
+    // deleting the connection row while stale calendars survive.
+    const t = setup()
+    const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+
+    // Seed more calendars than the drain page size. The exact count depends on
+    // the bound; we use a number we know exceeds it.
+    const CALENDAR_COUNT = 520
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleConnections", {
+        userId: ALICE,
+        status: "ok",
+        calendarsRefreshedAt: NOW,
+        lastSyncedAt: NOW,
+        lastErrorAt: null,
+        updatedAt: NOW,
+      })
+
+      // Seed more calendars than one drain page can hold
+      for (let i = 0; i < CALENDAR_COUNT; i++) {
+        await ctx.db.insert("googleCalendars", {
+          userId: ALICE,
+          googleId: `cal_${i}`,
+          summary: `Calendar ${i}`,
+          show: true,
+          syncToken: null,
+          lastSyncedAt: null,
+          updatedAt: NOW,
+        })
+      }
+    })
+
+    // Start the disconnect
+    await t.mutation(internal.google.disconnectForUser, { userId: ALICE })
+
+    // The connection row must still exist because the drain is not finished
+    const connections = await t.query(internal.google.allConnectionsForTest, {
+      userId: ALICE,
+    })
+    expect(connections).toHaveLength(1)
+    expect(connections[0].status).toBe("ok")
+
+    // The first page of calendars must be gone
+    const calendars = await t.query(internal.google.allCalendarsForTest, {
+      userId: ALICE,
+    })
+    expect(calendars.length).toBeGreaterThan(0)
+    expect(calendars.length).toBeLessThan(CALENDAR_COUNT)
+  })
 })
