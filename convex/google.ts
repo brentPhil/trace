@@ -20,9 +20,12 @@ import {
   googleEventDoc,
   googleEventTrackingDoc,
 } from "./lib/docs"
-import { mapGoogleEvent } from "./googleEvents"
+import { mapGoogleEvent, isDrawable } from "./googleEvents"
 import { googleConnectionFields } from "./schema"
+import { getOwned } from "./owned"
+import { traceError } from "./errors"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
+import type { Id } from "./_generated/dataModel"
 
 /*
  * Google Calendar: the read side.
@@ -635,6 +638,233 @@ export const clearSyncToken = internalMutation({
     }
     return null
   },
+})
+
+/*
+ * The calendar settings surface and the meetings query.
+ *
+ * Everything below reads or writes the mirror on the grid's behalf, rather
+ * than syncing it. `listMeetings` is what the calendar view reads; the
+ * `setCalendar*` mutations are what Settings writes.
+ */
+
+/** A mirrored event plus what this app knows about it. The grid needs both in
+ *  one read: `entryId` is what suppresses a ghost whose hour is already drawn as
+ *  a real entry. */
+const meetingDoc = v.object({
+  ...googleEventDoc.fields,
+  trackOnStart: v.boolean(),
+  entryId: v.union(v.id("timeEntries"), v.null()),
+})
+
+/** The most meetings one range read returns. A week of a busy calendar is tens;
+ *  250 is a ceiling that cannot be reached by a human's diary and stops an
+ *  unbounded read if one ever is. */
+const MEETING_LIMIT = 250
+
+async function listMeetingsImpl(
+  ctx: QueryCtx,
+  userId: string,
+  fromMs: number,
+  toMs: number
+) {
+  // `show` is read per calendar rather than joined per event: a diary has a
+  // handful of calendars and hundreds of events, so this is the cheap direction.
+  const calendars = await ctx.db
+    .query("googleCalendars")
+    .withIndex("by_user_show", (q) => q.eq("userId", userId).eq("show", true))
+    .take(50)
+  const shown = new Set(calendars.map((calendar) => calendar.googleId))
+  if (shown.size === 0) return []
+
+  const rows = await ctx.db
+    .query("googleEvents")
+    .withIndex("by_user_started", (q) =>
+      // Half-open, matching `dayWindow` and every other range in the product.
+      q.eq("userId", userId).gte("startedAt", fromMs).lt("startedAt", toMs)
+    )
+    .take(MEETING_LIMIT)
+
+  const meetings = []
+  for (const row of rows) {
+    if (!shown.has(row.calendarId)) continue
+    // All-day events have no clock and the grid has no rail for them.
+    if (!isDrawable(row)) continue
+
+    const tracking = await ctx.db
+      .query("googleEventTracking")
+      .withIndex("by_user_calendar_event", (q) =>
+        q
+          .eq("userId", userId)
+          .eq("calendarId", row.calendarId)
+          .eq("eventId", row.eventId)
+      )
+      .unique()
+
+    meetings.push({
+      ...row,
+      trackOnStart: tracking?.trackOnStart ?? false,
+      entryId: tracking?.entryId ?? null,
+    })
+  }
+  return meetings
+}
+
+export const listMeetings = query({
+  args: { fromMs: v.number(), toMs: v.number() },
+  returns: v.array(meetingDoc),
+  handler: async (ctx, args) =>
+    await listMeetingsImpl(
+      ctx,
+      await requireUserId(ctx),
+      args.fromMs,
+      args.toMs
+    ),
+})
+
+export const listMeetingsForUser = internalQuery({
+  args: { userId: v.string(), fromMs: v.number(), toMs: v.number() },
+  returns: v.array(meetingDoc),
+  handler: async (ctx, args) =>
+    await listMeetingsImpl(ctx, args.userId, args.fromMs, args.toMs),
+})
+
+async function listCalendarsImpl(ctx: QueryCtx, userId: string) {
+  return await ctx.db
+    .query("googleCalendars")
+    .withIndex("by_user_googleId", (q) => q.eq("userId", userId))
+    .take(250)
+}
+
+export const listCalendars = query({
+  args: {},
+  returns: v.array(googleCalendarDoc),
+  handler: async (ctx) =>
+    await listCalendarsImpl(ctx, await requireUserId(ctx)),
+})
+
+/**
+ * Show or hide a calendar.
+ *
+ * SHOWING CLEARS THE `syncToken`. A hidden calendar was not being fetched, so
+ * its token describes "changes since" a point with an unfetched gap after it —
+ * reusing it would silently skip everything that happened while the calendar was
+ * hidden, and the mirror would look healthy while missing a fortnight.
+ *
+ * HIDING DELETES THE MIRRORED EVENTS. Leaving them would draw a calendar that is
+ * no longer syncing, which is worse than drawing nothing: the blocks are stale
+ * and nothing on screen says so.
+ */
+async function setCalendarShowImpl(
+  ctx: MutationCtx,
+  userId: string,
+  calendarId: string,
+  show: boolean
+) {
+  const nowMs = Date.now()
+  const calendar = await calendarRow(ctx, userId, calendarId)
+  if (calendar === null) {
+    traceError("NOT_FOUND", "That calendar is not on this account.")
+  }
+
+  await ctx.db.patch(calendar._id, {
+    show,
+    syncToken: show ? null : calendar.syncToken,
+    updatedAt: nowMs,
+  })
+
+  if (show) {
+    await ctx.scheduler.runAfter(0, internal.google.syncAccount, { userId })
+    return null
+  }
+
+  // Only this calendar's rows, through the index rather than by filtering a page
+  // of the user's whole mirror.
+  const rows = await ctx.db
+    .query("googleEvents")
+    .withIndex("by_user_calendar_started", (q) =>
+      q.eq("userId", userId).eq("calendarId", calendarId)
+    )
+    .take(1_000)
+  for (const row of rows) await ctx.db.delete(row._id)
+  return null
+}
+
+export const setCalendarShow = mutation({
+  args: { calendarId: v.string(), show: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setCalendarShowImpl(
+      ctx,
+      await requireUserId(ctx),
+      args.calendarId,
+      args.show
+    ),
+})
+
+export const setCalendarShowForUser = internalMutation({
+  args: { userId: v.string(), calendarId: v.string(), show: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setCalendarShowImpl(ctx, args.userId, args.calendarId, args.show),
+})
+
+/** The project entries made from this calendar's meetings are classified as.
+ *  `null` clears it, which is a normal state: an unclassified entry is already
+ *  normal everywhere else in the product. */
+async function setCalendarProjectImpl(
+  ctx: MutationCtx,
+  userId: string,
+  calendarId: string,
+  projectId: Id<"projects"> | null
+) {
+  const calendar = await calendarRow(ctx, userId, calendarId)
+  if (calendar === null) {
+    traceError("NOT_FOUND", "That calendar is not on this account.")
+  }
+  // Through `getOwned`, so a project id belonging to someone else is NOT_FOUND
+  // rather than quietly stored — the same guard every other classifier write in
+  // this product goes through.
+  if (projectId !== null) await getOwned(ctx, userId, "projects", projectId)
+
+  await ctx.db.patch(calendar._id, {
+    ...(projectId === null
+      ? { defaultProjectId: undefined }
+      : { defaultProjectId: projectId }),
+    updatedAt: Date.now(),
+  })
+  return null
+}
+
+export const setCalendarProject = mutation({
+  args: {
+    calendarId: v.string(),
+    projectId: v.union(v.id("projects"), v.null()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setCalendarProjectImpl(
+      ctx,
+      await requireUserId(ctx),
+      args.calendarId,
+      args.projectId
+    ),
+})
+
+export const setCalendarProjectForUser = internalMutation({
+  args: {
+    userId: v.string(),
+    calendarId: v.string(),
+    projectId: v.union(v.id("projects"), v.null()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setCalendarProjectImpl(
+      ctx,
+      args.userId,
+      args.calendarId,
+      args.projectId
+    ),
 })
 
 const connectionStatus = v.object({

@@ -895,3 +895,188 @@ describe("the public connection surface", () => {
     expect(calendars.length).toBeLessThan(CALENDAR_COUNT)
   })
 })
+
+describe("listMeetings", () => {
+  const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+
+  async function seed(t: ReturnType<typeof setup>) {
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Brent",
+        show: true,
+        syncToken: null,
+        lastSyncedAt: null,
+        updatedAt: NOW,
+      })
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "hidden",
+        summary: "Personal",
+        show: false,
+        syncToken: null,
+        lastSyncedAt: null,
+        updatedAt: NOW,
+      })
+      for (const [eventId, calendarId, startIso, isAllDay] of [
+        ["inside", "primary", "2026-08-17T10:00:00.000Z", false],
+        ["outside", "primary", "2026-08-25T10:00:00.000Z", false],
+        ["allday", "primary", "2026-08-17T00:00:00.000Z", true],
+        ["hidden_cal", "hidden", "2026-08-17T11:00:00.000Z", false],
+      ] as const) {
+        const startedAt = Date.parse(startIso)
+        await ctx.db.insert("googleEvents", {
+          userId: ALICE,
+          calendarId,
+          eventId,
+          title: eventId,
+          startedAt,
+          endedAt: startedAt + 1_800_000,
+          isAllDay,
+          status: "confirmed",
+          myResponse: "accepted",
+          attendees: [],
+          attendeeCount: 0,
+          googleUpdatedAt: startedAt,
+          updatedAt: startedAt,
+        })
+      }
+    })
+  }
+
+  it("returns only drawable events in range on a shown calendar", async () => {
+    const t = setup()
+    await seed(t)
+    const meetings = await t.query(internal.google.listMeetingsForUser, {
+      userId: ALICE,
+      fromMs: Date.parse("2026-08-17T00:00:00.000Z"),
+      toMs: Date.parse("2026-08-18T00:00:00.000Z"),
+    })
+    expect(meetings.map((m) => m.eventId)).toEqual(["inside"])
+  })
+
+  it("carries the tracking state so the grid can suppress a drawn hour", async () => {
+    const t = setup()
+    await seed(t)
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleEventTracking", {
+        userId: ALICE,
+        calendarId: "primary",
+        eventId: "inside",
+        trackOnStart: true,
+        entryId: null,
+        interruptedEntryId: null,
+        updatedAt: NOW,
+      })
+    })
+    const meetings = await t.query(internal.google.listMeetingsForUser, {
+      userId: ALICE,
+      fromMs: Date.parse("2026-08-17T00:00:00.000Z"),
+      toMs: Date.parse("2026-08-18T00:00:00.000Z"),
+    })
+    expect(meetings[0].trackOnStart).toBe(true)
+    expect(meetings[0].entryId).toBeNull()
+  })
+
+  it("never returns another user's meetings", async () => {
+    const t = setup()
+    await seed(t)
+    const meetings = await t.query(internal.google.listMeetingsForUser, {
+      userId: "user_bob",
+      fromMs: Date.parse("2026-08-17T00:00:00.000Z"),
+      toMs: Date.parse("2026-08-18T00:00:00.000Z"),
+    })
+    expect(meetings).toEqual([])
+  })
+
+  it("rejects anonymous callers on every public function", async () => {
+    const t = setup()
+    await expectCode(t.query(api.google.listCalendars, {}), "UNAUTHENTICATED")
+    await expectCode(
+      t.query(api.google.listMeetings, { fromMs: 0, toMs: 1 }),
+      "UNAUTHENTICATED"
+    )
+    await expectCode(
+      t.mutation(api.google.setCalendarShow, {
+        calendarId: "primary",
+        show: true,
+      }),
+      "UNAUTHENTICATED"
+    )
+  })
+})
+
+describe("setCalendarShow", () => {
+  const NOW = Date.parse("2026-08-17T09:00:00.000Z")
+
+  it("clears the syncToken when a calendar is shown", async () => {
+    // A calendar that was hidden was not being fetched, so whatever token it
+    // holds describes changes since a point in the past with a gap after it.
+    // Reusing it would skip everything that happened while it was hidden.
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Brent",
+        show: false,
+        syncToken: "stale_tok",
+        lastSyncedAt: NOW,
+        updatedAt: NOW,
+      })
+    })
+
+    await t.mutation(internal.google.setCalendarShowForUser, {
+      userId: ALICE,
+      calendarId: "primary",
+      show: true,
+    })
+
+    const calendars = await t.query(internal.google.allCalendarsForTest, {
+      userId: ALICE,
+    })
+    expect(calendars[0].show).toBe(true)
+    expect(calendars[0].syncToken).toBeNull()
+  })
+
+  it("drops the mirrored events when a calendar is hidden", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("googleCalendars", {
+        userId: ALICE,
+        googleId: "primary",
+        summary: "Brent",
+        show: true,
+        syncToken: "tok",
+        lastSyncedAt: NOW,
+        updatedAt: NOW,
+      })
+      await ctx.db.insert("googleEvents", {
+        userId: ALICE,
+        calendarId: "primary",
+        eventId: "evt_1",
+        title: "Standup",
+        startedAt: NOW,
+        endedAt: NOW + 900_000,
+        isAllDay: false,
+        status: "confirmed",
+        myResponse: "accepted",
+        attendees: [],
+        attendeeCount: 0,
+        googleUpdatedAt: NOW,
+        updatedAt: NOW,
+      })
+    })
+
+    await t.mutation(internal.google.setCalendarShowForUser, {
+      userId: ALICE,
+      calendarId: "primary",
+      show: false,
+    })
+
+    expect(
+      await t.query(internal.google.allEventsForTest, { userId: ALICE })
+    ).toEqual([])
+  })
+})
