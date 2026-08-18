@@ -100,6 +100,31 @@ export type TraceErrorCode =
    *  permanent-document risk in this feature refuses rather than mints. */
   | "NO_PRICED_TIME"
 
+/*
+ * THERE ARE NO GOOGLE CODES HERE, and their absence is deliberate.
+ *
+ * `GOOGLE_NOT_CONNECTED` and `GOOGLE_REAUTH_REQUIRED` were declared with long
+ * justifications and thrown nowhere, which is a claim this file does not keep:
+ * a code in this union is a promise that some caller can branch on it, and a
+ * client written against one that is never thrown handles a case that cannot
+ * happen. Deleted rather than wired up, because neither describes anything
+ * this feature actually does.
+ *
+ * "Not connected" is not an error at all — `connectionStatusImpl` returns
+ * `{ connected: false }` and the settings page RENDERS that state, complete
+ * with the button that fixes it. Throwing there would turn a normal screen
+ * into a failure.
+ *
+ * "Re-consent needed" is not thrown either: it is a STORED FACT
+ * (`googleConnections.status === "reauth"`) discovered by a cron with no user
+ * present to throw at, and read back by the settings page as a banner. An
+ * error would have nowhere to surface — the cron is the only thing that learns
+ * it, and the only reader is a query that must succeed to say so.
+ *
+ * If Phase 2 adds a mutation a user can invoke that genuinely cannot proceed
+ * without a live grant, add the code back with the throw in the same commit.
+ */
+
 export type TraceErrorData = {
   code: TraceErrorCode
   message: string

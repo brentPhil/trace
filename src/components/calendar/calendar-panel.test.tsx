@@ -5,6 +5,7 @@ import { dayTotals, rangeOf } from "@/lib/calendar-events"
 import { noEntryActions } from "@/test-utils/fixtures"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { CalendarSize } from "@/lib/calendar-label"
+import type { Meeting } from "@/lib/calendar-meetings"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as CalendarEventsModuleType from "@/lib/calendar-events"
 
@@ -85,6 +86,46 @@ function entry(over: Partial<Doc<"timeEntries">>): Doc<"timeEntries"> {
     deletedAt: null,
     ...over,
   } as unknown as Doc<"timeEntries">
+}
+
+/**
+ * A Google meeting fixture, matching `entry`'s shape above.
+ *
+ * `startedAt` is 10:00 Manila on 2026-08-11 — inside the default `renderPanel`
+ * week (Mon 10 – Sun 16 August), unlike the brief's own sample instant of
+ * 2026-08-17, which falls in the FOLLOWING week and so is a day FullCalendar
+ * never draws a column for: `visibleRange` bounds what is rendered, so a
+ * meeting outside it would produce no block at all and every assertion below
+ * would fail for a reason unrelated to the feature under test.
+ *
+ * `htmlLink` is set even though the brief's own sample omits it: without it
+ * `CalendarMeetingPopover` renders no "Open in Google Calendar" link at all —
+ * see that component's `meeting.htmlLink === undefined ? null : <a>…` branch
+ * — and the click test below asserts exactly that link exists.
+ */
+function meetingFixture(over: Partial<Meeting> = {}): Meeting {
+  const startedAt = Date.parse("2026-08-11T02:00:00.000Z")
+  return {
+    _id: "ge_1" as Id<"googleEvents">,
+    _creationTime: startedAt,
+    userId: "user_alice",
+    calendarId: "primary",
+    eventId: "evt_1",
+    title: "Standup",
+    startedAt,
+    endedAt: startedAt + 1_800_000,
+    isAllDay: false,
+    status: "confirmed",
+    myResponse: "accepted",
+    attendees: [],
+    attendeeCount: 0,
+    googleUpdatedAt: startedAt,
+    updatedAt: startedAt,
+    htmlLink: "https://calendar.google.com/event?eid=evt_1",
+    trackOnStart: false,
+    entryId: null,
+    ...over,
+  }
 }
 
 type PanelProps = Parameters<typeof CalendarPanel>[0]
@@ -639,6 +680,215 @@ describe("CalendarPanel", () => {
     it("renders one column for a single day", () => {
       const { container } = renderPanel({ size: "day" })
       expect(renderedDays(container)).toEqual(["2026-08-11"])
+    })
+  })
+
+  describe("google meetings", () => {
+    /*
+     * `blockSaying`/`blocks`, NOT `screen.getByRole`, for finding the block
+     * itself — the same substitution every other describe block in this file
+     * already makes, and for the reason `blocks`' own comment gives: jsdom has
+     * no layout, so FullCalendar's packer never finishes measuring column
+     * widths and leaves every block's harness at `visibility: hidden` while it
+     * waits for a resize that will never come. That inline style is honoured by
+     * `getComputedStyle`, and `screen.getByRole` excludes anything the
+     * accessibility tree calls hidden — so it can never find a block in this
+     * environment, meeting or entry alike, which is exactly why the file's own
+     * block-clicking tests below reach for `blockSaying` and `fireEvent.click`
+     * on the raw element rather than `screen.getByRole`. `role="button"` is
+     * still assertable directly off the element, which is what the block's own
+     * "is a button" describe block above does.
+     */
+    it("draws a meeting as an unfilled block with a soft border", () => {
+      const { container } = renderPanel({ meetings: [meetingFixture()] })
+      const block = blockSaying(container, "Standup")
+      expect(block.getAttribute("role")).toBe("button")
+      // Fill means recorded, outline means scheduled. `surface-raised` is an
+      // entry's fill and must NOT appear here, and `enlarger` is reserved for a
+      // running timer by the Cold Light Rule.
+      expect(block.className).toContain("border-edge-soft")
+      expect(block.className).not.toContain("bg-surface-raised")
+      expect(block.className).not.toContain("enlarger")
+    })
+
+    /*
+     * A meeting's text is MEASURED, exactly as an entry's is.
+     *
+     * The meeting branch used to render a title line and a time line
+     * unconditionally — 34px of content — while a half-hour meeting has 17px
+     * of content box and a quarter-hour one has 11px. `overflow-hidden` cut
+     * the title through the middle of its glyphs, and half-hour meetings are
+     * the common case.
+     */
+    it("keeps only a half-hour meeting's title, and still says the time", () => {
+      // 30 minutes is 24px: one 16px row over the 7px the block spends on
+      // itself. `meetingFixture` is 10:00 – 10:30 Manila.
+      const { container } = renderPanel({ meetings: [meetingFixture()] })
+      const block = blockSaying(container, "Standup")
+      expect(block.querySelector(".truncate")?.textContent).toBe("Standup")
+      expect(block.querySelector(".tabular-nums")).toBeNull()
+      expect(block.querySelector(".sr-only")?.textContent).toBe("10:00 – 10:30")
+    })
+
+    it("draws no text at all in a meeting at the minimum height", () => {
+      const startedAt = Date.parse("2026-08-11T02:00:00.000Z")
+      const { container } = renderPanel({
+        meetings: [meetingFixture({ endedAt: startedAt + 60_000 })],
+      })
+      const block = blocks(container)[0]
+      expect(block.querySelector("span:not(.sr-only)")).toBeNull()
+      // Never silent: the whole description is on the screen-reader line, and
+      // the title and times are both on the native tooltip.
+      expect(block.querySelector(".sr-only")?.textContent).toBe(
+        "Standup — 10:00 – 10:01"
+      )
+      expect(block.querySelector("[title]")?.getAttribute("title")).toBe(
+        "Standup — 10:00 – 10:01"
+      )
+    })
+
+    it("shows a long meeting both lines", () => {
+      const startedAt = Date.parse("2026-08-11T02:00:00.000Z")
+      const { container } = renderPanel({
+        meetings: [meetingFixture({ endedAt: startedAt + 3_600_000 })],
+      })
+      const block = blockSaying(container, "Standup")
+      expect(block.querySelector(".tabular-nums")?.textContent).toBe(
+        "10:00 – 11:00"
+      )
+      expect(block.querySelector(".sr-only")).toBeNull()
+    })
+
+    describe("a meeting that crosses midnight", () => {
+      /** 23:00 Manila on the 12th to 01:30 on the 13th. */
+      const crosser = meetingFixture({
+        title: "Night handover",
+        startedAt: Date.parse("2026-08-12T15:00:00Z"),
+        endedAt: Date.parse("2026-08-12T17:30:00Z"),
+      })
+
+      it("hatches the tail and does not repeat the title on it", () => {
+        // `columnEventClass` had no `isStart` branch for a meeting, so the
+        // tail got neither the dashed edge nor the hatch, and `eventContent`
+        // printed the whole title again: one overnight meeting drew as two
+        // identical-looking meetings on consecutive days.
+        const { container } = renderPanel({ meetings: [crosser] })
+
+        const drawn = blocks(container)
+        expect(drawn).toHaveLength(2)
+
+        const hatched = drawn.filter((block) =>
+          block.className.includes("border-dashed")
+        )
+        expect(hatched).toHaveLength(1)
+
+        const [tail] = hatched
+        expect(within(tail).queryByText("Night handover")).toBeNull()
+        expect(tail.textContent).toBe(
+          "Night handover — continued from the previous day"
+        )
+        // A continuation is a texture, never a hue — and a ghost stays
+        // unfilled, so neither segment may pick up an entry's fill.
+        expect(tail.className).toContain("border-dashed")
+        expect(tail.className).not.toContain("bg-surface-raised")
+        expect(tail.className).not.toContain("enlarger")
+      })
+
+      it("leaves the head an ordinary outlined meeting block", () => {
+        const { container } = renderPanel({ meetings: [crosser] })
+        const head = blocks(container).find(
+          (block) => !block.className.includes("border-dashed")
+        )
+        expect(head!.className).toContain("border-edge-soft")
+        expect(head!.className).not.toContain("border-dashed")
+        expect(head!.textContent).toContain("Night handover")
+      })
+    })
+
+    it("does not draw a meeting whose entry already exists", () => {
+      const { container } = renderPanel({
+        meetings: [meetingFixture({ entryId: "te_1" as Id<"timeEntries"> })],
+      })
+      expect(blocks(container)).toHaveLength(0)
+    })
+
+    it("draws entries and meetings side by side when both are present", () => {
+      const { container } = renderPanel({
+        entries: [entry({ title: "Real work" })],
+        meetings: [meetingFixture()],
+      })
+      expect(blockSaying(container, "Real work")).toBeTruthy()
+      expect(blockSaying(container, "Standup")).toBeTruthy()
+    })
+
+    /*
+     * `eventOrder` REPLACES FullCalendar's default rather than extending it.
+     *
+     * `parseFieldSpecs` turns a function input into a ONE-spec list, so
+     * `compareByFieldSpecs` returned 0 for any two blocks of the same
+     * population and `Array.sort`'s stability left them in the events array's
+     * order — which is `entries.listRange`'s `.order("desc")`, i.e. latest
+     * first. Overlapping entries packed latest-start leftmost, inverting
+     * behaviour that predates this feature entirely. Both cases below read the
+     * blocks in DOM order, which is the order the packer emitted them in.
+     */
+    it("packs two overlapping entries earliest-start first", () => {
+      const { container } = renderPanel({
+        entries: [
+          // Handed over newest-first, exactly as `entries.listRange` returns
+          // them — the input that made the defect visible.
+          entry({
+            _id: "e_late" as Id<"timeEntries">,
+            title: "Started later",
+            startedAt: Date.parse("2026-08-11T02:00:00Z"),
+            endedAt: Date.parse("2026-08-11T03:00:00Z"),
+          }),
+          entry({
+            _id: "e_early" as Id<"timeEntries">,
+            title: "Started earlier",
+            startedAt: Date.parse("2026-08-11T01:30:00Z"),
+            endedAt: Date.parse("2026-08-11T03:00:00Z"),
+          }),
+        ],
+      })
+      const drawn = blocks(container).map((block) => block.textContent)
+      expect(drawn[0]).toContain("Started earlier")
+      expect(drawn[1]).toContain("Started later")
+    })
+
+    it("still sorts a meeting after an entry in the same window", () => {
+      // The rank comparator is the FIRST spec, so it outranks `start`: the
+      // meeting starts FIRST here, and still draws second. Built that way round
+      // deliberately — an entry that also started earlier would pass on
+      // `start` alone and prove nothing about the comparator.
+      const { container } = renderPanel({
+        entries: [
+          entry({
+            title: "Real work",
+            startedAt: Date.parse("2026-08-11T02:15:00Z"),
+            endedAt: Date.parse("2026-08-11T03:15:00Z"),
+          }),
+        ],
+        meetings: [meetingFixture()], // 02:00Z – 02:30Z, the earlier start
+      })
+      const drawn = blocks(container).map((block) => block.textContent)
+      expect(drawn[0]).toContain("Real work")
+      expect(drawn[1]).toContain("Standup")
+    })
+
+    it("opens the meeting popover rather than the entry editor on click", () => {
+      const { container } = renderPanel({ meetings: [meetingFixture()] })
+      // `fireEvent.click` targets the element directly rather than through an
+      // accessibility query, so the `visibility: hidden` harness above does not
+      // stop the click from reaching it.
+      fireEvent.click(blockSaying(container, "Standup"))
+      // The popover itself is an ordinary mounted React tree, outside
+      // FullCalendar's own packer, so it carries none of that hazard and
+      // `screen.getByRole` finds it normally. Read-only, and says so: it
+      // carries a link out to Google, which the entry editor never does.
+      expect(
+        screen.getByRole("link", { name: /Google Calendar/i })
+      ).toBeTruthy()
     })
   })
 })

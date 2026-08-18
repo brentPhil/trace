@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import {
@@ -6,9 +6,11 @@ import {
   useConvexAction,
   useConvexMutation,
 } from "@convex-dev/react-query"
+import { GoogleCalendarSection } from "@/components/settings/google-calendar-section"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
+import { authClient } from "@/lib/auth-client"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
@@ -28,7 +30,11 @@ export const Route = createFileRoute("/_authed/settings")({
   head: () => ({ meta: [{ title: pageTitle("Settings") }] }),
   component: Settings,
   loader: async ({ context }) => {
-    await context.queryClient.ensureQueryData(convexQuery(api.settings.get, {}))
+    await Promise.all([
+      context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.google.connection, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.google.listCalendars, {})),
+    ])
   },
 })
 
@@ -46,6 +52,60 @@ const WEEKDAYS = [
 ]
 
 const RUNAWAY_CHOICES = [4, 6, 8, 10, 12, 24]
+
+/*
+ * THE ONE-SHOT MARKER THAT SAYS "THIS LOAD IS A RETURN FROM GOOGLE".
+ *
+ * Without it, the round-trip effect below treated the ordinary disconnected
+ * state as an OAuth return, and DISCONNECT RE-CONNECTED ITSELF: deleting the
+ * `googleConnections` row flipped `connected` true→false, the effect's
+ * dependencies changed, it re-ran, `listAccounts()` still reported the Google
+ * account that nothing had unlinked, and `connect` inserted a fresh row and
+ * scheduled a sync. The only control for ending the mirror silently
+ * re-acquired other people's names and email addresses, and a reload did not
+ * help because the effect also ran on mount while disconnected.
+ *
+ * `sessionStorage` RATHER THAN A REF OR STATE, because `linkSocial` performs a
+ * full document navigation to Google and Google navigates back: React state
+ * and a `useRef` are both destroyed on that hop, so a bare ref set before
+ * navigating away is guaranteed to be gone by the time it would be read.
+ * `sessionStorage` is the one client store that survives a document load and
+ * still dies with the tab — exactly this marker's wanted lifetime.
+ *
+ * Rather than a `callbackURL` query flag, because a URL parameter is
+ * forgeable: anyone could hand the user a link to /settings carrying it, and
+ * the marker would then fire `connect` on a visit the user never started.
+ * Storage can only be written by this page.
+ */
+const GOOGLE_LINK_RETURN_KEY = "chroneli:google-link-return"
+
+/** Set on the way OUT to Google, so only a deliberate Connect/Reconnect press
+ *  can arm the round-trip. Both calls are wrapped: `sessionStorage` throws
+ *  outright in a browser configured to block all site data — a browser in
+ *  which the Better Auth session cookie would not survive either, so the page
+ *  has already failed for larger reasons than this marker. */
+function markGoogleLinkReturn(): void {
+  try {
+    window.sessionStorage.setItem(GOOGLE_LINK_RETURN_KEY, "1")
+  } catch {
+    // Nothing to recover here: the link still happens, the round-trip simply
+    // does not complete itself and the section keeps offering Connect.
+  }
+}
+
+/** Read AND clear, in one call. One-shot is the point — a marker that survives
+ *  its own reading is a marker that fires `connect` at some later unrelated
+ *  moment, which is the defect this replaced. */
+function takeGoogleLinkReturn(): boolean {
+  try {
+    const marked =
+      window.sessionStorage.getItem(GOOGLE_LINK_RETURN_KEY) !== null
+    window.sessionStorage.removeItem(GOOGLE_LINK_RETURN_KEY)
+    return marked
+  } catch {
+    return false
+  }
+}
 
 // Exported for -settings.test.tsx, the same way every other route in this
 // directory exports its component for its own test.
@@ -65,6 +125,153 @@ export function Settings() {
       toasts.add({ title: errorMessage(thrown), priority: "high" })
     })
   }
+
+  // `useLatest`-wrapped for a stable identity, so it can sit in the connect
+  // effect's dependency array below without re-running that effect on every
+  // render — the same reason every mutation on this page is wrapped.
+  const report = useLatest((thrown: unknown) => {
+    toasts.add({ title: errorMessage(thrown), priority: "high" })
+  })
+
+  /*
+   * Google Calendar.
+   *
+   * `projects` is already ensured by `_authed.tsx`'s own loader for every page
+   * under it — timer.tsx and projects.tsx read it the same way, with no
+   * `ensureQueryData` of their own — so this is a cache read, not a second
+   * round trip.
+   */
+  const { data: connection } = useSuspenseQuery(
+    convexQuery(api.google.connection, {})
+  )
+  const { data: calendars } = useSuspenseQuery(
+    convexQuery(api.google.listCalendars, {})
+  )
+  const { data: projects } = useSuspenseQuery(convexQuery(api.projects.list, {}))
+
+  const connectMutation = useLatest(useConvexMutation(api.google.connect))
+  const disconnectMutation = useLatest(useConvexMutation(api.google.disconnect))
+  const setCalendarShowMutation = useLatest(
+    useConvexMutation(api.google.setCalendarShow)
+  )
+  const setCalendarProjectMutation = useLatest(
+    useConvexMutation(api.google.setCalendarProject)
+  )
+  const createProjectMutation = useLatest(useConvexMutation(api.projects.create))
+
+  /*
+   * `linkSocial`, never `signIn.social`.
+   *
+   * This ADDS Google to an existing email-and-password identity rather than
+   * replacing it: the password login keeps working, and
+   * `revokeSessionsOnPasswordReset` keeps meaning what it says. Signing in with
+   * Google instead would strand anyone who set this up on a second device.
+   */
+  const connectGoogle = () => {
+    // Armed BEFORE navigating away, because after `linkSocial` there is no
+    // "after" — see `GOOGLE_LINK_RETURN_KEY`.
+    markGoogleLinkReturn()
+    void authClient.linkSocial({
+      provider: "google",
+      callbackURL: window.location.href,
+    })
+  }
+
+  /*
+   * DISCONNECT REVOKES, rather than only forgetting.
+   *
+   * `google.disconnect` deletes the four `google*` tables; it cannot touch the
+   * Better Auth `account` row, and that row holds the REFRESH TOKEN. Left
+   * behind, Chroneli keeps a live, offline-capable grant on the user's
+   * calendar after they pressed the only button that says it stops — so the
+   * unlink is half of what "disconnect" means, not a tidy-up.
+   *
+   * OUR ROWS FIRST, THE UNLINK SECOND, and the order is the whole decision.
+   * Either step can fail. Rows gone with the grant surviving is recoverable:
+   * nothing syncs (there is no connection row for the cron to pick up), the
+   * section reads disconnected, and pressing Disconnect again retries the
+   * unlink. The reverse — grant revoked with our rows surviving — leaves a
+   * connection that can never obtain a token again, so every cron run burns
+   * its `tokenFailures` counter until `TOKEN_FAILURE_LIMIT` flags it `reauth`,
+   * and the user is shown a "lost access" banner for something they asked for.
+   * So the recoverable failure is the one placed last-but-one.
+   *
+   * Better Auth REFUSES to unlink a sole account (`unlinkAccount` throws
+   * FAILED_TO_UNLINK_LAST_ACCOUNT when `findAccounts` returns one row and
+   * `allowUnlinkingAll` is off). It cannot bite here: every account on this
+   * product is created through email-and-password, and `linkSocial` ADDS
+   * Google beside that credential row rather than replacing it — see the
+   * `linkSocial` note above — so there are always two.
+   *
+   * The failure is REPORTED, never swallowed. "Disconnected" while a live
+   * grant survives is the one outcome a user cannot detect from this screen.
+   * Toasted here rather than thrown through `report`, because `errorMessage`
+   * deliberately flattens anything that is not a Trace error to "That didn't
+   * save. Try again." — which would be the wrong sentence twice over: the
+   * removal DID save, and trying again is not the only recovery.
+   */
+  const disconnectGoogle = async () => {
+    await disconnectMutation({})
+    const result = await authClient.unlinkAccount({ providerId: "google" })
+    if (result.error) {
+      toasts.add({
+        title:
+          "Your calendar data was removed, but Chroneli could not revoke its Google access. Try Disconnect again, or remove Chroneli in your Google account settings.",
+        priority: "high",
+      })
+    }
+  }
+
+  /*
+   * HOP TWO, after Google redirects back.
+   *
+   * `linkSocial` leaves the page, so nothing can be awaited after it — the
+   * `google.connect` mutation has to run on the way BACK IN. There are two
+   * moments that need it:
+   *
+   *  - First connect: a Google account now exists on the identity, and our
+   *    `googleConnections` row does not (`connection.connected` is false).
+   *  - Reconnect: the row exists but is flagged `reauth` (Google access was
+   *    revoked), and `connect` is — per its own comment in `convex/google.ts`
+   *    — the ONLY thing that clears that flag. Without firing here, a user
+   *    who completes Google's consent screen and lands back on this page
+   *    would keep seeing the "lost access" banner until the next cron tick,
+   *    up to 15 minutes later.
+   *
+   * WHAT ARMS IT IS THE MARKER, NOT THE STATE. "Not connected" is also what a
+   * deliberate disconnect looks like, and reading it as "just came back from
+   * Google" is what made Disconnect re-connect itself — see
+   * `GOOGLE_LINK_RETURN_KEY`. Only a Connect/Reconnect press sets the marker,
+   * and reading it clears it, so this fires at most once per trip out.
+   *
+   * The marker is TAKEN FIRST, before any early return, so it cannot be left
+   * in storage by a render that declined to act on it and then fire at some
+   * later unrelated moment — including right after a disconnect.
+   *
+   * The healthy state (`connected` and `status === "ok"`) is still excluded:
+   * the round trip has already completed (a second tab, a reload racing the
+   * query), and `connect` has nothing left to do there.
+   *
+   * `listAccounts()` still runs, because the marker only says the user LEFT
+   * for Google — it cannot say they finished. Someone who cancels at the
+   * consent screen is redirected back with the marker set and no linked
+   * account, and this is what stops `connect` firing for them.
+   *
+   * No cancel-on-unmount guard: there is no state to set, so a late `connect`
+   * is simply the round trip completing. A guard here would also mean
+   * StrictMode's deliberate double-invoke cancelled the first pass and found
+   * no marker on the second, so the round trip would never complete in dev.
+   */
+  useEffect(() => {
+    if (!takeGoogleLinkReturn()) return
+    if (connection.connected && connection.status !== "reauth") return
+    void authClient.listAccounts().then((result) => {
+      const linked = (result.data ?? []).some(
+        (account) => account.providerId === "google"
+      )
+      if (linked) void connectMutation({}).catch(report)
+    })
+  }, [connection.connected, connection.status, connectMutation, report])
 
   const uploadLogo = async (file: File) => {
     if (!isAcceptedLogoContentType(file.type) || file.size > MAX_LOGO_BYTES) {
@@ -420,6 +627,35 @@ export function Settings() {
               PNG or JPEG, up to {MAX_LOGO_BYTES / (1024 * 1024)} MB.
             </p>
           </div>
+        </Section>
+
+        <Section
+          title="Google Calendar"
+          hint="Draw your meetings on the calendar view and read their attendees and agenda without leaving this tab. Chroneli only ever reads from Google — nothing here is written back, and no meeting starts a timer on its own."
+        >
+          <GoogleCalendarSection
+            connection={connection}
+            calendars={calendars}
+            projects={projects}
+            timeZone={settings.timezone}
+            use12Hour={settings.timeFormat === "12"}
+            /* Read once per render rather than through `useClock`: "Last
+               synced" only needs to know which local DAY it is, and a ticking
+               clock would re-render this whole page every second to answer a
+               question whose answer changes at midnight. */
+            nowMs={Date.now()}
+            actions={{
+              connect: connectGoogle,
+              disconnect: () => void disconnectGoogle().catch(report),
+              setShow: (calendarId, show) =>
+                void setCalendarShowMutation({ calendarId, show }).catch(report),
+              setProject: (calendarId, projectId) =>
+                void setCalendarProjectMutation({ calendarId, projectId }).catch(
+                  report
+                ),
+              createProject: (name) => createProjectMutation({ name }),
+            }}
+          />
         </Section>
       </div>
     </Page>

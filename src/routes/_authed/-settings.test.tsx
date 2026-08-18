@@ -27,14 +27,48 @@ type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
  * outcomes rather than leaving one to be inferred from an unchecked box.
  */
 
-const { update, generateLogoUploadUrl, clearLogo, setLogo } = vi.hoisted(
-  () => ({
-    update: vi.fn(async () => null),
-    generateLogoUploadUrl: vi.fn(async () => "https://upload.example/logo"),
-    clearLogo: vi.fn(async () => null),
-    setLogo: vi.fn(async () => null),
-  })
-)
+const {
+  update,
+  generateLogoUploadUrl,
+  clearLogo,
+  setLogo,
+  listAccounts,
+  linkSocial,
+  unlinkAccount,
+  googleConnect,
+  googleDisconnect,
+} = vi.hoisted(() => ({
+  update: vi.fn(async () => null),
+  generateLogoUploadUrl: vi.fn(async () => "https://upload.example/logo"),
+  clearLogo: vi.fn(async () => null),
+  setLogo: vi.fn(async () => null),
+  // Defaults to "nothing linked", so the page's round-trip effect cannot fire
+  // `google.connect` by accident in a test that is about something else — and
+  // so a real network call in jsdom never reaches for a server that does not
+  // exist in a unit test. The Google tests below override it per test.
+  listAccounts: vi.fn(async () => ({
+    data: [] as Array<{ providerId: string }>,
+  })),
+  linkSocial: vi.fn(async () => ({ data: null, error: null })),
+  // Better Auth's client returns `{ data, error }` rather than throwing, so
+  // "the unlink failed" is a value this mock has to be able to produce.
+  unlinkAccount: vi.fn(
+    async (): Promise<{
+      data: { status: boolean } | null
+      error: { message: string } | null
+    }> => ({ data: { status: true }, error: null })
+  ),
+  // `google.connect` and `google.disconnect` are SEPARATE mocks rather than
+  // both landing on `update`. This file's whole reason for existing now
+  // includes "Disconnect must not re-fire connect", and one shared spy cannot
+  // tell those two calls apart.
+  googleConnect: vi.fn(async () => null),
+  googleDisconnect: vi.fn(async () => null),
+}))
+
+vi.mock("@/lib/auth-client", () => ({
+  authClient: { listAccounts, linkSocial, unlinkAccount },
+}))
 
 vi.mock("@convex-dev/react-query", async (importOriginal) => {
   const actual = await importOriginal<ConvexReactQueryModule>()
@@ -45,6 +79,8 @@ vi.mock("@convex-dev/react-query", async (importOriginal) => {
       if (name === "settings:generateLogoUploadUrl")
         return generateLogoUploadUrl
       if (name === "settings:clearLogo") return clearLogo
+      if (name === "google:connect") return googleConnect
+      if (name === "google:disconnect") return googleDisconnect
       return update
     },
     useConvexAction: () => setLogo,
@@ -57,6 +93,15 @@ afterEach(() => {
   generateLogoUploadUrl.mockClear()
   clearLogo.mockClear()
   setLogo.mockClear()
+  listAccounts.mockClear()
+  linkSocial.mockClear()
+  unlinkAccount.mockClear()
+  unlinkAccount.mockResolvedValue({ data: { status: true }, error: null })
+  googleConnect.mockClear()
+  googleDisconnect.mockClear()
+  // The round-trip marker lives in `sessionStorage` precisely so it survives a
+  // document load; it therefore also survives between tests unless cleared.
+  window.sessionStorage.clear()
   vi.unstubAllGlobals()
 })
 
@@ -64,19 +109,55 @@ type SettingsFixture = Omit<typeof SETTINGS, "logoUrl"> & {
   logoUrl: string | null
 }
 
-function renderSettings(over: Partial<SettingsFixture> = {}) {
+type ConnectionFixture = {
+  connected: boolean
+  status: "ok" | "reauth"
+  lastSyncedAt: number | null
+}
+
+function renderSettings(
+  over: Partial<SettingsFixture> = {},
+  connectionOver: Partial<ConnectionFixture> = {}
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
   client.setQueryData(convexKey(api.settings.get, {}), { ...SETTINGS, ...over })
-  return render(
-    <QueryClientProvider client={client}>
-      <Toast.Provider>
-        <Settings />
-        <ToastViewport />
-      </Toast.Provider>
-    </QueryClientProvider>
-  )
+  // Google Calendar's section renders inside this same page and its three
+  // reads (`useSuspenseQuery`, not `useQuery`) would otherwise suspend forever
+  // with no data ever arriving in this test's fake client — nothing here
+  // exercises that section, so "not connected, nothing to show" is enough
+  // unless a test overrides it (the reconnect-effect tests below do).
+  client.setQueryData(convexKey(api.google.connection, {}), {
+    connected: false,
+    status: "ok",
+    lastSyncedAt: null,
+    ...connectionOver,
+  })
+  client.setQueryData(convexKey(api.google.listCalendars, {}), [])
+  client.setQueryData(convexKey(api.projects.list, {}), [])
+  // The client is returned so a test can push a new `google.connection` the way
+  // the real Convex subscription does after `disconnect` invalidates it — which
+  // is the exact moment the re-connect defect used to fire.
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <Toast.Provider>
+          <Settings />
+          <ToastViewport />
+        </Toast.Provider>
+      </QueryClientProvider>
+    ),
+  }
+}
+
+/** Arms the page's one-shot "this load is a return from Google" marker, the
+ *  same key `settings.tsx` writes before `linkSocial` navigates away. Set
+ *  directly rather than by pressing Connect, because `linkSocial` is a full
+ *  document navigation that jsdom cannot perform. */
+function simulateOAuthReturn() {
+  window.sessionStorage.setItem("chroneli:google-link-return", "1")
 }
 
 const leaveOut = () => screen.getByLabelText("Leave notes out")
@@ -301,5 +382,121 @@ describe("/settings — invoice logo", () => {
     renderSettings({ logoUrl: "https://files.example/current.png" })
     fireEvent.click(screen.getByRole("button", { name: "Remove logo" }))
     await waitFor(() => expect(clearLogo).toHaveBeenCalledWith({}))
+  })
+})
+
+/*
+ * /settings' HOP TWO effect — the round-trip that fires `google.connect`
+ * after `linkSocial` redirects back from Google.
+ *
+ * `google.connect` is, by its own comment in convex/google.ts, the ONLY
+ * thing that clears a connection's `reauth` flag. A guard that only checked
+ * `connected` would return early for a reconnect, because a `reauth` row is
+ * still `connected: true` — leaving the "lost access" banner up until the
+ * next cron tick, up to 15 minutes later, even though the user just finished
+ * Google's consent screen. The first test below is that reconnect case; the
+ * second is the healthy state that must NOT retrigger the mutation on every
+ * settings page load.
+ */
+describe("/settings — Google reconnect after reauth", () => {
+  it("fires google.connect when a reauth-flagged connection comes back from Google", async () => {
+    listAccounts.mockResolvedValueOnce({
+      data: [{ providerId: "google" }],
+    })
+    simulateOAuthReturn()
+    renderSettings({}, { connected: true, status: "reauth" })
+    await waitFor(() => expect(googleConnect).toHaveBeenCalledWith({}))
+  })
+
+  it("fires google.connect on a first connect coming back from Google", async () => {
+    listAccounts.mockResolvedValueOnce({
+      data: [{ providerId: "google" }],
+    })
+    simulateOAuthReturn()
+    renderSettings({}, { connected: false, status: "ok" })
+    await waitFor(() => expect(googleConnect).toHaveBeenCalledWith({}))
+  })
+
+  it("does not call google.connect for an already-healthy connection", async () => {
+    listAccounts.mockResolvedValueOnce({
+      data: [{ providerId: "google" }],
+    })
+    renderSettings({}, { connected: true, status: "ok" })
+    await waitFor(() => expect(screen.getByText("Settings")).toBeTruthy())
+    expect(listAccounts).not.toHaveBeenCalled()
+    expect(googleConnect).not.toHaveBeenCalled()
+  })
+
+  it("does not call google.connect on an ordinary disconnected page load", async () => {
+    // The defect this replaced: the effect ran on mount whenever the
+    // connection was not healthy, so simply opening /settings while
+    // disconnected went looking for a linked Google account to re-adopt.
+    listAccounts.mockResolvedValueOnce({
+      data: [{ providerId: "google" }],
+    })
+    renderSettings({}, { connected: false, status: "ok" })
+    await waitFor(() => expect(screen.getByText("Settings")).toBeTruthy())
+    expect(listAccounts).not.toHaveBeenCalled()
+    expect(googleConnect).not.toHaveBeenCalled()
+  })
+})
+
+/*
+ * /settings' DISCONNECT — the control that used to undo itself.
+ *
+ * Deleting the `googleConnections` row flipped `connection.connected`
+ * true→false, which changed the round-trip effect's dependencies, which re-ran
+ * it, which found the Google account nothing had unlinked and inserted a fresh
+ * connection row. The user watched the section flip straight back to connected
+ * and the mirror re-acquire other people's names and addresses.
+ */
+describe("/settings — Google disconnect", () => {
+  it("stays disconnected and does not re-fire connect", async () => {
+    listAccounts.mockResolvedValue({ data: [{ providerId: "google" }] })
+    const { client } = renderSettings({}, { connected: true, status: "ok" })
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+    await waitFor(() => expect(googleDisconnect).toHaveBeenCalledWith({}))
+
+    // What the real Convex subscription pushes once `disconnect` has
+    // invalidated `api.google.connection`.
+    client.setQueryData(convexKey(api.google.connection, {}), {
+      connected: false,
+      status: "ok",
+      lastSyncedAt: null,
+      lastError: null,
+      lastErrorAt: null,
+    })
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Connect Google/i })).toBeTruthy()
+    )
+    expect(listAccounts).not.toHaveBeenCalled()
+    expect(googleConnect).not.toHaveBeenCalled()
+  })
+
+  it("revokes the Google grant rather than only forgetting the mirror", async () => {
+    renderSettings({}, { connected: true, status: "ok" })
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+    await waitFor(() =>
+      expect(unlinkAccount).toHaveBeenCalledWith({ providerId: "google" })
+    )
+    // Our rows first: a surviving grant with no rows is recoverable, a revoked
+    // grant with surviving rows burns the connection to `reauth`.
+    expect(googleDisconnect.mock.invocationCallOrder[0]).toBeLessThan(
+      unlinkAccount.mock.invocationCallOrder[0]
+    )
+  })
+
+  it("says so when the grant could not be revoked", async () => {
+    unlinkAccount.mockResolvedValue({
+      data: null,
+      error: { message: "session is not fresh" },
+    })
+    renderSettings({}, { connected: true, status: "ok" })
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }))
+    expect(
+      await screen.findAllByText(/could not revoke its Google access/i)
+    ).toHaveLength(2)
   })
 })

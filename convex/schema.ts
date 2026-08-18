@@ -256,6 +256,170 @@ export const entryTagFields = {
   tagId: v.id("tags"),
 }
 
+/**
+ * The Google Calendar mirror, and the line down the middle of it.
+ *
+ * `googleEvents` holds ONLY Google's facts. Every sync is free to replace a row
+ * without reading it first, and the prune is free to delete one, because
+ * nothing the user did is stored here — so nothing the user did can be lost by
+ * either. `googleEventTracking` beside it holds OUR facts about the same event
+ * and is never pruned.
+ *
+ * Two writers with different rights is the whole argument. Put the tick on the
+ * mirror row and every upsert has to be field-selective forever; the day
+ * someone writes a whole-row `replace`, every user's ticks disappear with no
+ * error. It is the same case `entryTags` makes for existing beside `tagIds`
+ * rather than replacing it — derived state and user-owned state have different
+ * lifetimes.
+ */
+
+/** One row per user who has linked Google. Where the re-consent flag lives, and
+ *  the list the cron iterates. */
+export const googleConnectionFields = {
+  userId: v.string(),
+  /** "reauth" means Google refused the refresh token. Sync STOPS for this user
+   *  until they consent again — retrying a revoked grant every 15 minutes
+   *  forever is how a quiet failure becomes an expensive one. */
+  status: v.union(v.literal("ok"), v.literal("reauth")),
+  /** The calendar LIST is refreshed at most once a day; events are polled every
+   *  15 minutes. Held here so the interval is a stored fact rather than a
+   *  second cron nobody can see the schedule of. */
+  calendarsRefreshedAt: v.union(v.number(), v.null()),
+  lastSyncedAt: v.union(v.number(), v.null()),
+  lastErrorAt: v.union(v.number(), v.null()),
+  lastError: v.optional(v.string()),
+  /** Consecutive `getAccessToken` token-exchange failures. See
+   *  `TOKEN_FAILURE_LIMIT` in convex/google.ts for why this counts rather than
+   *  flagging `reauth` on the first failure, and why it resets to 0 on any run
+   *  that does not fail this specific way.
+   *
+   *  Optional and additive, matching how `currency` and `pdfIncludeNotes` were
+   *  added to `userSettings` — a row written before this field existed simply
+   *  has no opinion and needs no backfill. */
+  tokenFailures: v.optional(v.number()),
+  updatedAt: v.number(),
+}
+
+export const googleCalendarFields = {
+  userId: v.string(),
+  /** Google's calendar id — "primary", or an address. Not a `v.id()`: it names
+   *  a document in Google's namespace, the same way `userId` names one in Better
+   *  Auth's. */
+  googleId: v.string(),
+  summary: v.string(),
+  /** Whether this calendar is drawn AND fetched. A calendar nothing may draw is
+   *  not mirrored: there is no point paying for rows nobody can see. It is also
+   *  what makes hiding a calendar suspend its pending ticks in Phase 2 —
+   *  `googleTick` reads the mirror, and a hidden calendar has nothing in it. */
+  show: v.boolean(),
+  /** What an entry made from this calendar's meetings is classified as. Optional
+   *  and stays optional: an unclassified entry is already a normal state. */
+  defaultProjectId: v.optional(v.id("projects")),
+  /** What makes polling cheap — Google returns only what changed since this was
+   *  issued. `null` means the next fetch is a full window fetch, which is both
+   *  the first-run state and the recovery from a 410. */
+  syncToken: v.union(v.string(), v.null()),
+  /** When this calendar last completed a FULL window fetch rather than a
+   *  delta. What makes the mirror converge: see `FULL_RESYNC_TTL_MS` in
+   *  convex/google.ts for the two ways a delta-only loop loses an event
+   *  permanently, and why a periodic full fetch is the only thing that finds
+   *  it again.
+   *
+   *  Optional and additive, the pattern `tokenFailures` and `currency`
+   *  already follow — a row written before this field existed simply has no
+   *  opinion, which reads as "never", which is the safe answer: its next run
+   *  does one full fetch and then settles into the TTL. No backfill. */
+  fullSyncedAt: v.optional(v.number()),
+  lastSyncedAt: v.union(v.number(), v.null()),
+  updatedAt: v.number(),
+}
+
+/** The most attendees stored on one event row.
+ *
+ *  A bound, not a preference. Convex caps a document at 1MB and the schema
+ *  guidelines warn against unbounded arrays in a document; a company-wide invite
+ *  has thousands of attendees and would both blow the cap and rewrite the whole
+ *  row on every poll. `attendeeCount` beside the array is what lets the popover
+ *  say "+ 40 more" honestly rather than implying the list is complete. */
+export const MAX_ATTENDEES = 50
+
+/** Google descriptions carry pasted agendas and mail footers and are routinely
+ *  tens of kilobytes. Truncated on write for the same reason as the attendee
+ *  cap, and truncated ONCE on the way in rather than at every render. */
+export const MAX_DESCRIPTION_LENGTH = 4_000
+
+export const googleEventFields = {
+  userId: v.string(),
+  /** The `googleCalendars.googleId` this came from. */
+  calendarId: v.string(),
+  /** Google's event id, unique per calendar. A recurring meeting arrives as
+   *  instances under `singleEvents: true`, each with its own id, which is what
+   *  keeps a daily standup from collapsing into one row. */
+  eventId: v.string(),
+  /** Google's `summary`. "" is legal and normal; the grid falls back to
+   *  "Untitled", the same fallback `titleOf` already applies to an entry. */
+  title: v.string(),
+  /** ABSOLUTE INSTANTS. Google returns RFC3339 with an offset, so `Date.parse`
+   *  is lossless. Never a wall-clock string — the failure `calendar-events.ts`
+   *  documents for entries applies here identically, and an event drawn an hour
+   *  off its real start is the defect this feature can least afford. */
+  startedAt: v.number(),
+  endedAt: v.number(),
+  /** True when Google returned `date` rather than `dateTime`. Such an event has
+   *  no clock, and the grid has no all-day rail (`allDaySlot={false}`), so it is
+   *  stored and never drawn. */
+  isAllDay: v.boolean(),
+  /** "confirmed" | "tentative". NEVER "cancelled": a cancelled event arrives
+   *  from incremental sync as a tombstone with no times at all, and is deleted
+   *  from the mirror rather than stored — see convex/googleEvents.ts. */
+  status: v.string(),
+  /** The signed-in user's RSVP, read off the attendee Google marks `self: true`,
+   *  or "none" when there is no such attendee.
+   *
+   *  STORED AND DISPLAYED, NEVER BRANCHED ON. It is written down because the
+   *  field looks exactly like a gate and an earlier draft of this feature used
+   *  it as one. In Phase 2 the checkbox is the only thing that decides whether a
+   *  meeting is tracked; an RSVP heuristic here would be the product guessing on
+   *  the user's behalf. */
+  myResponse: v.string(),
+  location: v.optional(v.string()),
+  /** Truncated to MAX_DESCRIPTION_LENGTH on write. */
+  description: v.optional(v.string()),
+  conferenceUrl: v.optional(v.string()),
+  htmlLink: v.optional(v.string()),
+  organizer: v.optional(
+    v.object({ name: v.optional(v.string()), email: v.optional(v.string()) })
+  ),
+  /** Capped at MAX_ATTENDEES. */
+  attendees: v.array(
+    v.object({
+      name: v.optional(v.string()),
+      email: v.optional(v.string()),
+      response: v.string(),
+    })
+  ),
+  /** How many Google actually reported, which may exceed the array's length. */
+  attendeeCount: v.number(),
+  /** Google's own `updated`, so a change is detectable without diffing fields. */
+  googleUpdatedAt: v.number(),
+  updatedAt: v.number(),
+}
+
+export const googleEventTrackingFields = {
+  userId: v.string(),
+  calendarId: v.string(),
+  eventId: v.string(),
+  /** The checkbox. Phase 2 owns the writer; the READER ships in Phase 1,
+   *  because it is what suppresses a ghost whose entry already exists. */
+  trackOnStart: v.boolean(),
+  /** Which entry this meeting produced. Also what suppresses the ghost: the grid
+   *  never draws an hour twice. */
+  entryId: v.union(v.id("timeEntries"), v.null()),
+  /** Which entry the switch closed, so undo can reopen it. */
+  interruptedEntryId: v.union(v.id("timeEntries"), v.null()),
+  updatedAt: v.number(),
+}
+
 export default defineSchema({
   timeEntries: defineTable(timeEntryFields)
     // userId leads every index: ownership is a key prefix, not a filter that
@@ -316,6 +480,46 @@ export default defineSchema({
     // reconcile when an entry's tags change.
     .index("by_user_tag", ["userId", "tagId"])
     .index("by_user_entry", ["userId", "entryId"]),
+
+  googleConnections: defineTable(googleConnectionFields)
+    .index("by_user", ["userId"])
+    /*
+     * NOT led by userId, and the exception is deliberate.
+     *
+     * Every other index in this file starts with `userId` because ownership must
+     * be a key prefix rather than a filter someone can forget. This one is read
+     * by exactly one caller — the sync cron, which is an internalAction
+     * enumerating work ACROSS users and has no user to scope to. It is never
+     * reachable from a user-facing query, and `by_user` above is what those use.
+     */
+    .index("by_status", ["status"]),
+
+  googleCalendars: defineTable(googleCalendarFields)
+    .index("by_user_googleId", ["userId", "googleId"])
+    .index("by_user_show", ["userId", "show"]),
+
+  googleEvents: defineTable(googleEventFields)
+    // The upsert's key.
+    .index("by_user_calendar_event", ["userId", "calendarId", "eventId"])
+    // The grid's range read, and the prune's scan.
+    .index("by_user_started", ["userId", "startedAt"])
+    /*
+     * Every row of ONE calendar, which is what two whole-calendar operations
+     * need: hiding a calendar deletes its mirrored events, and a calendar Google
+     * has stopped reporting takes its events with it.
+     *
+     * Without this both would read a page of the user's events and filter by
+     * `calendarId` in JavaScript — and a filter after the index scan does not
+     * reduce rows read, so the cost would be the whole mirror however few rows
+     * the target calendar holds. `startedAt` trails the key so the deletes come
+     * off in a stable order and a bounded page can be resumed.
+     */
+    .index("by_user_calendar_started", ["userId", "calendarId", "startedAt"]),
+
+  googleEventTracking: defineTable(googleEventTrackingFields).index(
+    "by_user_calendar_event",
+    ["userId", "calendarId", "eventId"]
+  ),
 
   userSettings: defineTable({
     userId: v.string(),

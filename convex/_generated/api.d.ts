@@ -10,10 +10,14 @@
 
 import type * as auth from "../auth.js";
 import type * as clients from "../clients.js";
+import type * as crons from "../crons.js";
 import type * as email from "../email.js";
 import type * as entries from "../entries.js";
 import type * as entryTags from "../entryTags.js";
 import type * as errors from "../errors.js";
+import type * as google from "../google.js";
+import type * as googleApi from "../googleApi.js";
+import type * as googleEvents from "../googleEvents.js";
 import type * as healthcheck from "../healthcheck.js";
 import type * as http from "../http.js";
 import type * as import_ from "../import.js";
@@ -51,10 +55,14 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   clients: typeof clients;
+  crons: typeof crons;
   email: typeof email;
   entries: typeof entries;
   entryTags: typeof entryTags;
   errors: typeof errors;
+  google: typeof google;
+  googleApi: typeof googleApi;
+  googleEvents: typeof googleEvents;
   healthcheck: typeof healthcheck;
   http: typeof http;
   import: typeof import_;

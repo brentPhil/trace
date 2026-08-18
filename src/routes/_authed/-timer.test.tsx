@@ -130,6 +130,11 @@ vi.mock("@/components/entries/entry-log", () => ({
  * The grid no longer reports a range back — see `calendar-events.ts`.
  */
 vi.mock("@/components/calendar/calendar-panel", () => ({
+  // The panel's own shared empty array, mocked alongside it: `timer.tsx`
+  // imports this from the real module for its `meetings` fallback, and an
+  // unstubbed named export is `undefined` under `vi.mock`, not the array
+  // `?? NO_MEETINGS` expects.
+  NO_MEETINGS: [],
   CalendarPanel: ({
     entries,
     range,
