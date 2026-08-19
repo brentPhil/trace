@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
-import { Music } from "@/routes/_authed/music"
+import { Music } from "@/routes/_authed/-music"
 import { convexKey } from "@/test-utils/convex-query"
 import { api } from "../../../convex/_generated/api"
 import { getFunctionName } from "convex/server"
@@ -76,16 +76,28 @@ afterEach(() => {
 })
 
 /*
- * Two tracks whose NAME order and whose ID order disagree, deliberately.
+ * Two tracks whose NAME order and whose CREATION order disagree, deliberately.
  *
- * Alpha sorts first by name and Beta is the later id, so "sorted by name" and
- * "recently added" cannot both pass by accident on a list that happens to
- * already be in the right order — which is exactly what a fixture listed in
- * one single order would let through.
+ * Alpha sorts first by name and Beta has the later `_creationTime`, so "sorted
+ * by name" and "recently added" cannot both pass by accident on a list that
+ * happens to already be in the right order — which is exactly what a fixture
+ * listed in one single order would let through.
  */
 const TRACKS = [
-  { _id: "t3", name: "Beta", bytes: 1_000_000, url: "https://f/b" },
-  { _id: "t2", name: "Alpha", bytes: 2_000_000, url: "https://f/a" },
+  {
+    _id: "t3",
+    name: "Beta",
+    bytes: 1_000_000,
+    _creationTime: 2_000,
+    url: "https://f/b",
+  },
+  {
+    _id: "t2",
+    name: "Alpha",
+    bytes: 2_000_000,
+    _creationTime: 1_000,
+    url: "https://f/a",
+  },
 ]
 
 function renderMusic(

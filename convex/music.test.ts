@@ -117,6 +117,25 @@ describe("upload validation", () => {
     expect(tracks).toHaveLength(1)
     expect(tracks[0].name).toBe("Rainfall")
     expect(tracks[0].bytes).toBe(2048)
+    expect(typeof tracks[0]._creationTime).toBe("number")
+  })
+
+  /*
+   * `_creationTime` is what makes the client's "Recently added" sort a fact
+   * rather than a guess — see -music.tsx's `orderTracks`. Sorted here by
+   * NAME, deliberately out of insertion order, so a test that happened to
+   * read the rows back already in creation order could not pass by accident.
+   */
+  it("returns _creationTime, strictly increasing with insertion order", async () => {
+    const t = setup()
+    await addTrack(t, ALICE, { name: "Bravo" })
+    await addTrack(t, ALICE, { name: "Alpha" })
+    const tracks = await t.query(internal.music.listTracksAs, { userId: ALICE })
+    const byName = [...tracks].sort((a, b) => a.name.localeCompare(b.name))
+    const [alpha, bravo] = byName
+    expect(alpha.name).toBe("Alpha")
+    expect(bravo.name).toBe("Bravo")
+    expect(alpha._creationTime).toBeGreaterThan(bravo._creationTime)
   })
 
   it("rejects an unsupported content type AND deletes the blob", async () => {

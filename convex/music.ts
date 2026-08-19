@@ -40,6 +40,10 @@ const trackReturns = v.object({
   name: v.string(),
   bytes: v.number(),
   durationMs: v.optional(v.number()),
+  /** Convex sets this on every document automatically; it is surfaced here so
+   *  the client's "Recently added" sort can order by an actual timestamp
+   *  instead of the document id, which carries no ordering guarantee. */
+  _creationTime: v.number(),
   /** Signed and short-lived. Null when the blob has gone missing, which the
    *  client treats as an unplayable track rather than an error. */
   url: v.union(v.string(), v.null()),
@@ -62,6 +66,7 @@ async function listTracksImpl(ctx: QueryCtx, userId: string) {
       name: row.name,
       bytes: row.bytes,
       ...(row.durationMs === undefined ? {} : { durationMs: row.durationMs }),
+      _creationTime: row._creationTime,
       url: await ctx.storage.getUrl(row.storageId),
     }))
   )
