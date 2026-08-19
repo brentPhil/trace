@@ -1,4 +1,3 @@
-import { afterEach } from "vitest"
 import {
   cleanup,
   fireEvent,
@@ -7,7 +6,7 @@ import {
   within,
 } from "@testing-library/react"
 // NO `user-event` import — see the Global Constraint on test interactions.
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { MusicControls } from "./music-controls"
 import type { MusicContextValue } from "./music-provider"
 
@@ -35,7 +34,10 @@ function value(overrides: Partial<MusicContextValue> = {}): MusicContextValue {
     volume: 0.6,
     shuffle: false,
     repeat: "all",
-    playRef: vi.fn(),
+    // Returns `true` — `playRef` now reports whether the ref resolved, and a
+    // stub that returned `undefined` would type-check as a permanent miss and
+    // quietly describe a player that never finds anything.
+    playRef: vi.fn(() => true),
     toggle: vi.fn(),
     next: vi.fn(),
     previous: vi.fn(),

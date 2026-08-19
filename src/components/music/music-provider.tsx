@@ -42,7 +42,19 @@ export type MusicContextValue = {
   volume: number
   shuffle: boolean
   repeat: RepeatMode
-  playRef: (ref: TrackRef) => void
+  /**
+   * Starts the named track, and says WHETHER IT FOUND ONE.
+   *
+   * `false` means the ref did not resolve against this render's track list —
+   * a deleted upload, a catalog slug that no longer ships, or simply
+   * `listTracks` not having arrived yet in a cold tab. It used to return
+   * `void` and swallow that case, which is how a preference naming a missing
+   * track became permanent silence: `use-music-tracking.ts` committed to its
+   * first choice, got no signal that nothing happened, and never re-resolved.
+   * The boolean is the whole seam that lets a caller walk a priority chain
+   * without the provider learning what a priority chain is.
+   */
+  playRef: (ref: TrackRef) => boolean
   toggle: () => void
   next: () => void
   previous: () => void
@@ -138,7 +150,27 @@ function mintTabId(): string {
  * of both halves — delete that one file and this keeps working, which is the
  * test of whether the boundary is real.
  */
-export function MusicProvider({ children }: { children: ReactNode }) {
+export function MusicProvider({
+  children,
+  onError,
+}: {
+  children: ReactNode
+  /**
+   * "One quiet toast", and the reason it is a PROP.
+   *
+   * The provider importing `Toast` directly would be the shortest diff and
+   * the wrong one: it owns the `<audio>` element and nothing else, and a
+   * toast dependency makes it unmountable in a test, unusable outside the
+   * authed shell, and coupled to the app's notification library forever. A
+   * callback is the seam — `_authed.tsx` passes the same `report` handler
+   * every other failure in the shell already goes through, so music errors
+   * look and behave like the rest of the product instead of like a second,
+   * parallel notification system.
+   *
+   * Optional because the provider must stay mountable with no wiring at all.
+   */
+  onError?: (message: string) => void
+}) {
   // Not `useSuspenseQuery`: the library is not worth blocking the authed shell
   // on, and an empty list is a correct first render — the catalog is still
   // playable while uploads load.
@@ -238,6 +270,15 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   // url is dead stops rather than walking the list forever.
   const failures = useRef(0)
 
+  // `onError` behind a ref, written during render exactly as `stateRef` below
+  // is. `_authed.tsx` builds its `report` handler inline, so the prop is a new
+  // function on every render of the shell; depending on it directly would make
+  // `failAndAdvance` — and through it the `useAudioElement` callbacks, and
+  // through those the element itself — rebuild on every render, which restarts
+  // the track. That is the same trap the destructuring comment below records.
+  const onErrorRef = useRef(onError)
+  onErrorRef.current = onError
+
   // `useAudioElement`'s callbacks are created before `advance` exists as a
   // `const` below — referencing it directly here would be a temporal-dead-zone
   // error, not just a stale closure. Routing through a ref sidesteps needing
@@ -261,6 +302,16 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     ) {
       failures.current = 0
       setPlaying(false)
+      // ONE toast, HERE, and not one per skipped track. A single unplayable
+      // file in a healthy library is a non-event — the queue steps past it and
+      // the user hears music, so telling them about it would be noise about a
+      // problem that already fixed itself. What deserves saying is the moment
+      // the music stops without anyone having asked it to, which is precisely
+      // this branch: every candidate the queue could reach failed. Firing per
+      // skip would also mean a library of ten dead uploads produces ten
+      // stacked toasts for one silence, which is how "quiet" was specified
+      // against in the first place.
+      onErrorRef.current?.("Music stopped — those tracks could not be played.")
       return
     }
     void advanceRef.current(1, "error")
@@ -416,11 +467,17 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   }, [playing])
 
   const playRef = useCallback(
-    (ref: TrackRef) => {
+    (ref: TrackRef): boolean => {
       const track = tracks.find((t) => trackRefEquals(t.ref, ref))
-      if (track === undefined) return
+      // The listeners fire ONLY on a resolved ref, unchanged: `onUserPick` is
+      // how a pick becomes a stored preference, and announcing a ref that
+      // named nothing would write a preference for a track that does not
+      // exist — manufacturing the exact dangling row `preferenceForImpl` now
+      // has to defend against.
+      if (track === undefined) return false
       for (const listener of pickListeners.current) listener(ref)
       void start(track)
+      return true
     },
     [start, tracks]
   )
@@ -432,7 +489,24 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       return
     }
     if (current === null) {
-      const track = tracks[0]
+      // COLD START — nothing is current because nothing has played in this
+      // tab yet. `currentRef` is state, so a reload empties it; it is never
+      // rehydrated from `prefs.lastTrack`, deliberately, because rehydrating
+      // it would make a reloaded tab claim to be "on" a track it has not
+      // loaded and cannot resume. But pressing Play with no current track is
+      // an instruction to start SOMETHING, and the last thing this device
+      // played is a far better guess at what than the first row of the
+      // catalog — the autoplay resolver in `use-music-tracking.ts` has always
+      // honoured `lastTrack` at exactly this priority, and Play disagreeing
+      // with autoplay about the same question is the kind of inconsistency
+      // nobody can explain to a user. Falls back to `tracks[0]` when the
+      // remembered track is gone from the list (deleted upload, uploads not
+      // loaded yet), which is the same fall-through the resolver performs.
+      const remembered =
+        prefs.lastTrack === null
+          ? undefined
+          : tracks.find((t) => trackRefEquals(t.ref, prefs.lastTrack))
+      const track = remembered ?? tracks[0]
       if (track === undefined) return
       void start(track)
       return
@@ -441,7 +515,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       setPlaying(ok)
       setBlocked(!ok)
     })
-  }, [current, pause, playing, resume, start, tracks])
+  }, [current, pause, playing, prefs.lastTrack, resume, start, tracks])
 
   const value = useMemo<MusicContextValue>(
     () => ({

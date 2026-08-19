@@ -307,11 +307,11 @@ describe("duration", () => {
     expect(track.durationMs).toBe(187_000)
   })
 
-  it("setTrackDuration hides another user's track behind NOT_FOUND", async () => {
+  it("setTrackDurationAs hides another user's track behind NOT_FOUND", async () => {
     const t = setup()
     const trackId = await addTrack(t, ALICE)
     await expectCode(
-      t.mutation(internal.music.setTrackDuration, {
+      t.mutation(internal.music.setTrackDurationAs, {
         userId: BOB,
         trackId,
         durationMs: 1000,
@@ -426,6 +426,52 @@ describe("preferences", () => {
     expect(
       await t.query(internal.music.preferenceForAs, { userId: BOB, ...KEY })
     ).toBe(null)
+  })
+
+  /*
+   * The two halves of "a preference naming a missing track must not produce
+   * silence". `removeTrackImpl` leaves the preference row behind by design —
+   * so the read is where the dangling ref has to stop, and these two tests
+   * together say it stops there WITHOUT also swallowing live refs, which is
+   * the way an over-eager guard would "fix" this and break the feature.
+   */
+  it("reads back as null once the upload it names has been removed", async () => {
+    const t = setup()
+    const trackId = await addTrack(t, ALICE, { name: "Doomed" })
+    await t.mutation(internal.music.setPreferenceAs, {
+      userId: ALICE,
+      ...KEY,
+      trackRef: { origin: "upload", trackId },
+    })
+    expect(
+      await t.query(internal.music.preferenceForAs, { userId: ALICE, ...KEY })
+    ).toEqual({ origin: "upload", trackId })
+
+    await t.mutation(internal.music.removeTrackAs, { userId: ALICE, trackId })
+
+    expect(
+      await t.query(internal.music.preferenceForAs, { userId: ALICE, ...KEY })
+    ).toBe(null)
+    // The row itself is deliberately left alone — a query cannot write, and
+    // the next genuine pick overwrites it. Asserted so a future "tidy-up"
+    // that turns this query into a mutation has to argue with a test first.
+    const rows = await t.run(
+      async (ctx) => await ctx.db.query("musicPreferences").collect()
+    )
+    expect(rows).toHaveLength(1)
+  })
+
+  it("still returns a preference naming a live upload", async () => {
+    const t = setup()
+    const trackId = await addTrack(t, ALICE, { name: "Alive" })
+    await t.mutation(internal.music.setPreferenceAs, {
+      userId: ALICE,
+      ...KEY,
+      trackRef: { origin: "upload", trackId },
+    })
+    expect(
+      await t.query(internal.music.preferenceForAs, { userId: ALICE, ...KEY })
+    ).toEqual({ origin: "upload", trackId })
   })
 
   it("refuses a preference pointing at someone else's upload", async () => {

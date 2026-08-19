@@ -93,10 +93,27 @@ export const Route = createFileRoute("/_authed")({
  * every navigation, and `MusicProvider` owns the single `<audio>` element
  * for the session, so an instance living below `<Outlet>` would tear the
  * audio down and rebuild it — cutting the music — on every page change.
+ *
+ * The toast manager is read HERE rather than reused from `AuthedShell`'s
+ * `report` for the same positional reason: `report` is defined inside the
+ * child, and a parent cannot reach into a component it renders. `Toast.Provider`
+ * lives in `__root.tsx`, above both, so `useToastManager` is legal at this
+ * level — and the provider gets the app's ordinary error channel instead of
+ * growing a toast import of its own.
  */
 function AuthedLayout() {
+  const toasts = Toast.useToastManager()
   return (
-    <MusicProvider>
+    <MusicProvider
+      onError={(message) => {
+        // `priority: "high"` and the 8s timeout match `AuthedShell`'s `report`
+        // exactly. Music failing is not more urgent than a failed save, but it
+        // must not be quieter either — a shorter, low-priority toast for the
+        // one failure the user cannot see the cause of (audio that simply
+        // stopped) is the one case where a lower priority would be wrong.
+        toasts.add({ title: message, priority: "high", timeout: 8_000 })
+      }}
+    >
       <AuthedShell />
     </MusicProvider>
   )

@@ -304,7 +304,7 @@ async function addTrackAction(
   }
 
   if (args.durationMs !== undefined) {
-    await ctx.runMutation(internal.music.setTrackDuration, {
+    await ctx.runMutation(internal.music.setTrackDurationAs, {
       userId,
       trackId,
       durationMs: args.durationMs,
@@ -337,7 +337,11 @@ export const callerUserId = internalQuery({
   handler: async (ctx) => await requireUserId(ctx),
 })
 
-export const setTrackDuration = internalMutation({
+/** `As`, not a bare name: this file's convention is that a function taking an
+ *  explicit `userId` instead of reading it off the caller's identity says so in
+ *  its name, so a reviewer can tell at a glance which functions trust an
+ *  argument for ownership. It was the one internal in here that did not. */
+export const setTrackDurationAs = internalMutation({
   args: {
     userId: v.string(),
     trackId: v.id("musicTracks"),
@@ -451,6 +455,34 @@ async function findPreference(
     .first()
 }
 
+/**
+ * The stored ref, or `null` — INCLUDING when the row exists but names a track
+ * that no longer does.
+ *
+ * `removeTrackImpl` above hard-deletes the row and the blob and leaves every
+ * preference pointing at it, so a stale upload ref is not an exotic state: it
+ * is what deleting a track you had once picked always produces. Handing that
+ * ref back unchecked is what made a record autoplay nothing forever — the
+ * client resolved it against a list it was not in, `playRef` found no track,
+ * and nothing ever re-resolved.
+ *
+ * The stale row is NOT deleted here, and the spec's "cleaned on read" wording
+ * overpromised. `preferenceFor` is a `query`; a query cannot write, and the
+ * cures for that are all worse than the disease — turning a read every timer
+ * start performs into a mutation costs a write on the hot path and forfeits
+ * the reactive cache; scheduling a delete from a query is not a thing Convex
+ * offers; a migration is the explicitly rejected option. What actually matters
+ * is the ANSWER, and `null` here is exactly the answer a deleted track should
+ * produce: the client falls through to the next resolution step, and the next
+ * genuine user pick overwrites the row in place via `setPreferenceImpl`'s
+ * upsert. A row nobody can observe is not a bug, it is a few dozen bytes.
+ *
+ * A catalog ref is deliberately NOT validated against `CATALOG` — that list
+ * lives in the client bundle, the server has no copy, and inventing one here
+ * would put the same array in two places that must never disagree. A slug
+ * whose file has gone fails the same way on the client, through
+ * `resolveTrackUrl` returning null, which the resolver already walks past.
+ */
 async function preferenceForImpl(
   ctx: QueryCtx,
   userId: string,
@@ -459,7 +491,21 @@ async function preferenceForImpl(
   const title = args.title.trim()
   if (title === "") return null
   const row = await findPreference(ctx, userId, title, args.projectId)
-  return row?.trackRef ?? null
+  const ref = row?.trackRef ?? null
+  if (ref === null || ref.origin !== "upload") return ref
+
+  // `ctx.db.get` rather than `getOwned`: this is a lookup that is ALLOWED to
+  // come back empty, and `getOwned` answers "missing" by throwing NOT_FOUND —
+  // which here would turn one deleted track into a hard failure of the query
+  // the whole autoplay path waits on, i.e. exactly the silence being fixed.
+  // The ownership half of `getOwned` is still enforced, by hand, because a
+  // preference row is user-supplied storage and must not become a way to ask
+  // whether another account's track id exists.
+  const track = await ctx.db.get(ref.trackId)
+  if (track === null || track.userId !== userId || track.deletedAt !== null) {
+    return null
+  }
+  return ref
 }
 
 export const preferenceFor = query({

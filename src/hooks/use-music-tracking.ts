@@ -129,29 +129,81 @@ export function useMusicTracking(
     [context, music, setPreference]
   )
 
-  // `running?._id` rather than `running`: the document's reference changes on
-  // every tick of the elapsed-time query, and this must fire once per timer.
-  const startedFor = useRef<string | null>(null)
+  /*
+   * WHAT HAS ALREADY BEEN RESOLVED, AND WHETHER WE ARE THE ONES PLAYING.
+   *
+   * `running?._id` rather than `running` for the read below: the document's
+   * reference changes on every tick of the elapsed-time query, and this must
+   * not re-fire on each one.
+   *
+   * THE KEY IS THE RESOLUTION'S INPUTS, NOT THE ENTRY ID. Keying on the id
+   * alone made resolution a once-per-entry event fired at entry CREATION, and
+   * the ordinary way a timer is started is: press start, then type what you
+   * are doing. At creation the title is `""`, so `preferenceFor` is disabled,
+   * there is no preference to consult, resolution lands on the default track —
+   * and the id is pinned. The title arriving a few seconds later re-runs this
+   * effect, which returns at the top, so the record's remembered track was
+   * consulted on precisely the entries nobody names up front, i.e. almost
+   * none. Keying on `{id, title, projectId}` makes a title (or a project)
+   * arriving after start count as a NEW question, which it is.
+   *
+   * THE RE-RESOLVE IS SUBORDINATE TO "DO NOT INTERRUPT", DELIBERATELY. The
+   * `music.playing` guard below still wins, so in practice the second
+   * resolution only takes effect when the first found nothing to play or the
+   * browser blocked autoplay. The visible consequence, and it is a real one:
+   * typing a title over music that is already playing does NOT switch the
+   * track to that record's remembered one. That is the trade the project owner
+   * chose, and the alternative is worse — a timer that yanks the track out
+   * from under someone mid-listen because they corrected a typo in the title
+   * is a product that cannot be trusted to be left running.
+   *
+   * `startedByUs` rides along because the stop branch needs it — see there.
+   */
+  const startedFor = useRef<{ key: string; startedByUs: boolean } | null>(null)
 
   useEffect(() => {
     const id = running?._id ?? null
 
     if (id === null) {
-      if (startedFor.current !== null) {
+      const prior = startedFor.current
+      if (prior !== null) {
         startedFor.current = null
-        if (settings.musicOnStop === "stop") music.stop()
-        if (settings.musicOnStop === "pause") music.pause()
-        // "continue" does nothing, deliberately.
+        // A USER'S OWN PLAYBACK IS THEIRS, AND THE TRACKER DOES NOT GET TO
+        // STOP IT. `startedFor` used to be set on every path through the
+        // resolver — including the autoplay-OFF path and the
+        // already-playing path — so it recorded "this entry has been seen",
+        // not "this hook started audio". `musicOnStop` was then applied on
+        // the strength of it, which meant switching autoplay off, pressing
+        // play by hand, and later stopping the timer silenced music this
+        // hook had nothing to do with. The user never connected the two
+        // actions, and could not have: nothing on screen links a timer they
+        // told not to touch the music to the music stopping.
+        if (prior.startedByUs) {
+          if (settings.musicOnStop === "stop") music.stop()
+          if (settings.musicOnStop === "pause") music.pause()
+          // "continue" does nothing, deliberately.
+        }
       }
       return
     }
 
-    if (startedFor.current === id) return
+    const key = `${id}\0${title}\0${projectId ?? ""}`
+
+    // `\0` as the separator for `sittingKey`'s reason: a user-supplied string
+    // must not be able to impersonate another key by containing the delimiter,
+    // and a title is entirely user-supplied.
+    if (startedFor.current?.key === key) return
+
+    // Carried across re-resolutions of the same running timer. A title
+    // arriving after start mints a new key, but it does not un-start the audio
+    // this hook already began — and if the stop branch above forgot that, the
+    // fix for `musicOnStop` would break the ordinary case it exists for.
+    const startedByUs = startedFor.current?.startedByUs ?? false
 
     if (!settings.musicAutoplay) {
       // Nothing to resolve — autoplay is off, so no query result could ever
       // change this outcome. Final answer, mark it handled now.
-      startedFor.current = id
+      startedFor.current = { key, startedByUs }
       return
     }
 
@@ -187,41 +239,90 @@ export function useMusicTracking(
     // something themselves, and a timer's autoplay must not stomp on music
     // that began while this effect was mid-wait.
     if (music.playing) {
-      startedFor.current = id
+      startedFor.current = { key, startedByUs }
       return
     }
 
-    // 1. what this record was last using, 2. the last track played on this
-    // device, 3. the first catalog track.
-    const fallback: TrackRef | null =
-      readLocalPrefs().lastTrack ??
-      (CATALOG.length === 0
-        ? null
-        : { origin: "chroneli", slug: CATALOG[0].slug })
-    const chosen = preference ?? fallback
+    /*
+     * A CHAIN THAT IS WALKED, NOT A CHOICE THAT IS COMMITTED TO.
+     *
+     * 1. what this record was last using, 2. the last track played on this
+     * device, 3. the first catalog track — unchanged in priority, changed in
+     * how a miss is handled. The old code collapsed all three into one
+     * `preference ?? fallback` and handed the winner to `playRef`, which
+     * returned `void` and did nothing at all if the ref named no track in the
+     * list. So a preference pointing at a deleted upload did not fall through
+     * to (2) or (3) as the spec promised — it produced SILENCE, permanently,
+     * because `startedFor` was pinned on the way past. `playRef` now reports
+     * whether it resolved, and this loop stops at the first candidate that
+     * actually started something.
+     */
+    const candidates: Array<TrackRef> = []
+    // `undefined` (query not settled) is unreachable here — the
+    // `preferencePending` guard above already returned — but it is part of the
+    // type and is not a candidate either way, so both empties are excluded
+    // explicitly rather than through a truthiness test that would also silently
+    // swallow a future falsy member of `TrackRef`.
+    if (preference !== undefined && preference !== null) {
+      candidates.push(preference)
+    }
+    const lastTrack = readLocalPrefs().lastTrack
+    if (lastTrack !== null) candidates.push(lastTrack)
+    if (CATALOG.length > 0) {
+      candidates.push({ origin: "chroneli", slug: CATALOG[0].slug })
+    }
 
-    // Only marked handled once actually resolved (immediately for a blank
-    // title, or after the query settled for a real one) — setting this any
-    // earlier is what let the cold-cache preference get skipped forever,
-    // since a later, correct re-run of this effect returns at the very top
-    // the moment it sees `startedFor.current === id`. This also covers the
-    // timer-stops-while-query-is-in-flight case for free: if `running`
-    // clears before this line ever runs, the `id === null` branch above
-    // takes over on the next pass, `startedFor.current` was never set for
-    // this id, and nothing here plays anything.
-    startedFor.current = id
-    if (chosen === null) return
-
+    // The suppression flag wraps the WHOLE walk rather than each call: every
+    // `playRef` in here is this resolver's own, and a `finally` around the
+    // loop means a throw from any one of them still clears it. See the long
+    // comment on `resolvingOwnPick` above for why the flag lives here at all.
+    let started = false
     resolvingOwnPick.current = true
     try {
-      music.playRef(chosen)
+      for (const candidate of candidates) {
+        if (music.playRef(candidate)) {
+          started = true
+          break
+        }
+      }
     } finally {
       resolvingOwnPick.current = false
+    }
+
+    /*
+     * MARKED HANDLED ONLY WHEN THERE IS SOMETHING TO HANDLE.
+     *
+     * Started: obviously done, and `startedByUs` is now true, which is what
+     * earns this hook the right to apply `musicOnStop` later.
+     *
+     * Nothing started but there were no candidates at all: the library is
+     * genuinely empty — no preference, no remembered track, no catalog — and
+     * no re-run of this effect can change that, so mark it and stop. Retrying
+     * forever on an empty library is a re-render loop nobody can see.
+     *
+     * Nothing started BUT candidates existed: every one of them failed to
+     * resolve, which on a cold tab means the track list has not landed yet
+     * (`listTracks` is a non-suspense query outside the loader's prefetch, and
+     * it is the slowest in the feature — one signed-URL round trip per row —
+     * while `preferenceFor` is a single index read, so the preference really
+     * can arrive first). Deliberately NOT marked: leaving `startedFor` unset
+     * is what lets the next render, once `music.tracks` has grown, resolve
+     * against the real list instead of against a catalog-only one.
+     *
+     * This also covers the timer-stops-while-the-query-is-in-flight case for
+     * free: if `running` clears before any of this ran, the `id === null`
+     * branch takes over with `startedFor.current` still null and stops nothing.
+     */
+    if (started || candidates.length === 0) {
+      // `||`, not `= started`: a re-resolution that starts nothing must not
+      // erase the fact that an EARLIER resolution for this same timer did.
+      startedFor.current = { key, startedByUs: startedByUs || started }
     }
   }, [
     music,
     preference,
     preferencePending,
+    projectId,
     running?._id,
     settings.musicAutoplay,
     settings.musicOnStop,
