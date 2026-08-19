@@ -1989,8 +1989,8 @@ export function useAudioElement({
     element.preload = "auto"
     ref.current = element
 
-    const handleEnded = () => ended.current()
-    const handleError = () => errored.current()
+    const handleEnded = () => ended()
+    const handleError = () => errored()
     element.addEventListener("ended", handleEnded)
     element.addEventListener("error", handleError)
 
@@ -2863,13 +2863,17 @@ export function useMusicTracking(
    * indistinguishable from a deliberate one, and within a week every record in
    * the account "prefers" the first catalog track.
    */
-  const context = useLatest({ title, projectId })
+  // `useLatest` takes a FUNCTION and returns a permanently stable one that
+  // always calls the newest closure. It is NOT a ref: passing it an object is
+  // a type error, and reading `.current` off its result is another. Task 6
+  // learned this the expensive way — see commit 15ef1d4.
+  const context = useLatest(() => ({ title, projectId }))
   useEffect(
     () =>
       music.onUserPick((ref: TrackRef) => {
-        const { title: t, projectId: p } = context.current
+        const { title: t, projectId: p } = context()
         if (t === "") return
-        void setPreference.current({ title: t, projectId: p, trackRef: ref }).catch(() => {
+        void setPreference({ title: t, projectId: p, trackRef: ref }).catch(() => {
           // A preference that failed to save is not worth interrupting a
           // running timer for. The music is already playing.
         })
