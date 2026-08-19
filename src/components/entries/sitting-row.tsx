@@ -143,7 +143,10 @@ export function SittingRow({
           full, where the whole cluster centres against the grown column.
           Whatever the answer to that mode is, it has to be answered for both
           rows at once, in one place. */}
-      <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
+      {/* WRAPS BELOW `sm`, exactly as `EntryRow` does and for the same reason —
+          see that file. The comment above is explicit that a layout answer has
+          to be given for both rows at once, and this is the other half of it. */}
+      <div className="flex min-h-(--entry-row-height) w-full flex-wrap items-center gap-1.5 px-4 sm:flex-nowrap">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
@@ -152,7 +155,10 @@ export function SittingRow({
             onToggle={selection.onToggle}
           />
         )}
-        <div className="flex w-full min-w-0 items-center gap-2">
+        {/* `flex-1`, not `w-full` — a wrapping flex container breaks a line on
+            an item's hypothetical size before it considers shrinking, so 100%
+            would put this column below the selection checkbox. See `EntryRow`. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           {/* The number is the disclosure, with its accessible state carried by
               the button rather than a separate visible chevron. The wrapper's
               `items-center` is what places it — level with the title at the
@@ -173,7 +179,7 @@ export function SittingRow({
               expanded ? "Hide grouped entries" : "Show grouped entries"
             }
             onClick={onToggle}
-            className="font-mono tabular-nums tracking-[-0.02em] shrink-0 rounded-sm border-edge-soft"
+            className="shrink-0 rounded-sm border-edge-soft font-mono tracking-[-0.02em] tabular-nums"
           >
             {sitting.entries.length}
           </Button>
@@ -230,24 +236,33 @@ export function SittingRow({
           */}
         </div>
 
-        <div className="flex h-full shrink-0 items-center justify-end gap-4">
-          <TagPicker
-            tags={tags}
-            value={sitting.tagIds}
-            onCreate={onCreateTag}
-            onChange={(tagIds) => onClassify({ tagIds })}
-            className="hidden sm:inline-flex"
-          />
-          <BillableToggle
-            value={sitting.allBillable}
-            onChange={(billable) => onClassify({ billable })}
-          />
-          {/* `text-nowrap`: a time range is one indivisible value; broken
+        {/* One wrapped line carrying BOTH clusters, `display: contents` from
+            `sm` up so the desktop row is untouched. `EntryRow` argues this at
+            length; the two must not diverge. */}
+        <div className="flex w-full items-center justify-end gap-4 sm:contents">
+          <div className="flex h-full shrink-0 items-center justify-end gap-4">
+            <TagPicker
+              tags={tags}
+              value={sitting.tagIds}
+              onCreate={onCreateTag}
+              onChange={(tagIds) => onClassify({ tagIds })}
+              className="hidden sm:inline-flex"
+            />
+            <BillableToggle
+              value={sitting.allBillable}
+              onChange={(billable) => onClassify({ billable })}
+            />
+            {/* `text-nowrap`: a time range is one indivisible value; broken
               across two lines it is not a smaller version of itself. */}
-          <div className="font-mono tabular-nums tracking-[-0.02em] text-xs text-nowrap px-1 text-muted-foreground">
-            {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}
-          </div>
-          {/*
+            <div className="px-1 font-mono text-xs tracking-[-0.02em] text-nowrap text-muted-foreground tabular-nums">
+              {formatTimeRange(
+                sitting.fromMs,
+                sitting.toMs,
+                timeZone,
+                use12Hour
+              )}
+            </div>
+            {/*
             `formatTotal`, whose contract says decimal applies to TOTALS and
             never to a single entry's own row. A sitting's figure is a sum of
             parts, so it is a total, and it is floored like every other one.
@@ -264,21 +279,26 @@ export function SittingRow({
             `data-log-cell="duration"` is the column's name in the DOM, shared
             with the day total and `EditableDuration`; day-list.test.tsx
             queries it to hold the three shapes to one treatment. */}
-          <span
-            data-log-cell="duration"
-            className="font-mono tabular-nums tracking-[-0.02em] flex h-full items-center justify-end ps-2.5 pe-1 text-sm font-medium"
-          >
-            {formatTotal(sitting.totalMs, display)}
-          </span>
-        </div>
+            <span
+              data-log-cell="duration"
+              className="flex h-full items-center justify-end ps-2.5 pe-1 font-mono text-sm font-medium tracking-[-0.02em] tabular-nums"
+            >
+              {formatTotal(sitting.totalMs, display)}
+            </span>
+          </div>
 
-        <div className="flex h-full items-center justify-end">
-          <SittingAction label={`Resume ${title}`} onClick={onResume}>
-            <Play className="size-4" />
-          </SittingAction>
-          <SittingAction label={`Delete ${title}`} onClick={onRemove} destructive>
-            <Trash2 className="size-4" />
-          </SittingAction>
+          <div className="flex h-full items-center justify-end">
+            <SittingAction label={`Resume ${title}`} onClick={onResume}>
+              <Play className="size-4" />
+            </SittingAction>
+            <SittingAction
+              label={`Delete ${title}`}
+              onClick={onRemove}
+              destructive
+            >
+              <Trash2 className="size-4" />
+            </SittingAction>
+          </div>
         </div>
       </div>
     </div>
