@@ -67,6 +67,65 @@ export function useMusic(): MusicContextValue {
 /** Names the channel that keeps two pinned tabs from playing over each other. */
 const CHANNEL = "chroneli:music"
 
+type ShuffleCache = { seed: number; keys: Array<string> } | null
+
+/**
+ * The shuffle order, expressed as track IDENTITIES and reconciled against
+ * whatever the track list looks like this render — never regenerated from
+ * scratch just because the list changed shape.
+ *
+ * Calling `shuffledOrder(tracks.length, seed)` again every time `tracks`
+ * changed was the earlier bug here: `listTracksImpl` (convex/music.ts) sorts
+ * uploads ALPHABETICALLY BY NAME, so a newly arrived upload does not merely
+ * append to the list — it can insert anywhere in the middle, shifting the
+ * index of every upload that sorts after it. Regenerating on every change
+ * reshuffles a queue the user is already mid-way through; the tempting
+ * middle ground of only regenerating when the length grows would still be
+ * wrong on its own, because a plain array of indices goes silently stale
+ * the instant an insertion (not just an append) shifts what index N means —
+ * `order` would keep pointing at the position, not the track. Keying by
+ * `TrackRef` instead of by raw index sidesteps both problems: a track
+ * already in the sequence keeps its place no matter where the array moves
+ * it around, and only a track with no prior entry counts as "new" and gets
+ * appended.
+ */
+function reconcileShuffleOrder(
+  cache: ShuffleCache,
+  currentKeys: Array<string>,
+  seed: number
+): Array<string> {
+  if (cache === null || cache.seed !== seed) {
+    // Shuffle just switched on, or the seed changed because the user
+    // explicitly asked for a reshuffle (`toggleShuffle`) — nothing worth
+    // preserving, so a full fresh permutation.
+    return shuffledOrder(currentKeys.length, seed).map((i) => currentKeys[i])
+  }
+  const known = new Set(currentKeys)
+  // Survivors keep the relative order they already had; a key with no
+  // match in `known` names a track that was deleted and simply drops out.
+  const kept = cache.keys.filter((key) => known.has(key))
+  const keptSet = new Set(kept)
+  const arrivedKeys = currentKeys.filter((key) => !keptSet.has(key))
+  // New tracks are shuffled only AMONG THEMSELVES, then appended — never
+  // interleaved with the existing sequence. That is what "does not reorder
+  // a queue already in progress" means in practice; the seed offset just
+  // keeps successive arrivals from all landing in the same relative order.
+  const shuffledArrivals = shuffledOrder(
+    arrivedKeys.length,
+    seed + cache.keys.length
+  ).map((i) => arrivedKeys[i])
+  return [...kept, ...shuffledArrivals]
+}
+
+/** Generates a per-tab id, lazily and client-side only — see the announce
+ *  effect below, which is the only caller, for why this must never run
+ *  during render. */
+function mintTabId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2)
+}
+
 /**
  * The player.
  *
@@ -133,10 +192,34 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     return at === -1 ? null : tracks[at]
   }, [currentRef, indexOfRef, tracks])
 
-  const order = useMemo(
-    () => (prefs.shuffle ? shuffledOrder(tracks.length, shuffleSeed) : null),
-    [prefs.shuffle, shuffleSeed, tracks.length]
-  )
+  // Caches the shuffle sequence between renders, keyed by track identity
+  // rather than by index — see `reconcileShuffleOrder` above for why.
+  const shuffleCacheRef = useRef<ShuffleCache>(null)
+
+  const order = useMemo(() => {
+    if (!prefs.shuffle) {
+      shuffleCacheRef.current = null
+      return null
+    }
+    const currentKeys = tracks.map((t) => trackRefKey(t.ref))
+    const keys = reconcileShuffleOrder(
+      shuffleCacheRef.current,
+      currentKeys,
+      shuffleSeed
+    )
+    shuffleCacheRef.current = { seed: shuffleSeed, keys }
+    // `keys` is a permutation of `currentKeys` (see `reconcileShuffleOrder`),
+    // so every lookup below succeeds and `indices` ends up the same length
+    // as `tracks` — a full permutation of `0..tracks.length-1`, matching
+    // what `QueuePosition.order` promises its callers.
+    const keyToIndex = new Map(currentKeys.map((key, i) => [key, i] as const))
+    const indices: Array<number> = []
+    for (const key of keys) {
+      const i = keyToIndex.get(key)
+      if (i !== undefined) indices.push(i)
+    }
+    return indices
+  }, [prefs.shuffle, shuffleSeed, tracks])
 
   // Listeners rather than a callback prop: the bridge subscribes, and a prop
   // would make the provider's placement depend on the bridge's.
@@ -165,20 +248,36 @@ export function MusicProvider({ children }: { children: ReactNode }) {
     (delta: 1 | -1, cause: "user" | "ended" | "error") => void
   >(() => {})
 
-  const audio = useAudioElement({
+  // Shared by a genuine decode/network error (`onError` below) and by
+  // `start` finding a track with no URL at all: both mean "this track
+  // cannot play, move on", and both need to count against the same bound —
+  // otherwise a library that is entirely dead URLs advances forever instead
+  // of stopping.
+  const failAndAdvance = useCallback(() => {
+    failures.current += 1
+    if (
+      failures.current >= stateRef.current.tracks.length ||
+      failures.current > 10
+    ) {
+      failures.current = 0
+      setPlaying(false)
+      return
+    }
+    void advanceRef.current(1, "error")
+  }, [])
+
+  // Destructured rather than kept as `audio.play`/`audio.pause`/etc: the
+  // object `useAudioElement` returns is a fresh literal on every render even
+  // though each callback inside it is individually `useCallback`-stable, so
+  // depending on the OBJECT (`[audio]`) instead of on the functions it
+  // contains defeats every memoization below that depends on it — effects
+  // that should run once on mount instead run on every render, and the
+  // context `value` memo at the bottom never actually memoizes. Depending on
+  // the individual functions fixes all of that for free, because they really
+  // are stable. `useAudioElement` itself is shared and out of scope here.
+  const { play, resume, pause, stop, setVolume } = useAudioElement({
     onEnded: () => void advanceRef.current(1, "ended"),
-    onError: () => {
-      failures.current += 1
-      if (
-        failures.current >= stateRef.current.tracks.length ||
-        failures.current > 10
-      ) {
-        failures.current = 0
-        setPlaying(false)
-        return
-      }
-      void advanceRef.current(1, "error")
-    },
+    onError: failAndAdvance,
   })
 
   const start = useCallback(
@@ -186,15 +285,22 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       setCurrentRef(track.ref)
       writeLocalPrefs({ lastTrack: track.ref })
       if (track.url === null || track.url === "") {
-        setPlaying(false)
+        // No URL to play — most likely an upload whose storage URL failed
+        // to resolve. This used to just stop the session outright, which
+        // meant one bad upload froze the whole queue even though the
+        // failure-and-advance machinery below existed for exactly this
+        // case. Routing it through the same path a playback error takes
+        // means it costs one failure against the bound instead of ending
+        // the session.
+        failAndAdvance()
         return
       }
-      const ok = await audio.play(track.url)
+      const ok = await play(track.url)
       setPlaying(ok)
       setBlocked(!ok)
       if (ok) failures.current = 0
     },
-    [audio]
+    [failAndAdvance, play]
   )
 
   const advance = useCallback(
@@ -220,13 +326,13 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       }
       const target = delta === 1 ? nextIndex(position) : prevIndex(position)
       if (target === null) {
-        audio.stop()
+        stop()
         setPlaying(false)
         return
       }
       await start(state.tracks[target])
     },
-    [audio, start]
+    [start, stop]
   )
 
   // Keeps `advanceRef` pointed at the current `advance` closure, so the
@@ -237,29 +343,56 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   }, [advance])
 
   useEffect(() => {
-    audio.setVolume(prefs.volume)
-  }, [audio, prefs.volume])
+    setVolume(prefs.volume)
+  }, [setVolume, prefs.volume])
+
+  // This tab's own identity for the "who started playing" announcements
+  // below. A ref, not state — it never needs to trigger a render — and
+  // populated lazily by the announce effect rather than here or in
+  // `useState`'s initialiser, because this component renders on the SERVER
+  // during SSR, where `crypto` may not behave the same as it does on the
+  // client. The value never reaches markup, so it could not cause a
+  // hydration mismatch either way, but minting it only in an effect means
+  // that stays true by construction instead of by accident.
+  const tabId = useRef<string | null>(null)
 
   /**
    * Two pinned tabs are two players, and Chroneli is explicitly a pinned-tab
    * app — so this WILL happen. Whichever tab starts most recently wins.
+   *
+   * Deps `[pause]` rather than `[audio]`: `pause` is genuinely stable, so
+   * this effect really does open the channel once, on mount, as the shape
+   * of the code implies — not on every render, which is what depending on
+   * the unstable `audio` object used to do.
    */
   useEffect(() => {
     if (typeof BroadcastChannel === "undefined") return
     const channel = new BroadcastChannel(CHANNEL)
     channel.onmessage = (event: MessageEvent) => {
-      if (event.data === "playing") {
-        audio.pause()
-        setPlaying(false)
-      }
+      // `BroadcastChannel#postMessage` excludes only the SENDING OBJECT
+      // from delivery — every other channel opened on this channel name in
+      // the SAME DOCUMENT still receives the message, tab or no tab. The
+      // announce effect below opens its own, second channel object in this
+      // very document every time this tab starts playing, so without the
+      // tag-and-ignore check here, this listener receives its own tab's
+      // announcement and immediately pauses the audio it just started —
+      // playback becomes impossible even with a single tab open. It is
+      // tempting to "simplify" this back to a bare string message once that
+      // symptom stops reproducing; don't — the exclusion rule above never
+      // covered same-document delivery, so the self-pause returns the
+      // moment the tag is dropped.
+      if (event.data?.tab === tabId.current) return
+      pause()
+      setPlaying(false)
     }
     return () => channel.close()
-  }, [audio])
+  }, [pause])
 
   useEffect(() => {
     if (!playing || typeof BroadcastChannel === "undefined") return
+    if (tabId.current === null) tabId.current = mintTabId()
     const channel = new BroadcastChannel(CHANNEL)
-    channel.postMessage("playing")
+    channel.postMessage({ tab: tabId.current })
     channel.close()
   }, [playing])
 
@@ -275,21 +408,21 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 
   const toggle = useCallback(() => {
     if (playing) {
-      audio.pause()
+      pause()
       setPlaying(false)
       return
     }
-    const track = current ?? tracks[0]
-    if (track === undefined) return
     if (current === null) {
+      const track = tracks[0]
+      if (track === undefined) return
       void start(track)
       return
     }
-    void audio.resume().then((ok) => {
+    void resume().then((ok) => {
       setPlaying(ok)
       setBlocked(!ok)
     })
-  }, [audio, current, playing, start, tracks])
+  }, [current, pause, playing, resume, start, tracks])
 
   const value = useMemo<MusicContextValue>(
     () => ({
@@ -304,6 +437,10 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       toggle,
       next: () => void advance(1, "user"),
       previous: () => void advance(-1, "user"),
+      // Calls the destructured `setVolume`/`stop`/`pause` from
+      // `useAudioElement` above, NOT itself — an object literal's key does
+      // not bind its own name inside the function assigned to it, so this
+      // resolves through the ordinary closure over the outer `const`.
       setVolume: (volume: number) => {
         // State first so the slider tracks the thumb; localStorage is written
         // in the same call because it is synchronous and cheap. NEITHER is a
@@ -311,7 +448,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         // Convex field.
         setPrefs((p) => ({ ...p, volume }))
         writeLocalPrefs({ volume })
-        audio.setVolume(volume)
+        setVolume(volume)
       },
       toggleShuffle: () => {
         const shuffle = !prefs.shuffle
@@ -328,24 +465,26 @@ export function MusicProvider({ children }: { children: ReactNode }) {
         writeLocalPrefs({ repeat })
       },
       stop: () => {
-        audio.stop()
+        stop()
         setPlaying(false)
       },
       pause: () => {
-        audio.pause()
+        pause()
         setPlaying(false)
       },
       onUserPick,
     }),
     [
       advance,
-      audio,
       blocked,
       current,
       onUserPick,
+      pause,
       playRef,
       playing,
       prefs,
+      setVolume,
+      stop,
       toggle,
       tracks,
     ]
