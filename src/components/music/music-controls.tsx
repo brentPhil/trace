@@ -9,6 +9,7 @@ import {
   VolumeX,
 } from "lucide-react"
 import { Popover } from "@/components/ui/popover"
+import { trackRefEquals, trackRefKey } from "@/lib/music/track-ref"
 import { cn } from "@/lib/utils"
 import type { MusicContextValue, PlayableTrack } from "./music-provider"
 
@@ -195,13 +196,18 @@ function TrackGroup({
         </p>
       ) : (
         tracks.map((track) => {
-          const isCurrent =
-            value.current !== null &&
-            value.current.name === track.name &&
-            value.current.origin === track.origin
+          // Identity is the REF, never the name. A name is user-supplied and
+          // renameable, so two uploads may legitimately share one — and then a
+          // name-keyed row collides with its twin in React's reconciliation and
+          // lights the wrong row as playing. `trackRefKey` and `trackRefEquals`
+          // exist for exactly this and are what the provider already uses.
+          const isCurrent = trackRefEquals(
+            value.current?.ref ?? null,
+            track.ref
+          )
           return (
             <button
-              key={`${track.origin}:${track.name}`}
+              key={trackRefKey(track.ref)}
               type="button"
               aria-label={`Play ${track.name}`}
               aria-current={isCurrent ? "true" : undefined}

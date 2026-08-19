@@ -132,3 +132,48 @@ describe("the panel", () => {
     expect(v.previous).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("track identity", () => {
+  /*
+   * A name is user-supplied and renameable, so two uploads may legitimately
+   * carry the same one. Keying rows or the playing-highlight on the NAME makes
+   * those two rows indistinguishable: React reconciles them as one, and the
+   * wrong row lights up. The ref is the identity, and `trackRefEquals` is what
+   * compares it — this test is here because the first version of this file
+   * keyed on the name and passed every other test in the suite.
+   */
+  const twins = [
+    {
+      ref: { origin: "upload" as const, trackId: "t1" },
+      name: "Untitled",
+      url: "https://f/1",
+      origin: "upload" as const,
+    },
+    {
+      ref: { origin: "upload" as const, trackId: "t2" },
+      name: "Untitled",
+      url: "https://f/2",
+      origin: "upload" as const,
+    },
+  ]
+
+  it("renders both of two identically named uploads", async () => {
+    const v = value({ tracks: twins })
+    render(<MusicControls value={v} />)
+    fireEvent.click(screen.getByRole("button", { name: /music library/i }))
+    const mine = await screen.findByRole("group", { name: /my music/i })
+    expect(
+      within(mine).getAllByRole("button", { name: /play untitled/i })
+    ).toHaveLength(2)
+  })
+
+  it("marks only the playing one as current", async () => {
+    const v = value({ tracks: twins, current: twins[1] })
+    render(<MusicControls value={v} />)
+    fireEvent.click(screen.getByRole("button", { name: /music library/i }))
+    const mine = await screen.findByRole("group", { name: /my music/i })
+    const rows = within(mine).getAllByRole("button", { name: /play untitled/i })
+    expect(rows[0].getAttribute("aria-current")).toBe(null)
+    expect(rows[1].getAttribute("aria-current")).toBe("true")
+  })
+})
