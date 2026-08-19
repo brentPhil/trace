@@ -165,6 +165,44 @@ describe("the library", () => {
     )
   })
 
+  /*
+   * THE REJECTED RENAME, covered here because before this fix it was the
+   * only mutation on this page whose failure path went untested — and
+   * untested is exactly how `onRename={(name) =>
+   * renameTrack(...).then(() => {})}` shipped with no `.catch` at all.
+   * `TrackRow.commit` swallowed the rejection to reopen the field, so the
+   * server's own INVALID_TRACK sentence — "A track needs a name." — never
+   * reached `report`, and the only visible signal was the field silently
+   * reopening. `renameTrack` rejects with the same `{ data: { code,
+   * message } }` shape `isTraceError` narrows, exactly what a real Convex
+   * mutation rejection carries after crossing the wire.
+   */
+  it("surfaces a rejected rename without rewriting the reason", async () => {
+    renameTrack.mockImplementationOnce(() =>
+      Promise.reject({
+        data: { code: "INVALID_TRACK", message: "A track needs a name." },
+      })
+    )
+    renderMusic()
+
+    fireEvent.click(screen.getByRole("button", { name: /rename alpha/i }))
+    const field = screen.getByRole("textbox", { name: /track name/i })
+    fireEvent.change(field, { target: { value: "" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+
+    // Two nodes, the same doubling the rejected-upload test documents: the
+    // toast's title renders both on screen and in a live region.
+    expect(await screen.findAllByText("A track needs a name.")).toHaveLength(2)
+
+    // The field reopens even though the rejection was ALSO reported — the
+    // rethrow in the page's onRename keeps TrackRow.commit's own `.catch`
+    // firing, which is what puts the rejected (here, blank) text back in an
+    // editable field rather than leaving the row stuck showing nothing.
+    await waitFor(() =>
+      expect(screen.getByRole("textbox", { name: /track name/i })).toBeTruthy()
+    )
+  })
+
   it("removes a track", async () => {
     renderMusic()
     fireEvent.click(screen.getByRole("button", { name: /remove alpha/i }))

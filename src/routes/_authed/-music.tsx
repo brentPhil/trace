@@ -243,6 +243,17 @@ export function Music() {
           onDrop={(event) => {
             event.preventDefault()
             setDragging(false)
+            // Ignored, not queued, while `busy`: the file picker above is
+            // already `disabled` for the same reason, but a drop bypasses that
+            // element entirely, so the guard has to be repeated here. Letting a
+            // second drop through would start a concurrent `upload()`, and
+            // `upload`'s own comment explains uploads are SEQUENTIAL precisely
+            // so the account-cap check inside `acceptTrack` cannot be raced by
+            // parallel batches each reading the same pre-upload total — two
+            // concurrent runs from two drops reintroduce exactly that race. The
+            // first run's `finally` would also flip `busy` back to false while
+            // the second run is still going, re-enabling the picker mid-upload.
+            if (busy) return
             void upload(Array.from(event.dataTransfer.files))
           }}
           className={cn(
@@ -265,7 +276,21 @@ export function Music() {
                   key={track._id}
                   track={track}
                   onRename={(name) =>
-                    renameTrack({ trackId: track._id, name }).then(() => {})
+                    // The rejection is reported here, through the same `report`
+                    // the remove and upload paths use, AND rethrown. Swallowing
+                    // it here would mean the docblock's promise above —
+                    // "the server's own 'A track needs a name.' is the sentence
+                    // the user should read" — is a lie: nothing else on this
+                    // path shows the user anything. Rethrowing keeps
+                    // `TrackRow.commit`'s own `.catch` doing its job, which is
+                    // unrelated to whether the user was told why: it reopens the
+                    // field with the rejected text still in it.
+                    renameTrack({ trackId: track._id, name })
+                      .then(() => {})
+                      .catch((thrown: unknown) => {
+                        report(thrown)
+                        throw thrown
+                      })
                   }
                   onRemove={() => {
                     void removeTrack({ trackId: track._id }).catch(report)
@@ -456,16 +481,25 @@ function TrackRow({
             <Pencil className="size-4" />
           </Button>
         )}
-        <Button
-          type="button"
-          variant="quiet"
-          size="icon-row"
-          aria-label={`Remove ${track.name}`}
-          onClick={onRemove}
-          className="opacity-100 hover:text-alarm focus-visible:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
-        >
-          <Trash2 className="size-4" />
-        </Button>
+        {editing ? null : (
+          // Hidden, not merely relocated, while `editing`: the input above
+          // commits its draft `onBlur`, and clicking Remove blurs it on the
+          // way to firing its own `onClick` — so a Remove click during a
+          // rename would send a `renameTrack` for a document `removeTrack` is
+          // about to delete out from under it. Removing the control is what
+          // keeps that click from being possible at all, the same way Rename
+          // is already hidden here for the reverse reason.
+          <Button
+            type="button"
+            variant="quiet"
+            size="icon-row"
+            aria-label={`Remove ${track.name}`}
+            onClick={onRemove}
+            className="opacity-100 hover:text-alarm focus-visible:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        )}
       </div>
     </li>
   )
