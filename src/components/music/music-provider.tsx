@@ -283,6 +283,12 @@ export function MusicProvider({ children }: { children: ReactNode }) {
   const start = useCallback(
     async (track: PlayableTrack) => {
       setCurrentRef(track.ref)
+      // The ref, not just the state. `setCurrentRef` is QUEUED, and the null-url
+      // path below calls into `advance` synchronously — with no render in between,
+      // `advance` would read the PREVIOUS track from `stateRef` and re-pick this
+      // same dead one until the failure budget ran out, never reaching the track
+      // after it. Writing both is what makes the skip actually step forward.
+      stateRef.current = { ...stateRef.current, currentRef: track.ref }
       writeLocalPrefs({ lastTrack: track.ref })
       if (track.url === null || track.url === "") {
         // No URL to play — most likely an upload whose storage URL failed
@@ -311,6 +317,13 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       )
       if (at === -1 || state.tracks.length === 0) {
         setPlaying(false)
+        // The current track is gone from the list (or the list is empty) —
+        // this attempt is over and unrelated to whatever happens next, so the
+        // failure budget must not carry forward into a future, unrelated
+        // playback attempt. `failAndAdvance` already incremented it to get us
+        // here; leaving it non-zero would let a handful of stale failures
+        // trip the bound early on a perfectly healthy next attempt.
+        failures.current = 0
         return
       }
       const position = {
@@ -328,6 +341,12 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       if (target === null) {
         stop()
         setPlaying(false)
+        // `blocked` means "the browser refused to start playback" — that is
+        // simply not true once the queue has run out and there is nothing
+        // left to play. Leaving it set would show a stale "click to play"
+        // affordance over a player that stopped on its own, not one the
+        // browser rejected.
+        setBlocked(false)
         return
       }
       await start(state.tracks[target])
@@ -467,10 +486,17 @@ export function MusicProvider({ children }: { children: ReactNode }) {
       stop: () => {
         stop()
         setPlaying(false)
+        // Deliberate user action, not a browser rejection — a lingering
+        // "click to play" affordance over a player the user just stopped
+        // would be describing a refusal that never happened.
+        setBlocked(false)
       },
       pause: () => {
         pause()
         setPlaying(false)
+        // Same reasoning as `stop` above: pausing is the user's choice, so
+        // whatever `blocked` was tracking is moot the moment they act.
+        setBlocked(false)
       },
       onUserPick,
     }),
