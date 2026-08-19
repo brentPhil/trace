@@ -10,6 +10,7 @@ import { useAnnounce } from "@/components/a11y/announcer"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TimerDurationPopover } from "@/components/timer/timer-duration-popover"
 import { Button } from "@/components/ui/button"
+import { withInheritedBillable } from "@/lib/inherit-billable"
 import { isOptimisticId } from "@/lib/optimistic-id"
 import { describeStagedStart, resolveStagedStart } from "@/lib/staged-start"
 import { cn } from "@/lib/utils"
@@ -331,7 +332,19 @@ export function TimerBar({
     // A row that does not exist yet cannot be patched; the start mutation is
     // carrying the staged values and will land in a moment.
     if (isOptimisticId(running._id)) return
-    void classify(running._id, change).catch(() => {
+    // The RUNNING half of the same inheritance the idle staging above does:
+    // picking a billable client's project mid-timer ticks the `$` in the same
+    // write. Promotion only — the boundary is argued in `withInheritedBillable`.
+    void classify(
+      running._id,
+      withInheritedBillable(
+        change,
+        running.billable,
+        change.projectId == null
+          ? null
+          : projects.find((project) => project._id === change.projectId)
+      )
+    ).catch(() => {
       // Same reasoning as the title write: never interrupt a running timer to
       // report that a tag did not stick.
     })

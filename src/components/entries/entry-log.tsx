@@ -9,6 +9,7 @@ import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { pruneSelection, toggleSelection } from "@/lib/entry-selection"
 import { errorMessage } from "@/lib/error-message"
 import { joinNotes } from "@/lib/group-sittings"
+import { withInheritedBillable } from "@/lib/inherit-billable"
 import { cn } from "@/lib/utils"
 import { dayOf } from "@shared/day"
 import type { ReactNode } from "react"
@@ -217,7 +218,21 @@ export function EntryLog({
     onSittingRemove: (entries) => {
       void entryActions.onRemoveMany(entries)
     },
-    onSittingClassify: (entries, change) => {
+    onSittingClassify: (entries, rawChange) => {
+      /*
+       * The same billable inheritance the single row gets (`use-entry-actions`).
+       * "Currently billable" for a GROUP is `every`: promotion applies as long
+       * as at least one member is still unticked, and writing `true` onto a
+       * member that already carries it is a no-op rather than a reversal — the
+       * promote-only boundary holds member by member.
+       */
+      const change = withInheritedBillable(
+        rawChange,
+        entries.every((entry) => entry.billable),
+        rawChange.projectId == null
+          ? null
+          : projects.find((project) => project._id === rawChange.projectId)
+      )
       void updateMany({
         entryIds: entries.map((entry) => entry._id),
         ...change,

@@ -1,10 +1,11 @@
 import { useCallback, useMemo } from "react"
 import { Toast } from "@/components/ui/toast"
-import { useClassifierMutations } from "@/hooks/use-classifiers"
+import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
 import { errorMessage } from "@/lib/error-message"
 import { instantMovedToDay } from "@/lib/format-time"
+import { withInheritedBillable } from "@/lib/inherit-billable"
 import { dayLabel } from "@/lib/group-entries"
 import { UNDO_MS, toastWithUndo } from "@/lib/undo-toast"
 import { addDays, dayOf } from "@shared/day"
@@ -50,6 +51,9 @@ export function useEntryActions(timeZone: string): EntryActions {
     useEntryEditMutations()
   const { resume } = useEntryMutations()
   const { createProject: createProjectRaw, ensureTag } = useClassifierMutations()
+  // Already queried (and cached) by every surface that renders a picker; read
+  // here so `onClassify` can resolve a picked project's billable default.
+  const { projectsById } = useClassifiers()
   const toasts = Toast.useToastManager()
 
   const createProject = useCallback(
@@ -228,7 +232,15 @@ export function useEntryActions(timeZone: string): EntryActions {
       // Classifier changes are fire-and-forget with an optimistic update behind
       // them, so the row reflects the choice immediately. A failure surfaces as a
       // toast rather than reverting silently.
-      onClassify: (entry, change) => {
+      onClassify: (entry, rawChange) => {
+        // Assigning a billable client's project ticks the `$` in the same
+        // write — promotion only, and an explicit `billable` always wins.
+        // The rule and its boundaries are argued in `withInheritedBillable`.
+        const change = withInheritedBillable(
+          rawChange,
+          entry.billable,
+          rawChange.projectId == null ? null : projectsById.get(rawChange.projectId)
+        )
         void update({
           entryId: entry._id,
           ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
@@ -260,6 +272,7 @@ export function useEntryActions(timeZone: string): EntryActions {
       onRemoveMany,
       onDuplicate,
       toasts,
+      projectsById,
     ]
   )
 }
