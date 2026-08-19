@@ -136,12 +136,14 @@ export function SittingRow({
           header use them, so three files that cannot see each other put the
           left edge and the baseline in the same place.
 
-          `items-start`, not `items-center` — this row now carries a note
-          beneath its title exactly as `EntryRow` does, and the same reasoning
-          applies: the trailing controls carry the row's own height (below)
-          while the title/note column is left to grow downward without
-          dragging the badge or the trailing cluster into its vertical middle. */}
-            <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
+          `items-center`, exactly as `EntryRow`'s own wrapper — the two rows
+          are peers in one list and must level their columns the same way. At
+          the resting row height centring and first-line alignment draw the
+          identical thing; they diverge only when a note is written out in
+          full, where the whole cluster centres against the grown column.
+          Whatever the answer to that mode is, it has to be answered for both
+          rows at once, in one place. */}
+      <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
@@ -152,20 +154,14 @@ export function SittingRow({
         )}
         <div className="flex w-full min-w-0 items-center gap-2">
           {/* The number is the disclosure, with its accessible state carried by
-              the button rather than a separate visible chevron.
+              the button rather than a separate visible chevron. The wrapper's
+              `items-center` is what places it — level with the title at the
+              resting row height, like every other control on the row.
 
-              `mt-1.5` and `h-6` together are what put it on the TITLE, not on
-              the row. The column above is `items-start` so that a growing note
-              never drags this downward (see the wrapper's comment), but that
-              alone pins the badge to the top of a two-line column — visibly
-              high of the title it belongs to. The title column's own `py-1.5`
-              is 6px and its `text-base` line box is 24px, so a 24px control
-              offset by 6px shares that line's exact centre.
-
-              `h-6 min-w-6` is also the floor WCAG 2.2 AA asks of a target
-              (24x24). The previous `text-xs px-1.5 py-0.5` came to roughly
-              22px tall — under it, and small enough to be a fussy hit for a
-              control that is on every grouped row. `min-w`, not a fixed
+              `h-6 min-w-6` (via `size="badge"`) is the floor WCAG 2.2 AA asks
+              of a target (24x24). The previous `text-xs px-1.5 py-0.5` came to
+              roughly 22px tall — under it, and small enough to be a fussy hit
+              for a control that is on every grouped row. `min-w`, not a fixed
               square, so a three-digit count still fits. */}
           <Button
             type="button"
@@ -246,30 +242,35 @@ export function SittingRow({
             value={sitting.allBillable}
             onChange={(billable) => onClassify({ billable })}
           />
-          {/* Fixed columns stay on the row's first line when a note expands. */}
+          {/* `text-nowrap`: a time range is one indivisible value; broken
+              across two lines it is not a smaller version of itself. */}
           <div className="font-mono tabular-nums tracking-[-0.02em] text-xs text-nowrap px-1 text-muted-foreground">
             {formatTimeRange(sitting.fromMs, sitting.toMs, timeZone, use12Hour)}
           </div>
-          <span className="font-mono tabular-nums tracking-[-0.02em] flex h-full items-center justify-end ps-2.5 pe-1 text-sm font-medium">
-            {formatTotal(sitting.totalMs, display)}
-          </span>
-        </div>
-
-        {/*
+          {/*
             `formatTotal`, whose contract says decimal applies to TOTALS and
             never to a single entry's own row. A sitting's figure is a sum of
             parts, so it is a total, and it is floored like every other one.
 
             TYPESET EXACTLY AS `EditableDuration` — `text-sm font-medium` in
             ink. A sitting row and an entry row are peers in one list, sharing
-            one duration column, and this figure was reading a size and a
-            weight above its members' for no reason the reader can act on. The
-            size difference was also what broke the column visually: these are
-            all right-aligned in the same 4.5rem box, so a 16px figure and a
-            14px figure start at different x-positions and the numbers looked
-            ragged even though their right edges matched. The DAY header total
-            stays larger on purpose — it summarises a section rather than
-            standing in the list as a row. */}
+            one duration column, and this figure once read a size and a weight
+            above its members' for no reason the reader can act on — a 16px
+            figure and a 14px figure start at different x-positions even with
+            their right edges true, so the column looked ragged. The DAY
+            header total stays larger on purpose — it summarises a section
+            rather than standing in the list as a row.
+
+            `data-log-cell="duration"` is the column's name in the DOM, shared
+            with the day total and `EditableDuration`; day-list.test.tsx
+            queries it to hold the three shapes to one treatment. */}
+          <span
+            data-log-cell="duration"
+            className="font-mono tabular-nums tracking-[-0.02em] flex h-full items-center justify-end ps-2.5 pe-1 text-sm font-medium"
+          >
+            {formatTotal(sitting.totalMs, display)}
+          </span>
+        </div>
 
         <div className="flex h-full items-center justify-end">
           <SittingAction label={`Resume ${title}`} onClick={onResume}>

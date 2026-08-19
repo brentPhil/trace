@@ -123,6 +123,11 @@ export function EditableDuration({
       <EntryDuration
         startedAt={entry.startedAt}
         endedAt={null}
+        // The log's duration column, named where it can be queried — the day
+        // header and the sitting total carry the same mark. The timer bar's
+        // EntryDuration is deliberately unmarked: it is not a cell of this
+        // column.
+        data-log-cell="duration"
         className={durationClass}
       />
     )
@@ -136,6 +141,7 @@ export function EditableDuration({
         <EntryDuration
           startedAt={entry.startedAt}
           endedAt={entry.endedAt}
+          data-log-cell="duration"
           className="text-right text-sm font-medium"
         />
       }

@@ -189,21 +189,18 @@ export function EntryRow({
         the written note does not — left to size themselves, a day of mixed rows
         would ripple by two pixels down the whole column.
       */}
-      {/*
-        `items-start`, not `items-center`, and the trailing controls carry the
-        row's height themselves (below). While every row is exactly 54px the two
-        spellings draw the identical thing — the left column is 6 + 20 + 2 + 20 +
-        6 by construction, so centring and top-aligning agree. They stop agreeing
-        the moment a note is written out in full: a ten-line note against
-        `items-center` floats the duration and the delete button in the vertical
-        middle of a paragraph, disconnected from the title they belong to. The
-        eye reads a row left to right along its FIRST line, so that is the line
-        everything on it has to sit on.
-      */}
       {/* A FLEX ROW, not the day header's grid. `.entry-log-row` used to be
           named here as the opt-in to first-line column alignment; it was never
           actually applied to anything, and the rules it gated in styles.css
-          were dead. The row's own `items-center` is what levels it. */}
+          were dead. The row's own `items-center` is what levels it.
+
+          While the row stands at its resting 54px, centring and first-line
+          alignment draw the identical thing — the left column is 6 + 20 + 2 +
+          20 + 6 by construction, so the two spellings agree. They diverge when
+          a note is written out in full: the trailing cluster then centres
+          against the grown column rather than sitting on the title's line.
+          `SittingRow` mirrors this wrapper exactly; if that trade is ever
+          revisited, both rows move together. */}
       <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
         {selection === undefined ? null : (
           <SelectionCheckbox

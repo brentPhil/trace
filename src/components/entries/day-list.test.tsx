@@ -438,11 +438,21 @@ describe("grouped entries", () => {
   })
 
   it("uses one duration column for the day, sitting, and entry", () => {
+    /*
+     * The column's shared geometry dissolved into three files when the log
+     * moved off `.entry-log-grid` (the day header keeps a grid; the rows are
+     * flex with fixed trailing clusters), so a shared parent is no longer the
+     * fact to pin. What survives, queryable, is the column's NAME —
+     * `data-log-cell="duration"` on every cell, whichever file renders it —
+     * and its uniform dress: monospaced tabular digits, so figures of
+     * different lengths still land their digits in step.
+     */
     const { container } = renderLog(true)
     const durations = container.querySelectorAll('[data-log-cell="duration"]')
     expect(durations.length).toBeGreaterThanOrEqual(3)
     for (const duration of durations) {
-      expect(duration.parentElement?.className).toContain("grid")
+      expect(duration.className).toContain("font-mono")
+      expect(duration.className).toContain("tabular-nums")
     }
   })
 
@@ -465,30 +475,44 @@ describe("grouped entries", () => {
    * ragged even with its right edge true.
    */
   it("typesets a sitting total exactly like an entry duration", () => {
+    /*
+     * Every ROW cell — the sitting total and each entry's own figure — wears
+     * `text-sm font-medium`; only the DAY header's total may stand larger,
+     * because it summarises a section rather than sitting in the list as a
+     * row. Asserted over all row cells rather than a first-match selector, so
+     * a sitting total regressing to `text-base font-semibold` cannot hide
+     * behind an entry cell matching in its place.
+     */
     const { container } = renderLog(true)
-    const sittingTotal = container.querySelector(
-      '[data-log-cell="duration"].text-sm'
-    )
-    expect(sittingTotal).not.toBeNull()
-    expect(sittingTotal?.className).toContain("font-medium")
-    // The weight and scale it used to carry, which its members never did.
-    expect(sittingTotal?.className).not.toContain("text-base")
-    expect(sittingTotal?.className).not.toContain("font-semibold")
+    const cells = [
+      ...container.querySelectorAll('[data-log-cell="duration"]'),
+    ]
+    const rowCells = cells.filter((cell) => cell.closest("header") === null)
+    // The sitting total and at least one member/entry figure.
+    expect(rowCells.length).toBeGreaterThanOrEqual(2)
+    for (const cell of rowCells) {
+      expect(cell.className).toContain("text-sm")
+      expect(cell.className).toContain("font-medium")
+      // The weight and scale the sitting total used to carry, which its
+      // members never did.
+      expect(cell.className).not.toContain("text-base")
+      expect(cell.className).not.toContain("font-semibold")
+    }
   })
 
-  it("gives the sitting disclosure a 24px target on the title's line", () => {
+  it("gives the sitting disclosure a 24px target", () => {
     renderLog(true)
     const disclosure = screen.getByRole("button", {
       name: "Show grouped entries",
     })
     // WCAG 2.2 AA target minimum; `min-w` rather than a fixed square so a
-    // three-digit count still fits.
+    // three-digit count still fits. The badge is levelled by the row's own
+    // `items-center` now — the `mt-1.5` offset this test once pinned belonged
+    // to the earlier top-aligned column, and died with it.
     expect(disclosure.className).toContain("h-6")
     expect(disclosure.className).toContain("min-w-6")
     expect(disclosure.className).toContain("justify-center")
-    // Matches the title column's own `py-1.5`, which is what lands the badge
-    // on the title rather than at the top of a two-line column.
-    expect(disclosure.className).toContain("mt-1.5")
+    expect(disclosure.className).toContain("shrink-0")
   })
 
   it("draws a stronger full-width boundary before later days", () => {

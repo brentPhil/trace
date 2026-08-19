@@ -1,6 +1,7 @@
 import { useElapsedMs } from "@/hooks/use-clock"
 import { formatClock, msToIsoDuration, spokenDuration } from "@shared/duration"
 import { cn } from "@/lib/utils"
+import type { ComponentProps } from "react"
 
 /**
  * A duration, live if the entry is still running.
@@ -14,11 +15,15 @@ export function EntryDuration({
   startedAt,
   endedAt,
   className,
+  ...rest
 }: {
   startedAt: number
   endedAt: number | null
   className?: string
-}) {
+  /* The rest spread exists for `data-*` marks — `EditableDuration` stamps
+     `data-log-cell="duration"` so the log's duration column stays queryable,
+     while the timer bar's use of this same component stays unmarked. */
+} & Omit<ComponentProps<"time">, "children">) {
   const ms = useElapsedMs(startedAt, endedAt)
   const running = endedAt === null
 
@@ -41,6 +46,7 @@ export function EntryDuration({
       // the client's are allowed to differ by a second.
       suppressHydrationWarning
       className={cn("font-mono tabular-nums tracking-[-0.02em] tracking-tight", className)}
+      {...rest}
     >
       {formatClock(ms)}
     </time>
