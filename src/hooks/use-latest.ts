@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react"
+import { useEffect, useRef } from "react"
 
 /**
  * A permanently stable function that always calls the newest `fn`.
@@ -23,12 +23,12 @@ import { useCallback, useEffect, useRef } from "react"
  */
 export function useLatest<TArgs extends Array<unknown>, TResult>(
   fn: (...args: TArgs) => TResult
-): (...args: TArgs) => TResult {
+): { readonly current: (...args: TArgs) => TResult } {
   const ref = useRef(fn)
 
   useEffect(() => {
     ref.current = fn
   })
 
-  return useCallback((...args: TArgs) => ref.current(...args), [])
+  return ref
 }

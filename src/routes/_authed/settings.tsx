@@ -120,8 +120,8 @@ export function Settings() {
   const toasts = Toast.useToastManager()
   const [logoBusy, setLogoBusy] = useState(false)
 
-  const save = (patch: Parameters<typeof update>[0]) => {
-    void update(patch).catch((thrown: unknown) => {
+  const save = (patch: Parameters<typeof update.current>[0]) => {
+    void update.current(patch).catch((thrown: unknown) => {
       toasts.add({ title: errorMessage(thrown), priority: "high" })
     })
   }
@@ -248,7 +248,7 @@ export function Settings() {
       (accounts.data ?? []).filter((account) => account.providerId === "google")
         .length === (accounts.data ?? []).length && (accounts.data ?? []).length > 0
 
-    await disconnectMutation({})
+    await disconnectMutation.current({})
 
     if (googleIsOnlyAccount) {
       toasts.add({
@@ -316,7 +316,7 @@ export function Settings() {
       const linked = (result.data ?? []).some(
         (account) => account.providerId === "google"
       )
-      if (linked) void connectMutation({}).catch(report)
+      if (linked) void connectMutation.current({}).catch((err) => report.current(err))
     })
   }, [connection.connected, connection.status, connectMutation, report])
 
@@ -331,7 +331,7 @@ export function Settings() {
 
     setLogoBusy(true)
     try {
-      const uploadUrl = await generateLogoUploadUrl({})
+      const uploadUrl = await generateLogoUploadUrl.current({})
       const response = await fetch(uploadUrl, {
         method: "POST",
         headers: { "Content-Type": file.type },
@@ -347,7 +347,7 @@ export function Settings() {
           ? payload.storageId
           : null
       if (storageId === null) throw new Error("upload returned no id")
-      await setLogo({ storageId: storageId as Id<"_storage"> })
+      await setLogo.current({ storageId: storageId as Id<"_storage"> })
     } catch (thrown) {
       toasts.add({ title: errorMessage(thrown), priority: "high" })
     } finally {
@@ -656,7 +656,7 @@ export function Settings() {
                   disabled={logoBusy}
                   onClick={() => {
                     setLogoBusy(true)
-                    void clearLogo({})
+                    void clearLogo.current({})
                       .catch((thrown: unknown) => {
                         toasts.add({
                           title: errorMessage(thrown),
@@ -693,14 +693,14 @@ export function Settings() {
             nowMs={Date.now()}
             actions={{
               connect: connectGoogle,
-              disconnect: () => void disconnectGoogle().catch(report),
+              disconnect: () => void disconnectGoogle().catch((err) => report.current(err)),
               setShow: (calendarId, show) =>
-                void setCalendarShowMutation({ calendarId, show }).catch(report),
+                void setCalendarShowMutation.current({ calendarId, show }).catch((err) => report.current(err)),
               setProject: (calendarId, projectId) =>
-                void setCalendarProjectMutation({ calendarId, projectId }).catch(
-                  report
+                void setCalendarProjectMutation.current({ calendarId, projectId }).catch(
+                  (err) => report.current(err)
                 ),
-              createProject: (name) => createProjectMutation({ name }),
+              createProject: (name) => createProjectMutation.current({ name }),
             }}
           />
         </Section>
