@@ -72,7 +72,17 @@ export function EditableTitle({
       // button establishes its own line box, so without this it inherits the
       // 16px base and reserves a 24px line for 20px of text — four wasted
       // pixels on every row, which is a whole entry per screenful.
-      className={cn("-mx-1 -my-0.5 min-w-0 px-1 py-0.5", textClassName)}
+      //
+      // `shrink` IS LOAD-BEARING and is not redundant beside `min-w-0`. The
+      // Button base carries `shrink-0` (see ui/button.tsx), which is right for
+      // every other button in the product and wrong for exactly this one: a
+      // flex item that may not shrink sizes to its content whatever `min-w-0`
+      // says, so the trigger grew to the full width of the title, pushed the
+      // row past its container, and the `truncate` on the span inside never
+      // had a constrained width to act against. Long titles overflowed the
+      // log instead of ellipsing — visible on a phone, where there is no
+      // spare width to hide it.
+      className={cn("-mx-1 -my-0.5 min-w-0 shrink px-1 py-0.5", textClassName)}
       inputClassName={cn("font-medium", textClassName)}
       grow
       parse={(raw) =>

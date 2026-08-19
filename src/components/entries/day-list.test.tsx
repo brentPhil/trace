@@ -467,6 +467,41 @@ describe("grouped entries", () => {
   })
 
   /*
+   * THE REGRESSION THIS PINS: long titles ran off the side of the log instead
+   * of ellipsing, worst on a phone where there is no spare width to hide it.
+   *
+   * `min-w-0` alone was not enough. The trigger is a `Button`, and the button
+   * base carries `shrink-0` — correct for every other button in the product,
+   * wrong for this one. A flex item that may not shrink sizes to its content
+   * however small its min-width is allowed to be, so the trigger grew to the
+   * full width of the title and the `truncate` on the span inside it never had
+   * a constrained width to act against.
+   *
+   * jsdom performs no layout, so this asserts the CLASSES rather than a
+   * measured width — which is exactly the change that would bring the bug
+   * back. `tailwind-merge` resolves `shrink-0` and `shrink` in one group, so
+   * the later `shrink` is what reaches the DOM.
+   */
+  it("lets a title trigger shrink, so a long one truncates instead of overflowing", () => {
+    renderLog(true)
+    const entryTitle = screen.getByRole("button", {
+      name: "Description: Weekly retro",
+    })
+    // Token-wise, not substring-wise: the button base also carries
+    // `[&_svg]:shrink-0`, which a substring check would match and which has
+    // nothing to do with whether the trigger itself may shrink.
+    const classes = entryTitle.className.split(/\s+/)
+    expect(classes).toContain("min-w-0")
+    expect(classes).toContain("shrink")
+    expect(classes).not.toContain("shrink-0")
+
+    // The clipping itself lives on the span inside the trigger, not on the
+    // trigger — the two together are what produce an ellipsis.
+    const text = entryTitle.querySelector("span")
+    expect(text?.className).toContain("truncate")
+  })
+
+  /*
    * THE REGRESSION THESE PIN: a sitting's total rendered `text-base
    * font-semibold text-muted-foreground` while its own members rendered
    * `text-sm font-medium` in ink — one column, three type treatments. Because
