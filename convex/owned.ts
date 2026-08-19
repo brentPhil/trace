@@ -15,6 +15,7 @@ const OWNED_TABLES = [
   "clients",
   "invoices",
   "invoiceLines",
+  "musicTracks",
 ] as const
 type OwnedTable = (typeof OWNED_TABLES)[number]
 
@@ -119,5 +120,7 @@ function label(table: OwnedTable): string {
       return "invoice"
     case "invoiceLines":
       return "invoice line"
+    case "musicTracks":
+      return "track"
   }
 }

@@ -257,6 +257,66 @@ export const entryTagFields = {
 }
 
 /**
+ * One uploaded audio file.
+ *
+ * `clientKey` is the same idempotency device `timeEntries` and `invoices` use,
+ * and it matters more here than anywhere else in the product: an upload is the
+ * longest-running mutation the app has, and a retry after a lost response on a
+ * bad connection would otherwise store the same 8 MB file twice — and bill for
+ * both.
+ */
+export const musicTrackFields = {
+  userId: v.string(),
+  clientKey: v.string(),
+  storageId: v.id("_storage"),
+  /** Renameable. Seeded from the filename with its extension stripped, and
+   *  never an identity — `_id` is. */
+  name: v.string(),
+  contentType: v.string(),
+  /** What the account cap is summed over. */
+  bytes: v.number(),
+  /** Decoded client-side after upload. OPTIONAL because decoding genuinely
+   *  fails — a browser that cannot decode a codec still stores the file, and a
+   *  track with an unknown length is playable. */
+  durationMs: v.optional(v.number()),
+  updatedAt: v.number(),
+  deletedAt: v.union(v.number(), v.null()),
+}
+
+/**
+ * Which music goes with which piece of work.
+ *
+ * KEYED ON TITLE + PROJECT, NOT ON `timeEntries._id`, and this is the whole
+ * design. `useEntryMutations.resume` mints a NEW entry carrying the old one's
+ * title, project, tags and billable — the id is not carried forward. A
+ * preference keyed on the id would therefore be destroyed at the exact moment
+ * it is supposed to be read, which is a bug that works perfectly in development
+ * and fails silently for every real user.
+ *
+ * The key is `sittingKey`'s (src/lib/group-sittings.ts): the title TRIMMED,
+ * case-sensitive, beside the project. Sittings, grouping, the log's expand
+ * state and now music all agree on what "the same work" means, which is the
+ * only way they can stay agreeing.
+ *
+ * A BLANK TITLE NEVER GETS A ROW, inherited from the same rule in
+ * `groupSittings`. Without it every unnamed entry in the account would share
+ * one preference and overwrite it in turn.
+ */
+export const musicPreferenceFields = {
+  userId: v.string(),
+  title: v.string(),
+  /** `v.union(..., v.null())` rather than `v.optional`, for the reason
+   *  `timeEntries.endedAt` is: an optional field is not indexable, and "this
+   *  title with no project" has to be a lookup rather than a scan-and-filter. */
+  projectId: v.union(v.id("projects"), v.null()),
+  trackRef: v.union(
+    v.object({ origin: v.literal("upload"), trackId: v.id("musicTracks") }),
+    v.object({ origin: v.literal("chroneli"), slug: v.string() })
+  ),
+  updatedAt: v.number(),
+}
+
+/**
  * The Google Calendar mirror, and the line down the middle of it.
  *
  * `googleEvents` holds ONLY Google's facts. Every sync is free to replace a row
@@ -481,6 +541,17 @@ export default defineSchema({
     .index("by_user_tag", ["userId", "tagId"])
     .index("by_user_entry", ["userId", "entryId"]),
 
+  musicTracks: defineTable(musicTrackFields)
+    // by_user carries creation order, which is "recently added".
+    .index("by_user", ["userId"])
+    .index("by_user_name", ["userId", "name"])
+    .index("by_user_clientKey", ["userId", "clientKey"]),
+
+  musicPreferences: defineTable(musicPreferenceFields).index(
+    "by_user_title_project",
+    ["userId", "title", "projectId"]
+  ),
+
   googleConnections: defineTable(googleConnectionFields)
     .index("by_user", ["userId"])
     /*
@@ -584,6 +655,21 @@ export default defineSchema({
      * default, and an individual invoice can override it without changing
      * this preference. */
     mergeInvoiceLines: v.optional(v.boolean()),
+    /** Start music when a timer starts. Optional and additive like `currency`
+     *  and `groupEntries` above — a row written before this field existed has
+     *  no opinion, `settings.get` falls through to `SETTINGS_DEFAULTS`, and no
+     *  backfill migration is required. */
+    musicAutoplay: v.optional(v.boolean()),
+    /** What happens to playback when a timer stops.
+     *
+     *  There is deliberately no `musicPauseWithTimer` beside this. The product
+     *  has NO PAUSE — an entry is running (`endedAt === null`) or stopped — so
+     *  a "pause music when the timer pauses" switch would be a preference that
+     *  can never fire, which is worse than a missing one: a user who sets it
+     *  believes something is now true. */
+    musicOnStop: v.optional(
+      v.union(v.literal("stop"), v.literal("pause"), v.literal("continue"))
+    ),
     /** Current account logo pointer. Repointing never deletes the old file:
      * historical invoices may still snapshot it. */
     logoStorageId: v.optional(v.id("_storage")),

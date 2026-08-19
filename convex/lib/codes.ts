@@ -99,6 +99,19 @@ export type TraceErrorCode =
    *  same trade `RANGE_TOO_LARGE` and `MIXED_CLIENTS` make — every other
    *  permanent-document risk in this feature refuses rather than mints. */
   | "NO_PRICED_TIME"
+  /** An uploaded track that is not an accepted audio type, is over
+   *  `MAX_TRACK_BYTES`, or (on rename) whose name is blank after trimming. One
+   *  code for all three, the same way `INVALID_LOGO` covers missing, too
+   *  large, and wrong type for a logo: a caller reacting to it shows the same
+   *  message either way. */
+  | "INVALID_TRACK"
+  /** An upload that would put the account over `MAX_LIBRARY_BYTES` or
+   *  `MAX_TRACK_COUNT`. Its own code rather than folded into `INVALID_TRACK`:
+   *  that code is about the FILE the caller just picked, and this one is about
+   *  an account-wide cap the file has nothing to do with — a caller branching
+   *  on the code would otherwise send someone to re-encode a perfectly good
+   *  file instead of removing an old track. */
+  | "LIBRARY_FULL"
 
 /*
  * THERE ARE NO GOOGLE CODES HERE, and their absence is deliberate.
