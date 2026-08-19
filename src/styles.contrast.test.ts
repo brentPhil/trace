@@ -25,8 +25,13 @@ const CSS = readFileSync(
 
 type Oklch = readonly [L: number, C: number, h: number]
 
-/** Reads `--name: oklch(L C H);` straight out of the stylesheet. */
+/** Reads `--name: oklch(L C H);` straight out of the stylesheet, following
+ *  one `var(--other)` hop first — `--ring: var(--safelight)` is one token
+ *  spelled once, not a literal, and the measurement should not force a
+ *  duplicate spelling into the stylesheet just to stay measurable. */
 function token(name: string): Oklch {
+  const alias = CSS.match(new RegExp(`--${name}:\\s*var\\(--([\\w-]+)\\)`))
+  if (alias !== null) return token(alias[1])
   const match = CSS.match(
     new RegExp(`--${name}:\\s*oklch\\(([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\)`)
   )
@@ -109,8 +114,10 @@ const round = (n: number) => Math.round(n * 100) / 100
 describe("the measurement pipeline itself", () => {
   // Two figures the repo already documents. If these two move, the maths
   // below is wrong and every other number in this file is worthless.
+  // (`ring` is `--safelight` now; 7.72 is the figure stated where the token
+  // is declared, measured the same way the old neutral ring's 7.59 was.)
   it("reproduces the two ratios DESIGN.md and styles.css already state", () => {
-    expect(round(ratio("ring", "ground"))).toBeCloseTo(7.59, 1)
+    expect(round(ratio("ring", "ground"))).toBeCloseTo(7.72, 1)
     expect(round(ratio("edge", "ground"))).toBeCloseTo(3.15, 1)
   })
 })
@@ -197,5 +204,28 @@ describe("text", () => {
     expect(ratio("ink-muted", "surface-raised")).toBeGreaterThanOrEqual(4.5)
     expect(ratio("brass", "ground")).toBeGreaterThanOrEqual(4.5)
     expect(ratio("alarm", "ground")).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
+describe("the safelight", () => {
+  it("carries button text and focus on every layer it lands on", () => {
+    // `--primary` is the safelight and `--primary-foreground` is the ground,
+    // so this one pair is both "amber text on the page" and "ground text on
+    // an amber button" — WCAG contrast is symmetric.
+    expect(ratio("safelight", "ground")).toBeGreaterThanOrEqual(4.5)
+    // The focus ring's three layers, same floors the neutral ring held.
+    expect(ratio("safelight", "surface")).toBeGreaterThanOrEqual(3)
+    expect(ratio("safelight", "surface-raised")).toBeGreaterThanOrEqual(3)
+  })
+
+  it("stays a hue apart from brass, which may sit in the same row", () => {
+    // Near-equal luminance is fine — the two are never each other's backdrop
+    // — but they must not be near-equal HUE, or "act here" and "money" merge.
+    // 40 degrees of OKLCH hue and 1.6x the chroma is the separation; this
+    // asserts the tokens do not drift together over time.
+    const [, safelightC, safelightH] = token("safelight")
+    const [, brassC, brassH] = token("brass")
+    expect(Math.abs(safelightH - brassH)).toBeGreaterThanOrEqual(30)
+    expect(safelightC).toBeGreaterThan(brassC)
   })
 })

@@ -63,6 +63,15 @@
   --enlarger: oklch(0.8 0.1 230);
   --brass: oklch(0.76 0.1 85);
   --alarm: oklch(0.68 0.17 25);
+  /* The SAFELIGHT: the darkroom's own working lamp, and the room's accent.
+   * Marks the thing you can act on — the affirmative action, the current
+   * selection, the focus ring — never a state of the work itself. Cold light
+   * still means running and brass still means money; this is the third
+   * meaning, "act here", and it is warm because the room is.
+   * Hue 45 with chroma 0.16 keeps it a clear orange against brass's gold
+   * (h85 C0.10). 7.72:1 on ground, 7.11 on surface, 6.36 on raised —
+   * measured, like every figure here, by styles.contrast.test.ts. */
+  --safelight: oklch(0.74 0.16 45);
 
   /* shadcn surface mappings */
   --background: var(--ground);
@@ -72,9 +81,12 @@
   --popover: var(--surface-raised);
   --popover-foreground: var(--ink);
 
-  /* Primary is ink, not cold light. High-contrast neutral: the affirmative
-     * action on a page where nothing is running yet. */
-  --primary: var(--ink);
+  /* Primary is the safelight, not cold light: the affirmative action on a
+     * page where nothing is running yet. It was ink for a while — a
+     * high-contrast neutral — which kept the room quiet but left the whole
+     * app without an accent; the play button read as chrome rather than as
+     * the one thing the page wants pressed. */
+  --primary: var(--safelight);
   --primary-foreground: var(--ground);
 
   --secondary: var(--surface-raised);
@@ -87,8 +99,10 @@
 
   --border: var(--edge);
   --input: var(--edge);
-  /* Neutral focus ring. Cold light is reserved; see The Cold Light Rule. */
-  --ring: oklch(0.72 0.012 75);
+  /* The focus ring is the safelight too: "where your keyboard is" is the
+     purest case of "act here". It was a neutral gray only because cold light
+     is reserved (The Cold Light Rule) and no third colour existed yet. */
+  --ring: var(--safelight);
 
   --radius: 0.45rem;
 
@@ -169,7 +183,7 @@
   --sidebar-accent: var(--surface-raised);
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--edge);
-  --sidebar-ring: oklch(0.72 0.012 75);
+  --sidebar-ring: var(--safelight);
 }
 
 @theme inline {
@@ -188,6 +202,7 @@
   --color-enlarger: var(--enlarger);
   --color-brass: var(--brass);
   --color-alarm: var(--alarm);
+  --color-safelight: var(--safelight);
 
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -223,8 +238,24 @@
 }
 
 @layer base {
+  /* THE SCROLLBAR, in the room's own materials.
+   *
+   * The standard pair only — `scrollbar-width` and `scrollbar-color` — never
+   * the `::-webkit-scrollbar` pseudo-elements: declaring the standard
+   * properties makes Chromium ignore the webkit ones anyway, and one
+   * declaration covers Chromium, Firefox and Safari 18.2+ where the webkit
+   * route needs a second, Firefox-only copy of the same decision.
+   *
+   * `thin` is the compact track. The thumb is `--edge`, the token whose whole
+   * job is to be a visible boundary on any surface in the room (3.15:1 on
+   * ground); the track is transparent so the gutter is the surface it scrolls
+   * — the same quiet bar inside a popover's description as down the page.
+   *
+   * `scrollbar-color` inherits, so it is said once on the root.
+   * `scrollbar-width` does not, so it rides the universal rule below. */
   * {
     @apply border-border outline-ring/50;
+    scrollbar-width: thin;
   }
   body {
     @apply bg-background text-foreground;
@@ -236,6 +267,7 @@
   html {
     @apply font-sans;
     color-scheme: dark;
+    scrollbar-color: var(--edge) transparent;
   }
 }
 

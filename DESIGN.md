@@ -13,6 +13,7 @@ colors:
   enlarger: "oklch(0.80 0.10 230)"
   brass: "oklch(0.76 0.10 85)"
   alarm: "oklch(0.68 0.17 25)"
+  safelight: "oklch(0.74 0.16 45)"
 typography:
   title:
     fontFamily: "DM Sans Variable, system-ui, sans-serif"
@@ -64,13 +65,22 @@ What is left is an instrument: quiet, warm, exact.
 
 ## 2. Colors
 
-A warm graphite room with two signal colours and nothing else.
+A warm graphite room with three signal colours and nothing else.
 
 ### Primary
 - **Enlarger** (`oklch(0.80 0.10 230)`): The running state, and nothing else.
   A live timer, an active entry row, the stop control while tracking. This is
   the only cold colour in the system and the only colour that ever animates.
   Reserving it is what makes a running timer findable in half a second.
+- **Safelight** (`oklch(0.74 0.16 45)`): The accent: the darkroom's own working
+  lamp, and the mark of *act here*. The affirmative action (`--primary` — the
+  play button, a confirm), the current selection (calendar range endpoints,
+  checked states), and the focus ring (`--ring`). It marks controls, never the
+  state of the work itself — the room was pure graphite for a while and read as
+  chrome; the safelight is what makes the one pressable thing on a screen read
+  as the one pressable thing. Orange (hue 45, chroma 0.16), deliberately a full
+  hue step from Brass's gold so "act here" and "money" cannot merge. 7.72:1 on
+  ground, 7.11 on Surface, 6.36 on Surface Raised.
 
 ### Secondary
 - **Brass** (`oklch(0.76 0.10 85)`): Money. A currency amount, and the mark
@@ -131,9 +141,11 @@ A warm graphite room with two signal colours and nothing else.
 focus rings, selected states, primary buttons, or decoration. If a screen shows
 cold light and nothing is being tracked, the screen is wrong.
 
-**The Two Temperatures Rule.** Cold means happening now; warm means money.
-These are the only two meanings colour carries. Anything else — status,
-category, client — is encoded with text, shape, or position.
+**The Two Temperatures Rule.** Cold means happening now; warm splits in two:
+brass gold means money, safelight orange means *act here*. These are the only
+meanings colour carries. Anything else — status, category, client — is encoded
+with text, shape, or position. (The green ring on an accepted meeting avatar is
+the one standing exception, and the guest summary restates it in words.)
 
 **The Boundary Rule.** Anything the user can interact with is identified by a
 border at Edge or brighter, never by a fill tint alone. A dark surface makes
@@ -254,16 +266,17 @@ documented, because documenting a placeholder would enshrine it as a decision.
 - **Shape:** Crisp, not pill — `rounded-md` (~0.36rem at `--radius: 0.45rem`).
   base-luma ships `rounded-4xl`, which computes to ~1.17rem and reads as a pill
   on a 36px control. That is the "rounded-everything" look this system rejects.
-- **Primary:** Ink on ground. Deliberately *not* the cold light — see The Cold
-  Light Rule. On a page where nothing is running, the affirmative action is a
-  high-contrast neutral.
-- **Focus:** Neutral ring (`oklch(0.72 0.012 75)`) — a **border shift** to that
-  colour, plus a 3px halo of it at 30% opacity. The two carry very different
-  weight and the numbers must stay attached to the right one:
-  - The **border shift** is what satisfies SC 2.4.11/1.4.11: **7.59:1** against
-    ground, 6.99:1 against surface.
-  - The **30% halo** is decoration: **1.75:1** over ground, **1.77:1** over
-    surface. It is nowhere near an indicator on its own.
+- **Primary:** Ground text on Safelight. Deliberately *not* the cold light —
+  see The Cold Light Rule. The affirmative action wears the accent; it was a
+  high-contrast neutral (ink on ground) until the room gained the safelight,
+  and read as chrome rather than as the one thing the page wants pressed.
+- **Focus:** The Safelight (`--ring` resolves to it) — a **border shift** to
+  that colour, plus a 3px halo of it at 30% opacity. The two carry very
+  different weight and the numbers must stay attached to the right one:
+  - The **border shift** is what satisfies SC 2.4.11/1.4.11: **7.72:1** against
+    ground, 7.11:1 against surface.
+  - The **30% halo** is decoration: **1.74:1** over ground. It is nowhere near
+    an indicator on its own.
 
   A single "measured at 7.6:1" attached to the halo is how a focus style
   shipped with the border shift dropped and the number still "checking out".
@@ -274,7 +287,7 @@ documented, because documenting a placeholder would enshrine it as a decision.
   **outline** instead of a border shift:
   `has-[input:focus-visible]:outline-2 outline-offset-2 outline-ring`. The
   `outline-offset-2` is load-bearing: it puts ground on *both* sides of the
-  outline, so the figure is **~7.58:1 whatever the control's own fill and
+  outline, so the figure is **~7.72:1 whatever the control's own fill and
   border are doing** — idle or running, the same number. It also leaves the
   border underneath untouched, so a cold boundary keeps saying "recording"
   while focus gets its own indicator. This is the answer for any future
