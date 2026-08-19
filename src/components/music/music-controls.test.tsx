@@ -179,3 +179,35 @@ describe("track identity", () => {
     expect(rows[1].getAttribute("aria-current")).toBe("true")
   })
 })
+
+describe("the spinning disc", () => {
+  /*
+   * The disc turns while something plays. It is the THIRD carrier of that
+   * state — after the speaker icon's shape and the Now Playing name — which is
+   * why `motion-reduce` may drop it outright without the state becoming
+   * unreadable. These assert the class, since jsdom runs no animations.
+   */
+  const nowPlaying = {
+    ref: { origin: "chroneli" as const, slug: "a" },
+    name: "Lo-fi Chill",
+    url: "/music/a.mp3",
+    origin: "chroneli" as const,
+  }
+
+  const disc = () =>
+    screen.getByRole("button", { name: /music library/i }).querySelector("svg")
+
+  it("does not spin when nothing is playing", () => {
+    render(<MusicControls value={value()} />)
+    expect(disc()?.getAttribute("class")).not.toContain("animate-spin")
+  })
+
+  it("spins while playing, and stands still for reduced motion", () => {
+    render(
+      <MusicControls value={value({ playing: true, current: nowPlaying })} />
+    )
+    const cls = disc()?.getAttribute("class") ?? ""
+    expect(cls).toContain("animate-spin")
+    expect(cls).toContain("motion-reduce:animate-none")
+  })
+})

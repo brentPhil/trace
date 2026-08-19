@@ -758,48 +758,17 @@ export function TimerBar({
           )}
         />
 
-        <div
-          className={cn(
-            "flex shrink-0 items-center gap-0.5",
-            // Own line below `sm`, ordered after the button so it wraps down
-            // rather than pushing the input along.
-            "order-last w-full border-t border-edge-soft/60 pt-2",
-            "sm:order-none sm:w-auto sm:border-t-0 sm:pt-0"
-          )}
-        >
-          <ProjectPicker
-            projects={projects}
-            value={classification.projectId}
-            onCreate={actions.createProject}
-            open={projectOpen}
-            onOpenChange={(next) => {
-              setProjectOpen(next)
-              if (!next) inputRef.current?.focus()
-            }}
-            onChange={(projectId) => {
-              applyClassification({ projectId })
-              stripTrigger()
-            }}
-          />
-          <TagPicker
-            tags={tags}
-            value={classification.tagIds}
-            onCreate={actions.createTag}
-            open={tagsOpen}
-            onOpenChange={(next) => {
-              setTagsOpen(next)
-              if (!next) inputRef.current?.focus()
-            }}
-            onChange={(tagIds) => {
-              applyClassification({ tagIds })
-              stripTrigger()
-            }}
-          />
-          <BillableToggle
-            value={classification.billable}
-            onChange={(billable) => applyClassification({ billable })}
-          />
-        </div>
+        {/*
+          THE CLASSIFIER CLUSTER IS NOT HERE ANY MORE — it is in the footer
+          below this row, beside the music controls.
+
+          It used to sit at this point and wrap to its own line below `sm` via
+          `order-last w-full border-t … sm:order-none sm:border-t-0`, which was
+          a footer in all but name that only existed on a phone. Making it a
+          real footer at every width deletes that responsive juggling, gives
+          the description input the whole row back, and puts the five small
+          controls that classify a session in one strip instead of two places.
+        */}
 
         <TimerDurationPopover
           running={running}
@@ -857,8 +826,6 @@ export function TimerBar({
           )}
         </button>
 
-        {music}
-
         {showSuggestions ? (
           <ul
             id="timer-suggestions"
@@ -914,6 +881,71 @@ export function TimerBar({
             ))}
           </ul>
         ) : null}
+      </div>
+
+      {/*
+        THE FOOTER: what this session IS, and what is playing while you do it.
+
+        Everything on it is secondary to the row above — the description and
+        the Play control are the bar's job, and these five small triggers are
+        the qualifiers. Splitting them onto their own strip is what lets the
+        description input have the full width of the bar at every size instead
+        of only on a phone.
+
+        The two groups are opposed rather than adjacent: `justify-between`
+        puts the classifiers against the left gutter, under the input they
+        qualify, and the music against the right, under the Play control. They
+        are unrelated jobs and reading them as one cluster is the confusion
+        this avoids.
+
+        SAME SHAPE AS THE STAGED-START ROW BELOW — `border-t border-edge-soft
+        px-4 py-1.5` — because they are peers: two secondary strips under one
+        bar. A second spelling here would be visible the moment both are on
+        screen at once.
+
+        `flex-wrap` and `gap-y-1` so that a long Now Playing name on a narrow
+        phone drops under the classifiers rather than squeezing them.
+      */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-edge-soft px-4 py-1.5">
+        <div className="flex shrink-0 items-center gap-0.5">
+          <ProjectPicker
+            projects={projects}
+            value={classification.projectId}
+            onCreate={actions.createProject}
+            open={projectOpen}
+            onOpenChange={(next) => {
+              setProjectOpen(next)
+              if (!next) inputRef.current?.focus()
+            }}
+            onChange={(projectId) => {
+              applyClassification({ projectId })
+              stripTrigger()
+            }}
+          />
+          <TagPicker
+            tags={tags}
+            value={classification.tagIds}
+            onCreate={actions.createTag}
+            open={tagsOpen}
+            onOpenChange={(next) => {
+              setTagsOpen(next)
+              if (!next) inputRef.current?.focus()
+            }}
+            onChange={(tagIds) => {
+              applyClassification({ tagIds })
+              stripTrigger()
+            }}
+          />
+          <BillableToggle
+            value={classification.billable}
+            onChange={(billable) => applyClassification({ billable })}
+          />
+        </div>
+
+        {/* A SLOT, still. The bar holds no music state and imports nothing
+            from the music modules — moving where it renders does not change
+            that, and the feature stays deletable without touching this file. */}
+        {music}
       </div>
 
       {/*

@@ -59,7 +59,31 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
 
       <Popover.Root>
         <Popover.Trigger aria-label="Music library" className={triggerClass}>
-          <Disc3 className="size-4" />
+          {/*
+            THE DISC TURNS WHILE SOMETHING IS PLAYING.
+
+            Three seconds a revolution, not Tailwind's default one: a record
+            turns at about that rate, and — more to the point — this sits a few
+            pixels from a running timer, which DESIGN.md calls the only motion
+            guaranteed to be on screen and the one that must stay readable when
+            everything else stops. A one-second spin competes with it. Three is
+            perceptible when you look and invisible when you do not, which is
+            what a tracker that recedes can afford.
+
+            `motion-reduce:animate-none`, per DESIGN.md's rule that every
+            transition owes a reduced-motion alternative — and nothing is lost
+            by it, because this is the THIRD carrier of "playing", after the
+            speaker icon's own shape and the Now Playing name. It reinforces a
+            state that is already legible without it rather than being the only
+            place that state lives.
+          */}
+          <Disc3
+            className={cn(
+              "size-4",
+              playing &&
+                "animate-spin [animation-duration:3s] motion-reduce:animate-none"
+            )}
+          />
         </Popover.Trigger>
         <Popover.Popup className="w-72 p-0">
           <Panel value={value} />
@@ -69,8 +93,24 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
   )
 }
 
+/*
+ * NO BOX. `border-transparent`, not `border-edge`.
+ *
+ * DESIGN.md's Boundary Rule asks that anything interactive carry a border at
+ * Edge or brighter — and the rule is about a control sitting ALONE on a
+ * surface, where a bare glyph is indistinguishable from an ornament. These do
+ * not sit alone: they sit in the timer bar's footer beside the project, tag
+ * and billable triggers, which are `variant="quiet"` over the button base's
+ * transparent border and have never carried a box. Boxing two of five controls
+ * in one strip is the inconsistency the rule exists to prevent, not an
+ * instance of it.
+ *
+ * `size-7` is 28px — under the 32px these were, and still over the 24x24 floor
+ * WCAG 2.2 AA asks of a target, which is the number that actually constrains
+ * how compact this may get.
+ */
 const triggerClass =
-  "inline-flex size-8 items-center justify-center rounded-md border border-edge text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+  "inline-flex size-7 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
 function IconButton({
   label,
