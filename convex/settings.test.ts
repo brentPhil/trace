@@ -570,3 +570,47 @@ describe("invoice logo", () => {
     ).toBeNull()
   })
 })
+
+describe("music settings", () => {
+  it("defaults to autoplay on and pause on stop", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.ensureAs, { userId: ALICE })
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.musicAutoplay).toBe(true)
+    expect(settings.musicOnStop).toBe("pause")
+  })
+
+  it("round-trips both fields", async () => {
+    const t = setup()
+    await t.mutation(internal.settings.ensureAs, { userId: ALICE })
+    await t.mutation(internal.settings.updateAs, {
+      userId: ALICE,
+      musicAutoplay: false,
+      musicOnStop: "continue",
+    })
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.musicAutoplay).toBe(false)
+    expect(settings.musicOnStop).toBe("continue")
+  })
+
+  // The additive-field contract: a row written before these existed has no
+  // opinion and needs no backfill.
+  it("falls through to the defaults for a row written before the fields existed", async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("userSettings", {
+        userId: ALICE,
+        timezone: "UTC",
+        weekStartDay: 1,
+        durationDisplay: "hms",
+        timeFormat: "24",
+        runawayThresholdMs: 8 * 60 * 60 * 1000,
+        tabTitleClock: true,
+        updatedAt: Date.now(),
+      })
+    })
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.musicAutoplay).toBe(true)
+    expect(settings.musicOnStop).toBe("pause")
+  })
+})

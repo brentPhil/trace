@@ -52,6 +52,11 @@ export type Settings = {
   groupEntries: boolean
   /** Collapse same-rate project lines on newly composed invoices. */
   mergeInvoiceLines: boolean
+  /** Start music when a timer starts. */
+  musicAutoplay: boolean
+  /** What happens to playback when a timer stops. There is no "pause with the
+   *  timer" companion: the product has no pause. See the schema. */
+  musicOnStop: "stop" | "pause" | "continue"
 }
 
 export const SETTINGS_DEFAULTS: Settings = {
@@ -65,6 +70,8 @@ export const SETTINGS_DEFAULTS: Settings = {
   pdfIncludeNotes: false,
   groupEntries: true,
   mergeInvoiceLines: true,
+  musicAutoplay: true,
+  musicOnStop: "pause",
 }
 
 async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
@@ -86,6 +93,8 @@ const settingsReturns = v.object({
   pdfIncludeNotes: v.boolean(),
   groupEntries: v.boolean(),
   mergeInvoiceLines: v.boolean(),
+  musicAutoplay: v.boolean(),
+  musicOnStop: v.union(v.literal("stop"), v.literal("pause"), v.literal("continue")),
   logoUrl: v.union(v.string(), v.null()),
 })
 
@@ -113,6 +122,10 @@ async function getImpl(
     groupEntries: row.groupEntries ?? SETTINGS_DEFAULTS.groupEntries,
     mergeInvoiceLines:
       row.mergeInvoiceLines ?? SETTINGS_DEFAULTS.mergeInvoiceLines,
+    // Same additive-column fallback as `currency`, `pdfIncludeNotes`,
+    // `groupEntries` and `mergeInvoiceLines` above.
+    musicAutoplay: row.musicAutoplay ?? SETTINGS_DEFAULTS.musicAutoplay,
+    musicOnStop: row.musicOnStop ?? SETTINGS_DEFAULTS.musicOnStop,
     logoUrl:
       row.logoStorageId === undefined
         ? null
@@ -251,6 +264,10 @@ const updateArgs = {
   pdfIncludeNotes: v.optional(v.boolean()),
   groupEntries: v.optional(v.boolean()),
   mergeInvoiceLines: v.optional(v.boolean()),
+  musicAutoplay: v.optional(v.boolean()),
+  musicOnStop: v.optional(
+    v.union(v.literal("stop"), v.literal("pause"), v.literal("continue"))
+  ),
   /** `null` CLEARS it, `undefined` leaves it alone — the same three-state
    *  shape `projects.update` uses for the same field, because "set it to
    *  nothing" and "do not touch it" are different requests. */
@@ -268,6 +285,8 @@ type UpdateArgs = {
   pdfIncludeNotes?: boolean
   groupEntries?: boolean
   mergeInvoiceLines?: boolean
+  musicAutoplay?: boolean
+  musicOnStop?: "stop" | "pause" | "continue"
   defaultHourlyRateCents?: number | null
 }
 
