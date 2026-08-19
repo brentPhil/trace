@@ -106,7 +106,8 @@ What publishing does NOT remove, because `calendar.readonly` is sensitive and
 the app is unverified: the one-time "Google hasn't verified this app"
 interstitial (**Advanced → Go to …** past it), and a 100-user cap. Neither
 matters for a personal tool; verification is only worth pursuing to let
-strangers sign up without seeing the warning.
+strangers sign up without seeing the warning — see **Getting the app verified**
+below for what that costs.
 
 Consent itself cannot be switched off — OAuth requires the account holder to
 approve the scopes at least once. The only alternative is a Workspace service
@@ -149,6 +150,96 @@ redirect URI added to the client — `https://your-domain/api/auth/callback/goog
 5. Turn **Show** on for the calendar you want.
 6. Open **/timer** in Calendar view. Meetings render as unfilled outlined
    blocks; entries stay filled. Click one for the read-only detail popover.
+
+## Getting the app verified
+
+Only worth doing if people other than you will link their calendars. The
+unverified-but-published state — a warning interstitial and a 100-user cap — is
+fine for a personal tool, and Google itself lists "personal use, single user or
+a few known individuals" as an explicit exception to verification.
+
+The good news first: `calendar.readonly` is **sensitive**, not **restricted**.
+Restricted scopes (Gmail, Drive) drag in an annual third-party security
+assessment — CASA — that costs real money. Sensitive scopes do not. This is a
+form, a video, and a wait.
+
+### What has to exist before you can submit
+
+Three of these do not exist yet, and they are the actual work. The form itself
+takes twenty minutes.
+
+**1. A verified domain.** Ownership of `chroneli.com` proved in
+[Google Search Console](https://search.google.com/search-console), signed in as
+an account with Owner or Editor on the Cloud project. Same account, or the
+console will not see the verification.
+
+**2. A homepage that describes the app.** Public — a reviewer will open it
+signed out — on the verified domain, saying what Chroneli does, and linking to
+the privacy policy. `src/routes/index.tsx` is currently one sentence and two
+buttons. It renders for signed-out visitors, so a reviewer sees it, but "Track
+what you worked on, and what you got done." is not a description of an app that
+reads your calendar. It needs a paragraph about the calendar link specifically.
+
+**3. A privacy policy, on the same domain.** There isn't one. This is the item
+reviewers bounce most often, because a generic template fails: it has to name
+the Google user data this app touches and say what happens to it. For Chroneli
+that means calendar event titles, times, locations, descriptions, attendee
+names and email addresses; stored in Convex; never sold, never shared, never
+used for advertising or to train models; deleted when the user disconnects. It
+must also commit to the
+[Limited Use requirements](https://developers.google.com/terms/api-services-user-data-policy#additional_requirements_for_specific_api_scopes)
+by name.
+
+**4. Consent-screen branding that matches.** App name, logo and support email on
+the OAuth screen have to be the same ones the site uses. A reviewer compares the
+two.
+
+### The demo video
+
+YouTube, **unlisted**, in English, and it has to show three specific things —
+not a marketing tour:
+
+- the OAuth consent screen, with the app name on it,
+- the **browser address bar with the OAuth client ID visible in the URL** (this
+  is the one people re-record for; do not crop it out),
+- each sensitive scope actually being used.
+
+For this app the shortest honest take is: /settings → **Connect Google
+Calendar** → consent screen (pause so the URL and scopes are legible) → back to
+Settings with the calendar list populated → turn **Show** on → /timer in
+Calendar view with meeting blocks drawn → click one for the popover. That last
+minute *is* the scope justification, demonstrated.
+
+### The justification to paste
+
+One per scope, and it must argue why a narrower scope is not enough:
+
+> **`https://www.googleapis.com/auth/calendar.readonly`** — Chroneli is a time
+> tracker. It mirrors the user's upcoming events into the app's own calendar
+> grid so they can see meetings alongside tracked time and start a timer against
+> one without leaving the app. Event title, start and end time, location,
+> description, organiser and attendee response are all displayed in the meeting
+> detail panel. No narrower scope exists: `calendar.events.readonly` and
+> `calendar.app.created` cover only events this app created, and this app
+> creates none — it reads events created by the user and their colleagues, which
+> is the entire feature. Chroneli never writes to Google Calendar: it creates no
+> events, changes no RSVPs, and requests no write scope.
+
+### Submitting
+
+Cloud Console → **Google Auth Platform** → publish **Branding** → **Verification
+Center** → **Add or remove scopes**, declare `calendar.readonly`, paste the
+justification, paste the YouTube link, submit.
+
+Google says up to **10 days** once the submission is complete. In practice the
+clock restarts every time a reviewer asks for something, so the thing that
+decides whether this takes two weeks or two months is how fast you answer their
+email — sent to the support address on the consent screen, so make sure that is
+an inbox you read.
+
+Nothing breaks while you wait. The app keeps working exactly as it does now,
+warning interstitial and all; verification only removes the interstitial and the
+100-user cap.
 
 ## When something fails
 
