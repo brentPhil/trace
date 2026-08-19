@@ -94,7 +94,11 @@ const settingsReturns = v.object({
   groupEntries: v.boolean(),
   mergeInvoiceLines: v.boolean(),
   musicAutoplay: v.boolean(),
-  musicOnStop: v.union(v.literal("stop"), v.literal("pause"), v.literal("continue")),
+  musicOnStop: v.union(
+    v.literal("stop"),
+    v.literal("pause"),
+    v.literal("continue")
+  ),
   logoUrl: v.union(v.string(), v.null()),
 })
 
