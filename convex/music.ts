@@ -29,6 +29,10 @@ import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server"
  * (the browser POSTs straight to the upload URL), so every rejection below has
  * to delete what is already there. Skip it and each rejected upload leaks a
  * paid-for file that no row references and no UI can reach.
+ *
+ * One thing it does NOT copy from `setLogoAction`: the order size and content
+ * type are checked in. See the comment on the size check in `addTrackAction`
+ * for why a 20 MiB cap earns a different order than a 1 MiB one.
  */
 
 const trackReturns = v.object({
@@ -138,7 +142,15 @@ export const deleteUpload = internalMutation({
   args: { storageId: v.id("_storage") },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await ctx.storage.delete(args.storageId)
+    // Guarded the same way `settings.deleteLogoUpload` is: a caller reaches
+    // here BECAUSE `readTrackMetadata` (or the delete below itself, on a
+    // second rejection reason) already found nothing at this id, and Convex
+    // deleting a storage id with no metadata is exactly the kind of call that
+    // should never happen — asking it to do so anyway would surface an opaque
+    // storage error in place of the caller's own INVALID_TRACK.
+    if ((await ctx.db.system.get("_storage", args.storageId)) !== null) {
+      await ctx.storage.delete(args.storageId)
+    }
     return null
   },
 })
@@ -162,7 +174,16 @@ export const acceptTrack = internalMutation({
         q.eq("userId", args.userId).eq("clientKey", args.clientKey)
       )
       .first()
-    if (existing !== null) return existing._id
+    if (existing !== null) {
+      // A retry mints a FRESH blob before calling this, so returning the first
+      // row without deleting it would dedupe the ROW and bill for both FILES —
+      // which is the exact failure `clientKey` exists to prevent. Guarded on
+      // inequality because a caller may legitimately re-send the same pair.
+      if (existing.storageId !== args.storageId) {
+        await ctx.storage.delete(args.storageId)
+      }
+      return existing._id
+    }
 
     const { bytes, count } = await usageImpl(ctx, args.userId)
     if (bytes + args.bytes > MAX_LIBRARY_BYTES || count + 1 > MAX_TRACK_COUNT) {
@@ -204,22 +225,20 @@ async function addTrackAction(
   const metadata = await ctx.runQuery(internal.music.readTrackMetadata, {
     storageId: args.storageId,
   })
-  // Convex does not always record a content type; fall back to the blob's own,
-  // exactly as `settings.setLogoAction` does.
-  const blob =
-    metadata !== null && metadata.contentType === undefined
-      ? await ctx.storage.get(args.storageId)
-      : null
-  const contentType = metadata?.contentType ?? blob?.type
 
-  const name = args.name.trim().slice(0, MAX_TRACK_NAME_LENGTH)
-
-  if (
-    metadata === null ||
-    !isAcceptedAudioContentType(contentType) ||
-    metadata.size > MAX_TRACK_BYTES ||
-    name === ""
-  ) {
+  // `settings.setLogoAction` reads the blob's own content type BEFORE
+  // checking size, and the plan modeled this action on that same order. That
+  // order is fine for a logo, whose cap is 1 MiB: the worst an untyped upload
+  // can force into the action's memory is one megabyte. This cap is 20 MiB —
+  // twenty times as much — and `Content-Type` is entirely client-controlled,
+  // so omitting it costs an attacker nothing and can be repeated for free.
+  // Fetching the blob before its size is known would materialize an
+  // arbitrarily large file in memory on every such attempt, and if that OOMs
+  // or times out, the cleanup below never runs and the blob is orphaned for
+  // good. So here the size check runs FIRST, against metadata alone — nothing
+  // this cheap to trigger should ever cause a blob fetch — and the blob is
+  // only read once a file is already known to fit.
+  if (metadata === null || metadata.size > MAX_TRACK_BYTES) {
     await ctx.runMutation(internal.music.deleteUpload, {
       storageId: args.storageId,
     })
@@ -227,6 +246,37 @@ async function addTrackAction(
       "INVALID_TRACK",
       "Use an MP3, M4A, WAV, OGG or FLAC file no larger than 20 MB."
     )
+  }
+
+  // Convex does not always record a content type; fall back to the blob's
+  // own, now that its size is known to be within bounds.
+  const blob =
+    metadata.contentType === undefined
+      ? await ctx.storage.get(args.storageId)
+      : null
+  const contentType = metadata.contentType ?? blob?.type
+
+  if (!isAcceptedAudioContentType(contentType)) {
+    await ctx.runMutation(internal.music.deleteUpload, {
+      storageId: args.storageId,
+    })
+    traceError(
+      "INVALID_TRACK",
+      "Use an MP3, M4A, WAV, OGG or FLAC file no larger than 20 MB."
+    )
+  }
+
+  // A blank name and an unsupported file are different problems with
+  // different fixes, so this earns its own check and its own message rather
+  // than folding into the content-type rejection above — the combined
+  // message used to send someone to re-encode a perfectly good file over a
+  // name they simply left empty.
+  const name = args.name.trim().slice(0, MAX_TRACK_NAME_LENGTH)
+  if (name === "") {
+    await ctx.runMutation(internal.music.deleteUpload, {
+      storageId: args.storageId,
+    })
+    traceError("INVALID_TRACK", "A track needs a name.")
   }
 
   const trackId = await ctx.runMutation(internal.music.acceptTrack, {

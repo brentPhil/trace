@@ -542,9 +542,13 @@ export default defineSchema({
     .index("by_user_entry", ["userId", "entryId"]),
 
   musicTracks: defineTable(musicTrackFields)
-    // by_user carries creation order, which is "recently added".
+    // by_user carries creation order, which is "recently added". There is
+    // deliberately no by_user_name index: `listTracksImpl` sorts in JS with
+    // `localeCompare`, which orders non-ASCII names correctly where a
+    // raw-string index would not, and at most `MAX_TRACK_COUNT` (500) rows is
+    // nothing to sort in memory. Do not re-add it thinking its absence is an
+    // oversight — an index nobody reads still costs every write.
     .index("by_user", ["userId"])
-    .index("by_user_name", ["userId", "name"])
     .index("by_user_clientKey", ["userId", "clientKey"]),
 
   musicPreferences: defineTable(musicPreferenceFields).index(

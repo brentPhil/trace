@@ -182,12 +182,46 @@ describe("upload validation", () => {
 
   it("is idempotent on clientKey — a retry returns the first row, not a second", async () => {
     const t = setup()
-    const first = await addTrack(t, ALICE, { clientKey: "same" })
-    const second = await addTrack(t, ALICE, { clientKey: "same" })
+    // A retry mints a FRESH blob before calling addTrack with the SAME
+    // clientKey, exactly what clientKey exists to survive — the storedBlob
+    // calls below stand in for the two separately-billed uploads a client
+    // makes on a lost-response retry.
+    const firstStorageId = await storedBlob(t, "audio/mpeg", 1024)
+    const first = await t.action(internal.music.addTrackAs, {
+      userId: ALICE,
+      storageId: firstStorageId,
+      clientKey: "same",
+      name: "A track",
+    })
+    const secondStorageId = await storedBlob(t, "audio/mpeg", 1024)
+    const second = await t.action(internal.music.addTrackAs, {
+      userId: ALICE,
+      storageId: secondStorageId,
+      clientKey: "same",
+      name: "A track",
+    })
     expect(second).toBe(first)
     expect(
       await t.query(internal.music.listTracksAs, { userId: ALICE })
     ).toHaveLength(1)
+    // The retry's second, freshly-billed blob must not be left unreachable —
+    // dedupe the ROW but leak the FILE is the exact failure this guards.
+    expect(await blobExists(t, secondStorageId)).toBe(false)
+  })
+
+  it("rejects an oversized upload with no content type before ever reading the blob, AND deletes it", async () => {
+    const t = setup()
+    const storageId = await storedBlob(t, "", MAX_TRACK_BYTES + 1)
+    await expectCode(
+      t.action(internal.music.addTrackAs, {
+        userId: ALICE,
+        storageId,
+        clientKey: "k7",
+        name: "n",
+      }),
+      "INVALID_TRACK"
+    )
+    expect(await blobExists(t, storageId)).toBe(false)
   })
 })
 
@@ -233,6 +267,38 @@ describe("rename and remove", () => {
       await t.query(internal.music.listTracksAs, { userId: ALICE })
     ).toEqual([])
     expect(await blobExists(t, storageId)).toBe(false)
+  })
+})
+
+describe("duration", () => {
+  it("stores durationMs and returns it from listTracksAs", async () => {
+    const t = setup()
+    const storageId = await storedBlob(t, "audio/mpeg", 4096)
+    const trackId = await t.action(internal.music.addTrackAs, {
+      userId: ALICE,
+      storageId,
+      clientKey: "k8",
+      name: "Timed",
+      durationMs: 187_000,
+    })
+    const [track] = await t.query(internal.music.listTracksAs, {
+      userId: ALICE,
+    })
+    expect(track._id).toBe(trackId)
+    expect(track.durationMs).toBe(187_000)
+  })
+
+  it("setTrackDuration hides another user's track behind NOT_FOUND", async () => {
+    const t = setup()
+    const trackId = await addTrack(t, ALICE)
+    await expectCode(
+      t.mutation(internal.music.setTrackDuration, {
+        userId: BOB,
+        trackId,
+        durationMs: 1000,
+      }),
+      "NOT_FOUND"
+    )
   })
 })
 
