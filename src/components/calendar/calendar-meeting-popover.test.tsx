@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { CalendarMeetingPopover } from "@/components/calendar/calendar-meeting-popover"
 import type { Meeting } from "@/lib/calendar-meetings"
 import type { Id } from "../../../convex/_generated/dataModel"
@@ -59,25 +59,90 @@ describe("CalendarMeetingPopover", () => {
     expect(screen.getByText("Untitled")).toBeTruthy()
   })
 
-  it("lists attendees with their response", () => {
+  it("shows an avatar per attendee, named through its label", () => {
     show({
       attendees: [
-        { name: "Ana", email: "ana@example.com", response: "accepted" },
+        { name: "Ana Cruz", email: "ana@example.com", response: "accepted" },
         { email: "bo@example.com", response: "needsAction" },
       ],
       attendeeCount: 2,
     })
-    expect(screen.getByText("Ana")).toBeTruthy()
-    expect(screen.getByText("bo@example.com")).toBeTruthy()
-    expect(screen.getByText(/Accepted/)).toBeTruthy()
+    // The name moved off the surface and into the avatar's label; who a circle
+    // stands for is still stated, it just waits to be asked.
+    expect(screen.getByLabelText("Ana Cruz — Accepted")).toBeTruthy()
+    expect(screen.getByText("AC")).toBeTruthy()
+    // A non-replier's label carries no response at all — "No response" per
+    // person repeats one non-fact down the roster. The count of non-repliers
+    // is stated once, in the summary line.
+    expect(screen.getByLabelText("bo@example.com")).toBeTruthy()
+    expect(screen.getByText("B")).toBeTruthy()
 
-    // The people who HAVE replied are labelled per row; the ones who have not
-    // are counted once in the summary instead. Printing "No response" beside
-    // every unanswered invite repeats one word down the column and buries the
-    // two answers anyone is actually scanning for.
     expect(screen.getByText(/1 accepted/)).toBeTruthy()
     expect(screen.getByText(/1 awaiting reply/)).toBeTruthy()
     expect(screen.queryByText(/No response/)).toBeNull()
+  })
+
+  it("rings only the accepted avatar in green", () => {
+    show({
+      attendees: [
+        { name: "Ana", response: "accepted" },
+        { name: "Bo", response: "declined" },
+      ],
+      attendeeCount: 2,
+    })
+    // The ring is the mark of acceptance and nothing else wears it. The same
+    // fact is restated in words by the summary line, so the meaning never
+    // rests on colour alone.
+    expect(
+      screen.getByLabelText("Ana — Accepted").className
+    ).toContain("border-[oklch")
+    expect(
+      screen.getByLabelText("Bo — Declined").className
+    ).not.toContain("border-[oklch")
+  })
+
+  it("folds a long roster behind a +N chip that opens the rest", () => {
+    show({
+      attendees: [
+        { name: "Ana", response: "accepted" },
+        { name: "Bo", response: "needsAction" },
+        { name: "Cy", response: "needsAction" },
+        { name: "Di", response: "needsAction" },
+        { name: "Ed", response: "needsAction" },
+        { name: "Fay", response: "needsAction" },
+        { name: "Gus", response: "needsAction" },
+        { name: "Hal", response: "needsAction" },
+      ],
+      attendeeCount: 8,
+    })
+    // Six circles, then the chip; Gus and Hal are behind it, not gone.
+    expect(screen.getByLabelText("Fay")).toBeTruthy()
+    expect(screen.queryByLabelText("Gus")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: /\+2/ }))
+    // The chip's popup prints avatar AND name per row — it is where somebody
+    // goes to find out who exactly is behind the fold.
+    expect(screen.getByLabelText("Gus")).toBeTruthy()
+    expect(screen.getByText("Gus")).toBeTruthy()
+    expect(screen.getByText("Hal")).toBeTruthy()
+  })
+
+  it("does not fold exactly one avatar behind a +1", () => {
+    show({
+      attendees: [
+        { name: "Ana", response: "accepted" },
+        { name: "Bo", response: "needsAction" },
+        { name: "Cy", response: "needsAction" },
+        { name: "Di", response: "needsAction" },
+        { name: "Ed", response: "needsAction" },
+        { name: "Fay", response: "needsAction" },
+        { name: "Gus", response: "needsAction" },
+      ],
+      attendeeCount: 7,
+    })
+    // A "+1" chip takes the same space as the avatar it hides, saying less.
+    expect(screen.getByLabelText("Gus")).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /\+1/ })).toBeNull()
   })
 
   it("counts every guest in the header, including unlisted ones", () => {
@@ -109,8 +174,10 @@ describe("CalendarMeetingPopover", () => {
       attendeeCount: 51,
     })
     // Honesty about a capped list. A truncated roster that looks complete is
-    // worse than one that says it is truncated.
-    expect(screen.getByText(/50 more/)).toBeTruthy()
+    // worse than one that says it is truncated: the chip counts the people
+    // Google never listed, and opening it says why they cannot be shown.
+    fireEvent.click(screen.getByRole("button", { name: /\+50/ }))
+    expect(screen.getByText(/and 50 more not listed/)).toBeTruthy()
   })
 
   it("renders the conference link and the link out to Google", () => {
@@ -196,9 +263,9 @@ ID: 247` })
       attendeeCount: 2,
     })
     // Resource rooms and hidden guests (guests cannot see each other setting)
-    // both arrive with no name and no email. Both rows should render "Guest"
-    // rather than blank, so the user knows they exist.
-    const guests = screen.getAllByText("Guest")
-    expect(guests).toHaveLength(2)
+    // both arrive with no name and no email. Both get a "Guest" avatar rather
+    // than nothing, so the user knows they exist.
+    expect(screen.getByLabelText("Guest — Accepted")).toBeTruthy()
+    expect(screen.getByLabelText("Guest — Declined")).toBeTruthy()
   })
 })

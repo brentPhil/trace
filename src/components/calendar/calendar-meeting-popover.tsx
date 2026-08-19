@@ -1,4 +1,5 @@
-import { ExternalLinkIcon, MapPinIcon, VideoIcon } from "lucide-react"
+import { ExternalLinkIcon, MapPinIcon, UserIcon, VideoIcon } from "lucide-react"
+import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar"
 import { Popover } from "@/components/ui/popover"
 import { formatTimeRange } from "@/lib/format-time"
 import { linkify, safeHref } from "@/lib/linkify"
@@ -39,6 +40,78 @@ function countResponses(attendees: Meeting["attendees"]) {
 }
 
 /**
+ * Two letters standing for a person.
+ *
+ * Google sends no photo for an attendee — the Calendar API's attendee object
+ * carries name, email and response, nothing more — so the avatar is initials,
+ * which is also what Google's own UI falls back to. First and last word of the
+ * name; first letter of the email when there is no name; `null` for the hidden
+ * guest with neither, who gets a person glyph instead of an empty circle.
+ */
+function initials(attendee: Meeting["attendees"][number]): string | null {
+  const name = attendee.name?.trim()
+  if (name !== undefined && name !== "") {
+    const words = name.split(/\s+/)
+    const first = words[0][0] ?? ""
+    const last = words.length > 1 ? (words[words.length - 1][0] ?? "") : ""
+    const letters = (first + last).toUpperCase()
+    return letters === "" ? null : letters
+  }
+  const email = attendee.email?.trim()
+  if (email !== undefined && email !== "") return email[0].toUpperCase()
+  return null
+}
+
+/** How many avatars the group shows before folding the rest behind "+N".
+ *  Six overlapped circles read at a glance; past that the row is a texture,
+ *  not a roster, and the count chip says the rest better. */
+const VISIBLE_AVATARS = 6
+
+/**
+ * One guest as a circle.
+ *
+ * The name is in the tooltip and the aria-label, not on the surface — every
+ * avatar states who it stands for, it just waits to be asked. `needsAction` is
+ * the state everyone starts in, so the label names a reply only where somebody
+ * actually replied; non-repliers are counted once, in the summary line.
+ *
+ * The green ring means accepted and only accepted. It is the one departure
+ * from the Two Temperatures Rule, and the summary line restates the same fact
+ * in words so the meaning never rests on the ring alone.
+ */
+function AttendeeAvatar({
+  attendee,
+}: {
+  attendee: Meeting["attendees"][number]
+}) {
+  const who = attendee.name ?? attendee.email ?? "Guest"
+  const label =
+    attendee.response === "needsAction"
+      ? who
+      : `${who} — ${RESPONSE_LABEL[attendee.response] ?? attendee.response}`
+  const letters = initials(attendee)
+  return (
+    <Avatar
+      title={label}
+      aria-label={label}
+      role="img"
+      className={
+        attendee.response === "accepted"
+          ? "after:border-2 after:border-[oklch(0.72_0.13_150)]"
+          : undefined
+      }
+    >
+      <AvatarFallback className="bg-ground text-[11px] font-medium text-muted-foreground">
+        {letters ?? <UserIcon className="size-3.5" aria-hidden />}
+        {/* An attendee with no name and no email is either a resource room or
+            a guest hidden by the organiser's "guests cannot see each other"
+            setting; a person glyph rather than an empty circle. */}
+      </AvatarFallback>
+    </Avatar>
+  )
+}
+
+/**
  * The invite body, with its links made clickable.
  *
  * `linkify` SPLITS the text and this renders our own anchors around the runs it
@@ -54,7 +127,7 @@ function countResponses(attendees: Meeting["attendees"]) {
  */
 function Description({ text }: { text: string }) {
   return (
-    <p className="max-h-36 overflow-x-hidden overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
+    <p className="max-h-[26rem] overflow-x-hidden overflow-y-auto text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground [overflow-wrap:anywhere]">
       {linkify(text).map((segment, index) =>
         segment.kind === "link" ? (
           <a
@@ -107,6 +180,18 @@ export function CalendarMeetingPopover({
   const organiser = meeting.organizer?.name ?? meeting.organizer?.email
 
   /*
+   * The fold. Folding exactly one avatar behind a "+1" would spend the same
+   * space saying less, so the group only folds when at least two go behind
+   * the chip. `overflow` also carries the attendees Google never listed
+   * (`unlisted`, past the MAX_ATTENDEES cap) — the chip's number is the true
+   * count of people not shown, whichever of the two reasons hid them.
+   */
+  const folds = listed > VISIBLE_AVATARS + 1
+  const shown = folds ? meeting.attendees.slice(0, VISIBLE_AVATARS) : meeting.attendees
+  const folded = folds ? meeting.attendees.slice(VISIBLE_AVATARS) : []
+  const overflow = folded.length + unlisted
+
+  /*
    * The guest-list summary, in words rather than in marks.
    *
    * Only the states that actually occur are named, so a fully-accepted meeting
@@ -136,7 +221,17 @@ export function CalendarMeetingPopover({
         side="right"
         align="start"
         aria-label={`Meeting: ${title}`}
-        className="w-[21rem] gap-0 p-0"
+        /*
+         * Wider and much taller than the Popup default: this one carries a
+         * roster and an invite body, and at 21×22rem the description was a
+         * keyhole and the Google Calendar link below it was clipped clean off
+         * by the Popup's `overflow-hidden`. The cap is the viewport's, not a
+         * number: a Teams invite body is the length it is, and the popover
+         * gives it the height the screen actually has. The body scrolls as a
+         * whole when the viewport beats the cap, so the link out is always
+         * reachable.
+         */
+        className="max-h-[min(56rem,90svh)] w-[26rem] gap-0 p-0"
       >
         {/*
           SECTIONS DIVIDED BY HAIRLINES, not by gaps alone.
@@ -148,7 +243,7 @@ export function CalendarMeetingPopover({
           `edge-soft` throughout: these divide passive content, where no contrast
           floor applies.
         */}
-        <div className="divide-y divide-edge-soft">
+        <div className="min-h-0 divide-y divide-edge-soft overflow-y-auto">
           <header className="grid gap-1 p-3">
             <h2 className="text-sm leading-snug font-medium text-balance text-foreground">
               {title}
@@ -228,45 +323,80 @@ export function CalendarMeetingPopover({
               )}
 
               {listed === 0 ? null : (
-                <ul className="grid max-h-32 gap-1 overflow-x-hidden overflow-y-auto">
-                  {meeting.attendees.map((attendee, index) => (
-                    <li
-                      key={index}
-                      className="flex items-baseline justify-between gap-3 text-xs"
-                    >
-                      <span className="truncate text-foreground">
-                        {/* Index as key is safe here: this list is not
-                            reorderable or filterable, and is always re-rendered
-                            fresh from a query result. */}
-                        {attendee.name ?? attendee.email ?? "Guest"}
-                        {/* An attendee with no name and no email is either a
-                            resource room or a guest hidden by the organiser's
-                            "guests cannot see each other" setting. "Guest" is
-                            what Google itself calls such an attendee. */}
-                      </span>
-                      {/*
-                        A LABEL ONLY WHERE SOMEBODY ACTUALLY REPLIED.
-                        `needsAction` is the state everyone starts in, so
-                        printing it per row repeats one word down the column and
-                        drowns the two answers a user is scanning for. The count
-                        of non-repliers is stated once in the summary above, so
-                        nothing is hidden — it is said in the place where saying
-                        it once is enough. Text, never colour alone.
-                      */}
-                      {attendee.response === "needsAction" ? null : (
-                        <span className="shrink-0 text-muted-foreground">
-                          {RESPONSE_LABEL[attendee.response] ??
-                            attendee.response}
-                        </span>
-                      )}
-                    </li>
+                /*
+                  AN OVERLAPPED STACK RATHER THAN A COLUMN OF NAMES.
+
+                  The separation ring between circles is repainted from the
+                  shadcn default (`ring-background`, the page's ground) to the
+                  popover's own surface, or every avatar would wear a dark halo
+                  cut from a background this popover does not sit on.
+
+                  Index as key is safe throughout: the roster is never
+                  reordered or filtered, and is re-rendered fresh from a query
+                  result.
+                */
+                <AvatarGroup className="*:data-[slot=avatar]:ring-surface-raised">
+                  {shown.map((attendee, index) => (
+                    <AttendeeAvatar key={index} attendee={attendee} />
                   ))}
-                  {unlisted === 0 ? null : (
-                    <li className="text-xs text-muted-foreground">
-                      and {unlisted} more
-                    </li>
+                  {overflow === 0 ? null : (
+                    /*
+                      THE "+N" IS A CONTROL, so it dresses like one: same
+                      circle as its neighbours but with the raised border every
+                      interactive boundary in this app wears. Pressing it opens
+                      the rest of the roster rather than making the popover
+                      taller than the meeting is important.
+                    */
+                    <Popover.Root>
+                      <Popover.Trigger
+                        title={`Show ${overflow} more`}
+                        className="relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-edge-raised bg-ground text-[11px] font-medium text-muted-foreground ring-2 ring-surface-raised transition-colors hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      >
+                        +{overflow}
+                      </Popover.Trigger>
+                      <Popover.Popup
+                        side="bottom"
+                        align="start"
+                        aria-label={`${overflow} more ${overflow === 1 ? "guest" : "guests"}`}
+                        className="max-h-[min(18rem,50svh)] w-auto max-w-[21rem] p-2"
+                      >
+                        {folded.length === 0 ? null : (
+                          /* Avatar AND name, per row: the chip's popup is
+                             where somebody goes to find out who exactly is
+                             behind the fold, so the answer is printed, not
+                             left in a tooltip. */
+                          <ul className="grid min-h-0 gap-1 overflow-y-auto">
+                            {folded.map((attendee, index) => (
+                              <li
+                                key={index}
+                                className="flex items-center gap-2 text-xs"
+                              >
+                                <AttendeeAvatar attendee={attendee} />
+                                <span className="truncate text-foreground">
+                                  {attendee.name ?? attendee.email ?? "Guest"}
+                                </span>
+                                {attendee.response === "needsAction" ? null : (
+                                  <span className="ml-auto shrink-0 pl-2 text-muted-foreground">
+                                    {RESPONSE_LABEL[attendee.response] ??
+                                      attendee.response}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {unlisted === 0 ? null : (
+                          /* Honesty about the MAX_ATTENDEES cap: these people
+                             exist, Google was not asked for them, and a roster
+                             that looks complete would be lying. */
+                          <p className="p-1 text-xs text-muted-foreground">
+                            and {unlisted} more not listed
+                          </p>
+                        )}
+                      </Popover.Popup>
+                    </Popover.Root>
                   )}
-                </ul>
+                </AvatarGroup>
               )}
             </div>
           )}
