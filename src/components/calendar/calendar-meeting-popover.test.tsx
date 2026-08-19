@@ -70,7 +70,37 @@ describe("CalendarMeetingPopover", () => {
     expect(screen.getByText("Ana")).toBeTruthy()
     expect(screen.getByText("bo@example.com")).toBeTruthy()
     expect(screen.getByText(/Accepted/)).toBeTruthy()
-    expect(screen.getByText(/No response/)).toBeTruthy()
+
+    // The people who HAVE replied are labelled per row; the ones who have not
+    // are counted once in the summary instead. Printing "No response" beside
+    // every unanswered invite repeats one word down the column and buries the
+    // two answers anyone is actually scanning for.
+    expect(screen.getByText(/1 accepted/)).toBeTruthy()
+    expect(screen.getByText(/1 awaiting reply/)).toBeTruthy()
+    expect(screen.queryByText(/No response/)).toBeNull()
+  })
+
+  it("counts every guest in the header, including unlisted ones", () => {
+    show({
+      attendees: [
+        { name: "Ana", response: "accepted" },
+        { name: "Bo", response: "declined" },
+        { name: "Cy", response: "tentative" },
+      ],
+      attendeeCount: 3,
+    })
+    expect(screen.getByText("3 guests")).toBeTruthy()
+    // Only the states that actually occur are named — a meeting where nobody
+    // declined never mentions declining.
+    expect(screen.getByText(/1 accepted · 1 declined · 1 maybe/)).toBeTruthy()
+  })
+
+  it("says guest in the singular for a one-person invite", () => {
+    show({
+      attendees: [{ name: "Ana", response: "accepted" }],
+      attendeeCount: 1,
+    })
+    expect(screen.getByText("1 guest")).toBeTruthy()
   })
 
   it("says how many attendees were not listed", () => {
@@ -120,6 +150,33 @@ describe("CalendarMeetingPopover", () => {
   it("renders no link for a relative URL, which would point at Chroneli itself", () => {
     show({ conferenceUrl: "/settings" })
     expect(screen.queryByRole("link", { name: /Join/i })).toBeNull()
+  })
+
+  it("makes a link in the description clickable", () => {
+    // The join details live in the invite body, and until this they were text
+    // you had to select and copy. This is the Teams block from a real invite.
+    const url =
+      "https://teams.microsoft.com/meet/247181968887963?p=CVeTEgIPQw3vicMw3N"
+    show({ description: `Microsoft Teams meeting
+Join:
+${url}
+ID: 247` })
+
+    const link = screen.getByRole("link", { name: url })
+    expect(link.getAttribute("href")).toBe(url)
+    expect(link.getAttribute("rel")).toContain("noreferrer")
+    // The surrounding prose is still there, unaltered.
+    expect(screen.getByText(/Microsoft Teams meeting/)).toBeTruthy()
+  })
+
+  it("does not linkify a javascript: url in the description", () => {
+    // The description is written by whoever sent the invite. A scheme outside
+    // the allowlist stays readable prose rather than becoming a target.
+    show({ description: "click javascript:alert(1) please" })
+    expect(screen.queryByRole("link", { name: /javascript/ })).toBeNull()
+    // Still readable prose — silently deleting text somebody wrote would be
+    // worse than declining to make it a target.
+    expect(screen.getByText(/javascript:alert/)).toBeTruthy()
   })
 
   it("has no editable control anywhere in it", () => {
