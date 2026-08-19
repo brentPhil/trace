@@ -1,0 +1,134 @@
+import { afterEach } from "vitest"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react"
+// NO `user-event` import — see the Global Constraint on test interactions.
+import { describe, expect, it, vi } from "vitest"
+import { MusicControls } from "./music-controls"
+import type { MusicContextValue } from "./music-provider"
+
+afterEach(cleanup)
+
+function value(overrides: Partial<MusicContextValue> = {}): MusicContextValue {
+  return {
+    tracks: [
+      {
+        ref: { origin: "chroneli", slug: "a" },
+        name: "Lo-fi Chill",
+        url: "/music/a.mp3",
+        origin: "chroneli",
+      },
+      {
+        ref: { origin: "upload", trackId: "t1" },
+        name: "My Recording",
+        url: "https://f/x",
+        origin: "upload",
+      },
+    ],
+    current: null,
+    playing: false,
+    blocked: false,
+    volume: 0.6,
+    shuffle: false,
+    repeat: "all",
+    playRef: vi.fn(),
+    toggle: vi.fn(),
+    next: vi.fn(),
+    previous: vi.fn(),
+    setVolume: vi.fn(),
+    toggleShuffle: vi.fn(),
+    cycleRepeat: vi.fn(),
+    stop: vi.fn(),
+    pause: vi.fn(),
+    onUserPick: vi.fn(() => () => {}),
+    ...overrides,
+  }
+}
+
+describe("collapsed", () => {
+  it("shows only two controls when nothing is playing", () => {
+    render(<MusicControls value={value()} />)
+    expect(screen.getByRole("button", { name: /play music/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /music library/i })).toBeTruthy()
+    // The panel's controls are not in the document until it is opened.
+    expect(screen.queryByRole("button", { name: /next track/i })).toBe(null)
+  })
+
+  it("names the playing track for a screen reader without drawing a label", () => {
+    render(
+      <MusicControls
+        value={value({
+          playing: true,
+          current: {
+            ref: { origin: "chroneli", slug: "a" },
+            name: "Lo-fi Chill",
+            url: "/music/a.mp3",
+            origin: "chroneli",
+          },
+        })}
+      />
+    )
+    expect(screen.getByRole("button", { name: /pause music/i })).toBeTruthy()
+    expect(screen.getByText("Lo-fi Chill")).toBeTruthy()
+  })
+
+  it("toggles playback", () => {
+    const v = value()
+    render(<MusicControls value={v} />)
+    fireEvent.click(screen.getByRole("button", { name: /play music/i }))
+    expect(v.toggle).toHaveBeenCalledTimes(1)
+  })
+
+  it("says so when the browser refused to start playback", () => {
+    render(<MusicControls value={value({ blocked: true })} />)
+    expect(screen.getByRole("button", { name: /click to play/i })).toBeTruthy()
+  })
+})
+
+describe("the panel", () => {
+  async function open() {
+    const v = value()
+    render(<MusicControls value={v} />)
+    fireEvent.click(screen.getByRole("button", { name: /music library/i }))
+    // Base UI's popup mounts into a portal asynchronously; `findByRole` waits
+    // for it rather than assuming it is already in the document the instant
+    // the click handler returns.
+    await screen.findByRole("group", { name: /chroneli music/i })
+    return v
+  }
+
+  it("exposes transport, shuffle, repeat and volume", async () => {
+    await open()
+    expect(screen.getByRole("button", { name: /previous track/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /next track/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /shuffle/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /repeat/i })).toBeTruthy()
+    expect(screen.getByRole("slider", { name: /volume/i })).toBeTruthy()
+  })
+
+  it("lists catalog and uploaded tracks under separate headings", async () => {
+    await open()
+    const chroneli = screen.getByRole("group", { name: /chroneli music/i })
+    expect(within(chroneli).getByText("Lo-fi Chill")).toBeTruthy()
+    const mine = screen.getByRole("group", { name: /my music/i })
+    expect(within(mine).getByText("My Recording")).toBeTruthy()
+  })
+
+  it("plays the track that is clicked", async () => {
+    const v = await open()
+    fireEvent.click(screen.getByRole("button", { name: /play lo-fi chill/i }))
+    expect(v.playRef).toHaveBeenCalledWith({ origin: "chroneli", slug: "a" })
+  })
+
+  it("dispatches next and previous", async () => {
+    const v = await open()
+    fireEvent.click(screen.getByRole("button", { name: /next track/i }))
+    fireEvent.click(screen.getByRole("button", { name: /previous track/i }))
+    expect(v.next).toHaveBeenCalledTimes(1)
+    expect(v.previous).toHaveBeenCalledTimes(1)
+  })
+})
