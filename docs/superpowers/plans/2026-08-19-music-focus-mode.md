@@ -22,7 +22,6 @@ These apply to **every** task. They are the house rules this codebase already en
 - **Colour rules from DESIGN.md are binding.** `--enlarger` is the running timer and nothing else. `--brass` is money. Music controls use `--ink` / `--muted-foreground` only. Checkbox accents use `accent-[var(--ink)]`, matching every other control in /settings.
 - **Test file placement decides the runner** (`vitest.config.ts`): `src/**/*.test.ts` and `convex/lib/**/*.test.ts` → `unit` (node); `src/**/*.test.tsx` → `dom` (jsdom); `convex/*.test.ts` → `convex` (edge-runtime). Put files in the right place or they run in the wrong environment.
 - **Test interactions use `fireEvent` from `@testing-library/react` — NEVER `@testing-library/user-event` — and plain assertions, never jest-dom matchers.** Neither package is a dependency of this project. `src/components/reports/export-menu.test.tsx:9` states the rule outright; `classifier-pickers.test.tsx` shows the idiom for driving Base UI popups (`fireEvent.click` + `findByRole`). Typing is `fireEvent.change(el, { target: { value: "…" } })`; picking a `<select>` option is the same call; Enter is `fireEvent.keyDown(el, { key: "Enter" })`. Every `.test.tsx` also calls `afterEach(cleanup)`. Any `userEvent` in this plan's example code is an error in the plan — translate it.
-- **A truncated name must be readable on hover.** Track names are truncated in the timer bar and in the panel list, so every truncated name carries a tooltip (`src/components/ui/tooltip.tsx` — `Tooltip`, `TooltipTrigger`, `TooltipContent`) showing the full text. A `title` attribute is not sufficient: it is invisible to touch and to keyboard focus.
 - **`@shared` is aliased to `convex/lib`** and is compiled into the client. Everything under it must stay pure — no `ctx`, no DOM.
 - **Limits, verbatim:** 20 MB per file; 500 MB per account; 500 tracks per account; accepted types `audio/mpeg`, `audio/mp4`, `audio/wav`, `audio/ogg`, `audio/flac`.
 - **Bundled catalog ceiling:** ~12 tracks / ~55 MB in `public/music/`.
@@ -2487,29 +2486,6 @@ describe("collapsed", () => {
     expect(screen.getByRole("button", { name: /music library/i })).toBeTruthy()
     // The panel's controls are not in the document until it is opened.
     expect(screen.queryByRole("button", { name: /next track/i })).toBe(null)
-  })
-
-  // The bar truncates at `max-w-32`, so a long name is unreadable without this.
-  it("offers the full track name on hover", async () => {
-    render(
-      <MusicControls
-        value={value({
-          playing: true,
-          current: {
-            ref: { origin: "chroneli", slug: "a" },
-            name: "A Very Long Lo-fi Track Name That Will Not Fit",
-            url: "/music/a.mp3",
-            origin: "chroneli",
-          },
-        })}
-      />
-    )
-    fireEvent.focus(screen.getByText(/A Very Long Lo-fi/))
-    expect(
-      await screen.findByText("A Very Long Lo-fi Track Name That Will Not Fit", {
-        selector: '[role="tooltip"] *, [role="tooltip"]',
-      })
-    ).toBeTruthy()
   })
 
   it("names the playing track for a screen reader without drawing a label", () => {
