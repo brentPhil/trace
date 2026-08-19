@@ -16,6 +16,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AuthedInvoicesRouteImport } from './routes/_authed/invoices'
+import { Route as AuthedMusicRouteImport } from './routes/_authed/music'
 import { Route as AuthedProjectsRouteImport } from './routes/_authed/projects'
 import { Route as AuthedReportsRouteImport } from './routes/_authed/reports'
 import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
@@ -56,6 +57,11 @@ const SignupRoute = SignupRouteImport.update({
 const AuthedInvoicesRoute = AuthedInvoicesRouteImport.update({
   id: '/invoices',
   path: '/invoices',
+  getParentRoute: () => AuthedRoute,
+} as any)
+const AuthedMusicRoute = AuthedMusicRouteImport.update({
+  id: '/music',
+  path: '/music',
   getParentRoute: () => AuthedRoute,
 } as any)
 const AuthedProjectsRoute = AuthedProjectsRouteImport.update({
@@ -101,6 +107,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/invoices': typeof AuthedInvoicesRoute
+  '/music': typeof AuthedMusicRoute
   '/projects': typeof AuthedProjectsRoute
   '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
@@ -116,6 +123,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/invoices': typeof AuthedInvoicesRoute
+  '/music': typeof AuthedMusicRoute
   '/projects': typeof AuthedProjectsRoute
   '/reports': typeof AuthedReportsRoute
   '/settings': typeof AuthedSettingsRoute
@@ -133,6 +141,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/_authed/invoices': typeof AuthedInvoicesRoute
+  '/_authed/music': typeof AuthedMusicRoute
   '/_authed/projects': typeof AuthedProjectsRoute
   '/_authed/reports': typeof AuthedReportsRoute
   '/_authed/settings': typeof AuthedSettingsRoute
@@ -150,6 +159,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/invoices'
+    | '/music'
     | '/projects'
     | '/reports'
     | '/settings'
@@ -165,6 +175,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/invoices'
+    | '/music'
     | '/projects'
     | '/reports'
     | '/settings'
@@ -181,6 +192,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/signup'
     | '/_authed/invoices'
+    | '/_authed/music'
     | '/_authed/projects'
     | '/_authed/reports'
     | '/_authed/settings'
@@ -251,6 +263,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedInvoicesRouteImport
       parentRoute: typeof AuthedRoute
     }
+    '/_authed/music': {
+      id: '/_authed/music'
+      path: '/music'
+      fullPath: '/music'
+      preLoaderRoute: typeof AuthedMusicRouteImport
+      parentRoute: typeof AuthedRoute
+    }
     '/_authed/projects': {
       id: '/_authed/projects'
       path: '/projects'
@@ -305,6 +324,7 @@ declare module '@tanstack/react-router' {
 
 interface AuthedRouteChildren {
   AuthedInvoicesRoute: typeof AuthedInvoicesRoute
+  AuthedMusicRoute: typeof AuthedMusicRoute
   AuthedProjectsRoute: typeof AuthedProjectsRoute
   AuthedReportsRoute: typeof AuthedReportsRoute
   AuthedSettingsRoute: typeof AuthedSettingsRoute
@@ -315,6 +335,7 @@ interface AuthedRouteChildren {
 
 const AuthedRouteChildren: AuthedRouteChildren = {
   AuthedInvoicesRoute: AuthedInvoicesRoute,
+  AuthedMusicRoute: AuthedMusicRoute,
   AuthedProjectsRoute: AuthedProjectsRoute,
   AuthedReportsRoute: AuthedReportsRoute,
   AuthedSettingsRoute: AuthedSettingsRoute,

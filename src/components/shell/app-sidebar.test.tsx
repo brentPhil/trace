@@ -26,12 +26,15 @@ function mount(
 }
 
 describe("AppSidebar", () => {
-  it("lists exactly the five destinations, in the order of the work", () => {
+  it("lists exactly the six destinations, in the order of the work", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Timer",
       "Reports",
       "Invoices",
       "Projects",
+      // Music sits with the settings-shaped half rather than in the
+      // track-review-bill sequence — see NAV_ITEMS' docblock for the argument.
+      "Music",
       "Settings",
     ])
   })

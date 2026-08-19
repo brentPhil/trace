@@ -1,5 +1,13 @@
 import { Link } from "@tanstack/react-router"
-import { Clock, FileText, FolderKanban, LogOut, Settings, Table2 } from "lucide-react"
+import {
+  Clock,
+  FileText,
+  FolderKanban,
+  LogOut,
+  Music,
+  Settings,
+  Table2,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
@@ -19,12 +27,20 @@ import { APP_NAME } from "@shared/brand"
 import type { LucideIcon } from "lucide-react"
 
 /**
- * The five destinations, as data.
+ * The six destinations, as data.
  *
  * Exported so a test can assert the set without rendering, and so the count is
- * checkable at a glance: five, and adding a sixth should be an argument, not an
+ * checkable at a glance: six, and adding a seventh should be an argument, not an
  * edit. Toggl's web app has a two-level nav with a dozen entries and the tracker
  * itself is one of them.
+ *
+ * THE ARGUMENT FOR THE SIXTH. /music is a library of files the account owns —
+ * uploaded, renamed, deleted, and counted against a storage cap. None of that is
+ * a preference, so folding it into /settings would put a file manager inside a
+ * page of switches; and the tracker's music control is a PLAYER, which is the
+ * wrong place to delete something from. It sits AFTER Projects and BEFORE
+ * Settings because it belongs to the settings-shaped half of the list rather
+ * than to the track-review-bill sequence that opens it.
  *
  * THE ARGUMENT FOR THE FIFTH, since this list stood at four and said so. An
  * invoice is not a view of a report. /reports answers "where did this period
@@ -37,7 +53,7 @@ import type { LucideIcon } from "lucide-react"
  * two settings-shaped destinations stay at the end.
  */
 export const NAV_ITEMS: Array<{
-  to: "/timer" | "/reports" | "/invoices" | "/projects" | "/settings"
+  to: "/timer" | "/reports" | "/invoices" | "/projects" | "/music" | "/settings"
   label: string
   icon: LucideIcon
 }> = [
@@ -45,6 +61,7 @@ export const NAV_ITEMS: Array<{
   { to: "/reports", label: "Reports", icon: Table2 },
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/projects", label: "Projects", icon: FolderKanban },
+  { to: "/music", label: "Music", icon: Music },
   { to: "/settings", label: "Settings", icon: Settings },
 ]
 
@@ -180,10 +197,16 @@ export function AppSidebar({
               which is right for a nav label and would otherwise delete the
               one glyph a collapsed rail has to keep. Only ever one of the two
               is displayed, so the order is invisible. */}
-          <span aria-hidden="true" className="hidden group-data-[collapsible=icon]:inline">
+          <span
+            aria-hidden="true"
+            className="hidden group-data-[collapsible=icon]:inline"
+          >
             {APP_NAME[0]}
           </span>
-          <span aria-hidden="true" className="group-data-[collapsible=icon]:hidden">
+          <span
+            aria-hidden="true"
+            className="group-data-[collapsible=icon]:hidden"
+          >
             {APP_NAME}
           </span>
         </Link>
@@ -221,7 +244,10 @@ export function AppSidebar({
                   render={
                     <Link
                       to={item.to}
-                      activeProps={{ "aria-current": "page", "data-active": true }}
+                      activeProps={{
+                        "aria-current": "page",
+                        "data-active": true,
+                      }}
                     >
                       <item.icon />
                       <span>{item.label}</span>
@@ -238,7 +264,11 @@ export function AppSidebar({
           region that is not navigation, and a hairline is cheaper than the
           40px of dead space it would otherwise take to say so. */}
       <SidebarFooter
-        className={cn("border-t border-edge-soft p-2", RAIL_GUTTER_COLLAPSED, RAIL_CENTRE)}
+        className={cn(
+          "border-t border-edge-soft p-2",
+          RAIL_GUTTER_COLLAPSED,
+          RAIL_CENTRE
+        )}
       >
         {/* Straight into the footer, with no `SidebarMenu`/`SidebarMenuItem`
             around it. Those are a `<ul>` and an `<li>`, and one control inside
@@ -350,7 +380,12 @@ function ProfileMenu({
         viewport. `align="end"` lines the popup's bottom up with the trigger's,
         so it opens upward into the empty rail rather than off the screen.
       */}
-      <Popover.Popup side="right" align="end" sideOffset={8} className="w-[15rem] p-1">
+      <Popover.Popup
+        side="right"
+        align="end"
+        sideOffset={8}
+        className="w-[15rem] p-1"
+      >
         {/* The identity, first and largest — this is what the control is FOR.
             The email used to occupy a permanent line of the rail to say it.
             The same block as the trigger's, from the same two strings: a popup
@@ -474,5 +509,7 @@ function initialsOf(label: string) {
   if (words.length === 0) return "?"
   // `charAt`, not `[0]`: it returns "" for an index that is not there rather
   // than `undefined`, so a one-word label needs no second branch.
-  return (words[0].charAt(0) + (words.length > 1 ? words[1].charAt(0) : "")).toUpperCase()
+  return (
+    words[0].charAt(0) + (words.length > 1 ? words[1].charAt(0) : "")
+  ).toUpperCase()
 }
