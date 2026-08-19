@@ -22,7 +22,13 @@ import { useEnsureSettings } from "@/hooks/use-ensure-settings"
 import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
-import { useReplayPendingStart, useTabTitleClock } from "@/hooks/use-timer-effects"
+import {
+  useReplayPendingStart,
+  useTabTitleClock,
+} from "@/hooks/use-timer-effects"
+import { useMusicTracking } from "@/hooks/use-music-tracking"
+import { MusicProvider, useMusic } from "@/components/music/music-provider"
+import { MusicControls } from "@/components/music/music-controls"
 import { cn } from "@/lib/utils"
 import { api } from "../../convex/_generated/api"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
@@ -57,7 +63,9 @@ export const Route = createFileRoute("/_authed")({
       context.queryClient.ensureQueryData(
         convexQuery(api.auth.getAuthenticatedUser, {})
       ),
-      context.queryClient.ensureQueryData(convexQuery(api.entries.getRunning, {})),
+      context.queryClient.ensureQueryData(
+        convexQuery(api.entries.getRunning, {})
+      ),
       context.queryClient.ensureQueryData(convexQuery(api.projects.list, {})),
       context.queryClient.ensureQueryData(convexQuery(api.tags.list, {})),
       context.queryClient.ensureQueryData(
@@ -70,6 +78,31 @@ export const Route = createFileRoute("/_authed")({
 })
 
 /**
+ * Just the provider boundary. `AuthedShell` below is the one that calls
+ * `useMusic()`, and a component cannot call a hook that reads a context
+ * value from a provider it renders itself — React resolves context by
+ * position in the tree, not by execution order, so the provider has to be a
+ * separate component sitting ABOVE `AuthedShell`, which is this one.
+ *
+ * `AuthedShell` itself does not unmount on navigation — it is what
+ * `component: AuthedLayout` has always meant, one instance for the whole
+ * authed session — so this split costs nothing on the persistence front
+ * that the earlier, unsplit `AuthedLayout` did not already have. What
+ * DOES matter for persistence is that `MusicProvider`, wherever it sits,
+ * stays outside `<Outlet>`: TanStack Router unmounts a route component on
+ * every navigation, and `MusicProvider` owns the single `<audio>` element
+ * for the session, so an instance living below `<Outlet>` would tear the
+ * audio down and rebuild it — cutting the music — on every page change.
+ */
+function AuthedLayout() {
+  return (
+    <MusicProvider>
+      <AuthedShell />
+    </MusicProvider>
+  )
+}
+
+/**
  * Every authed page hangs off this, which is why the settings seed lives here:
  * it needs to run once per session on the client, wherever the user landed.
  *
@@ -77,7 +110,7 @@ export const Route = createFileRoute("/_authed")({
  * the timer bar sits above the outlet, so a timer can be started and stopped
  * from any page rather than only from Today.
  */
-function AuthedLayout() {
+function AuthedShell() {
   useEnsureSettings()
 
   const { sidebarOpen } = Route.useRouteContext()
@@ -85,13 +118,21 @@ function AuthedLayout() {
     convexQuery(api.auth.getAuthenticatedUser, {})
   )
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
-  const { data: running } = useSuspenseQuery(convexQuery(api.entries.getRunning, {}))
+  const { data: running } = useSuspenseQuery(
+    convexQuery(api.entries.getRunning, {})
+  )
   const { data: suggestions } = useSuspenseQuery(
     convexQuery(api.entries.titleSuggestions, { limit: 40 })
   )
 
   useTabTitleClock(running, settings.tabTitleClock)
   useReplayPendingStart(running)
+
+  const music = useMusic()
+  useMusicTracking(running, {
+    musicAutoplay: settings.musicAutoplay,
+    musicOnStop: settings.musicOnStop,
+  })
 
   const entryMutations = useEntryMutations()
   const editMutations = useEntryEditMutations()
@@ -100,7 +141,11 @@ function AuthedLayout() {
 
   const toasts = Toast.useToastManager()
   const report = (thrown: unknown) => {
-    toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
+    toasts.add({
+      title: errorMessage(thrown),
+      priority: "high",
+      timeout: 8_000,
+    })
   }
 
   const announce = useAnnounce()
@@ -140,9 +185,13 @@ function AuthedLayout() {
       classify: async (entryId, change) => {
         await editMutations.update({
           entryId,
-          ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
+          ...(change.projectId !== undefined
+            ? { projectId: change.projectId }
+            : {}),
           ...(change.tagIds !== undefined ? { tagIds: change.tagIds } : {}),
-          ...(change.billable !== undefined ? { billable: change.billable } : {}),
+          ...(change.billable !== undefined
+            ? { billable: change.billable }
+            : {}),
         })
       },
       createProject: async (name) => await createProject({ name }),
@@ -181,6 +230,7 @@ function AuthedLayout() {
             weekStartDay={settings.weekStartDay}
             onError={report}
             onCreateManual={editMutations.create}
+            music={<MusicControls value={music} />}
           />
           <RunawayBanner
             running={running}

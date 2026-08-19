@@ -86,7 +86,10 @@ export type TimerBarActions = {
    */
   setTitle: (entryId: Id<"timeEntries">, title: string) => Promise<void>
   /** Applies a classifier change to the entry already running. */
-  classify: (entryId: Id<"timeEntries">, change: Partial<Classification>) => Promise<void>
+  classify: (
+    entryId: Id<"timeEntries">,
+    change: Partial<Classification>
+  ) => Promise<void>
   createProject: (name: string) => Promise<{ projectId: Id<"projects"> }>
   createTag: (name: string) => Promise<{ tagId: Id<"tags"> }>
   /**
@@ -140,6 +143,7 @@ export function TimerBar({
   weekStartDay,
   onError,
   onCreateManual,
+  music,
 }: {
   running: Doc<"timeEntries"> | null
   actions: TimerBarActions
@@ -183,6 +187,10 @@ export function TimerBar({
     startedAt: number
     endedAt: number
   }) => Promise<unknown>
+  /** Rendered at the end of the control row. A SLOT, not a feature: the bar
+   *  holds no music state and imports nothing from the music modules, so the
+   *  feature can be removed without touching this file. */
+  music?: React.ReactNode
 }) {
   const { start, stop, setTitle, classify } = actions
   const [pending, setPending] = useState(false)
@@ -241,14 +249,17 @@ export function TimerBar({
    * outside this file either: every use goes through `resolveStagedStart`, so
    * the staleness rule cannot be bypassed by a caller that forgot to check it.
    */
-  const [stagedStart, setStagedStart] = useState<{ at: number; setAt: number } | null>(
-    null
-  )
+  const [stagedStart, setStagedStart] = useState<{
+    at: number
+    setAt: number
+  } | null>(null)
 
   const clearStagedStart = () => setStagedStart(null)
 
   const stageStart = (instantMs: number | null) => {
-    setStagedStart(instantMs === null ? null : { at: instantMs, setAt: Date.now() })
+    setStagedStart(
+      instantMs === null ? null : { at: instantMs, setAt: Date.now() }
+    )
   }
 
   /*
@@ -508,7 +519,11 @@ export function TimerBar({
   const stripTrigger = () => {
     setDraft((current) =>
       /[@#]$/.test(current.text)
-        ? { ...current, text: current.text.replace(/\s*[@#]$/, ""), dirty: true }
+        ? {
+            ...current,
+            text: current.text.replace(/\s*[@#]$/, ""),
+            dirty: true,
+          }
         : current
     )
   }
@@ -804,7 +819,9 @@ export function TimerBar({
             await actions.createCompleted({
               ...input,
               ...(title === "" ? {} : { title }),
-              ...(staged.projectId !== null ? { projectId: staged.projectId } : {}),
+              ...(staged.projectId !== null
+                ? { projectId: staged.projectId }
+                : {}),
               tagIds: staged.tagIds,
               billable: staged.billable,
             })
@@ -840,6 +857,8 @@ export function TimerBar({
           )}
         </button>
 
+        {music}
+
         {showSuggestions ? (
           <ul
             id="timer-suggestions"
@@ -870,18 +889,23 @@ export function TimerBar({
                   }}
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm",
-                    "data-[active=true]:bg-surface focus-visible:outline-none"
+                    "focus-visible:outline-none data-[active=true]:bg-surface"
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
                   {s.projectId === undefined ? null : (
                     <ProjectDot
-                      project={projects.find((p) => p._id === s.projectId) ?? null}
+                      project={
+                        projects.find((p) => p._id === s.projectId) ?? null
+                      }
                       className="shrink-0"
                     />
                   )}
                   {s.billable ? (
-                    <span aria-hidden="true" className="shrink-0 text-xs text-brass">
+                    <span
+                      aria-hidden="true"
+                      className="shrink-0 text-xs text-brass"
+                    >
                       $
                     </span>
                   ) : null}
@@ -936,7 +960,7 @@ export function TimerBar({
             {/* The Tabular Rule: every timestamp, at any size. The date and
                 the "(3 days ago)" are part of the same stamp, so the whole
                 phrase is set in it rather than only the digits. */}
-            <span className="font-mono tabular-nums tracking-[-0.02em]">
+            <span className="font-mono tracking-[-0.02em] tabular-nums">
               Starts{" "}
               {describeStagedStart(
                 effectiveStagedStartAt,
@@ -963,4 +987,3 @@ export function TimerBar({
     </section>
   )
 }
-
