@@ -11,9 +11,14 @@
  * `resolveTrackUrl` grows a base URL — which is the whole reason the
  * indirection exists.
  *
- * NO CATEGORIES. Lo-fi / Ambient / Deep Focus are meaningless partitions of a
- * one-element set. A `category` field goes here when there are enough tracks to
- * divide, and nothing else changes.
+ * NO CATEGORIES, still. Four tracks is enough to shuffle but not enough to
+ * divide: every one of them is lo-fi, so a category control would offer a
+ * single option and read as a promise the library does not keep. A `category`
+ * field goes here when the catalog actually spans more than one, and nothing
+ * else changes when it does.
+ *
+ * ORDER IS THE DEFAULT ORDER. The first entry is what a brand-new account with
+ * no history plays, so it is the least-demanding one deliberately.
  *
  * Provenance for every file is in public/music/LICENSE.md. A track whose
  * licence cannot be produced on request has to be pulled.
@@ -33,5 +38,20 @@ export const CATALOG: ReadonlyArray<CatalogTrack> = [
     slug: "lofi-chill-beats",
     name: "Lo-fi Chill Beats",
     file: "/music/alex-morgan-lofi-chill-vlog-beats-573883.mp3",
+  },
+  {
+    slug: "lofi-sunny-cafe",
+    name: "Lo-fi Sunny Cafe",
+    file: "/music/alex-morgan-lofi-sunny-cafe-568156.mp3",
+  },
+  {
+    slug: "lofi-restaurant",
+    name: "Lo-fi Restaurant",
+    file: "/music/alex-morgan-lofi-restaurant-568157.mp3",
+  },
+  {
+    slug: "lofi-relax",
+    name: "Lo-fi Relax",
+    file: "/music/kulakovka-lofi-relax-570489.mp3",
   },
 ]
