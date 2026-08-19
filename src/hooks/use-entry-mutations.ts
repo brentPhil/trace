@@ -125,7 +125,7 @@ export function useEntryMutations() {
 
       // No try/catch: the intent must STAY in storage if this throws, so the
       // next load replays it. Clearing happens only on the success path.
-      const result = await startMutation.current({
+      const result = await startMutation({
         clientKey,
         title,
         startedAt,
@@ -171,7 +171,7 @@ export function useEntryMutations() {
    */
   const replayStart = useCallback(
     async (pending: { clientKey: string; title: string; startedAt: number }) => {
-      const result = await startMutation.current({
+      const result = await startMutation({
         clientKey: pending.clientKey,
         title: pending.title,
         startedAt: pending.startedAt,
@@ -184,7 +184,7 @@ export function useEntryMutations() {
   )
 
   const stop = useCallback(async () => {
-    const result = await stopMutation.current({})
+    const result = await stopMutation({})
     recordServerNow(result.serverNow)
     clearPendingStart()
     return result
@@ -192,12 +192,12 @@ export function useEntryMutations() {
 
   const discard = useCallback(async () => {
     clearPendingStart()
-    return await discardMutation.current({})
+    return await discardMutation({})
   }, [discardMutation])
 
   const setTitle = useCallback(
     async (entryId: Id<"timeEntries">, title: string) => {
-      await setTitleMutation.current({ entryId, title })
+      await setTitleMutation({ entryId, title })
     },
     [setTitleMutation]
   )

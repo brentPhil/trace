@@ -67,7 +67,7 @@ export function useClassifierMutations() {
       color?: string
       billableByDefault?: boolean
       hourlyRateCents?: number
-    }) => await createProjectMutation.current(input),
+    }) => await createProjectMutation(input),
     [createProjectMutation]
   )
 
@@ -79,34 +79,34 @@ export function useClassifierMutations() {
       billableByDefault?: boolean
       // `null`, not just omission, means "clear it" — see projects.update.
       hourlyRateCents?: number | null
-    }) => await updateProjectMutation.current(input),
+    }) => await updateProjectMutation(input),
     [updateProjectMutation]
   )
 
   const setArchived = useCallback(
     async (projectId: Id<"projects">, archived: boolean) =>
-      await setArchivedMutation.current({ projectId, archived }),
+      await setArchivedMutation({ projectId, archived }),
     [setArchivedMutation]
   )
 
   const removeProject = useCallback(
-    async (projectId: Id<"projects">) => await removeProjectMutation.current({ projectId }),
+    async (projectId: Id<"projects">) => await removeProjectMutation({ projectId }),
     [removeProjectMutation]
   )
 
   /** Get-or-create. The picker's flow is "type a word, press Enter". */
   const ensureTag = useCallback(
-    async (name: string) => await ensureTagMutation.current({ name }),
+    async (name: string) => await ensureTagMutation({ name }),
     [ensureTagMutation]
   )
 
   const renameTag = useCallback(
-    async (tagId: Id<"tags">, name: string) => await renameTagMutation.current({ tagId, name }),
+    async (tagId: Id<"tags">, name: string) => await renameTagMutation({ tagId, name }),
     [renameTagMutation]
   )
 
   const removeTag = useCallback(
-    async (tagId: Id<"tags">) => await removeTagMutation.current({ tagId }),
+    async (tagId: Id<"tags">) => await removeTagMutation({ tagId }),
     [removeTagMutation]
   )
 

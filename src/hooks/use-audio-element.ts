@@ -44,8 +44,8 @@ export function useAudioElement({
     element.preload = "auto"
     ref.current = element
 
-    const handleEnded = () => ended.current()
-    const handleError = () => errored.current()
+    const handleEnded = () => ended()
+    const handleError = () => errored()
     element.addEventListener("ended", handleEnded)
     element.addEventListener("error", handleError)
 

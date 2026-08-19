@@ -57,7 +57,7 @@ export function useCreateInvoice() {
       currency?: string
       issuedAt?: number
       dueAt?: number
-    }) => await createMutation.current({ clientKey: newClientKey(), ...input }),
+    }) => await createMutation({ clientKey: newClientKey(), ...input }),
     [createMutation]
   )
 

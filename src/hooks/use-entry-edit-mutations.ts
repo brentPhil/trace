@@ -334,7 +334,7 @@ export function useEntryEditMutations() {
       tagIds?: Array<Id<"tags">>
       billable?: boolean
     }) => {
-      await updateMutation.current(args)
+      await updateMutation(args)
     },
     [updateMutation]
   )
@@ -348,26 +348,26 @@ export function useEntryEditMutations() {
       tagIds?: Array<Id<"tags">>
       billable?: boolean
     }) => {
-      await updateManyMutation.current(args)
+      await updateManyMutation(args)
     },
     [updateManyMutation]
   )
 
   const editTime = useCallback(
     async (entryId: Id<"timeEntries">, field: TimeEdit["field"], value: number) => {
-      return await editTimeMutation.current({ entryId, field, value })
+      return await editTimeMutation({ entryId, field, value })
     },
     [editTimeMutation]
   )
 
   const remove = useCallback(
-    async (entryId: Id<"timeEntries">) => await removeMutation.current({ entryId }),
+    async (entryId: Id<"timeEntries">) => await removeMutation({ entryId }),
     [removeMutation]
   )
 
   const removeMany = useCallback(
     async (entryIds: Array<Id<"timeEntries">>) =>
-      await removeManyMutation.current({ entryIds: [...new Set(entryIds)] }),
+      await removeManyMutation({ entryIds: [...new Set(entryIds)] }),
     [removeManyMutation]
   )
 
@@ -382,7 +382,7 @@ export function useEntryEditMutations() {
     async (entry: Entry) => {
       pendingRestore.current.set(entry._id, entry)
       try {
-        return await restoreMutation.current({ entryId: entry._id })
+        return await restoreMutation({ entryId: entry._id })
       } finally {
         pendingRestore.current.delete(entry._id)
       }
@@ -395,7 +395,7 @@ export function useEntryEditMutations() {
       const uniqueEntries = [...new Map(entries.map((entry) => [entry._id, entry])).values()]
       for (const entry of uniqueEntries) pendingRestore.current.set(entry._id, entry)
       try {
-        return await restoreManyMutation.current({
+        return await restoreManyMutation({
           entryIds: uniqueEntries.map((entry) => entry._id),
         })
       } finally {
