@@ -323,3 +323,102 @@ describe("usage", () => {
     })
   })
 })
+
+describe("preferences", () => {
+  const KEY = { title: "Website Development", projectId: null }
+
+  it("returns null when nothing has been chosen", async () => {
+    const t = setup()
+    expect(
+      await t.query(internal.music.preferenceForAs, { userId: ALICE, ...KEY })
+    ).toBe(null)
+  })
+
+  it("stores and returns a catalog choice", async () => {
+    const t = setup()
+    await t.mutation(internal.music.setPreferenceAs, {
+      userId: ALICE,
+      ...KEY,
+      trackRef: { origin: "chroneli", slug: "lofi-chill-beats" },
+    })
+    expect(
+      await t.query(internal.music.preferenceForAs, { userId: ALICE, ...KEY })
+    ).toEqual({ origin: "chroneli", slug: "lofi-chill-beats" })
+  })
+
+  it("upserts rather than accumulating rows", async () => {
+    const t = setup()
+    for (const slug of ["a", "b", "c"]) {
+      await t.mutation(internal.music.setPreferenceAs, {
+        userId: ALICE,
+        ...KEY,
+        trackRef: { origin: "chroneli", slug },
+      })
+    }
+    expect(
+      await t.query(internal.music.preferenceForAs, { userId: ALICE, ...KEY })
+    ).toEqual({ origin: "chroneli", slug: "c" })
+    const rows = await t.run(
+      async (ctx) => await ctx.db.query("musicPreferences").collect()
+    )
+    expect(rows).toHaveLength(1)
+  })
+
+  // The rule inherited from groupSittings. Without it every unnamed entry in
+  // the account shares one preference and overwrites it in turn.
+  it("never stores a preference for a blank title", async () => {
+    const t = setup()
+    await t.mutation(internal.music.setPreferenceAs, {
+      userId: ALICE,
+      title: "   ",
+      projectId: null,
+      trackRef: { origin: "chroneli", slug: "lofi-chill-beats" },
+    })
+    const rows = await t.run(
+      async (ctx) => await ctx.db.query("musicPreferences").collect()
+    )
+    expect(rows).toEqual([])
+  })
+
+  it("trims the title, so a stray space is the same work", async () => {
+    const t = setup()
+    await t.mutation(internal.music.setPreferenceAs, {
+      userId: ALICE,
+      title: "  Coding  ",
+      projectId: null,
+      trackRef: { origin: "chroneli", slug: "lofi-chill-beats" },
+    })
+    expect(
+      await t.query(internal.music.preferenceForAs, {
+        userId: ALICE,
+        title: "Coding",
+        projectId: null,
+      })
+    ).toEqual({ origin: "chroneli", slug: "lofi-chill-beats" })
+  })
+
+  it("keeps one user's preference out of another's", async () => {
+    const t = setup()
+    await t.mutation(internal.music.setPreferenceAs, {
+      userId: ALICE,
+      ...KEY,
+      trackRef: { origin: "chroneli", slug: "lofi-chill-beats" },
+    })
+    expect(
+      await t.query(internal.music.preferenceForAs, { userId: BOB, ...KEY })
+    ).toBe(null)
+  })
+
+  it("refuses a preference pointing at someone else's upload", async () => {
+    const t = setup()
+    const trackId = await addTrack(t, ALICE)
+    await expectCode(
+      t.mutation(internal.music.setPreferenceAs, {
+        userId: BOB,
+        ...KEY,
+        trackRef: { origin: "upload", trackId },
+      }),
+      "NOT_FOUND"
+    )
+  })
+})

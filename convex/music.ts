@@ -412,3 +412,124 @@ export const removeTrackAs = internalMutation({
   returns: v.null(),
   handler: async (ctx, args) => await removeTrackImpl(ctx, args.userId, args),
 })
+
+// --- preferences -----------------------------------------------------------
+
+/**
+ * Which music goes with which piece of work.
+ *
+ * The key is `sittingKey`'s — the title trimmed, beside the project — because
+ * that is the only identity that survives a resume. See the schema for the
+ * argument at length.
+ */
+const trackRefValidator = v.union(
+  v.object({ origin: v.literal("upload"), trackId: v.id("musicTracks") }),
+  v.object({ origin: v.literal("chroneli"), slug: v.string() })
+)
+
+const preferenceKeyArgs = {
+  title: v.string(),
+  projectId: v.union(v.id("projects"), v.null()),
+}
+
+async function findPreference(
+  ctx: QueryCtx | MutationCtx,
+  userId: string,
+  title: string,
+  projectId: Id<"projects"> | null
+) {
+  return await ctx.db
+    .query("musicPreferences")
+    .withIndex("by_user_title_project", (q) =>
+      q.eq("userId", userId).eq("title", title).eq("projectId", projectId)
+    )
+    .first()
+}
+
+async function preferenceForImpl(
+  ctx: QueryCtx,
+  userId: string,
+  args: { title: string; projectId: Id<"projects"> | null }
+) {
+  const title = args.title.trim()
+  if (title === "") return null
+  const row = await findPreference(ctx, userId, title, args.projectId)
+  return row?.trackRef ?? null
+}
+
+export const preferenceFor = query({
+  args: preferenceKeyArgs,
+  returns: v.union(trackRefValidator, v.null()),
+  handler: async (ctx, args) =>
+    await preferenceForImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const preferenceForAs = internalQuery({
+  args: { ...preferenceKeyArgs, userId: v.string() },
+  returns: v.union(trackRefValidator, v.null()),
+  handler: async (ctx, args) => await preferenceForImpl(ctx, args.userId, args),
+})
+
+/**
+ * Records a choice the USER made.
+ *
+ * Called when the user changes track while an entry is running — NEVER on
+ * timer start. Writing on start would mean the resolver's own arbitrary
+ * fallback immediately becomes a stored preference indistinguishable from a
+ * deliberate one, and after a week every record in the account "prefers" the
+ * first catalog track.
+ *
+ * A blank title writes NOTHING and does not raise: it is a normal state, not an
+ * error, and the caller has no useful response to an exception here.
+ */
+async function setPreferenceImpl(
+  ctx: MutationCtx,
+  userId: string,
+  args: {
+    title: string
+    projectId: Id<"projects"> | null
+    trackRef:
+      | { origin: "upload"; trackId: Id<"musicTracks"> }
+      | { origin: "chroneli"; slug: string }
+  }
+): Promise<null> {
+  const title = args.title.trim()
+  if (title === "") return null
+
+  // An upload must belong to the caller. Without this, a preference is a place
+  // to stash a reference to another user's track id and have the client fetch
+  // its signed URL.
+  if (args.trackRef.origin === "upload") {
+    await getOwned(ctx, userId, "musicTracks", args.trackRef.trackId)
+  }
+
+  const existing = await findPreference(ctx, userId, title, args.projectId)
+  const updatedAt = Date.now()
+  if (existing === null) {
+    await ctx.db.insert("musicPreferences", {
+      userId,
+      title,
+      projectId: args.projectId,
+      trackRef: args.trackRef,
+      updatedAt,
+    })
+  } else {
+    await ctx.db.patch(existing._id, { trackRef: args.trackRef, updatedAt })
+  }
+  return null
+}
+
+const setPreferenceArgs = { ...preferenceKeyArgs, trackRef: trackRefValidator }
+
+export const setPreference = mutation({
+  args: setPreferenceArgs,
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setPreferenceImpl(ctx, await requireUserId(ctx), args),
+})
+
+export const setPreferenceAs = internalMutation({
+  args: { ...setPreferenceArgs, userId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, args) => await setPreferenceImpl(ctx, args.userId, args),
+})
