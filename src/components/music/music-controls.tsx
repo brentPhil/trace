@@ -258,10 +258,43 @@ function TrackGroup({
               )}
             >
               <span className="truncate">{track.name}</span>
+              {/*
+                THE TURNING DISC IS THE ANSWER TO "WHICH ONE IS PLAYING?".
+
+                Only the current row draws it, at the end of the row, so the
+                eye finds it by position rather than by re-reading four names
+                and comparing them to the header. `font-medium` alone was
+                carrying that job, and one notch of weight is not a difference
+                you can see without looking for it.
+
+                It SPINS only while playback is actually running, and stands
+                still on the loaded-but-paused row — which is the more useful
+                pair of states than showing nothing when paused: you still know
+                where you are, and you can tell stopped from playing.
+
+                `aria-hidden`, because `aria-current="true"` on the button
+                already says this to a screen reader and a second announcement
+                on the same row would be noise. Same three-second revolution
+                and the same reduced-motion opt-out as the trigger above.
+              */}
               {track.url === null ? (
+                // "unavailable" OUTRANKS the disc, including on the current
+                // row. `start` sets the current ref before it discovers the
+                // track has no URL, so a dead track can be current for a beat
+                // — and a spinning disc on a track that cannot play is the one
+                // thing this indicator must never say.
                 <span className="shrink-0 text-xs text-muted-foreground">
                   unavailable
                 </span>
+              ) : isCurrent ? (
+                <Disc3
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 shrink-0 text-muted-foreground",
+                    value.playing &&
+                      "animate-spin [animation-duration:3s] motion-reduce:animate-none"
+                  )}
+                />
               ) : null}
             </button>
           )

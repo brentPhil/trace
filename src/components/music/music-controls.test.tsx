@@ -211,3 +211,64 @@ describe("the spinning disc", () => {
     expect(cls).toContain("motion-reduce:animate-none")
   })
 })
+
+describe("which row is playing", () => {
+  const chill = {
+    ref: { origin: "chroneli" as const, slug: "a" },
+    name: "Lo-fi Chill",
+    url: "/music/a.mp3",
+    origin: "chroneli" as const,
+  }
+
+  async function openPanel(v: MusicContextValue) {
+    render(<MusicControls value={v} />)
+    fireEvent.click(screen.getByRole("button", { name: /music library/i }))
+    return await screen.findByRole("group", { name: /chroneli music/i })
+  }
+
+  const rowFor = (group: HTMLElement, name: RegExp) =>
+    within(group).getByRole("button", { name })
+
+  it("marks only the current row with a disc", async () => {
+    const group = await openPanel(value({ playing: true, current: chill }))
+    expect(rowFor(group, /play lo-fi chill/i).querySelector("svg")).toBeTruthy()
+  })
+
+  it("draws no disc on any row when nothing is current", async () => {
+    const group = await openPanel(value())
+    expect(rowFor(group, /play lo-fi chill/i).querySelector("svg")).toBe(null)
+  })
+
+  it("spins the current row's disc only while playback is running", async () => {
+    const spinning = await openPanel(value({ playing: true, current: chill }))
+    expect(
+      rowFor(spinning, /play lo-fi chill/i)
+        .querySelector("svg")
+        ?.getAttribute("class")
+    ).toContain("animate-spin")
+
+    cleanup()
+
+    const paused = await openPanel(value({ playing: false, current: chill }))
+    const cls =
+      rowFor(paused, /play lo-fi chill/i)
+        .querySelector("svg")
+        ?.getAttribute("class") ?? ""
+    expect(cls).not.toContain("animate-spin")
+  })
+
+  /*
+   * A dead track can be `current` for a beat, because `start` sets the ref
+   * before it discovers there is no URL. A spinning disc there would claim
+   * playback that cannot happen.
+   */
+  it("says unavailable rather than drawing a disc on a dead current track", async () => {
+    const dead = { ...chill, url: null }
+    const group = await openPanel(
+      value({ tracks: [dead], playing: true, current: dead })
+    )
+    const row = rowFor(group, /play lo-fi chill/i)
+    expect(within(row).getByText("unavailable")).toBeTruthy()
+    expect(row.querySelector("svg")).toBe(null)
+  })
+})
