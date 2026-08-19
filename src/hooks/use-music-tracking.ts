@@ -59,7 +59,7 @@ export function useMusicTracking(
   // Skipped entirely for a blank title — inherited from `groupSittings`, which
   // refuses to group an untitled entry. Without it every unnamed entry in the
   // account would share one preference and overwrite it in turn.
-  const { data: preference } = useQuery({
+  const { data: preference, isPending: preferencePending } = useQuery({
     ...convexQuery(api.music.preferenceFor, { title, projectId }),
     enabled: title !== "",
   })
@@ -77,9 +77,44 @@ export function useMusicTracking(
   // a type error, and reading `.current` off its result is another. Task 6
   // learned this the expensive way — see commit 15ef1d4.
   const context = useLatest(() => ({ title, projectId }))
+
+  /*
+   * SUPPRESSING THE RESOLVER'S OWN NOTIFICATION.
+   *
+   * `playRef` (music-provider.tsx) has exactly one call site for "the user
+   * clicked a track" (music-controls.tsx) and exactly one for "the timer
+   * just started and something has to play" (the effect below) — and it is
+   * the SAME function either way. It notifies every `onUserPick` listener
+   * unconditionally, synchronously, before it even starts audio, because
+   * from inside the provider a click and a resolver's fallback look
+   * identical: both are just "play this ref". The provider has no way to
+   * tell them apart, and it should not grow one — teaching `playRef` a
+   * second parameter like `{ userInitiated: boolean }` would leak this
+   * hook's start-of-timer bookkeeping into a shared API that
+   * `music-controls.tsx` and every other future caller would then have to
+   * know to set correctly, forever, or silently reintroduce this exact bug.
+   * This hook is the only subscriber that ALSO causes picks — every other
+   * conceivable listener only reacts to what's playing — so the flag that
+   * tells "was this my own call" belongs here, next to the one call site
+   * that needs to ask the question, not on the provider that cannot answer
+   * it.
+   *
+   * A plain set/clear around the `playRef` call below is enough because
+   * `playRef` notifies synchronously, before any `await` — there is no
+   * chance for a re-render or another `playRef` call to interleave between
+   * the set and the clear. The `finally` exists only so a throw out of
+   * `playRef` (or a future change that makes it throw) can't leave the flag
+   * stuck `true` and silently swallow every real user pick afterward.
+   */
+  const resolvingOwnPick = useRef(false)
+
   useEffect(
     () =>
       music.onUserPick((ref: TrackRef) => {
+        // This notification is the resolver's own `playRef` call below,
+        // echoing straight back to the one hook that is subscribed AND
+        // caused it. Not a user pick — must not become a stored preference.
+        if (resolvingOwnPick.current) return
         const { title: t, projectId: p } = context()
         if (t === "") return
         void setPreference({
@@ -112,11 +147,49 @@ export function useMusicTracking(
     }
 
     if (startedFor.current === id) return
-    startedFor.current = id
-    if (!settings.musicAutoplay) return
-    // Already playing something the user chose — a new timer must not
-    // interrupt it with a resolution of its own.
-    if (music.playing) return
+
+    if (!settings.musicAutoplay) {
+      // Nothing to resolve — autoplay is off, so no query result could ever
+      // change this outcome. Final answer, mark it handled now.
+      startedFor.current = id
+      return
+    }
+
+    /*
+     * WAITING FOR THE QUERY TO ACTUALLY SETTLE — `undefined` IS NOT `null`.
+     *
+     * `useQuery`'s `data` is `undefined` on the first render for any
+     * {title, projectId} key that is not already in the cache — that is
+     * "haven't heard back yet", not "confirmed, no preference exists". Both
+     * `preference ?? fallback` and a `null`-check treat those identically,
+     * so folding `data` into the fallback chain on this same render silently
+     * promotes priority (3), the arbitrary catalog default, over priority
+     * (1), the record's actual stored preference — on every cold-cache
+     * start, which is precisely the case this feature is for: opening a
+     * fresh tab and picking up a task, and hearing the music that record is
+     * associated with rather than whatever track happens to be first.
+     *
+     * `isPending` is TanStack Query's own name for exactly that "haven't
+     * heard back yet" state, so it is what we wait on — but only when the
+     * query is actually enabled. A DISABLED query (blank title, see
+     * `enabled` above) reports `isPending: true` forever, because it never
+     * even starts a fetch to settle; waiting on it for a blank title would
+     * mean autoplay never fires for an untitled entry. A blank title has no
+     * preference to look up in the first place, so there is nothing to wait
+     * for — resolve straight from the fallbacks.
+     */
+    if (title !== "" && preferencePending) return
+
+    // Already playing something the user chose — re-checked HERE, at the
+    // point of actually resolving, rather than only once up front. The
+    // branch above can return early and let this effect re-run later once
+    // the query lands; in the time between, the user could have started
+    // something themselves, and a timer's autoplay must not stomp on music
+    // that began while this effect was mid-wait.
+    if (music.playing) {
+      startedFor.current = id
+      return
+    }
 
     // 1. what this record was last using, 2. the last track played on this
     // device, 3. the first catalog track.
@@ -126,12 +199,32 @@ export function useMusicTracking(
         ? null
         : { origin: "chroneli", slug: CATALOG[0].slug })
     const chosen = preference ?? fallback
-    if (chosen !== null) music.playRef(chosen)
+
+    // Only marked handled once actually resolved (immediately for a blank
+    // title, or after the query settled for a real one) — setting this any
+    // earlier is what let the cold-cache preference get skipped forever,
+    // since a later, correct re-run of this effect returns at the very top
+    // the moment it sees `startedFor.current === id`. This also covers the
+    // timer-stops-while-query-is-in-flight case for free: if `running`
+    // clears before this line ever runs, the `id === null` branch above
+    // takes over on the next pass, `startedFor.current` was never set for
+    // this id, and nothing here plays anything.
+    startedFor.current = id
+    if (chosen === null) return
+
+    resolvingOwnPick.current = true
+    try {
+      music.playRef(chosen)
+    } finally {
+      resolvingOwnPick.current = false
+    }
   }, [
     music,
     preference,
+    preferencePending,
     running?._id,
     settings.musicAutoplay,
     settings.musicOnStop,
+    title,
   ])
 }
