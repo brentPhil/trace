@@ -201,7 +201,18 @@ export function EntryRow({
           against the grown column rather than sitting on the title's line.
           `SittingRow` mirrors this wrapper exactly; if that trade is ever
           revisited, both rows move together. */}
-      <div className="flex min-h-(--entry-row-height) w-full items-center gap-1.5 px-4">
+      {/*
+          WRAPS BELOW `sm`, and does not above it. A phone has no width to put
+          the times, the duration and the row controls on the same line as a
+          title — the title had to give up most of its room to a cluster that
+          is the same width whatever the screen is. Below `sm` that cluster
+          takes a line of its own beneath the title and note; from `sm` up the
+          row is exactly what it was.
+
+          `min-h-` rather than a fixed height is what lets the second line
+          exist at all.
+      */}
+      <div className="flex min-h-(--entry-row-height) w-full flex-wrap items-center gap-1.5 px-4 sm:flex-nowrap">
         {selection === undefined ? null : (
           <SelectionCheckbox
             contextual
@@ -210,7 +221,13 @@ export function EntryRow({
             onToggle={selection.onToggle}
           />
         )}
-        <div className="flex flex-col w-full min-w-0 gap-2 py-1.5">
+        {/* `flex-1` rather than `w-full`, now that the row wraps. A 100% width
+            is a 100% HYPOTHETICAL SIZE, and a wrapping flex container breaks a
+            line on that before it ever considers shrinking — so `w-full` would
+            put this column on a line below the selection checkbox. `flex-1`
+            asks for nothing and grows into whatever is left, which is what
+            `w-full` was already resolving to on the non-wrapping row. */}
+        <div className="flex min-w-0 flex-1 flex-col gap-2 py-1.5">
           {/* `min-h-6` PINS THE FIRST LINE. The fixed columns opposite are
               offset by half of exactly this, so the line cannot be allowed to size itself off
               whichever child happens to be tallest — a picker changing by two
@@ -290,38 +307,60 @@ export function EntryRow({
           ) : null}
         </div>
 
-        <div className="flex h-full shrink-0 items-center justify-end gap-4">
-          <TagPicker
-            tags={tags}
-            value={entry.tagIds}
-            onCreate={actions.onCreateTag}
-            onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
-            className={cn(
-              "hidden sm:inline-flex",
-              entry.tagIds.length === 0 && revealed
-            )}
-          />
-          <BillableToggle
-            value={entry.billable}
-            onChange={(billable) => actions.onClassify(entry, { billable })}
-            className={cn("hidden sm:inline-flex", !entry.billable && revealed)}
-          />
-          <EntryTimePopover
-            entry={entry}
-            timeZone={timeZone}
-            use12Hour={use12Hour}
-            weekStartDay={weekStartDay}
-            onCommitTime={(field, value) =>
-              actions.onTimeChange(entry, field, value)
-            }
-            onCommitDay={(day) => actions.onDayChange(entry, day)}
-          />
-          <EditableDuration
-            entry={entry}
-            onCommit={(ms) => actions.onDurationChange(entry, ms)}
-          />
-        </div>
         {/*
+            The wrapped line, and `sm:contents` is what makes it free.
+
+            Below `sm` this is one full-width flex item, so it breaks onto its
+            own line and carries BOTH clusters — the times and duration, then
+            the row controls — as one right-aligned group. That is the whole
+            point: two separate full-width items would wrap onto two lines and
+            make every row three deep.
+
+            From `sm` up it is `display: contents`, so the box stops generating
+            a layout of its own and its two children become flex items of the
+            row exactly as they were before this element existed. The desktop
+            geometry is therefore not approximated back — it is untouched.
+
+            A bare `<div>` has no role, so removing its box removes nothing
+            from the accessibility tree. `display: contents` on a semantic
+            element would be a different matter.
+        */}
+        <div className="flex w-full items-center justify-end gap-4 sm:contents">
+          <div className="flex h-full shrink-0 items-center justify-end gap-4">
+            <TagPicker
+              tags={tags}
+              value={entry.tagIds}
+              onCreate={actions.onCreateTag}
+              onChange={(tagIds) => actions.onClassify(entry, { tagIds })}
+              className={cn(
+                "hidden sm:inline-flex",
+                entry.tagIds.length === 0 && revealed
+              )}
+            />
+            <BillableToggle
+              value={entry.billable}
+              onChange={(billable) => actions.onClassify(entry, { billable })}
+              className={cn(
+                "hidden sm:inline-flex",
+                !entry.billable && revealed
+              )}
+            />
+            <EntryTimePopover
+              entry={entry}
+              timeZone={timeZone}
+              use12Hour={use12Hour}
+              weekStartDay={weekStartDay}
+              onCommitTime={(field, value) =>
+                actions.onTimeChange(entry, field, value)
+              }
+              onCommitDay={(day) => actions.onDayChange(entry, day)}
+            />
+            <EditableDuration
+              entry={entry}
+              onCommit={(ms) => actions.onDurationChange(entry, ms)}
+            />
+          </div>
+          {/*
             Row controls stay in the layout at all times and fade in on hover or
             focus, rather than being added and removed. Reserving the space means
             the columns to their left do not shift when the pointer crosses a row
@@ -331,20 +370,21 @@ export function EntryRow({
             on a phone, so a hover-revealed control is not subtle there, it is
             absent: delete and resume would be unreachable by any means.
           */}
-        <div className="flex h-full items-center justify-end">
-          <RowButton
-            label={`Resume ${title === "" ? "this entry" : title}`}
-            onClick={() => actions.onResume(entry)}
-          >
-            <Play className="size-4" />
-          </RowButton>
-          <RowButton
-            label={`Delete ${title === "" ? "this entry" : title}`}
-            onClick={() => actions.onRemove(entry)}
-            destructive
-          >
-            <Trash2 className="size-4" />
-          </RowButton>
+          <div className="flex h-full items-center justify-end">
+            <RowButton
+              label={`Resume ${title === "" ? "this entry" : title}`}
+              onClick={() => actions.onResume(entry)}
+            >
+              <Play className="size-4" />
+            </RowButton>
+            <RowButton
+              label={`Delete ${title === "" ? "this entry" : title}`}
+              onClick={() => actions.onRemove(entry)}
+              destructive
+            >
+              <Trash2 className="size-4" />
+            </RowButton>
+          </div>
         </div>
       </div>
     </div>
