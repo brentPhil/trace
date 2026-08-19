@@ -36,6 +36,23 @@ export type PlayableTrack = {
 
 export type MusicContextValue = {
   tracks: Array<PlayableTrack>
+  /**
+   * Whether `tracks` is the WHOLE library yet, or only the bundled catalog.
+   *
+   * `tracks` is never empty and never `undefined` — the catalog is compiled
+   * into the bundle, so the very first render already has playable rows — and
+   * that is exactly what makes "have the uploads landed?" unanswerable from
+   * the array itself. A consumer resolving a stored preference cannot tell
+   * "this upload does not exist" from "`listTracks` has not come back yet",
+   * and the two demand opposite behaviour: give up and fall through, versus
+   * wait one render and try again.
+   *
+   * It is a flag rather than making `tracks` nullable on purpose: nothing else
+   * in the feature has to care, the player keeps working against the catalog
+   * while the query is in flight, and only `use-music-tracking.ts` — the one
+   * consumer that walks a priority chain — ever reads it.
+   */
+  tracksReady: boolean
   current: PlayableTrack | null
   playing: boolean
   blocked: boolean
@@ -43,16 +60,23 @@ export type MusicContextValue = {
   shuffle: boolean
   repeat: RepeatMode
   /**
-   * Starts the named track, and says WHETHER IT FOUND ONE.
+   * Starts the named track, and says WHETHER ANYTHING STARTED.
    *
-   * `false` means the ref did not resolve against this render's track list —
-   * a deleted upload, a catalog slug that no longer ships, or simply
-   * `listTracks` not having arrived yet in a cold tab. It used to return
-   * `void` and swallow that case, which is how a preference naming a missing
-   * track became permanent silence: `use-music-tracking.ts` committed to its
-   * first choice, got no signal that nothing happened, and never re-resolved.
-   * The boolean is the whole seam that lets a caller walk a priority chain
-   * without the provider learning what a priority chain is.
+   * `false` means nothing began playing, in either of the two ways that can
+   * happen: the ref did not resolve against this render's track list — a
+   * deleted upload, a catalog slug that no longer ships, or simply
+   * `listTracks` not having arrived yet in a cold tab — or it resolved to a
+   * row that has no URL to hand an `<audio>` element, which is what an upload
+   * whose signed URL failed to resolve looks like in `tracks`.
+   *
+   * It used to return `void` and swallow the first case, which is how a
+   * preference naming a missing track became permanent silence:
+   * `use-music-tracking.ts` committed to its first choice, got no signal that
+   * nothing happened, and never re-resolved. The boolean is the whole seam
+   * that lets a caller walk a priority chain without the provider learning
+   * what a priority chain is — and it is only worth anything if `true`
+   * really does mean "audio is on its way", which is why the URL-less row
+   * counts as a miss rather than as a resolution.
    */
   playRef: (ref: TrackRef) => boolean
   toggle: () => void
@@ -175,6 +199,12 @@ export function MusicProvider({
   // on, and an empty list is a correct first render — the catalog is still
   // playable while uploads load.
   const { data: uploads } = useQuery(convexQuery(api.music.listTracks, {}))
+
+  // `undefined` is TanStack Query's "no answer yet"; `[]` is a real answer
+  // meaning "this account has uploaded nothing". Those two produce the same
+  // `tracks` array below — catalog only — and a consumer resolving a stored
+  // upload ref has to tell them apart. See `tracksReady` on the context type.
+  const tracksReady = uploads !== undefined
 
   const [prefs, setPrefs] = useState(DEFAULT_LOCAL_PREFS)
   // localStorage is read in an effect rather than in `useState`'s initialiser
@@ -475,6 +505,23 @@ export function MusicProvider({
       // exist — manufacturing the exact dangling row `preferenceForImpl` now
       // has to defend against.
       if (track === undefined) return false
+      // A ROW WITH NO URL IS NOT A RESOLUTION EITHER.
+      //
+      // An upload whose signed URL failed to resolve is still IN `tracks` —
+      // `listTracksImpl` hands back the row with `url: null` so the panel can
+      // draw it and say "unavailable" rather than silently dropping a file the
+      // user knows they uploaded. Returning `true` for it made the caller's
+      // priority walk stop on a track that could never play: the resolver
+      // recorded `startedByUs: true`, which is the flag that later licenses
+      // `musicOnStop` to silence a player this hook never actually started.
+      //
+      // The deliberate cost: clicking an "unavailable" row in the panel is now
+      // a no-op instead of advancing the queue through `start`'s
+      // `failAndAdvance`. That is the honest behaviour — the row already says
+      // the track cannot be played, so stepping to a DIFFERENT track would be
+      // the surprising outcome — and it is a strictly better answer than
+      // reporting a start that did not occur.
+      if (track.url === null || track.url === "") return false
       for (const listener of pickListeners.current) listener(ref)
       void start(track)
       return true
@@ -520,6 +567,7 @@ export function MusicProvider({
   const value = useMemo<MusicContextValue>(
     () => ({
       tracks,
+      tracksReady,
       current,
       playing,
       blocked,
@@ -587,6 +635,11 @@ export function MusicProvider({
       stop,
       toggle,
       tracks,
+      // Listed even though it changes exactly once per mount: a new context
+      // value on the render where the uploads land is precisely what re-runs
+      // `use-music-tracking.ts`'s resolver, which is deliberately holding off
+      // committing an upload preference until this flips.
+      tracksReady,
     ]
   )
 

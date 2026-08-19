@@ -8,6 +8,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Popover } from "@/components/ui/popover"
 import { trackRefEquals, trackRefKey } from "@/lib/music/track-ref"
 import { cn } from "@/lib/utils"
@@ -94,7 +95,7 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
 }
 
 /*
- * NO BOX. `border-transparent`, not `border-edge`.
+ * NO BOX, AND ONE SOURCE FOR EVERYTHING ELSE.
  *
  * DESIGN.md's Boundary Rule asks that anything interactive carry a border at
  * Edge or brighter — and the rule is about a control sitting ALONE on a
@@ -105,12 +106,34 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
  * in one strip is the inconsistency the rule exists to prevent, not an
  * instance of it.
  *
- * `size-7` is 28px — under the 32px these were, and still over the 24x24 floor
- * WCAG 2.2 AA asks of a target, which is the number that actually constrains
- * how compact this may get.
+ * Which is exactly why these are built out of `buttonVariants` rather than
+ * hand-rolled to LOOK like it. The hand-rolled version matched the missing
+ * border and nothing else: it drew `focus-visible:ring-2 ring-ring` where its
+ * three neighbours in the same strip draw the base's `focus-visible:border-ring
+ * ring-3 ring-ring/30`, so tabbing along one row of five controls changed the
+ * shape of the focus indicator halfway across — a difference that says
+ * "different kind of control" to anyone navigating by keyboard, about controls
+ * that are peers. Same story for the box: `size-7` against the classifiers'
+ * `row-trigger`. Deriving both from the shared variants is what makes a future
+ * change to the app's focus treatment reach this strip too, instead of leaving
+ * two of five behind. `classifier-pickers.tsx` builds its own `triggerClass`
+ * the same way, for the same reason.
+ *
+ * `size-6` is 24x24 — WCAG 2.2 AA's target floor exactly, and the smallest
+ * these may get. `row-trigger` is `h-auto` because a classifier is sized by the
+ * text sitting inside it; an icon-only control has no text to be sized by, so
+ * it has to state the floor itself. `p-0` because at a fixed size the padding
+ * would only shrink the glyph.
  */
-const triggerClass =
-  "inline-flex size-7 items-center justify-center rounded-md border border-transparent text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+const TRIGGER_BOX = "size-6 rounded-md p-0"
+
+/** For `Popover.Trigger`, which brings its own element and takes a className —
+ *  the same reason `classifier-pickers.tsx` reaches for `buttonVariants`
+ *  instead of `<Button>` on two of its three controls. */
+const triggerClass = cn(
+  buttonVariants({ variant: "quiet", size: "row-trigger" }),
+  TRIGGER_BOX
+)
 
 function IconButton({
   label,
@@ -124,15 +147,17 @@ function IconButton({
   children: React.ReactNode
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="quiet"
+      size="row-trigger"
       aria-label={label}
       {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
       onClick={onClick}
-      className={cn(triggerClass, pressed === true && "text-foreground")}
+      className={cn(TRIGGER_BOX, pressed === true && "text-foreground")}
     >
       {children}
-    </button>
+    </Button>
   )
 }
 

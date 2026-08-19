@@ -479,9 +479,16 @@ async function findPreference(
  *
  * A catalog ref is deliberately NOT validated against `CATALOG` — that list
  * lives in the client bundle, the server has no copy, and inventing one here
- * would put the same array in two places that must never disagree. A slug
- * whose file has gone fails the same way on the client, through
- * `resolveTrackUrl` returning null, which the resolver already walks past.
+ * would put the same array in two places that must never disagree. The client
+ * already handles both ways a catalog ref can go bad, and neither needs a
+ * server-side mirror to do it: a slug DROPPED FROM `CATALOG` never enters
+ * `music.tracks` at all, so `playRef`'s `tracks.find` misses, it reports
+ * `false`, and the resolver walks to the next candidate; a slug still IN
+ * `CATALOG` whose mp3 has gone resolves to a perfectly good-looking path and
+ * fails later as a 404 on the `<audio>` element, which lands in
+ * `failAndAdvance` and steps the queue on. Only the first of those is a
+ * resolution failure at all — which is why validating slugs here would buy
+ * nothing for the case people actually worry about.
  */
 async function preferenceForImpl(
   ctx: QueryCtx,

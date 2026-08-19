@@ -79,6 +79,55 @@ export function useMusicTracking(
   const context = useLatest(() => ({ title, projectId }))
 
   /*
+   * WHAT HAS ALREADY BEEN RESOLVED, AND WHETHER WE ARE THE ONES PLAYING.
+   *
+   * Declared above the pick listener rather than beside the resolver it mostly
+   * serves, because BOTH write it: the resolver sets it, and a genuine user
+   * pick clears `startedByUs` on it. A reader who meets the listener first
+   * should meet this first too.
+   *
+   * `running?._id` rather than `running` for the read below: the document's
+   * reference changes on every tick of the elapsed-time query, and this must
+   * not re-fire on each one.
+   *
+   * THE KEY IS THE RESOLUTION'S INPUTS, NOT THE ENTRY ID. Keying on the id
+   * alone made resolution a once-per-entry event fired at entry CREATION, and
+   * the ordinary way a timer is started is: press start, then type what you
+   * are doing. At creation the title is `""`, so `preferenceFor` is disabled,
+   * there is no preference to consult, resolution lands on the default track —
+   * and the id is pinned. The title arriving a few seconds later re-runs this
+   * effect, which returns at the top, so the record's remembered track was
+   * consulted on precisely the entries nobody names up front, i.e. almost
+   * none. Keying on `{id, title, projectId}` makes a title (or a project)
+   * arriving after start count as a NEW question, which it is.
+   *
+   * THE RE-RESOLVE IS SUBORDINATE TO EVERY DECISION ALREADY MADE ABOUT SOUND,
+   * DELIBERATELY. Three guards sit ahead of it and each one wins outright, so
+   * the second resolution takes effect in exactly one situation: nothing is
+   * playing and nothing this hook started was ever silenced by hand.
+   *
+   *   - Music is PLAYING (`music.playing`): typing a title over music does not
+   *     switch the track. Yanking a track out from under someone mid-listen
+   *     because they corrected a typo is a product that cannot be trusted to
+   *     be left running.
+   *   - We started something and it is NOT playing (`startedByUs` without
+   *     `blocked`): the user turned it off. This is the most common of the
+   *     three and the one the guard list used to omit — press start, hear
+   *     music, hit the speaker button, then type the description, and the
+   *     re-resolve started the audio back up.
+   *   - The browser REFUSED (`blocked`): the one case worth retrying, because
+   *     playback never began and the very keystroke that changed the title is
+   *     the user gesture that can lift the refusal.
+   *
+   * So in practice the re-resolve serves the cold start: a title arriving over
+   * silence, over a blocked autoplay, or over a first resolution that found
+   * nothing playable. That is the trade the project owner chose.
+   *
+   * `startedByUs` rides along because the stop branch needs it — see there.
+   */
+  const startedFor = useRef<{ key: string; startedByUs: boolean } | null>(null)
+
+  /*
    * SUPPRESSING THE RESOLVER'S OWN NOTIFICATION.
    *
    * `playRef` (music-provider.tsx) has exactly one call site for "the user
@@ -115,6 +164,20 @@ export function useMusicTracking(
         // echoing straight back to the one hook that is subscribed AND
         // caused it. Not a user pick — must not become a stored preference.
         if (resolvingOwnPick.current) return
+        // THE USER HAS TAKEN THE WHEEL, so this hook no longer owns what is
+        // playing. `startedByUs` is the permission slip for `musicOnStop`, and
+        // leaving it set through a hand-picked track means stopping the timer
+        // silences a track the user chose themselves — the same violation the
+        // `startedByUs` flag was introduced to fix, arriving by a different
+        // route. Clearing it rather than re-deriving it later is what keeps
+        // "did WE start this?" answerable from one field: the answer became
+        // "no" at this exact moment, and nothing downstream has to reconstruct
+        // when that happened. The key is kept as-is — this is not a new
+        // resolution, only a change of owner.
+        const owned = startedFor.current
+        if (owned !== null) {
+          startedFor.current = { key: owned.key, startedByUs: false }
+        }
         const { title: t, projectId: p } = context()
         if (t === "") return
         void setPreference({
@@ -128,38 +191,6 @@ export function useMusicTracking(
       }),
     [context, music, setPreference]
   )
-
-  /*
-   * WHAT HAS ALREADY BEEN RESOLVED, AND WHETHER WE ARE THE ONES PLAYING.
-   *
-   * `running?._id` rather than `running` for the read below: the document's
-   * reference changes on every tick of the elapsed-time query, and this must
-   * not re-fire on each one.
-   *
-   * THE KEY IS THE RESOLUTION'S INPUTS, NOT THE ENTRY ID. Keying on the id
-   * alone made resolution a once-per-entry event fired at entry CREATION, and
-   * the ordinary way a timer is started is: press start, then type what you
-   * are doing. At creation the title is `""`, so `preferenceFor` is disabled,
-   * there is no preference to consult, resolution lands on the default track —
-   * and the id is pinned. The title arriving a few seconds later re-runs this
-   * effect, which returns at the top, so the record's remembered track was
-   * consulted on precisely the entries nobody names up front, i.e. almost
-   * none. Keying on `{id, title, projectId}` makes a title (or a project)
-   * arriving after start count as a NEW question, which it is.
-   *
-   * THE RE-RESOLVE IS SUBORDINATE TO "DO NOT INTERRUPT", DELIBERATELY. The
-   * `music.playing` guard below still wins, so in practice the second
-   * resolution only takes effect when the first found nothing to play or the
-   * browser blocked autoplay. The visible consequence, and it is a real one:
-   * typing a title over music that is already playing does NOT switch the
-   * track to that record's remembered one. That is the trade the project owner
-   * chose, and the alternative is worse — a timer that yanks the track out
-   * from under someone mid-listen because they corrected a typo in the title
-   * is a product that cannot be trusted to be left running.
-   *
-   * `startedByUs` rides along because the stop branch needs it — see there.
-   */
-  const startedFor = useRef<{ key: string; startedByUs: boolean } | null>(null)
 
   useEffect(() => {
     const id = running?._id ?? null
@@ -244,6 +275,72 @@ export function useMusicTracking(
     }
 
     /*
+     * MUSIC THIS HOOK STARTED, AND THAT IS NOT PLAYING NOW, WAS TURNED OFF BY
+     * THE USER — AND THEIR CHOICE OUTRANKS ANY RE-RESOLUTION.
+     *
+     * `music.playing` above protects sound that is CURRENTLY COMING OUT. It
+     * says nothing about sound the user deliberately stopped, and the ordinary
+     * flow walks straight through that hole: press start (title is `""`, the
+     * catalog default plays, `startedByUs` becomes true), decide you do not
+     * want music and press the speaker button (`pause()`, `playing: false`),
+     * then type the description — or pick a project, which now sits in the
+     * same footer strip. A new key is minted, `playing` is false, the chain
+     * walks, and the audio the user just silenced starts again. This is the
+     * same class of violation as applying `musicOnStop` to a track this hook
+     * never started: the tracker overriding a music decision made by hand.
+     *
+     * `blocked` is the exception, and the reason this is not simply
+     * `startedByUs`: there, playback never actually began because the browser
+     * refused it, so there is nothing the user could have silenced — and the
+     * very interaction that changed the title is the user gesture that can
+     * lift the refusal. Retrying is the whole point in that case.
+     *
+     * The key is still committed. This is a decided question, not a deferred
+     * one: nothing arriving later makes silence the user asked for wrong.
+     */
+    if (startedByUs && !music.blocked) {
+      startedFor.current = { key, startedByUs }
+      return
+    }
+
+    /*
+     * AN UPLOAD PREFERENCE CANNOT BE JUDGED AGAINST A LIST THAT HAS NOT
+     * ARRIVED.
+     *
+     * `music.tracks` is never empty — the catalog is compiled into the bundle
+     * — so a cold tab can resolve, play the catalog default and pin the key
+     * before `listTracks` has come back. `preferenceFor` is a single index
+     * read while `listTracks` costs one signed-URL round trip per row, so the
+     * preference really does arrive first, and the record's remembered upload
+     * loses to the arbitrary third-choice fallback on exactly the flow this
+     * feature exists for: opening a fresh tab and picking a task back up.
+     *
+     * This used to be "handled" by declining to commit `startedFor` when
+     * candidates existed and none resolved — a branch that could never run,
+     * because the candidate list always ends with a catalog slug and catalog
+     * tracks are in `music.tracks` unconditionally. The last candidate always
+     * resolved, so the retry the comment there promised was fiction.
+     *
+     * `tracksReady` is the fact that was missing: the provider now says
+     * whether `listTracks` has answered at all. Deliberately NOT committing
+     * `startedFor` is what makes this a WAIT rather than a decision — the
+     * provider mints a new context value on the render the uploads land,
+     * `music` is a dependency of this effect, so the effect re-runs and
+     * resolves against the real list. It cannot spin: `tracksReady` flips once
+     * per mount and never flips back, and the guard is narrow enough that
+     * neither a blank title (no preference at all) nor a catalog preference
+     * ever reaches it — those have nothing to wait for.
+     */
+    if (
+      !music.tracksReady &&
+      preference !== undefined &&
+      preference !== null &&
+      preference.origin === "upload"
+    ) {
+      return
+    }
+
+    /*
      * A CHAIN THAT IS WALKED, NOT A CHOICE THAT IS COMMITTED TO.
      *
      * 1. what this record was last using, 2. the last track played on this
@@ -301,13 +398,14 @@ export function useMusicTracking(
      * forever on an empty library is a re-render loop nobody can see.
      *
      * Nothing started BUT candidates existed: every one of them failed to
-     * resolve, which on a cold tab means the track list has not landed yet
-     * (`listTracks` is a non-suspense query outside the loader's prefetch, and
-     * it is the slowest in the feature — one signed-URL round trip per row —
-     * while `preferenceFor` is a single index read, so the preference really
-     * can arrive first). Deliberately NOT marked: leaving `startedFor` unset
-     * is what lets the next render, once `music.tracks` has grown, resolve
-     * against the real list instead of against a catalog-only one.
+     * resolve. Deliberately NOT marked, so a later render can try again —
+     * though note this is a backstop, not the cold-tab fix it was once
+     * described as. In the shipped app the walk always ends at a catalog slug
+     * and catalog tracks are in `music.tracks` unconditionally, so this branch
+     * is only reachable if the catalog itself is empty of playable files. The
+     * uploads-are-still-loading race is closed ahead of the walk, by the
+     * `tracksReady` guard above, which is the only place that can distinguish
+     * "this upload does not exist" from "the list has not arrived".
      *
      * This also covers the timer-stops-while-the-query-is-in-flight case for
      * free: if `running` clears before any of this ran, the `id === null`

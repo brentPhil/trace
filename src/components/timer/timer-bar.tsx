@@ -737,9 +737,10 @@ export function TimerBar({
           // Borderless inside an already-bordered bar: the section IS the
           // control's boundary, so The Boundary Rule is satisfied once. A
           // second border here would read as a form field inside a card.
-          // `pr-2` because the classifier icons are hidden below `sm`, and
-          // without them the text runs straight into the elapsed time with no
-          // gap at all — the title and the clock read as one string.
+          // `pr-2` because the elapsed time is the very next thing in this row
+          // at every width — the classifiers that used to sit between them are
+          // in the footer strip now — and without a gap a long title runs
+          // straight into the clock, so the two read as one string.
           //
           // `outline-none` with no ring of its own is deliberate, not the bug
           // it used to be: the indicator moved to the `<section>` above

@@ -28,6 +28,10 @@ function value(overrides: Partial<MusicContextValue> = {}): MusicContextValue {
         origin: "upload",
       },
     ],
+    // The uploads query has answered. A stub saying otherwise would be
+    // describing a first render that has not happened yet, and nothing in this
+    // file is about that moment — `use-music-tracking.test.tsx` is.
+    tracksReady: true,
     current: null,
     playing: false,
     blocked: false,
