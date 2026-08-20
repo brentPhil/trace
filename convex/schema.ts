@@ -591,10 +591,18 @@ export default defineSchema({
      */
     .index("by_user_calendar_started", ["userId", "calendarId", "startedAt"]),
 
-  googleEventTracking: defineTable(googleEventTrackingFields).index(
-    "by_user_calendar_event",
-    ["userId", "calendarId", "eventId"]
-  ),
+  googleEventTracking: defineTable(googleEventTrackingFields)
+    .index("by_user_calendar_event", ["userId", "calendarId", "eventId"])
+    /*
+     * The tick's and the backfill's work list: ticked, not yet materialised.
+     *
+     * `entryId` trails `trackOnStart` so `(userId, true, null)` is an exact key
+     * range rather than a scan of every ticked meeting the user has ever had.
+     * The set it returns shrinks every time a meeting is materialised, so it
+     * stays small without a prune — which is what lets both jobs read it every
+     * minute.
+     */
+    .index("by_user_track_entry", ["userId", "trackOnStart", "entryId"]),
 
   userSettings: defineTable({
     userId: v.string(),

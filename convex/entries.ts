@@ -1337,6 +1337,13 @@ type StartArgs = {
   projectId?: Id<"projects">
   tagIds?: Array<Id<"tags">>
   billable?: boolean
+  /**
+   * How the row got here, for `timeEntries.source`. Internal callers only —
+   * `startArgs` does not carry it, so the public `start` mutation cannot be
+   * made to claim a switch happened. `convex/googleTrack.ts` is the only
+   * caller that passes it.
+   */
+  source?: "web" | "calendar"
 }
 
 /**
@@ -1403,7 +1410,7 @@ async function startImpl(ctx: MutationCtx, userId: string, args: StartArgs) {
     // Inherited from the project unless the caller said otherwise, so a
     // billable client's work is billable without the user remembering.
     billable: args.billable ?? project?.billableByDefault ?? false,
-    source: "web",
+    source: args.source ?? "web",
     updatedAt: now,
     deletedAt: null,
   })
@@ -1411,6 +1418,12 @@ async function startImpl(ctx: MutationCtx, userId: string, args: StartArgs) {
 
   return { entryId, stoppedEntryIds, serverNow: now, replayed: false }
 }
+
+/** Exported for `convex/googleTrack.ts`, which needs the atomic close-and-open
+ *  this performs and must not reimplement it: the handoff instant, the clamp
+ *  and the clientKey replay are the three things a second copy would get subtly
+ *  wrong. A mutation cannot call another mutation in Convex, so it calls this. */
+export { startImpl }
 
 export const start = mutation({
   args: startArgs,
@@ -2056,7 +2069,7 @@ type CreateArgs = {
    * arrived together and are indistinguishable from sixty the user typed is
    * not a state anyone can get out of.
    */
-  source?: "manual" | "import"
+  source?: "manual" | "import" | "calendar"
 }
 
 /**
