@@ -116,7 +116,7 @@ export function AuthForm({
     // Reached only when Better Auth refused before redirecting — a missing
     // client id being the one that actually happens. Without this the button
     // sits in its pending state forever and the screen says nothing.
-    if (result?.error) {
+    if (result.error) {
       setError(result.error.message ?? "Could not reach Google. Try again.")
       setGooglePending(false)
     }

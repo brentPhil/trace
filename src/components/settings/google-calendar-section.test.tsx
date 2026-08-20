@@ -8,7 +8,7 @@ afterEach(cleanup)
 
 const NOW = Date.parse("2026-08-17T09:00:00.000Z")
 
-function calendar(over: Partial<Doc<"googleCalendars">> = {}) {
+function calendar(over: Partial<Doc<"googleCalendars">> = {}): Doc<"googleCalendars"> {
   return {
     _id: "gc_1" as Id<"googleCalendars">,
     _creationTime: NOW,
@@ -20,7 +20,7 @@ function calendar(over: Partial<Doc<"googleCalendars">> = {}) {
     lastSyncedAt: null,
     updatedAt: NOW,
     ...over,
-  } as Doc<"googleCalendars">
+  }
 }
 
 function project(over: Partial<Doc<"projects">> = {}) {

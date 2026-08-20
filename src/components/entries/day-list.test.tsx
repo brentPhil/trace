@@ -351,18 +351,18 @@ describe("grouped entries", () => {
 
   it("selects and clears every entry in a day", () => {
     render(<SelectableDayList />)
-    const day = screen.getByRole("checkbox", {
+    const day = screen.getByRole<HTMLInputElement>("checkbox", {
       name: /Select all records for Today/,
-    }) as HTMLInputElement
+    })
 
     fireEvent.click(day)
 
     expect(day.checked).toBe(true)
     expect(
       (
-        screen.getByRole("checkbox", {
+        screen.getByRole<HTMLInputElement>("checkbox", {
           name: /Select all 2 records for Crew dropdowns/,
-        }) as HTMLInputElement
+        })
       ).checked
     ).toBe(true)
 
@@ -382,14 +382,14 @@ describe("grouped entries", () => {
     )
 
     expect(
-      screen.getByRole("checkbox", {
+      screen.getByRole<HTMLInputElement>("checkbox", {
         name: /Select all records for Today/,
-      }) as HTMLInputElement
+      })
     ).toHaveProperty("indeterminate", true)
     expect(
-      screen.getByRole("checkbox", {
+      screen.getByRole<HTMLInputElement>("checkbox", {
         name: /Select all 2 records for Crew dropdowns/,
-      }) as HTMLInputElement
+      })
     ).toHaveProperty("indeterminate", true)
   })
 
@@ -415,9 +415,9 @@ describe("grouped entries", () => {
   it("keeps selection and sitting disclosure as independent controls", () => {
     render(<SelectableDayList />)
     const disclosure = screen.getByRole("button", { name: "Show grouped entries" })
-    const sitting = screen.getByRole("checkbox", {
+    const sitting = screen.getByRole<HTMLInputElement>("checkbox", {
       name: /Select all 2 records for Crew dropdowns/,
-    }) as HTMLInputElement
+    })
 
     fireEvent.click(sitting)
 
@@ -775,7 +775,7 @@ describe("grouped entries", () => {
       _id: "jd7probono" as unknown as Id<"projects">,
       name: "Pro bono",
       billableByDefault: false,
-    } as unknown as Doc<"projects">
+    }
 
     /**
      * Renders `SittingRow` directly rather than through `DayList`: the

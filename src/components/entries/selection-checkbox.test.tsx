@@ -7,7 +7,7 @@ afterEach(cleanup)
 describe("SelectionCheckbox", () => {
   it("synchronizes native and accessible mixed state", () => {
     render(<SelectionCheckbox label="Select Tuesday" state="indeterminate" onToggle={() => {}} />)
-    const checkbox = screen.getByRole("checkbox", { name: "Select Tuesday" }) as HTMLInputElement
+    const checkbox = screen.getByRole<HTMLInputElement>("checkbox", { name: "Select Tuesday" })
     expect(checkbox.checked).toBe(false)
     expect(checkbox.indeterminate).toBe(true)
     expect(checkbox.getAttribute("aria-checked")).toBe("mixed")

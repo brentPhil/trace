@@ -58,8 +58,11 @@ function initials(attendee: Meeting["attendees"][number]): string | null {
   const name = attendee.name?.trim()
   if (name !== undefined && name !== "") {
     const words = name.split(/\s+/)
-    const first = words[0][0] ?? ""
-    const last = words.length > 1 ? (words[words.length - 1][0] ?? "") : ""
+    // No fallback on either index: `name` is trimmed and non-empty here, so
+    // splitting it on whitespace cannot yield an empty first or last word, and
+    // a word always has a first character.
+    const first = words[0][0]
+    const last = words.length > 1 ? words[words.length - 1][0] : ""
     const letters = (first + last).toUpperCase()
     return letters === "" ? null : letters
   }

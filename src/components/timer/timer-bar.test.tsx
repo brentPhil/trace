@@ -1064,7 +1064,7 @@ describe("billable, inherited from the project while idle", () => {
     _id: "jd7probono" as unknown as Id<"projects">,
     name: "Pro bono",
     billableByDefault: false,
-  } as unknown as Doc<"projects">
+  }
 
   /*
    * Opens the picker and chooses a project by name.

@@ -49,14 +49,14 @@ const HOUR = 3_600_000
 
 /** Narrows, and names the file and index when it does not. */
 function sittingAt(items: Array<LogItem>, at: number) {
-  const item = items[at]
+  const item = items.at(at)
   if (item === undefined) throw new Error(`no item at index ${at}`)
   if (item.kind !== "sitting") throw new Error(`items[${at}] is a row, not a sitting`)
   return item
 }
 
 function rowAt(items: Array<LogItem>, at: number) {
-  const item = items[at]
+  const item = items.at(at)
   if (item === undefined) throw new Error(`no item at index ${at}`)
   if (item.kind !== "row") throw new Error(`items[${at}] is a sitting, not a row`)
   return item
@@ -269,7 +269,7 @@ describe("tagUnion", () => {
 describe("a sitting's derived classification", () => {
   const sittingOf = (items: Array<LogItem>) => {
     const found = items.find((item) => item.kind === "sitting")
-    if (found === undefined || found.kind !== "sitting") throw new Error("no sitting")
+    if (found === undefined) throw new Error("no sitting")
     return found
   }
 
@@ -294,12 +294,12 @@ describe("a sitting's derived classification", () => {
   })
 
   it("carries the tag union so the parent's picker opens on it", () => {
-    const sitting = sittingOf(
+    const parent = sittingOf(
       toLogItems([
         makeEntry({ title: "Retainer", startedAt: 200, tagIds: [TAG_A] }),
         makeEntry({ title: "Retainer", startedAt: 100, tagIds: [TAG_B] }),
       ])
     )
-    expect(sitting.tagIds).toEqual([TAG_B, TAG_A])
+    expect(parent.tagIds).toEqual([TAG_B, TAG_A])
   })
 })

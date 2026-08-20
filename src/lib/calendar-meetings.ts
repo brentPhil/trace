@@ -45,11 +45,15 @@ export type MeetingEventProps = {
 
 /** The same discriminator on an ENTRY's props, so the panel can narrow either
  *  way. `calendar-events.ts` omits `kind` on its own props; absence is what
- *  identifies an entry, and this predicate is the only place that is relied on. */
+ *  identifies an entry, and this predicate is the only place that is relied on.
+ *
+ *  The union has exactly these two members, so presence of `kind` IS the test;
+ *  a `=== "meeting"` beside it compared the literal against itself. A third
+ *  event kind would have to revisit this predicate anyway. */
 export function isMeetingEvent(
   props: CalendarEventProps | MeetingEventProps
 ): props is MeetingEventProps {
-  return "kind" in props && props.kind === "meeting"
+  return "kind" in props
 }
 
 /**
