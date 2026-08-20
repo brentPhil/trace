@@ -581,10 +581,10 @@ describe("/settings — music", () => {
   })
 
   it("saves what happens when tracking stops", async () => {
-    renderSettings({ musicOnStop: "pause" })
-    fireEvent.change(onStop(), { target: { value: "stop" } })
+    renderSettings({ musicOnStop: "stop" })
+    fireEvent.change(onStop(), { target: { value: "continue" } })
     await waitFor(() =>
-      expect(update).toHaveBeenCalledWith({ musicOnStop: "stop" })
+      expect(update).toHaveBeenCalledWith({ musicOnStop: "continue" })
     )
   })
 
