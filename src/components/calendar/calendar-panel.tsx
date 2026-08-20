@@ -405,6 +405,7 @@ export function CalendarPanel({
   actions,
   meetings = NO_MEETINGS,
   onSetTrack,
+  onTrackNow,
 }: {
   entries: Array<Doc<"timeEntries">>
   /**
@@ -1409,6 +1410,9 @@ export function CalendarPanel({
           onClose={() => setSelectedMeeting(null)}
           timeZone={timeZone}
           use12Hour={use12Hour}
+          nowMs={nowMs}
+          onSetTrack={onSetTrack}
+          onTrackNow={onTrackNow}
         />
       )}
     </>

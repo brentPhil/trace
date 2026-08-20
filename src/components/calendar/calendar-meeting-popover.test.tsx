@@ -7,6 +7,10 @@ import type { Id } from "../../../convex/_generated/dataModel"
 afterEach(cleanup)
 
 const START = Date.parse("2026-08-17T02:00:00.000Z")
+/** A meeting still ahead of `nowMs`, so a tick has a switch left to instruct. */
+const LATER = START + 60 * 60 * 1_000
+/** A meeting that already happened, where a tick has nothing left to fire. */
+const EARLIER = START - 3 * 60 * 60 * 1_000
 
 function meeting(over: Partial<Meeting> = {}): Meeting {
   return {
@@ -31,7 +35,13 @@ function meeting(over: Partial<Meeting> = {}): Meeting {
   }
 }
 
-function show(over: Partial<Meeting> = {}) {
+function show(
+  over: Partial<Meeting> = {},
+  handlers: {
+    onSetTrack?: (calendarId: string, eventId: string, track: boolean) => void
+    onTrackNow?: (calendarId: string, eventId: string) => void
+  } = {}
+) {
   const anchor = document.createElement("div")
   document.body.appendChild(anchor)
   render(
@@ -41,6 +51,8 @@ function show(over: Partial<Meeting> = {}) {
       onClose={vi.fn()}
       timeZone="Asia/Manila"
       use12Hour
+      nowMs={START}
+      {...handlers}
     />
   )
 }
@@ -267,5 +279,57 @@ ID: 247` })
     // than nothing, so the user knows they exist.
     expect(screen.getByLabelText("Guest — Accepted")).toBeTruthy()
     expect(screen.getByLabelText("Guest — Declined")).toBeTruthy()
+  })
+
+  it("offers a tick on a meeting that has not started", () => {
+    const onSetTrack = vi.fn()
+    show({ startedAt: LATER, endedAt: LATER + 1_800_000 }, { onSetTrack })
+    const box = screen.getByRole("checkbox", { name: /track this meeting/i })
+    fireEvent.click(box)
+    expect(onSetTrack).toHaveBeenCalledWith("primary", "evt_1", true)
+  })
+
+  it("offers Track this on a meeting that has already ended", () => {
+    const onTrackNow = vi.fn()
+    show({ startedAt: EARLIER, endedAt: EARLIER + 1_800_000 }, { onTrackNow })
+    // A tick has nothing left to fire on a meeting that already happened, so the
+    // popover offers the same materialisation the backfill runs, on demand.
+    expect(
+      screen.queryByRole("checkbox", { name: /track this meeting/i })
+    ).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: /track this/i }))
+    expect(onTrackNow).toHaveBeenCalledWith("primary", "evt_1")
+  })
+
+  it("offers Track this on a meeting that has already begun", () => {
+    // The boundary itself, and the one that matters: `startedAt === nowMs` is a
+    // meeting that IS starting, so the future switch a tick instructs is already
+    // spent. Anything at or before `nowMs` gets the button, never the box.
+    const onSetTrack = vi.fn()
+    const onTrackNow = vi.fn()
+    show({ startedAt: START, endedAt: START + 1_800_000 }, { onSetTrack, onTrackNow })
+    expect(
+      screen.queryByRole("checkbox", { name: /track this meeting/i })
+    ).toBeNull()
+    expect(screen.getByRole("button", { name: /track this/i })).toBeTruthy()
+  })
+
+  it("offers nothing to track when no handler was given", () => {
+    // The popover is rendered in tests and stories without the mutations wired.
+    // It must degrade to the read-only Phase 1 shape rather than drawing a
+    // control that does nothing.
+    show({ startedAt: LATER })
+    expect(screen.queryByRole("checkbox")).toBeNull()
+    expect(screen.queryByRole("button", { name: /track this/i })).toBeNull()
+    // And the rest of the Phase 1 shape is still there.
+    expect(screen.getByText("Sprint planning")).toBeTruthy()
+  })
+
+  it("is still read-only in every other respect", () => {
+    show({ description: "Agenda: everything" }, { onSetTrack: vi.fn() })
+    // The tick is the ONE control this popover ever gains. Nothing in here writes
+    // to Google and nothing in here edits an entry.
+    expect(screen.queryAllByRole("textbox")).toEqual([])
+    expect(screen.queryAllByRole("combobox")).toEqual([])
   })
 })

@@ -1,4 +1,10 @@
-import { ExternalLinkIcon, MapPinIcon, UserIcon, VideoIcon } from "lucide-react"
+import {
+  ClockIcon,
+  ExternalLinkIcon,
+  MapPinIcon,
+  UserIcon,
+  VideoIcon,
+} from "lucide-react"
 import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar"
 import { Popover } from "@/components/ui/popover"
 import { formatTimeRange } from "@/lib/format-time"
@@ -155,12 +161,34 @@ export function CalendarMeetingPopover({
   onClose,
   timeZone,
   use12Hour,
+  nowMs,
+  onSetTrack,
+  onTrackNow,
 }: {
   meeting: Meeting
   anchor: HTMLElement
   onClose: () => void
   timeZone: string
   use12Hour: boolean
+  /**
+   * The clock, for the one question this popover asks of it: has the meeting
+   * started? Passed in rather than read from `Date.now()` so the answer is the
+   * panel's answer — a popover that decided this for itself could draw a tick
+   * for a meeting whose block is already showing none.
+   */
+  nowMs: number
+  /**
+   * Tick or untick — `api.googleTrack.setTrackOnStart`, handed down.
+   *
+   * OPTIONAL, and its absence draws NO CONTROL AT ALL. This component is
+   * rendered in tests and stories with no mutations behind it, and an inert
+   * tick is worse than no tick: the user ticks it, nothing happens, and the
+   * meeting quietly does not start.
+   */
+  onSetTrack?: (calendarId: string, eventId: string, track: boolean) => void
+  /** **Track this** — `api.googleTrack.trackNow`. Same optionality, same
+   *  reason. */
+  onTrackNow?: (calendarId: string, eventId: string) => void
 }) {
   /*
    * READ-ONLY, and that is the whole design of this component.
@@ -260,6 +288,59 @@ export function CalendarMeetingPopover({
               )}
             </span>
           </header>
+
+          {onSetTrack === undefined && onTrackNow === undefined ? null : (
+            <div className="p-3">
+              {meeting.startedAt > nowMs ? (
+                /*
+                 * THE TICK IS THE CONSENT, and this is its second home.
+                 *
+                 * The block carries one too, but a fifteen-minute meeting has
+                 * no room for a control and a meeting on a crowded column may
+                 * be two millimetres wide. This is the path that always works,
+                 * which is why the label spells out what will happen rather
+                 * than trusting a bare checkbox to imply it.
+                 */
+                <label className="flex cursor-pointer items-start gap-2 text-xs text-foreground">
+                  <input
+                    type="checkbox"
+                    aria-label="Track this meeting when it starts"
+                    checked={meeting.trackOnStart}
+                    onChange={(event) =>
+                      onSetTrack?.(
+                        meeting.calendarId,
+                        meeting.eventId,
+                        event.currentTarget.checked
+                      )
+                    }
+                    className="mt-0.5 size-3.5 shrink-0 rounded-[3px] border border-edge-raised bg-ground accent-current focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  />
+                  <span>
+                    Track this when it starts
+                    <span className="block text-muted-foreground">
+                      Stops whatever is running and starts this instead.
+                    </span>
+                  </span>
+                </label>
+              ) : (
+                /*
+                 * A meeting that has already begun has no future switch left,
+                 * so the honest offer is the one the backfill makes: record it
+                 * now, over its own window.
+                 */
+                <button
+                  type="button"
+                  onClick={() =>
+                    onTrackNow?.(meeting.calendarId, meeting.eventId)
+                  }
+                  className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-edge-raised text-xs font-medium text-foreground transition-colors hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  <ClockIcon className="size-3.5" aria-hidden />
+                  Track this
+                </button>
+              )}
+            </div>
+          )}
 
           {conferenceHref === null && meeting.location === undefined ? null : (
             <div className="grid gap-2 p-3">
