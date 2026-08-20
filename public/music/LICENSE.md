@@ -8,19 +8,28 @@ licence cannot be produced on request has to be pulled.
 **Adding a track?** Add a row here in the same commit. A file in this directory
 with no row is treated as unlicensed.
 
-All four files below carry Pixabay's download naming convention — `artist-title-id.mp3`,
-where the trailing number is Pixabay's own track id. Each is reachable at
-`https://pixabay.com/music/-<id>/`. The **Source URL** column is left for the
-maintainer who downloaded them to confirm and paste; the id is recorded so that
-confirmation is a lookup rather than a memory.
+All four files carry Pixabay's download naming convention —
+`uploader-title-id.mp3`, where the trailing number is Pixabay's own track id.
+Each **Source URL** below was fetched and read on 2026-08-20; the title,
+uploader and licence in that row are what the page itself says, not what the
+filename implies.
 
-| File | Artist | Pixabay id | Source URL | Licence |
+| File | Track title | Uploader | Source URL | Licence |
 |---|---|---|---|---|
-| `alex-morgan-lofi-chill-vlog-beats-573883.mp3` | Alex Morgan | 573883 | _to confirm_ | Pixabay Content License |
-| `alex-morgan-lofi-sunny-cafe-568156.mp3` | Alex Morgan | 568156 | _to confirm_ | Pixabay Content License |
-| `alex-morgan-lofi-restaurant-568157.mp3` | Alex Morgan | 568157 | _to confirm_ | Pixabay Content License |
-| `kulakovka-lofi-relax-570489.mp3` | Kulakovka | 570489 | _to confirm_ | Pixabay Content License |
+| `alex-morgan-lofi-chill-vlog-beats-573883.mp3` | Lofi Chill Vlog Beats | alex-morgan | https://pixabay.com/music/lofi-chill-vlog-beats-573883/ | Pixabay Content License |
+| `alex-morgan-lofi-sunny-cafe-568156.mp3` | Lofi Sunny Cafe | alex-morgan | https://pixabay.com/music/lofi-sunny-cafe-568156/ | Pixabay Content License |
+| `alex-morgan-lofi-restaurant-568157.mp3` | Lofi Restaurant | alex-morgan | https://pixabay.com/music/lofi-restaurant-568157/ | Pixabay Content License |
+| `kulakovka-lofi-relax-570489.mp3` | LoFi Relax | Kulakovka | https://pixabay.com/music/lofi-relax-570489/ | Pixabay Content License |
+
+Pixabay resolves a music URL by its trailing id, so these links survive a title
+being edited upstream — which is the property a provenance record needs and a
+slug does not have.
 
 **The Pixabay Content License** permits commercial use and does not require
-attribution. The artists are recorded here anyway: attribution not being
+attribution. The uploaders are recorded here anyway: attribution not being
 required is not a reason to stop knowing whose work this is.
+
+The catalog Chroneli actually serves is `src/lib/music/catalog.ts`, and
+`track-ref.test.ts` fails if a file here has no entry there or an entry there
+names a file that is not here. Neither of those tests checks this file — a row
+missing from the table is the one failure mode still left to a human.
