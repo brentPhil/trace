@@ -452,7 +452,7 @@ export function CalendarPanel({
    * THE DAY TOTALS USED TO BE GUARDED HERE TOO, and that guard was undone by
    * the page above: /timer built the same map from the same array against the
    * raw `nowMs` to sum "Range total". Both the guard and the single pass live
-   * in `timer.tsx` now, and the map arrives as `dayTotals`.
+   * in `-timer.tsx` now, and the map arrives as `dayTotals`.
    */
   const clockMs = entries.some((entry) => entry.endedAt === null) ? nowMs : 0
 

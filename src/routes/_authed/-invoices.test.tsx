@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen, within } from "@testing-library/react"
-import { Invoices } from "@/routes/_authed/invoices"
+import { Invoices } from "@/routes/_authed/-invoices"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
@@ -24,8 +24,10 @@ type RouterModule = typeof RouterModuleType
  *
  * `Link` is stubbed for the same reason -reports.test.tsx stubs it: it reads
  * router context and this file deliberately renders the route's COMPONENT on
- * its own. `createFileRoute` stays real, so a broken route definition still
- * fails here rather than hiding behind a module mock.
+ * its own — imported from ./-invoices, where it lives so the route file's
+ * `component:` can be code-split. The route definition itself is not imported
+ * here; a broken one fails the type check and the router's own generation, not
+ * this file.
  */
 vi.mock("@tanstack/react-router", async (importOriginal) => {
   const actual = await importOriginal<RouterModule>()

@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { Timer } from "@/routes/_authed/timer"
+import { Timer } from "@/routes/_authed/-timer"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import {
   convexKey,
@@ -130,7 +130,7 @@ vi.mock("@/components/entries/entry-log", () => ({
  * The grid no longer reports a range back — see `calendar-events.ts`.
  */
 vi.mock("@/components/calendar/calendar-panel", () => ({
-  // The panel's own shared empty array, mocked alongside it: `timer.tsx`
+  // The panel's own shared empty array, mocked alongside it: `-timer.tsx`
   // imports this from the real module for its `meetings` fallback, and an
   // unstubbed named export is `undefined` under `vi.mock`, not the array
   // `?? NO_MEETINGS` expects.

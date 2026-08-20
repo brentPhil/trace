@@ -4,7 +4,8 @@ import { defaultParseSearch } from "@tanstack/react-router"
 import { getFunctionName } from "convex/server"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { Reports, breakdownArgs } from "@/routes/_authed/reports"
+import { Reports } from "@/routes/_authed/-reports"
+import { breakdownArgs } from "@/lib/breakdown-args"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import { rangeOf, stepPeriod } from "@/lib/history-filters"
 import { reportsDefaultFilters } from "@/lib/date-range-picker"
@@ -37,7 +38,7 @@ type RouterModule = typeof RouterModuleType
  * `useSuspenseQuery` answered that by throwing — unmounting this whole
  * component (the filter bar, the log, everything) up to the nearest Suspense
  * boundary. `usePaginatedQuery`'s own args-changed reset had the same
- * consequence for the log itself, one level down (see reports.tsx's
+ * consequence for the log itself, one level down (see -reports.tsx's
  * `settledPageRef` comment).
  *
  * `EntryLog` is mocked to a plain list of testable rows below — what is under
@@ -50,9 +51,11 @@ type RouterModule = typeof RouterModuleType
 /*
  * `Link` reads router context via `useRouter`, and this file deliberately
  * renders `Reports` on its own — the route's COMPONENT is what is under test,
- * not the router. `createFileRoute` and everything else stay real:
- * reports.tsx calls `createFileRoute` at module scope, and stubbing the whole
- * module would hide a genuine route-definition error behind a test double.
+ * not the router. It is imported from ./-reports, where it lives so the route
+ * file's `component:` can be code-split; the route definition itself is not
+ * imported here, so a broken one fails the type check and the router's own
+ * generation rather than this file. Everything else in the module stays real —
+ * stubbing more than `Link` would hide genuine errors behind a test double.
  *
  * The double SERIALISES `search` with the router's own `defaultStringifySearch`
  * rather than dropping it. `Create invoice` is a link now, and what it carries
@@ -131,7 +134,7 @@ vi.mock("@/components/entries/entry-log", () => ({
  * `usePaginatedQuery` (from "convex/react") reads and writes a subscription
  * this test does not have — there is no real `ConvexReactClient` here. The
  * double in `@/test-utils/convex-query` reproduces exactly the one behaviour
- * the fix in reports.tsx depends on: the REAL hook resets `results` to `[]`
+ * the fix in -reports.tsx depends on: the REAL hook resets `results` to `[]`
  * and `status` to "LoadingFirstPage" the instant its args (the query key)
  * change, synchronously, before the new first page round-trips. A test
  * controls when a page "arrives" with `resolvePage`.
@@ -249,8 +252,9 @@ function seedStable(queryClient: QueryClient, settings: Partial<typeof SETTINGS>
  * tab a test is actually about — and `createQueryClient`'s `queryFn` throws on
  * anything it was not told to expect, deliberately, so an unseeded query is a
  * loud test-setup bug rather than a silent hang. `breakdownArgs` is imported
- * from the route rather than spelled out here, so the key this seeds is the
- * key the component asks for by construction.
+ * from the same @/lib/breakdown-args the panels read rather than spelled out
+ * here, so the key this seeds is the key the component asks for by
+ * construction.
  */
 function seedBreakdown(
   queryClient: QueryClient,

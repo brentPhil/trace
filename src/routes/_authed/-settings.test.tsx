@@ -8,7 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
-import { Settings } from "@/routes/_authed/settings"
+import { Settings } from "@/routes/_authed/-settings"
 import { convexKey } from "@/test-utils/convex-query"
 import { SETTINGS } from "@/test-utils/fixtures"
 import { api } from "../../../convex/_generated/api"
@@ -167,7 +167,7 @@ function renderSettings(
 }
 
 /** Arms the page's one-shot "this load is a return from Google" marker, the
- *  same key `settings.tsx` writes before `linkSocial` navigates away. Set
+ *  same key `-settings.tsx` writes before `linkSocial` navigates away. Set
  *  directly rather than by pressing Connect, because `linkSocial` is a full
  *  document navigation that jsdom cannot perform. */
 function simulateOAuthReturn() {
@@ -483,7 +483,9 @@ describe("/settings — Google disconnect", () => {
     })
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Connect Google/i })).toBeTruthy()
+      expect(
+        screen.getByRole("button", { name: /Connect Google/i })
+      ).toBeTruthy()
     )
     // EXACTLY ONE call, not zero: `disconnectGoogle` reads the account list
     // itself, to find out whether Google is the only way into this account. A
@@ -546,5 +548,51 @@ describe("/settings — Google disconnect", () => {
     expect(
       await screen.findAllByText(/could not revoke its Google access/i)
     ).toHaveLength(2)
+  })
+})
+
+/*
+ * The Music section is a presentational component with its own suite
+ * (`src/components/settings/music-section.test.tsx`) covering what its two
+ * controls render and what they call back with. These four cases cover the
+ * only thing that suite CANNOT: that the section is actually mounted on this
+ * page, reading the page's settings and writing through the page's `save`.
+ * A component nobody rendered is the failure mode this file exists to catch —
+ * it was built, tested and left unwired for a day.
+ */
+describe("/settings — music", () => {
+  const autoplayBox = () =>
+    screen.getByLabelText<HTMLInputElement>("Play music when tracking starts")
+  const onStop = () =>
+    screen.getByLabelText<HTMLSelectElement>("When tracking stops")
+
+  it("shows the account's stored preferences", () => {
+    renderSettings({ musicAutoplay: false, musicOnStop: "continue" })
+    expect(autoplayBox().checked).toBe(false)
+    expect(onStop().value).toBe("continue")
+  })
+
+  it("saves autoplay the moment it is switched off", async () => {
+    renderSettings({ musicAutoplay: true })
+    fireEvent.click(autoplayBox())
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ musicAutoplay: false })
+    )
+  })
+
+  it("saves what happens when tracking stops", async () => {
+    renderSettings({ musicOnStop: "pause" })
+    fireEvent.change(onStop(), { target: { value: "stop" } })
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith({ musicOnStop: "stop" })
+    )
+  })
+
+  /* The hint has to promise the memory, because that is the part of this
+   * feature no other tracker has and the part a user would otherwise have to
+   * discover by accident. */
+  it("says the track is remembered per piece of work", () => {
+    renderSettings()
+    expect(screen.getByText(/remembers the track you chose/i)).toBeTruthy()
   })
 })

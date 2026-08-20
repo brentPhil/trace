@@ -5,7 +5,8 @@ import type { Breakdown } from "@/lib/report-series"
  * What stops a control acting on the range that is currently on screen, and
  * the priority order that question is answered in.
  *
- * Extracted out of `reports.tsx` so this priority order — the single most
+ * Extracted out of the /reports page (now `-reports.tsx`) so this priority
+ * order — the single most
  * consequential rule on this page — has a unit test at all. `truncated`
  * outranks "empty" because a truncated scan's `count` is itself unproven: the
  * server stopped before reaching the end of the range, so a count of zero

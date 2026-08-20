@@ -42,7 +42,7 @@ export function resetPaginatedStore() {
  * writes a subscription a component test does not have — there is no real
  * `ConvexReactClient` behind these renders.
  *
- * It reproduces exactly the one behaviour the fix in reports.tsx depends on:
+ * It reproduces exactly the one behaviour the fix in -reports.tsx depends on:
  * the REAL hook resets `results` to `[]` and `status` to "LoadingFirstPage"
  * the instant its args (the query key) change, synchronously, before the new
  * first page round-trips — see
@@ -51,7 +51,7 @@ export function resetPaginatedStore() {
  * exactly when a page arrives.
  *
  * Shared rather than copied because that reproduction is the whole point:
- * `reports.tsx`'s `settledPageRef` exists to defeat it, and two copies of the
+ * `-reports.tsx`'s `settledPageRef` exists to defeat it, and two copies of the
  * double would let a Convex upgrade that changes the reset leave one test
  * green over a broken page.
  *

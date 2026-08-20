@@ -142,7 +142,7 @@ export function parseInvoiceSearch(raw: Record<string, unknown>): InvoiceSearch 
  * The other direction: /reports' current range and filter, as the link's
  * search.
  *
- * Written here rather than inline in `reports.tsx` so the two halves of one
+ * Written here rather than inline in `-reports.tsx` so the two halves of one
  * contract sit together — a key added to the parser and forgotten in the
  * builder is a filter the button drops on the way to the page, and the invoice
  * would then bill a superset of the rows the user was looking at. That is the

@@ -243,7 +243,7 @@ export function boundsOf(range: CalendarRange): {
  * — once here for the total and once inside `CalendarPanel` for the column
  * headers, from the same array, with only the panel's copy guarded against the
  * clock. The page now builds it once and both readings come off that one map;
- * see the guard in `src/routes/_authed/timer.tsx`.
+ * see the guard in `src/routes/_authed/-timer.tsx`.
  *
  * A function rather than three lines in the page, because the assertion that
  * holds it is "this equals the sum of the numbers in the column headers" and

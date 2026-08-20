@@ -8,11 +8,8 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
-import {
-  InvoicePage,
-  InvoiceUnreachable,
-  Route,
-} from "@/routes/_authed/invoices_.$invoiceId"
+import { InvoicePage, InvoiceUnreachable } from "@/routes/_authed/-invoice-record"
+import { Route } from "@/routes/_authed/invoices_.$invoiceId"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
