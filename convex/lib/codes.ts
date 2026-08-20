@@ -112,6 +112,21 @@ export type TraceErrorCode =
    *  on the code would otherwise send someone to re-encode a perfectly good
    *  file instead of removing an old track. */
   | "LIBRARY_FULL"
+  /** A meeting that cannot become an entry at all: all-day, so it has no clock,
+   *  or cancelled, so it did not happen. Its own code rather than NOT_FOUND —
+   *  the meeting is right there on the grid, and telling someone it does not
+   *  exist would send them looking for a sync problem that is not there. */
+  | "NOT_TRACKABLE"
+  /** Undo was asked to reverse an entry that did not come from a meeting.
+   *  Reachable only from a stale client, and reported rather than ignored: a
+   *  silent no-op on an undo is the failure a user is least able to explain,
+   *  because they pressed the recovery control and nothing changed. */
+  | "NOT_A_SWITCH"
+  /** The switch is older than the undo window. Distinct from NOT_A_SWITCH
+   *  because the answer is different: that one means never, this one means the
+   *  moment has passed and the entry is now ordinary recorded time the user can
+   *  edit or delete like any other. */
+  | "UNDO_EXPIRED"
 
 /*
  * THERE ARE NO GOOGLE CODES HERE, and their absence is deliberate.

@@ -1,6 +1,9 @@
 import { v } from "convex/values"
-import { internalMutation } from "./_generated/server"
+import { internalMutation, mutation } from "./_generated/server"
+import { requireUserId } from "./auth"
 import { createImpl, startImpl } from "./entries"
+import { traceError } from "./errors"
+import { isTrackable } from "./googleEvents"
 import { MAX_DURATION_MS } from "./lib/duration"
 import type { MutationCtx, QueryCtx } from "./_generated/server"
 import type { Doc, Id } from "./_generated/dataModel"
@@ -223,4 +226,225 @@ export const materialiseForTest = internalMutation({
     if (event === null) return null
     return await materialiseMeeting(ctx, args.userId, event, args.mode)
   },
+})
+
+/**
+ * The mirrored meeting a user-facing mutation was aimed at, or a refusal.
+ *
+ * The eligibility gate lives HERE rather than in `materialiseMeeting`, which
+ * filters nothing: the jobs that call that function have already chosen their
+ * work from an index, whereas everything below arrives from a client naming a
+ * calendar and an event, and a client can name anything.
+ */
+async function eventRowOrThrow(
+  ctx: MutationCtx,
+  userId: string,
+  calendarId: string,
+  eventId: string
+): Promise<Doc<"googleEvents">> {
+  const event = await ctx.db
+    .query("googleEvents")
+    .withIndex("by_user_calendar_event", (q) =>
+      q.eq("userId", userId).eq("calendarId", calendarId).eq("eventId", eventId)
+    )
+    .unique()
+  // NOT_FOUND rather than a silent no-op: the client just drew a checkbox for
+  // this meeting, so a miss means the mirror and the grid disagree, and the
+  // user should be told rather than left ticking a box that does nothing.
+  if (event === null) {
+    traceError("NOT_FOUND", "That meeting is not on this account.")
+  }
+  if (!isTrackable(event)) {
+    traceError("NOT_TRACKABLE", "That meeting cannot be tracked.")
+  }
+  return event
+}
+
+async function setTrackOnStartImpl(
+  ctx: MutationCtx,
+  userId: string,
+  calendarId: string,
+  eventId: string,
+  track: boolean
+) {
+  await eventRowOrThrow(ctx, userId, calendarId, eventId)
+  /*
+   * The tick only ever governs a FUTURE switch.
+   *
+   * Unticking a meeting that already produced an entry deletes nothing: that
+   * entry is recorded time, and this product does not remove recorded time on
+   * the user's behalf anywhere else either. The ghost stays suppressed because
+   * `entryId` is untouched.
+   */
+  await upsertTracking(ctx, userId, calendarId, eventId, {
+    trackOnStart: track,
+  })
+  return null
+}
+
+export const setTrackOnStart = mutation({
+  args: { calendarId: v.string(), eventId: v.string(), track: v.boolean() },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setTrackOnStartImpl(
+      ctx,
+      await requireUserId(ctx),
+      args.calendarId,
+      args.eventId,
+      args.track
+    ),
+})
+
+export const setTrackOnStartForUser = internalMutation({
+  args: {
+    userId: v.string(),
+    calendarId: v.string(),
+    eventId: v.string(),
+    track: v.boolean(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await setTrackOnStartImpl(
+      ctx,
+      args.userId,
+      args.calendarId,
+      args.eventId,
+      args.track
+    ),
+})
+
+const trackNowReturns = v.union(
+  v.object({ entryId: v.id("timeEntries") }),
+  v.null()
+)
+
+/**
+ * **Track this** — the same materialisation the backfill runs, on demand.
+ *
+ * The path for a meeting that has already started or already finished, where a
+ * tick has nothing left to fire. A meeting still in progress becomes the
+ * running entry, dated from its own start; one that has ended becomes a
+ * completed entry over its own window. Both are idempotent through `clientKey`,
+ * so a double press returns the entry that already exists.
+ */
+async function trackNowImpl(
+  ctx: MutationCtx,
+  userId: string,
+  calendarId: string,
+  eventId: string
+) {
+  const event = await eventRowOrThrow(ctx, userId, calendarId, eventId)
+  const mode = event.endedAt <= Date.now() ? "completed" : "live"
+  const result = await materialiseMeeting(ctx, userId, event, mode)
+  return result === null ? null : { entryId: result.entryId }
+}
+
+export const trackNow = mutation({
+  args: { calendarId: v.string(), eventId: v.string() },
+  returns: trackNowReturns,
+  handler: async (ctx, args) =>
+    await trackNowImpl(
+      ctx,
+      await requireUserId(ctx),
+      args.calendarId,
+      args.eventId
+    ),
+})
+
+export const trackNowForUser = internalMutation({
+  args: { userId: v.string(), calendarId: v.string(), eventId: v.string() },
+  returns: trackNowReturns,
+  handler: async (ctx, args) =>
+    await trackNowImpl(ctx, args.userId, args.calendarId, args.eventId),
+})
+
+/**
+ * How long the way back stays open.
+ *
+ * Long enough to notice a wrong interruption, short enough that the offer is
+ * not still on screen an hour into the call. The client uses the same number to
+ * decide whether to OFFER; this one decides whether to ALLOW, so a stale tab
+ * cannot reverse a switch from this morning.
+ */
+export const UNDO_WINDOW_MS = 5 * 60 * 1_000
+
+/**
+ * Reverses one switch: delete the meeting entry, reopen what it closed.
+ *
+ * The switch is the one write in this feature that happens at a moment the user
+ * did not choose, so it is the one that gets a way back. Everything it needs is
+ * derivable from the entry itself — `clientKey` names the meeting and the
+ * tracking row names what was interrupted — so the client passes an entry id
+ * and nothing else it could get wrong.
+ */
+async function undoSwitchImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryId: Id<"timeEntries">
+) {
+  const entry = await ctx.db.get(entryId)
+  if (entry === null || entry.userId !== userId) {
+    traceError("NOT_FOUND", "That entry is not on this account.")
+  }
+  if (entry.source !== "calendar") {
+    traceError("NOT_A_SWITCH", "That entry did not come from a meeting.")
+  }
+  const key = parseMeetingClientKey(entry.clientKey)
+  if (key === null) {
+    traceError("NOT_A_SWITCH", "That entry did not come from a meeting.")
+  }
+  if (Date.now() - entry.startedAt > UNDO_WINDOW_MS) {
+    traceError("UNDO_EXPIRED", "That switch is too old to undo.")
+  }
+
+  /*
+   * The interruption is read from the TRACKING row, not from the entry.
+   *
+   * `materialiseMeeting` omits `interruptedEntryId` on a replay rather than
+   * writing null, so the row still names what the FIRST switch closed however
+   * many times the cron re-ran the same minute. Recomputing it here from
+   * anything else would lose exactly that.
+   */
+  const tracking = await trackingRow(ctx, userId, key.calendarId, key.eventId)
+  const interrupted =
+    tracking === null || tracking.interruptedEntryId === null
+      ? null
+      : await ctx.db.get(tracking.interruptedEntryId)
+
+  // A HARD delete, not the soft one `remove` uses. This entry is being un-made
+  // rather than removed: it records nothing the user did, and leaving it in the
+  // trash would put a meeting they never tracked into their restore list.
+  await ctx.db.delete(entry._id)
+
+  if (interrupted !== null && interrupted.userId === userId) {
+    await ctx.db.patch(interrupted._id, {
+      endedAt: null,
+      durationMs: null,
+      updatedAt: Date.now(),
+    })
+  }
+
+  if (tracking !== null) {
+    await ctx.db.patch(tracking._id, {
+      entryId: null,
+      interruptedEntryId: null,
+      trackOnStart: false,
+      updatedAt: Date.now(),
+    })
+  }
+  return null
+}
+
+export const undoSwitch = mutation({
+  args: { entryId: v.id("timeEntries") },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await undoSwitchImpl(ctx, await requireUserId(ctx), args.entryId),
+})
+
+export const undoSwitchForUser = internalMutation({
+  args: { userId: v.string(), entryId: v.id("timeEntries") },
+  returns: v.null(),
+  handler: async (ctx, args) =>
+    await undoSwitchImpl(ctx, args.userId, args.entryId),
 })
