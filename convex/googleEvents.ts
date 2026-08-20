@@ -198,3 +198,100 @@ export function mapGoogleEvent(
 export function isDrawable(row: { isAllDay: boolean }): boolean {
   return !row.isAllDay
 }
+
+/*
+ * The predicates the two write jobs share.
+ *
+ * Pure, and here rather than beside their callers for the reason
+ * `lib/entryTimes.ts` gives: a rule that decides whether billable time gets
+ * recorded is worth testing directly, against its own table of cases, rather
+ * than through a cron that has to be stood up to ask it one question.
+ */
+
+export type TrackableEvent = { isAllDay: boolean; status: string }
+
+/**
+ * Whether a meeting is allowed to become an entry AT ALL.
+ *
+ * Two rules, and both are mechanical rather than judgements: an all-day event
+ * has no clock so it has no defensible span, and a cancelled meeting did not
+ * happen. Declined, tentative and unanswered meetings are all trackable — the
+ * user's tick already said what they wanted, and overriding it from an RSVP is
+ * the guess this design exists to remove.
+ */
+export function isTrackable(event: TrackableEvent): boolean {
+  return !event.isAllDay && event.status !== "cancelled"
+}
+
+/**
+ * How far back the live switch will reach.
+ *
+ * Ten minutes is the blast radius: long enough that a tick missed to a deploy,
+ * a cold start or a minute of Convex being busy still lands on the right
+ * meeting, short enough that a deployment coming back after lunch cannot seize
+ * the timer for something that finished hours ago.
+ */
+export const SWITCH_LOOKBACK_MS = 10 * 60 * 1_000
+
+export function isDueForSwitch(startedAt: number, now: number): boolean {
+  return startedAt <= now && startedAt > now - SWITCH_LOOKBACK_MS
+}
+
+export type SwitchCandidate = { eventId: string; startedAt: number }
+
+/**
+ * One meeting out of everything due this minute.
+ *
+ * Latest start wins, because the most recent thing to begin is the one the user
+ * is in. `eventId` breaks the tie so that two meetings starting on the same
+ * instant resolve the same way on every retry — the alternative is a switch
+ * that flips between two entries as the cron re-runs.
+ */
+export function pickSwitch<T extends SwitchCandidate>(
+  candidates: Array<T>
+): T | null {
+  let best: T | null = null
+  for (const candidate of candidates) {
+    if (best === null) {
+      best = candidate
+      continue
+    }
+    if (candidate.startedAt > best.startedAt) {
+      best = candidate
+      continue
+    }
+    if (
+      candidate.startedAt === best.startedAt &&
+      candidate.eventId < best.eventId
+    ) {
+      best = candidate
+    }
+  }
+  return best
+}
+
+export type EntrySpan = { startedAt: number; endedAt: number | null }
+
+/**
+ * Whether recorded time already covers a meeting's window.
+ *
+ * THE OVERLAP RULE, and it lives here and only here — the backfill consults it,
+ * the live switch does not need to, because the switch *closes* the running
+ * entry and so cannot create an overlap.
+ *
+ * A running entry counts as spanning `[startedAt, now]`. Without that, a timer
+ * running since nine would be invisible to this test at noon and every meeting
+ * inside it would be backfilled on top of real recorded time.
+ *
+ * Touching endpoints do not overlap. One entry ending on the instant the next
+ * begins is the switch's own contract, not a collision.
+ */
+export function overlapsWindow(
+  entry: EntrySpan,
+  windowStart: number,
+  windowEnd: number,
+  now: number
+): boolean {
+  const end = entry.endedAt ?? Math.max(now, entry.startedAt)
+  return entry.startedAt < windowEnd && end > windowStart
+}

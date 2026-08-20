@@ -6,7 +6,15 @@
 // offset that is not the user's zone, and an attendee list long enough to blow
 // the document limit.
 import { describe, expect, it } from "vitest"
-import { isDrawable, mapGoogleEvent } from "./googleEvents"
+import {
+  isDrawable,
+  isDueForSwitch,
+  isTrackable,
+  mapGoogleEvent,
+  overlapsWindow,
+  pickSwitch,
+  SWITCH_LOOKBACK_MS,
+} from "./googleEvents"
 import { MAX_ATTENDEES, MAX_DESCRIPTION_LENGTH } from "./schema"
 
 const CAL = "primary"
@@ -162,5 +170,140 @@ describe("isDrawable", () => {
   it("excludes an all-day event", () => {
     expect(isDrawable({ isAllDay: true })).toBe(false)
     expect(isDrawable({ isAllDay: false })).toBe(true)
+  })
+})
+
+describe("isTrackable", () => {
+  it("accepts an ordinary confirmed meeting", () => {
+    expect(isTrackable({ isAllDay: false, status: "confirmed" })).toBe(true)
+  })
+
+  it("refuses an all-day event, which has no clock", () => {
+    expect(isTrackable({ isAllDay: true, status: "confirmed" })).toBe(false)
+  })
+
+  it("refuses a cancelled meeting, which did not happen", () => {
+    expect(isTrackable({ isAllDay: false, status: "cancelled" })).toBe(false)
+  })
+
+  it("accepts a meeting the user did not accept", () => {
+    // The tick already said what the user wanted. Re-deciding it from an RSVP
+    // is exactly the guess this design exists to remove — someone who declines
+    // an invite and attends anyway is describing a normal Tuesday.
+    expect(isTrackable({ isAllDay: false, status: "tentative" })).toBe(true)
+  })
+})
+
+describe("isDueForSwitch", () => {
+  const now = Date.parse("2026-08-20T10:00:00.000Z")
+
+  it("is due for a meeting that started this minute", () => {
+    expect(isDueForSwitch(now, now)).toBe(true)
+    expect(isDueForSwitch(now - 30_000, now)).toBe(true)
+  })
+
+  it("is due anywhere inside the lookback, so a missed tick recovers", () => {
+    expect(isDueForSwitch(now - SWITCH_LOOKBACK_MS + 1, now)).toBe(true)
+  })
+
+  it("is not due for a meeting older than the lookback", () => {
+    // The blast radius. This is what stops a meeting that started three hours
+    // ago from seizing the timer when a deployment comes back up; anything
+    // older falls to backfill and becomes a completed entry over its own
+    // window instead of stealing the present.
+    expect(isDueForSwitch(now - SWITCH_LOOKBACK_MS - 1, now)).toBe(false)
+  })
+
+  it("is not due for a meeting that has not started", () => {
+    expect(isDueForSwitch(now + 1, now)).toBe(false)
+  })
+})
+
+describe("pickSwitch", () => {
+  it("takes the latest start when two meetings are both due", () => {
+    const picked = pickSwitch([
+      { eventId: "a", startedAt: 100 },
+      { eventId: "b", startedAt: 200 },
+    ])
+    expect(picked?.eventId).toBe("b")
+  })
+
+  it("breaks a tie on eventId, so the outcome is deterministic", () => {
+    // One running entry, always — the product's oldest invariant. Which of two
+    // simultaneous meetings wins matters less than that it is the same one on
+    // every retry of the same minute.
+    const picked = pickSwitch([
+      { eventId: "zulu", startedAt: 100 },
+      { eventId: "alpha", startedAt: 100 },
+    ])
+    expect(picked?.eventId).toBe("alpha")
+  })
+
+  it("is null for an empty list", () => {
+    expect(pickSwitch([])).toBeNull()
+  })
+})
+
+describe("overlapsWindow", () => {
+  const now = Date.parse("2026-08-20T12:00:00.000Z")
+  const start = Date.parse("2026-08-20T10:00:00.000Z")
+  const end = Date.parse("2026-08-20T11:00:00.000Z")
+
+  it("is true for a completed entry sitting inside the window", () => {
+    expect(
+      overlapsWindow(
+        { startedAt: start + 60_000, endedAt: end - 60_000 },
+        start,
+        end,
+        now
+      )
+    ).toBe(true)
+  })
+
+  it("is true for an entry that straddles the start", () => {
+    expect(
+      overlapsWindow(
+        { startedAt: start - 60_000, endedAt: start + 60_000 },
+        start,
+        end,
+        now
+      )
+    ).toBe(true)
+  })
+
+  it("is false for an entry that ends exactly when the window opens", () => {
+    // Touching is not overlapping. The switch's whole contract is that one
+    // entry ends on the instant the next begins, so treating that as an
+    // overlap would make every switched pair block its own backfill.
+    expect(
+      overlapsWindow({ startedAt: start - 60_000, endedAt: start }, start, end, now)
+    ).toBe(false)
+  })
+
+  it("is false for an entry that starts exactly when the window closes", () => {
+    expect(
+      overlapsWindow({ startedAt: end, endedAt: end + 60_000 }, start, end, now)
+    ).toBe(false)
+  })
+
+  it("treats a running entry as spanning up to now", () => {
+    // The case with no endedAt to compare, and the one that matters: a timer
+    // started at nine and still going at noon covers the ten o'clock meeting,
+    // and backfilling over it would shadow real recorded time with the
+    // calendar's plan for it.
+    expect(
+      overlapsWindow(
+        { startedAt: start - 60 * 60 * 1_000, endedAt: null },
+        start,
+        end,
+        now
+      )
+    ).toBe(true)
+  })
+
+  it("is false for a running entry that started after the window closed", () => {
+    expect(
+      overlapsWindow({ startedAt: end + 60_000, endedAt: null }, start, end, now)
+    ).toBe(false)
   })
 })
