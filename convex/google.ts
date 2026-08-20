@@ -702,6 +702,18 @@ export const syncAccount = internalAction({
       throw error
     }
 
+    /*
+     * The backfill rides the sync's tail rather than having a cron of its own.
+     *
+     * It can only do anything when the mirror has just changed, which is
+     * exactly here — and a separate schedule would race this one for the same
+     * rows. Scheduled rather than awaited so that a backfill which throws
+     * cannot fail a sync that has already committed its rows and its token.
+     */
+    await ctx.scheduler.runAfter(0, internal.googleBackfill.backfillUser, {
+      userId: args.userId,
+    })
+
     return null
   },
 })
