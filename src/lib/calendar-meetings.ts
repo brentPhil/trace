@@ -33,6 +33,14 @@ export type MeetingEventProps = {
   startedAt: number
   endedAt: number
   trackOnStart: boolean
+  /**
+   * The meeting has not begun, so a tick still has a switch left to fire.
+   *
+   * Computed here rather than in the render hook so the panel's memo does not
+   * re-derive it per block per second — the hook runs once per block per
+   * render, this runs once per meeting per mapping.
+   */
+  startable: boolean
 }
 
 /** The same discriminator on an ENTRY's props, so the panel can narrow either
@@ -44,8 +52,15 @@ export function isMeetingEvent(
   return "kind" in props && props.kind === "meeting"
 }
 
+/**
+ * @param nowMs The instant `startable` is measured against. Only that one
+ * field reads it — a meeting's start and end are stored instants and nothing
+ * else here moves with the clock, which is what lets the panel hand this a
+ * PINNED value rather than the once-a-second one. See `meetingClockMs` there.
+ */
 export function meetingEvents(
-  meetings: Array<Meeting>
+  meetings: Array<Meeting>,
+  nowMs: number
 ): Array<EventInput & { extendedProps: MeetingEventProps }> {
   const events: Array<EventInput & { extendedProps: MeetingEventProps }> = []
 
@@ -98,6 +113,9 @@ export function meetingEvents(
         startedAt: meeting.startedAt,
         endedAt: meeting.endedAt,
         trackOnStart: meeting.trackOnStart,
+        // `>`, not `>=`: at the start instant itself the switch has already
+        // fired, so there is nothing left for a tick to instruct.
+        startable: meeting.startedAt > nowMs,
       },
     })
   }

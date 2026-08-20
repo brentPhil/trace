@@ -75,6 +75,39 @@ const LINE_PX = 16
 const LINE_GAP_PX = 2
 const BLOCK_CHROME_PX = 1 + 2 + 4
 
+/**
+ * The mark that says "this node is the tick, not the block".
+ *
+ * A DATA ATTRIBUTE RATHER THAN A CLASS, because the class list on that input is
+ * styling and a styling change must not be able to break a behavioural guard.
+ * Spread onto the element so the string is written once.
+ */
+const TRACK_BOX_MARK = { "data-track-box": "" } as const
+
+/**
+ * Was this click aimed at a meeting's tick rather than at its block?
+ *
+ * THIS IS THE ONLY PLACE EARLY ENOUGH, and that is worth stating because the
+ * obvious answer — `event.stopPropagation()` in the checkbox's own React
+ * handlers — does not work and looks like it does.
+ *
+ * FullCalendar's `EventClicking` is a NATIVE delegated `click` listener bound
+ * on the calendar's root element. React 17+ binds ALL of its own listeners on
+ * the root CONTAINER, which is an ancestor of that element. So on the way up, a
+ * click on the checkbox reaches FullCalendar's listener first and React's
+ * second: by the time any `onClick`/`onChange` handler in this tree runs, the
+ * popover has already been asked to open, and calling `stopPropagation` there
+ * stops nothing. (Stopping it NATIVELY on the input would be early enough, but
+ * would also stop React ever seeing the click, which is where `onChange` comes
+ * from — so the toggle would stop working instead.)
+ *
+ * `eventClick` runs inside FullCalendar's listener, which makes it the first
+ * code of ours the click reaches, and the guard belongs there.
+ */
+function isTrackBoxTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-track-box]") !== null
+}
+
 /** What a block of this pixel height can show without clipping any of it. */
 type BlockFit = { titleLines: 0 | 1 | 2; time: boolean; project: boolean }
 
@@ -371,6 +404,7 @@ export function CalendarPanel({
   tags,
   actions,
   meetings = NO_MEETINGS,
+  onSetTrack,
 }: {
   entries: Array<Doc<"timeEntries">>
   /**
@@ -426,6 +460,25 @@ export function CalendarPanel({
    * existing test — renders exactly as before.
    */
   meetings?: Array<Meeting>
+  /**
+   * Tick or untick a meeting — `api.googleTrack.setTrackOnStart`, handed down
+   * rather than reached for, the same rule `actions` follows.
+   *
+   * OPTIONAL, and its absence is what draws NO CHECKBOX. A harness with no
+   * Google link behind it renders the grid it always did, and an inert control
+   * on a block is worse than no control: the user ticks it, nothing happens,
+   * and the meeting quietly does not start.
+   */
+  onSetTrack?: (calendarId: string, eventId: string, track: boolean) => void
+  /**
+   * Start a meeting that has already begun — `api.googleTrack.trackNow`.
+   *
+   * DECLARED HERE, CONSUMED IN THE POPOVER. The block itself offers nothing on
+   * a meeting that has started (there is no future switch left for a tick to
+   * instruct), so this travels through to `CalendarMeetingPopover`'s "Track
+   * this". The panel's own render path does not read it.
+   */
+  onTrackNow?: (calendarId: string, eventId: string) => void
 }) {
   /*
    * THE CLOCK, ADMITTED ONLY WHEN SOMETHING IS ACTUALLY RUNNING.
@@ -542,7 +595,33 @@ export function CalendarPanel({
    * constant: a fresh `[]` default would bust this memo on every render and
    * put the cost straight back.
    */
-  const meetingBlocks = useMemo(() => meetingEvents(meetings), [meetings])
+  /*
+   * THE CLOCK ADMITTED TO THE MEETING HALF, AND ONLY WHERE IT CHANGES AN ANSWER.
+   *
+   * `startable` is `startedAt > nowMs` — a STEP function, whose only
+   * transitions are the meeting starts themselves. Handing the memo below the
+   * raw once-a-second `nowMs` would rebuild the whole array every second,
+   * reallocating two `Date`s per meeting, which is the exact cost the note
+   * above says this memo was split out to avoid.
+   *
+   * So the clock enters as the latest start that has already passed. For a
+   * meeting whose start is still ahead, that value is below `nowMs` and so
+   * below its own start too — `startable` stays true. For one that has begun,
+   * its start is at or below this maximum — `startable` is false. Identical
+   * output to the live clock, and it only moves when a meeting begins.
+   */
+  const meetingClockMs = meetings.reduce(
+    (latest, meeting) =>
+      meeting.startedAt <= nowMs && meeting.startedAt > latest
+        ? meeting.startedAt
+        : latest,
+    0
+  )
+
+  const meetingBlocks = useMemo(
+    () => meetingEvents(meetings, meetingClockMs),
+    [meetings, meetingClockMs]
+  )
 
   const events = useMemo(
     () => [...calendarEvents(entries, clockMs), ...meetingBlocks],
@@ -703,6 +782,16 @@ export function CalendarPanel({
        * is a second entry to edit.
        */
       eventClick={(info) => {
+        /*
+         * FIRST, and BEFORE the `preventDefault` below rather than after it.
+         *
+         * A checkbox's checked state is set before the click is dispatched and
+         * REVERTED if anything cancels that click — so a `preventDefault` here,
+         * even followed by an early return, would untick the box the user just
+         * ticked. Returning before it leaves the click entirely alone, which is
+         * what lets React's `onChange` on the input see it and fire.
+         */
+        if (isTrackBoxTarget(info.jsEvent.target)) return
         info.jsEvent.preventDefault()
         const props = propsOf(info.event)
         if (isMeetingEvent(props)) {
@@ -1123,14 +1212,48 @@ export function CalendarPanel({
               className="flex min-w-0 flex-col gap-0.5"
             >
               {meetingFit.titleLines === 0 ? null : (
-                <span
-                  className={cn(
-                    "text-xs font-medium",
-                    meetingFit.titleLines === 1 ? "truncate" : "line-clamp-2"
-                  )}
-                >
-                  {titleOf(info.event)}
-                </span>
+                <div className="flex min-w-0 items-start gap-1">
+                  {props.startable && onSetTrack !== undefined ? (
+                    <input
+                      type="checkbox"
+                      aria-label={`Track ${titleOf(info.event)}`}
+                      checked={props.trackOnStart}
+                      {...TRACK_BOX_MARK}
+                      /*
+                       * THE KEYBOARD HALF of keeping the popover shut. See
+                       * `isTrackBoxTarget` for the click half and for why the
+                       * two need different mechanisms.
+                       *
+                       * Registering `eventClick` is what makes FullCalendar put
+                       * `tabIndex={0}` and a REACT `onKeyDown` on the segment,
+                       * which fires `eventClick` on Enter or Space and then
+                       * calls `preventDefault()`. A Space aimed at this box
+                       * bubbles into that handler: the popover opens over the
+                       * control, and the `preventDefault` cancels the toggle
+                       * the user asked for. That handler is React's, in React's
+                       * own tree above this one, so stopping the synthetic
+                       * event here is early enough to reach it.
+                       */
+                      onKeyDown={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        onSetTrack(
+                          props.calendarId,
+                          props.eventId,
+                          event.currentTarget.checked
+                        )
+                      }}
+                      className="mt-0.5 size-3 shrink-0 rounded-[3px] border border-edge-raised bg-ground accent-current focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    />
+                  ) : null}
+                  <span
+                    className={cn(
+                      "min-w-0 text-xs font-medium",
+                      meetingFit.titleLines === 1 ? "truncate" : "line-clamp-2"
+                    )}
+                  >
+                    {titleOf(info.event)}
+                  </span>
+                </div>
               )}
               {meetingFit.time ? (
                 <span className="font-mono tabular-nums tracking-[-0.02em] truncate text-[0.6875rem]">

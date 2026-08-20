@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
-import { convexQuery } from "@convex-dev/react-query"
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { WrapText } from "lucide-react"
 import { CalendarPanel, NO_MEETINGS } from "@/components/calendar/calendar-panel"
@@ -24,10 +24,13 @@ import { RangeBar } from "@/components/timer/range-bar"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
 import { useEntryActions } from "@/hooks/use-entry-actions"
+import { useLatest } from "@/hooks/use-latest"
 import { boundsOf, dayTotals, rangeOf, totalOverDays } from "@/lib/calendar-events"
+import { errorMessage } from "@/lib/error-message"
 import { groupByDay } from "@/lib/group-entries"
 import { periodTotals } from "@/lib/period-totals"
 import {
@@ -327,6 +330,32 @@ export function Timer() {
    * always answers `[]`, so nothing here changes what that account sees.
    */
   const meetingsQuery = useQuery(convexQuery(api.google.listMeetings, rangeArgs))
+
+  /*
+   * THE TWO WRITES A MEETING BLOCK CAN MAKE, held here rather than in the panel
+   * — `eslint.config.js` forbids `useConvexMutation` under `src/components` and
+   * says why: a component that reaches for its own writes cannot be rendered
+   * against fixtures, and the design harnesses depend on being able to.
+   *
+   * `useLatest`-wrapped for a stable identity, the same wrapping every mutation
+   * on /settings carries: the handlers below are inline props on a component
+   * that re-renders once a second, and a fresh closure per tick is a fresh
+   * `eventContent` per tick for every block on the grid.
+   */
+  const setTrack = useLatest(useConvexMutation(api.googleTrack.setTrackOnStart))
+  const trackNow = useLatest(useConvexMutation(api.googleTrack.trackNow))
+
+  /*
+   * A FAILED TICK HAS TO SAY SO. There is no optimistic update behind these:
+   * the checkbox is drawn from `trackOnStart` on the mirrored row, so a write
+   * that throws leaves the box exactly where it was and the only evidence the
+   * user gets is this line. /settings raises its Google failures the same way,
+   * through the same two functions.
+   */
+  const toasts = Toast.useToastManager()
+  const reportWrite = useLatest((thrown: unknown) => {
+    toasts.add({ title: errorMessage(thrown), priority: "high" })
+  })
 
   /*
    * The unbounded log, exactly as before: all the way back, 50 rows at a time.
@@ -738,6 +767,12 @@ export function Timer() {
               projectsById={projectsById}
               tags={tags}
               actions={entryActions}
+              onSetTrack={(calendarId, eventId, track) => {
+                void setTrack({ calendarId, eventId, track }).catch(reportWrite)
+              }}
+              onTrackNow={(calendarId, eventId) => {
+                void trackNow({ calendarId, eventId }).catch(reportWrite)
+              }}
             />
           </div>
         ) : listPending ? (

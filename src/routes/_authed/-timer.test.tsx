@@ -14,13 +14,16 @@ import { TIMER_VIEW_KEY } from "@/lib/timer-view"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
 import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
+import { getFunctionName } from "convex/server"
 import { api } from "../../../convex/_generated/api"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type { CalendarRange } from "@/lib/calendar-events"
 import type * as ConvexReactModuleType from "convex/react"
+import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
 import type * as UseClockModuleType from "@/hooks/use-clock"
 
 type ConvexReactModule = typeof ConvexReactModuleType
+type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
 type UseClockModule = typeof UseClockModuleType
 
 /*
@@ -138,9 +141,13 @@ vi.mock("@/components/calendar/calendar-panel", () => ({
   CalendarPanel: ({
     entries,
     range,
+    onSetTrack,
+    onTrackNow,
   }: {
     entries: Array<Doc<"timeEntries">>
     range: CalendarRange
+    onSetTrack?: (calendarId: string, eventId: string, track: boolean) => void
+    onTrackNow?: (calendarId: string, eventId: string) => void
   }) => (
     <div
       data-testid="calendar-panel"
@@ -152,6 +159,20 @@ vi.mock("@/components/calendar/calendar-panel", () => ({
       {entries.map((entry) => (
         <span key={entry._id}>{`block: ${entry.title}`}</span>
       ))}
+      {/*
+        THE TWO WRITES THE GRID CAN MAKE, exposed as buttons so the page's own
+        wiring is assertable. What the real panel draws for them is a checkbox
+        on a meeting block and a verb in its popover — tested there. What is
+        only testable HERE is that the page turns the panel's three loose
+        arguments into the object shape the mutation actually takes, which no
+        typecheck of the panel can see.
+      */}
+      <button onClick={() => onSetTrack?.("primary", "evt_1", true)}>
+        stub track on
+      </button>
+      <button onClick={() => onTrackNow?.("primary", "evt_1")}>
+        stub track now
+      </button>
     </div>
   ),
 }))
@@ -168,6 +189,28 @@ vi.mock("@/hooks/use-entry-edit-mutations", () => ({
 vi.mock("@/hooks/use-entry-actions", () => ({
   useEntryActions: () => ({}),
 }))
+
+/*
+ * The two meeting writes the grid is handed, as spies.
+ *
+ * `useConvexMutation` reaches for a live Convex client, which this harness does
+ * not mount — so the page's first direct mutation would fail every case in this
+ * file rather than only the ones that press it. Keyed by function name, the
+ * same shape `-settings.test.tsx` uses for the same reason.
+ */
+const setTrackOnStart = vi.fn(async () => null)
+const trackNow = vi.fn(async () => null)
+
+vi.mock("@convex-dev/react-query", async (importOriginal) => {
+  const actual = await importOriginal<ConvexReactQueryModule>()
+  return {
+    ...actual,
+    useConvexMutation: (reference: Parameters<typeof getFunctionName>[0]) =>
+      getFunctionName(reference) === "googleTrack:trackNow"
+        ? trackNow
+        : setTrackOnStart,
+  }
+})
 
 /* The same hand-driven `usePaginatedQuery` double `-reports.test.tsx` uses:
  * the real hook wants a subscription this test does not have, and the branch
@@ -813,5 +856,60 @@ describe("Timer — the unbounded log", () => {
     renderTimer()
 
     expect(screen.getByText("Load earlier entries")).toBeTruthy()
+  })
+})
+
+/*
+ * THE MEETING WRITES, from the grid's loose arguments to the mutation's object.
+ *
+ * The panel says `(calendarId, eventId, track)` because that is what a block
+ * has; the Convex function takes `{ calendarId, eventId, track }`. The join is
+ * this page's, it is invisible to a typecheck on either side of it, and a
+ * transposed pair here would tick the wrong meeting.
+ */
+describe("Timer — ticking a meeting", () => {
+  const openCalendar = () => {
+    renderTimer()
+    fireEvent.click(tab("Calendar"))
+  }
+
+  beforeEach(() => {
+    setTrackOnStart.mockClear()
+    trackNow.mockClear()
+  })
+
+  it("hands setTrackOnStart the meeting the grid named", () => {
+    openCalendar()
+    fireEvent.click(screen.getByRole("button", { name: "stub track on" }))
+    expect(setTrackOnStart).toHaveBeenCalledWith({
+      calendarId: "primary",
+      eventId: "evt_1",
+      track: true,
+    })
+  })
+
+  it("hands trackNow the meeting the popover named", () => {
+    openCalendar()
+    fireEvent.click(screen.getByRole("button", { name: "stub track now" }))
+    expect(trackNow).toHaveBeenCalledWith({
+      calendarId: "primary",
+      eventId: "evt_1",
+    })
+  })
+
+  it("says so when the write fails, rather than failing silently", async () => {
+    // No optimistic update stands behind these: the checkbox is drawn from the
+    // mirrored row, so a rejected write leaves the box exactly where it was and
+    // this line is the only evidence the user gets.
+    setTrackOnStart.mockRejectedValueOnce(new Error("ConvexError: whatever"))
+    openCalendar()
+    fireEvent.click(screen.getByRole("button", { name: "stub track on" }))
+    // Through `errorMessage`, which refuses to print a Convex internal at a
+    // user: anything that is not a trace error becomes this one sentence.
+    // `findAll`: Base UI renders the title twice — once in the toast and once
+    // in the offscreen live region it announces from.
+    expect(
+      (await screen.findAllByText("That didn't save. Try again.")).length
+    ).toBeGreaterThan(0)
   })
 })

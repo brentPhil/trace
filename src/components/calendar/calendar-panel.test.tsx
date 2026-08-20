@@ -8,8 +8,10 @@ import type { CalendarSize } from "@/lib/calendar-label"
 import type { Meeting } from "@/lib/calendar-meetings"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as CalendarEventsModuleType from "@/lib/calendar-events"
+import type * as CalendarMeetingsModuleType from "@/lib/calendar-meetings"
 
 type CalendarEventsModule = typeof CalendarEventsModuleType
+type CalendarMeetingsModule = typeof CalendarMeetingsModuleType
 
 /*
  * `drawnDays` runs once per `datesSet`, and nowhere else in this component —
@@ -19,6 +21,27 @@ type CalendarEventsModule = typeof CalendarEventsModuleType
  * actually ruined is scroll position, and jsdom has no layout.
  */
 const { datesSetCount } = vi.hoisted(() => ({ datesSetCount: { n: 0 } }))
+
+/*
+ * And the same trick on the meeting mapper, for the cost `startable` put at
+ * risk. It is derived from the clock, and the clock ticks once a second for the
+ * life of the tab — so the obvious wiring (hand `meetingEvents` the live
+ * `nowMs`) rebuilds the whole array, and two `Date`s per meeting, every second
+ * for an input that has not changed. That is the exact regression the panel's
+ * own note above `meetingBlocks` records having already been made once.
+ */
+const { mapCount } = vi.hoisted(() => ({ mapCount: { n: 0 } }))
+
+vi.mock("@/lib/calendar-meetings", async (importOriginal) => {
+  const actual = await importOriginal<CalendarMeetingsModule>()
+  return {
+    ...actual,
+    meetingEvents: (...args: Parameters<typeof actual.meetingEvents>) => {
+      mapCount.n += 1
+      return actual.meetingEvents(...args)
+    },
+  }
+})
 
 vi.mock("@/lib/calendar-events", async (importOriginal) => {
   // The module's type is pulled in at the top of the file rather than written
@@ -128,6 +151,31 @@ function meetingFixture(over: Partial<Meeting> = {}): Meeting {
   }
 }
 
+/**
+ * 2026-08-11 14:00 Manila — two hours AFTER `NOW`, and inside the default week.
+ *
+ * `meetingFixture` starts at 02:00Z, which is two hours BEFORE `NOW`: the
+ * default meeting on this grid has already begun. That is what `pastMeeting`
+ * names, so the tests below say which side of the clock they mean rather than
+ * relying on a reader noticing the two constants.
+ */
+const FUTURE_START = Date.parse("2026-08-11T06:00:00.000Z")
+
+/** A meeting the user could still tick: it has not started. Half an hour, which
+ *  `blockFit` gives one title line — the room the checkbox shares. */
+function futureMeeting(over: Partial<Meeting> = {}): Meeting {
+  return meetingFixture({
+    startedAt: FUTURE_START,
+    endedAt: FUTURE_START + 1_800_000,
+    ...over,
+  })
+}
+
+/** A meeting that has already begun. The bare fixture is one. */
+function pastMeeting(over: Partial<Meeting> = {}): Meeting {
+  return meetingFixture(over)
+}
+
 type PanelProps = Parameters<typeof CalendarPanel>[0]
 
 /**
@@ -212,6 +260,28 @@ function blockSaying(container: HTMLElement, text: string): HTMLElement {
   )
   if (found === undefined) throw new Error(`no block reading "${text}"`)
   return found
+}
+
+/**
+ * The tick on a meeting's block, by ROLE — with two concessions to jsdom, both
+ * forced by the `visibility: hidden` harness `blocks` describes above.
+ *
+ * `hidden: true`, because a role query excludes anything the accessibility tree
+ * calls hidden, and every block in this environment is.
+ *
+ * And the LABEL is matched off the attribute rather than through `name:`.
+ * dom-accessibility-api returns an empty accessible name for a node inside a
+ * hidden subtree — it refuses to walk one — so `name: /track standup/i` matches
+ * nothing here even though the label is on the element and correct in a
+ * browser. The attribute is the same claim, asserted where it can be seen.
+ */
+function trackBox(container: HTMLElement): HTMLInputElement | null {
+  return (
+    within(container)
+      .queryAllByRole<HTMLInputElement>("checkbox", { hidden: true })
+      .find((box) => /^track /i.test(box.getAttribute("aria-label") ?? "")) ??
+    null
+  )
 }
 
 afterEach(cleanup)
@@ -889,6 +959,188 @@ describe("CalendarPanel", () => {
       expect(
         screen.getByRole("link", { name: /Google Calendar/i })
       ).toBeTruthy()
+    })
+
+    describe("the tick on the block", () => {
+      /** The popover's own observable — the link out to Google, which nothing
+       *  else on this grid renders. The same thing the click test above asserts
+       *  the presence of, asserted absent. */
+      const popover = () =>
+        screen.queryByRole("link", { name: /Google Calendar/i })
+
+      it("ticks a meeting without opening its popover", () => {
+        const onSetTrack = vi.fn()
+        const { container } = renderPanel({
+          meetings: [futureMeeting()],
+          onSetTrack,
+        })
+
+        const box = trackBox(container)
+        expect(box).not.toBeNull()
+        fireEvent.click(box as HTMLInputElement)
+
+        expect(onSetTrack).toHaveBeenCalledWith("primary", "evt_1", true)
+        /*
+         * THE NESTED-CONTROL PROBLEM, and the reason this assertion is the
+         * point of the test rather than a footnote to it.
+         *
+         * FullCalendar's `EventClicking` is a NATIVE delegated `click` listener
+         * on the calendar's own root element — not a React `onClick` — so it
+         * sits BELOW React's root container in the tree and fires before React
+         * dispatches anything at all. A `stopPropagation` on the React
+         * synthetic event therefore arrives after the popover has already been
+         * asked to open. Only a listener bound on the checkbox itself is inside
+         * FullCalendar's, which is what the implementation does.
+         */
+        expect(popover()).toBeNull()
+      })
+
+      it("leaves a Space on the box alone, so it can still toggle", () => {
+        /*
+         * THE SECOND ROUTE INTO THE BLOCK, and it is not the click.
+         *
+         * Registering `eventClick` is what makes FullCalendar put `tabIndex={0}`
+         * and a REACT `onKeyDown` on the segment, which fires `eventClick` on
+         * Enter or Space and then calls `preventDefault()`. A Space aimed at
+         * this checkbox bubbles straight into it — and a cancelled Space is a
+         * checkbox that cannot be ticked from the keyboard at all.
+         *
+         * `fireEvent` returns false when a listener cancelled the event, which
+         * is the only handle jsdom gives on this: it has no activation
+         * behaviour for Space on a checkbox, so the toggle it would have
+         * prevented is not itself observable here.
+         */
+        const onSetTrack = vi.fn()
+        const { container } = renderPanel({
+          meetings: [futureMeeting()],
+          onSetTrack,
+        })
+        const box = trackBox(container) as HTMLInputElement
+        box.focus()
+        expect(fireEvent.keyDown(box, { key: " ", code: "Space" })).toBe(true)
+        expect(popover()).toBeNull()
+
+        // And the activation it leads to still reaches the handler.
+        fireEvent.click(box)
+        expect(onSetTrack).toHaveBeenCalledWith("primary", "evt_1", true)
+      })
+
+      it("still opens the popover from Enter on the block itself", () => {
+        // The keydown guard is on the CHECKBOX. The block's own keyboard
+        // activation — the thing that makes every block reachable — is
+        // untouched by it.
+        const { container } = renderPanel({
+          meetings: [futureMeeting()],
+          onSetTrack: vi.fn(),
+        })
+        fireEvent.keyDown(blockSaying(container, "Standup"), { key: "Enter" })
+        expect(popover()).toBeTruthy()
+      })
+
+      it("unticks a meeting that was ticked", () => {
+        const onSetTrack = vi.fn()
+        const { container } = renderPanel({
+          meetings: [futureMeeting({ trackOnStart: true })],
+          onSetTrack,
+        })
+        fireEvent.click(trackBox(container) as HTMLInputElement)
+        expect(onSetTrack).toHaveBeenCalledWith("primary", "evt_1", false)
+      })
+
+      it("names the meeting in the checkbox's label", () => {
+        // "Track" alone would be four identical controls on a busy morning, and
+        // the block's own title is not on the control.
+        const { container } = renderPanel({
+          meetings: [futureMeeting()],
+          onSetTrack: vi.fn(),
+        })
+        expect(trackBox(container)?.getAttribute("aria-label")).toBe(
+          "Track Standup"
+        )
+      })
+
+      it("draws a ticked meeting's checkbox as checked", () => {
+        const { container } = renderPanel({
+          meetings: [futureMeeting({ trackOnStart: true })],
+          onSetTrack: vi.fn(),
+        })
+        expect(trackBox(container)?.checked).toBe(true)
+      })
+
+      it("draws no checkbox on a meeting that has already started", () => {
+        const { container } = renderPanel({
+          meetings: [pastMeeting()],
+          onSetTrack: vi.fn(),
+        })
+        expect(trackBox(container)).toBeNull()
+      })
+
+      it("draws no checkbox on a block too short for text", () => {
+        // `blockFit` returning titleLines: 0 means the block has no room for
+        // content, and a control it cannot show is a control the user cannot
+        // hit. Five minutes is the 18px minimum block, which is under the 23px
+        // one text row costs.
+        const { container } = renderPanel({
+          meetings: [futureMeeting({ endedAt: FUTURE_START + 5 * 60_000 })],
+          onSetTrack: vi.fn(),
+        })
+        expect(blocks(container)[0]?.querySelector("span:not(.sr-only)")).toBeNull()
+        expect(trackBox(container)).toBeNull()
+      })
+
+      it("draws no checkbox at all for a caller that cannot write", () => {
+        // /timer passes the handler; a fixture harness with no Google link does
+        // not, and an inert checkbox is worse than none.
+        const { container } = renderPanel({ meetings: [futureMeeting()] })
+        expect(trackBox(container)).toBeNull()
+      })
+
+      describe("the clock behind `startable`", () => {
+        /*
+         * The meetings are held in a CONST, not rebuilt per render: the memo is
+         * keyed on that array's identity as well, and a fresh one per tick
+         * would make the count go up for a reason unrelated to the clock.
+         * /timer hands down `meetingsQuery.data`, which React Query keeps
+         * stable while the data has not changed.
+         */
+        const held = [futureMeeting()]
+
+        it("does not remap the meetings on a tick that changes nothing", () => {
+          const { rerender } = renderPanel({
+            meetings: held,
+            onSetTrack: vi.fn(),
+          })
+          const before = mapCount.n
+          rerender({ nowMs: NOW + 1000 })
+          rerender({ nowMs: NOW + 2000 })
+          expect(mapCount.n).toBe(before)
+        })
+
+        it("remaps when the clock crosses a meeting's start", () => {
+          // …and the pinning is not a way of ignoring the clock: the checkbox
+          // has to go away the moment its meeting begins, because there is no
+          // longer a future switch for it to instruct.
+          const { container, rerender } = renderPanel({
+            meetings: held,
+            onSetTrack: vi.fn(),
+          })
+          expect(trackBox(container)).not.toBeNull()
+
+          rerender({ nowMs: FUTURE_START })
+          expect(trackBox(container)).toBeNull()
+        })
+      })
+
+      it("still opens the popover when the block itself is clicked", () => {
+        // The guard is on the CHECKBOX, not on the block: everything else about
+        // a ticked meeting's block still opens the popover.
+        const { container } = renderPanel({
+          meetings: [futureMeeting()],
+          onSetTrack: vi.fn(),
+        })
+        fireEvent.click(blockSaying(container, "Standup"))
+        expect(popover()).toBeTruthy()
+      })
     })
   })
 })
