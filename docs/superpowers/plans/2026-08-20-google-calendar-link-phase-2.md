@@ -55,6 +55,17 @@ concurrently; a wave does not start until the previous one is committed.
 Wave B's three tasks all consume Task 1's exports and Task 2's predicates. They
 do not consume each other.
 
+**`convex/_generated/api.d.ts` is owned by nobody.** It is a tracked file, and a
+new module under `convex/` does not appear in `internal.*` until
+`npx convex codegen` regenerates it — so Tasks 4 and 5 must each RUN it, or
+their own tests cannot call the mutation they just wrote. Neither may COMMIT it:
+two agents regenerating one generated file concurrently is the one way this
+wave can corrupt itself. Whoever closes the wave runs `npx convex codegen` once
+more and commits the result, which by then names every new module.
+
+Task 1 hit this first and committed the file because it ran alone. Tasks 3, 6,
+7 and 8 add no new Convex module and need none of this.
+
 ## File Structure
 
 **New**
@@ -1931,7 +1942,19 @@ crons.interval(
 )
 ```
 
-- [ ] **Step 5: Run to verify they pass**
+- [ ] **Step 5: Regenerate the API surface**
+
+`internal.googleTick` does not exist until this runs — the tests call it, so
+they cannot pass without it.
+
+```bash
+npx convex codegen
+```
+
+Do **not** `git add convex/_generated/api.d.ts`. Task 5 is regenerating the same
+file concurrently; whoever closes the wave commits it once.
+
+- [ ] **Step 6: Run to verify they pass**
 
 ```bash
 npx vitest run convex/googleTick.test.ts
@@ -1939,13 +1962,13 @@ npx vitest run convex/googleTick.test.ts
 
 Expected: PASS, 11 tests.
 
-- [ ] **Step 6: Gates**
+- [ ] **Step 7: Gates**
 
 ```bash
 npm run typecheck && npm run lint
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add convex/googleTick.ts convex/googleTick.test.ts convex/crons.ts && git commit -m "feat(calendar): a ticked meeting takes the timer at its own start instant"
@@ -2307,7 +2330,19 @@ before it returns:
     })
 ```
 
-- [ ] **Step 5: Run to verify they pass**
+- [ ] **Step 5: Regenerate the API surface**
+
+`internal.googleBackfill` does not exist until this runs — both your tests and
+the `scheduler.runAfter` call you just added to `google.ts` reference it.
+
+```bash
+npx convex codegen
+```
+
+Do **not** `git add convex/_generated/api.d.ts`. Task 4 is regenerating the same
+file concurrently; whoever closes the wave commits it once.
+
+- [ ] **Step 6: Run to verify they pass**
 
 ```bash
 npx vitest run convex/googleBackfill.test.ts convex/google.test.ts
@@ -2315,13 +2350,13 @@ npx vitest run convex/googleBackfill.test.ts convex/google.test.ts
 
 Expected: PASS, both suites.
 
-- [ ] **Step 6: Gates**
+- [ ] **Step 7: Gates**
 
 ```bash
 npm run typecheck && npm run lint
 ```
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add convex/googleBackfill.ts convex/googleBackfill.test.ts convex/google.ts && git commit -m "feat(calendar): a missed switch becomes the hour it was, not the hour it is"
