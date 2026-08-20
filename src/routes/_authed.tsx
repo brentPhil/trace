@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-router"
 import { ConvexError } from "convex/values"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
-import { convexQuery } from "@convex-dev/react-query"
+import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
 import { buttonVariants } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
 import { AuthShell } from "@/components/auth-shell"
@@ -27,6 +27,8 @@ import {
   useTabTitleClock,
 } from "@/hooks/use-timer-effects"
 import { useMusicTracking } from "@/hooks/use-music-tracking"
+import { useLatest } from "@/hooks/use-latest"
+import { useSwitchUndo } from "@/lib/use-switch-undo"
 import { MusicProvider, useMusic } from "@/components/music/music-provider"
 import { MusicControls } from "@/components/music/music-controls"
 import { cn } from "@/lib/utils"
@@ -163,18 +165,37 @@ function AuthedShell() {
   useTabTitleClock(running, settings.tabTitleClock)
   useReplayPendingStart(running)
 
+  const toasts = Toast.useToastManager()
+
   const music = useMusic()
   useMusicTracking(running, {
     musicAutoplay: settings.musicAutoplay,
     musicOnStop: settings.musicOnStop,
   })
 
+  /*
+   * The way back from a switch nobody asked for — mounted HERE, beside the
+   * other hook that watches `running`, and not on /timer.
+   *
+   * `googleTick` is a one-minute server cron, so a ticked meeting can take the
+   * timer while the user is on /reports, on /invoices, or looking at nothing at
+   * all. This shell is the one mount that survives navigation, so it is the
+   * only place that can promise to announce EVERY switch; a toast on the timer
+   * page would catch the ones that happened while that page was open and
+   * silently miss the rest.
+   *
+   * `useLatest`-wrapped like every other raw mutation in this codebase:
+   * `useConvexMutation` returns a fresh function per render and the hook holds
+   * it in an effect's dependency array.
+   */
+  const undoSwitch = useLatest(useConvexMutation(api.googleTrack.undoSwitch))
+  useSwitchUndo(running, toasts, undoSwitch)
+
   const entryMutations = useEntryMutations()
   const editMutations = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
   const { createProject, ensureTag } = useClassifierMutations()
 
-  const toasts = Toast.useToastManager()
   const report = (thrown: unknown) => {
     toasts.add({
       title: errorMessage(thrown),
