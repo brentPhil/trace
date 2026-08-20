@@ -50,7 +50,7 @@ concurrently; a wave does not start until the previous one is committed.
 | A | 1, 2 | 1: `schema.ts`, `entries.ts`, `googleTrack.ts` · 2: `googleEvents.ts` |
 | B | 3, 4, 5 | 3: `googleTrack.ts` · 4: `googleTick.ts`, `crons.ts` · 5: `googleBackfill.ts`, `google.ts` |
 | C | 6 | `calendar-panel.tsx`, `-timer.tsx`, `calendar-meetings.ts` |
-| D | 7, 8 | 7: `calendar-meeting-popover.tsx` · 8: `use-switch-undo.ts`, `-timer.tsx` |
+| D | 7, 8 | 7: `calendar-meeting-popover.tsx` · 8: `use-switch-undo.ts`, `_authed.tsx` |
 
 Wave B's three tasks all consume Task 1's exports and Task 2's predicates. They
 do not consume each other.
@@ -93,7 +93,8 @@ Task 1 hit this first and committed the file because it ran alone. Tasks 3, 6,
   plumbed to the popover.
 - `src/components/calendar/calendar-meeting-popover.tsx` — the tick, or
   **Track this** on a meeting that has already started.
-- `src/routes/_authed/-timer.tsx` — the mutations, and the undo hook.
+- `src/routes/_authed.tsx` — the undo hook, in the shell so a switch is
+  announced whatever page is open.
 
 ---
 
@@ -2781,7 +2782,14 @@ git add src/components/calendar/calendar-meeting-popover.tsx src/components/cale
 
 **Files:**
 - Create: `src/lib/use-switch-undo.ts`
-- Modify: `src/routes/_authed/-timer.tsx`
+- Modify: `src/routes/_authed.tsx` — **the shell, not the timer page.**
+  The switch happens on a server cron, so it can land while the user is on
+  /reports, /invoices or nothing at all. A toast mounted on /timer would
+  announce only the switches that happened to occur while /timer was open, and
+  silently miss the rest — which is worse than no toast, because it teaches
+  people the app tells them and then it doesn't. `_authed.tsx` already holds
+  `running`, a toast manager, `errorMessage`, and `useMusicTracking(running, …)`
+  — a hook of exactly this shape, one line above where this one goes.
 - Test: `src/lib/use-switch-undo.test.ts`
 
 **Interfaces:**
@@ -2928,15 +2936,18 @@ export function useSwitchUndo(
 }
 ```
 
-- [ ] **Step 4: Wire it into the timer page**
+- [ ] **Step 4: Wire it into the shell**
 
-In `src/routes/_authed/-timer.tsx`, after the existing `running` query and the
-toast manager:
+In `src/routes/_authed.tsx`, beside `useMusicTracking(running, …)` —
+which takes the same `running` and is the closest existing thing to this:
 
 ```tsx
   const undoSwitch = useConvexMutation(api.googleTrack.undoSwitch)
   useSwitchUndo(running, toasts, undoSwitch)
 ```
+
+`running` and `toasts` are both already in scope there. Check whether the file
+wraps its mutations in `useLatest` before adding this one, and match it.
 
 - [ ] **Step 5: Run to verify it passes**
 
@@ -2961,7 +2972,7 @@ Expected: green.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/lib/use-switch-undo.ts src/lib/use-switch-undo.test.ts src/routes/_authed/-timer.tsx && git commit -m "feat(calendar): say what the switch did, and offer it back"
+git add src/lib/use-switch-undo.ts src/lib/use-switch-undo.test.ts src/routes/_authed.tsx && git commit -m "feat(calendar): say what the switch did, and offer it back"
 ```
 
 ---
