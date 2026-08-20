@@ -152,7 +152,7 @@ entry" a property of the code rather than a rule three callers have to remember.
   `startImpl`'s args type gains `source?: "web" | "calendar"`.
   `createImpl`'s `CreateArgs["source"]` becomes `"manual" | "import" | "calendar"`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `convex/googleTrack.test.ts`:
 
@@ -414,7 +414,7 @@ describe("materialiseMeeting", () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 npx vitest run convex/googleTrack.test.ts
@@ -422,7 +422,7 @@ npx vitest run convex/googleTrack.test.ts
 
 Expected: FAIL — `Cannot find module './googleTrack'`.
 
-- [ ] **Step 3: Add the index**
+- [x] **Step 3: Add the index**
 
 In `convex/schema.ts`, replace the `googleEventTracking` table definition:
 
@@ -441,7 +441,7 @@ In `convex/schema.ts`, replace the `googleEventTracking` table definition:
     .index("by_user_track_entry", ["userId", "trackOnStart", "entryId"]),
 ```
 
-- [ ] **Step 4: Plumb `source` through the two entry constructors**
+- [x] **Step 4: Plumb `source` through the two entry constructors**
 
 In `convex/entries.ts`, add `source` to `StartArgs`:
 
@@ -485,7 +485,7 @@ Widen `CreateArgs["source"]`:
   source?: "manual" | "import" | "calendar"
 ```
 
-- [ ] **Step 5: Write `convex/googleTrack.ts`**
+- [x] **Step 5: Write `convex/googleTrack.ts`**
 
 ```ts
 import { v } from "convex/values"
@@ -716,7 +716,7 @@ export const materialiseForTest = internalMutation({
 })
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 ```bash
 npx vitest run convex/googleTrack.test.ts
@@ -724,7 +724,7 @@ npx vitest run convex/googleTrack.test.ts
 
 Expected: PASS, 11 tests.
 
-- [ ] **Step 7: Run the gates**
+- [x] **Step 7: Run the gates**
 
 ```bash
 npm run typecheck && npm run lint && npx vitest run convex/entries.test.ts convex/import.test.ts
@@ -733,7 +733,7 @@ npm run typecheck && npm run lint && npx vitest run convex/entries.test.ts conve
 Expected: clean, and the existing entry suites still pass — `startImpl`'s
 default keeps `source: "web"` for every caller that does not pass one.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add convex/schema.ts convex/entries.ts convex/googleTrack.ts convex/googleTrack.test.ts && git commit -m "feat(calendar): one function turns a meeting into an entry"
@@ -772,7 +772,7 @@ Runs concurrently with Task 1 — different file, no shared symbols.
   ): boolean
   ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `convex/googleEvents.test.ts` (and add the five names to the existing
 import from `./googleEvents`):
@@ -899,7 +899,7 @@ describe("overlapsWindow", () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 npx vitest run convex/googleEvents.test.ts
@@ -907,7 +907,7 @@ npx vitest run convex/googleEvents.test.ts
 
 Expected: FAIL — `isTrackable is not a function`.
 
-- [ ] **Step 3: Append the implementation**
+- [x] **Step 3: Append the implementation**
 
 At the end of `convex/googleEvents.ts`:
 
@@ -1010,7 +1010,7 @@ export function overlapsWindow(
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 npx vitest run convex/googleEvents.test.ts
@@ -1018,7 +1018,7 @@ npx vitest run convex/googleEvents.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add convex/googleEvents.ts convex/googleEvents.test.ts && git commit -m "feat(calendar): the rules the switch and the backfill share"
@@ -1053,7 +1053,7 @@ that has already started. `undoSwitch` is the way back.
   export const undoSwitchForUser: internalMutation        // + userId
   ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `convex/googleTrack.test.ts`:
 
@@ -1268,7 +1268,7 @@ describe("undoSwitch", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run convex/googleTrack.test.ts
@@ -1276,7 +1276,7 @@ npx vitest run convex/googleTrack.test.ts
 
 Expected: FAIL — `setTrackOnStartForUser is not a function`.
 
-- [ ] **Step 3: Add the three error codes**
+- [x] **Step 3: Add the three error codes**
 
 `TraceErrorCode` is a closed union, so a code that is not in it is a compile
 error rather than a runtime surprise. Append these to the union in
@@ -1303,7 +1303,7 @@ Step 4, in this commit.
   | "UNDO_EXPIRED"
 ```
 
-- [ ] **Step 4: Append the implementation**
+- [x] **Step 4: Append the implementation**
 
 Extend the imports at the top of `convex/googleTrack.ts` with `mutation` (from
 `./_generated/server`), `requireUserId` (from `./auth`), `isTrackable` (from
@@ -1508,7 +1508,7 @@ export const undoSwitchForUser = internalMutation({
 })
 ```
 
-- [ ] **Step 5: Run to verify they pass**
+- [x] **Step 5: Run to verify they pass**
 
 ```bash
 npx vitest run convex/googleTrack.test.ts
@@ -1516,13 +1516,13 @@ npx vitest run convex/googleTrack.test.ts
 
 Expected: PASS.
 
-- [ ] **Step 6: Gates**
+- [x] **Step 6: Gates**
 
 ```bash
 npm run typecheck && npm run lint
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add convex/googleTrack.ts convex/googleTrack.test.ts && git commit -m "feat(calendar): tick a meeting, track a past one, take it back"
@@ -1549,7 +1549,7 @@ git add convex/googleTrack.ts convex/googleTrack.test.ts && git commit -m "feat(
   export const tickAll: internalAction({}) => null
   ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `convex/googleTick.test.ts`:
 
@@ -1760,7 +1760,7 @@ describe("dueUsers", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run convex/googleTick.test.ts
@@ -1768,7 +1768,7 @@ npx vitest run convex/googleTick.test.ts
 
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Write `convex/googleTick.ts`**
+- [x] **Step 3: Write `convex/googleTick.ts`**
 
 ```ts
 import { v } from "convex/values"
@@ -1921,7 +1921,7 @@ export const tickAll = internalAction({
 })
 ```
 
-- [ ] **Step 4: Register the cron**
+- [x] **Step 4: Register the cron**
 
 In `convex/crons.ts`, before `export default crons`:
 
@@ -1943,7 +1943,7 @@ crons.interval(
 )
 ```
 
-- [ ] **Step 5: Regenerate the API surface**
+- [x] **Step 5: Regenerate the API surface**
 
 `internal.googleTick` does not exist until this runs — the tests call it, so
 they cannot pass without it.
@@ -1955,7 +1955,7 @@ npx convex codegen
 Do **not** `git add convex/_generated/api.d.ts`. Task 5 is regenerating the same
 file concurrently; whoever closes the wave commits it once.
 
-- [ ] **Step 6: Run to verify they pass**
+- [x] **Step 6: Run to verify they pass**
 
 ```bash
 npx vitest run convex/googleTick.test.ts
@@ -1963,13 +1963,13 @@ npx vitest run convex/googleTick.test.ts
 
 Expected: PASS, 11 tests.
 
-- [ ] **Step 7: Gates**
+- [x] **Step 7: Gates**
 
 ```bash
 npm run typecheck && npm run lint
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add convex/googleTick.ts convex/googleTick.test.ts convex/crons.ts && git commit -m "feat(calendar): a ticked meeting takes the timer at its own start instant"
@@ -1994,7 +1994,7 @@ git add convex/googleTick.ts convex/googleTick.test.ts convex/crons.ts && git co
   export const backfillUser: internalMutation({ userId: string }) => null
   ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `convex/googleBackfill.test.ts`:
 
@@ -2191,7 +2191,7 @@ describe("backfillUser", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run convex/googleBackfill.test.ts
@@ -2199,7 +2199,7 @@ npx vitest run convex/googleBackfill.test.ts
 
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Write `convex/googleBackfill.ts`**
+- [x] **Step 3: Write `convex/googleBackfill.ts`**
 
 ```ts
 import { v } from "convex/values"
@@ -2312,7 +2312,7 @@ export const backfillUser = internalMutation({
 })
 ```
 
-- [ ] **Step 4: Hang it off the sync**
+- [x] **Step 4: Hang it off the sync**
 
 At the very end of `syncAccount`'s handler in `convex/google.ts`, immediately
 before it returns:
@@ -2331,7 +2331,7 @@ before it returns:
     })
 ```
 
-- [ ] **Step 5: Regenerate the API surface**
+- [x] **Step 5: Regenerate the API surface**
 
 `internal.googleBackfill` does not exist until this runs — both your tests and
 the `scheduler.runAfter` call you just added to `google.ts` reference it.
@@ -2343,7 +2343,7 @@ npx convex codegen
 Do **not** `git add convex/_generated/api.d.ts`. Task 4 is regenerating the same
 file concurrently; whoever closes the wave commits it once.
 
-- [ ] **Step 6: Run to verify they pass**
+- [x] **Step 6: Run to verify they pass**
 
 ```bash
 npx vitest run convex/googleBackfill.test.ts convex/google.test.ts
@@ -2351,13 +2351,13 @@ npx vitest run convex/googleBackfill.test.ts convex/google.test.ts
 
 Expected: PASS, both suites.
 
-- [ ] **Step 7: Gates**
+- [x] **Step 7: Gates**
 
 ```bash
 npm run typecheck && npm run lint
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add convex/googleBackfill.ts convex/googleBackfill.test.ts convex/google.ts && git commit -m "feat(calendar): a missed switch becomes the hour it was, not the hour it is"
@@ -2392,7 +2392,7 @@ git add convex/googleBackfill.ts convex/googleBackfill.test.ts convex/google.ts 
   //   onTrackNow?: (calendarId: string, eventId: string) => void
   ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `src/lib/calendar-meetings.test.ts`:
 
@@ -2458,7 +2458,7 @@ it("draws no checkbox on a block too short for text", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run src/lib/calendar-meetings.test.ts src/components/calendar/calendar-panel.test.tsx
@@ -2466,7 +2466,7 @@ npx vitest run src/lib/calendar-meetings.test.ts src/components/calendar/calenda
 
 Expected: FAIL — `meetingEvents` takes one argument; no checkbox in the DOM.
 
-- [ ] **Step 3: Add `startable` to the mapper**
+- [x] **Step 3: Add `startable` to the mapper**
 
 In `src/lib/calendar-meetings.ts`, add to `MeetingEventProps`:
 
@@ -2500,7 +2500,7 @@ and the `extendedProps` it pushes:
       },
 ```
 
-- [ ] **Step 4: Draw the checkbox**
+- [x] **Step 4: Draw the checkbox**
 
 In `calendar-panel.tsx`, add `onSetTrack` and `onTrackNow` to the component's
 props and type. In the meeting branch of `eventContent`, replace the standalone
@@ -2557,7 +2557,7 @@ that could disagree with the first.
 Update the call site: `meetingEvents(meetings, nowMs)`, and add `nowMs` to that
 memo's dependency array. It is already in scope for the entry branch.
 
-- [ ] **Step 5: Pass the mutations down**
+- [x] **Step 5: Pass the mutations down**
 
 In `src/routes/_authed/-timer.tsx`, beside the existing calendar mutations:
 
@@ -2581,7 +2581,7 @@ and on `<CalendarPanel …>`:
         }}
 ```
 
-- [ ] **Step 6: Run to verify they pass**
+- [x] **Step 6: Run to verify they pass**
 
 ```bash
 npx vitest run src/lib src/components/calendar
@@ -2589,13 +2589,13 @@ npx vitest run src/lib src/components/calendar
 
 Expected: PASS.
 
-- [ ] **Step 7: Gates**
+- [x] **Step 7: Gates**
 
 ```bash
 npm run typecheck && npm run lint
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/calendar-meetings.ts src/lib/calendar-meetings.test.ts src/components/calendar/calendar-panel.tsx src/components/calendar/calendar-panel.test.tsx src/routes/_authed/-timer.tsx && git commit -m "feat(calendar): the tick, on the block, where the meeting is"
@@ -2615,7 +2615,7 @@ git add src/lib/calendar-meetings.ts src/lib/calendar-meetings.test.ts src/compo
 - Consumes: Task 6's `onSetTrack` / `onTrackNow` signatures.
 - Produces: nothing downstream.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `calendar-meeting-popover.test.tsx`, replace the `show()` helper so it
 forwards handlers, and add the two constants beside `START`:
@@ -2686,7 +2686,7 @@ it("is still read-only in every other respect", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 ```bash
 npx vitest run src/components/calendar/calendar-meeting-popover.test.tsx
@@ -2694,7 +2694,7 @@ npx vitest run src/components/calendar/calendar-meeting-popover.test.tsx
 
 Expected: FAIL — no checkbox, no button.
 
-- [ ] **Step 3: Add the control**
+- [x] **Step 3: Add the control**
 
 Add `nowMs: number`, `onSetTrack?` and `onTrackNow?` to the component's props,
 add `ClockIcon` to the `lucide-react` import, and insert a section directly
@@ -2756,7 +2756,7 @@ after the `<header>`:
 Pass `nowMs={nowMs}`, `onSetTrack={onSetTrack}` and `onTrackNow={onTrackNow}`
 from `calendar-panel.tsx` where `<CalendarMeetingPopover>` is rendered.
 
-- [ ] **Step 4: Run to verify they pass**
+- [x] **Step 4: Run to verify they pass**
 
 ```bash
 npx vitest run src/components/calendar
@@ -2764,13 +2764,13 @@ npx vitest run src/components/calendar
 
 Expected: PASS — the existing popover tests plus the four new ones.
 
-- [ ] **Step 5: Gates**
+- [x] **Step 5: Gates**
 
 ```bash
 npm run typecheck && npm run lint
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/calendar/calendar-meeting-popover.tsx src/components/calendar/calendar-meeting-popover.test.tsx src/components/calendar/calendar-panel.tsx && git commit -m "feat(calendar): tick it before, track it after"
@@ -2797,7 +2797,7 @@ git add src/components/calendar/calendar-meeting-popover.tsx src/components/cale
   `src/lib/undo-toast.ts`.
 - Produces: nothing downstream.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `src/lib/use-switch-undo.test.ts`:
 
@@ -2860,7 +2860,7 @@ describe("switchToAnnounce", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 npx vitest run src/lib/use-switch-undo.test.ts
@@ -2868,7 +2868,7 @@ npx vitest run src/lib/use-switch-undo.test.ts
 
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Write `src/lib/use-switch-undo.ts`**
+- [x] **Step 3: Write `src/lib/use-switch-undo.ts`**
 
 ```ts
 import { useEffect, useRef } from "react"
@@ -2936,7 +2936,7 @@ export function useSwitchUndo(
 }
 ```
 
-- [ ] **Step 4: Wire it into the shell**
+- [x] **Step 4: Wire it into the shell**
 
 In `src/routes/_authed.tsx`, beside `useMusicTracking(running, …)` —
 which takes the same `running` and is the closest existing thing to this:
@@ -2949,7 +2949,7 @@ which takes the same `running` and is the closest existing thing to this:
 `running` and `toasts` are both already in scope there. Check whether the file
 wraps its mutations in `useLatest` before adding this one, and match it.
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 ```bash
 npx vitest run src/lib/use-switch-undo.test.ts
@@ -2957,7 +2957,7 @@ npx vitest run src/lib/use-switch-undo.test.ts
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 6: Run the whole suite**
+- [x] **Step 6: Run the whole suite**
 
 Stop the dev server first — vitest and vite competing for the same cores
 produces phantom timeouts in the calendar suite that vanish when it is not
@@ -2969,7 +2969,7 @@ npm run typecheck && npm run lint && npx vitest run
 
 Expected: green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/lib/use-switch-undo.ts src/lib/use-switch-undo.test.ts src/routes/_authed.tsx && git commit -m "feat(calendar): say what the switch did, and offer it back"
