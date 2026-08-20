@@ -49,8 +49,8 @@ concurrently; a wave does not start until the previous one is committed.
 | --- | --- | --- |
 | A | 1, 2 | 1: `schema.ts`, `entries.ts`, `googleTrack.ts` · 2: `googleEvents.ts` |
 | B | 3, 4, 5 | 3: `googleTrack.ts` · 4: `googleTick.ts`, `crons.ts` · 5: `googleBackfill.ts`, `google.ts` |
-| C | 6 | `calendar-panel.tsx`, `timer.tsx`, `calendar-meetings.ts` |
-| D | 7, 8 | 7: `calendar-meeting-popover.tsx` · 8: `use-switch-undo.ts`, `timer.tsx` |
+| C | 6 | `calendar-panel.tsx`, `-timer.tsx`, `calendar-meetings.ts` |
+| D | 7, 8 | 7: `calendar-meeting-popover.tsx` · 8: `use-switch-undo.ts`, `-timer.tsx` |
 
 Wave B's three tasks all consume Task 1's exports and Task 2's predicates. They
 do not consume each other.
@@ -93,7 +93,7 @@ Task 1 hit this first and committed the file because it ran alone. Tasks 3, 6,
   plumbed to the popover.
 - `src/components/calendar/calendar-meeting-popover.tsx` — the tick, or
   **Track this** on a meeting that has already started.
-- `src/routes/_authed/timer.tsx` — the mutations, and the undo hook.
+- `src/routes/_authed/-timer.tsx` — the mutations, and the undo hook.
 
 ---
 
@@ -2369,7 +2369,7 @@ git add convex/googleBackfill.ts convex/googleBackfill.test.ts convex/google.ts 
 **Files:**
 - Modify: `src/lib/calendar-meetings.ts`
 - Modify: `src/components/calendar/calendar-panel.tsx`
-- Modify: `src/routes/_authed/timer.tsx`
+- Modify: `src/routes/_authed/-timer.tsx`
 - Test: `src/lib/calendar-meetings.test.ts`,
   `src/components/calendar/calendar-panel.test.tsx`
 
@@ -2558,7 +2558,7 @@ memo's dependency array. It is already in scope for the entry branch.
 
 - [ ] **Step 5: Pass the mutations down**
 
-In `src/routes/_authed/timer.tsx`, beside the existing calendar mutations:
+In `src/routes/_authed/-timer.tsx`, beside the existing calendar mutations:
 
 ```tsx
   const setTrack = useConvexMutation(api.googleTrack.setTrackOnStart)
@@ -2597,7 +2597,7 @@ npm run typecheck && npm run lint
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/lib/calendar-meetings.ts src/lib/calendar-meetings.test.ts src/components/calendar/calendar-panel.tsx src/components/calendar/calendar-panel.test.tsx src/routes/_authed/timer.tsx && git commit -m "feat(calendar): the tick, on the block, where the meeting is"
+git add src/lib/calendar-meetings.ts src/lib/calendar-meetings.test.ts src/components/calendar/calendar-panel.tsx src/components/calendar/calendar-panel.test.tsx src/routes/_authed/-timer.tsx && git commit -m "feat(calendar): the tick, on the block, where the meeting is"
 ```
 
 ---
@@ -2781,7 +2781,7 @@ git add src/components/calendar/calendar-meeting-popover.tsx src/components/cale
 
 **Files:**
 - Create: `src/lib/use-switch-undo.ts`
-- Modify: `src/routes/_authed/timer.tsx`
+- Modify: `src/routes/_authed/-timer.tsx`
 - Test: `src/lib/use-switch-undo.test.ts`
 
 **Interfaces:**
@@ -2930,7 +2930,7 @@ export function useSwitchUndo(
 
 - [ ] **Step 4: Wire it into the timer page**
 
-In `src/routes/_authed/timer.tsx`, after the existing `running` query and the
+In `src/routes/_authed/-timer.tsx`, after the existing `running` query and the
 toast manager:
 
 ```tsx
@@ -2961,7 +2961,7 @@ Expected: green.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/lib/use-switch-undo.ts src/lib/use-switch-undo.test.ts src/routes/_authed/timer.tsx && git commit -m "feat(calendar): say what the switch did, and offer it back"
+git add src/lib/use-switch-undo.ts src/lib/use-switch-undo.test.ts src/routes/_authed/-timer.tsx && git commit -m "feat(calendar): say what the switch did, and offer it back"
 ```
 
 ---
