@@ -9,7 +9,7 @@ describe("MusicSection", () => {
     render(
       <MusicSection
         musicAutoplay={true}
-        musicOnStop="pause"
+        musicOnStop="stop"
         onChange={vi.fn()}
       />
     )
@@ -29,7 +29,7 @@ describe("MusicSection", () => {
     const select = screen.getByRole<HTMLSelectElement>("combobox", {
       name: /when tracking stops/i,
     })
-    expect(select.value).toBe("pause")
+    expect(select.value).toBe("stop")
   })
 
   it("toggling the checkbox calls back with false", () => {
@@ -37,7 +37,7 @@ describe("MusicSection", () => {
     render(
       <MusicSection
         musicAutoplay={true}
-        musicOnStop="pause"
+        musicOnStop="stop"
         onChange={onChange}
       />
     )
@@ -52,7 +52,7 @@ describe("MusicSection", () => {
     render(
       <MusicSection
         musicAutoplay={true}
-        musicOnStop="pause"
+        musicOnStop="stop"
         onChange={onChange}
       />
     )
@@ -63,16 +63,31 @@ describe("MusicSection", () => {
     expect(onChange).toHaveBeenCalledWith({ musicOnStop: "continue" })
   })
 
-  it("shows all three stop-option labels", () => {
+  /*
+   * TWO OPTIONS, AND THE ABSENT ONE IS ASSERTED.
+   *
+   * "Pause the music" was the third, and it and "Stop the music" differed by a
+   * single `currentTime = 0` — the same silence when the timer stopped, and a
+   * difference only in whether the next press of Play rewound the track, which
+   * a reload erased anyway. Asserting the label is GONE, not merely that the
+   * other two are present, is what stops it being helpfully added back by
+   * someone who reads a two-item dropdown as an oversight.
+   */
+  it("offers exactly two, and no longer distinguishes pause from stop", () => {
     render(
       <MusicSection
         musicAutoplay={true}
-        musicOnStop="pause"
+        musicOnStop="stop"
         onChange={vi.fn()}
       />
     )
     expect(screen.getByText("Stop the music")).toBeTruthy()
-    expect(screen.getByText("Pause the music")).toBeTruthy()
     expect(screen.getByText("Keep playing")).toBeTruthy()
+    expect(screen.queryByText("Pause the music")).toBe(null)
+    expect(
+      screen.getByRole<HTMLSelectElement>("combobox", {
+        name: /when tracking stops/i,
+      }).options
+    ).toHaveLength(2)
   })
 })

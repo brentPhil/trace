@@ -19,7 +19,7 @@ import type { Doc, Id } from "../../convex/_generated/dataModel"
  */
 type MusicSettings = {
   musicAutoplay: boolean
-  musicOnStop: "stop" | "pause" | "continue"
+  musicOnStop: "stop" | "continue"
 }
 
 /**
@@ -210,8 +210,17 @@ export function useMusicTracking(
         // actions, and could not have: nothing on screen links a timer they
         // told not to touch the music to the music stopping.
         if (prior.startedByUs) {
-          if (settings.musicOnStop === "stop") music.stop()
-          if (settings.musicOnStop === "pause") music.pause()
+          // `pause`, not `stop`, for the option CALLED "stop" — and that is
+          // not a mismatch, it is the point. The two provider methods differ
+          // by a single `element.currentTime = 0`, so they sound identical
+          // here and diverge only on the next press of Play: rewind or resume.
+          // That was a third dropdown option once, and it was asking the user
+          // to predict a difference they cannot hear on a lo-fi loop and which
+          // a page reload erases anyway. "Stop the music" is a promise about
+          // silence, which both keep; resuming where you left off is simply
+          // the kinder half of the pair, so it is what the one surviving
+          // option does. See music-section.tsx and the schema.
+          if (settings.musicOnStop === "stop") music.pause()
           // "continue" does nothing, deliberately.
         }
       }

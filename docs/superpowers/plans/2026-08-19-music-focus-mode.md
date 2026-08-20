@@ -3302,6 +3302,16 @@ Expected: FAIL — no such checkbox.
 
 - [x] **Step 3: Add the section**
 
+> **Superseded in one detail, 2026-08-20.** The snippet below shows THREE
+> options for "When tracking stops". There are two. `"pause"` was cut once it
+> was noticed that it and `"stop"` differ by a single `element.currentTime = 0`
+> — identical at the moment the timer stops, distinguishable only by whether
+> the next press of Play rewinds the track, and not even that across a reload.
+> The schema still accepts the stored value and `settings.get` folds it into
+> `"stop"`; the surviving option calls the player's `pause`, keeping the
+> position. **Do not re-add the third option from this snippet.** See
+> `music-section.tsx`, which carries the full reasoning.
+
 In `src/routes/_authed/settings.tsx`, add a new `<Section>` after the Clock section:
 
 ```tsx

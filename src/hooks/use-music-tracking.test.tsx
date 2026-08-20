@@ -140,7 +140,7 @@ const AUTOPLAY = { musicAutoplay: true, musicOnStop: "stop" as const }
 
 type Settings = {
   musicAutoplay: boolean
-  musicOnStop: "stop" | "pause" | "continue"
+  musicOnStop: "stop" | "continue"
 }
 type Props = { running: Doc<"timeEntries"> | null; settings: Settings }
 
@@ -426,7 +426,21 @@ describe("waiting for the uploads to land", () => {
 })
 
 describe("stopping the timer", () => {
-  it("applies musicOnStop to music it started itself", () => {
+  /*
+   * "Stop the music" SILENCES BY PAUSING, and the assertion is deliberately
+   * that way round rather than a mismatch nobody noticed.
+   *
+   * The provider's `stop` and `pause` differ by one `element.currentTime = 0`,
+   * so they are indistinguishable here and diverge only on the next press of
+   * Play: rewind, or resume where you were. That was a third settings option
+   * once — "Pause the music" — and it asked a user to predict a difference
+   * they cannot hear on a lo-fi loop and which a page reload erases anyway.
+   * One option survived, and it takes the kinder of the two behaviours.
+   *
+   * `stop` is asserted NOT to be called so that a future edit "restoring
+   * symmetry" by swapping them has to come through this test first.
+   */
+  it("silences music it started itself, without losing the position", () => {
     const player = makePlayer()
     installed.current = stub(player)
 
@@ -434,26 +448,16 @@ describe("stopping the timer", () => {
     expect(player.playRef).toHaveBeenCalledTimes(1)
 
     rerender({ running: null, settings: AUTOPLAY })
-    expect(player.stop).toHaveBeenCalledTimes(1)
+    expect(player.pause).toHaveBeenCalledTimes(1)
+    expect(player.stop).not.toHaveBeenCalled()
   })
 
-  it("honours pause, and leaves continue alone", () => {
-    const paused = makePlayer()
-    installed.current = stub(paused)
-    const settings = { musicAutoplay: true, musicOnStop: "pause" as const }
-    const first = render({ running: entry(""), settings })
-    first.rerender({ running: null, settings })
-    expect(paused.pause).toHaveBeenCalledTimes(1)
-    expect(paused.stop).not.toHaveBeenCalled()
-
-    cleanup()
-    listeners.clear()
-
+  it("leaves continue alone", () => {
     const kept = makePlayer()
     installed.current = stub(kept)
     const carryOn = { musicAutoplay: true, musicOnStop: "continue" as const }
-    const second = render({ running: entry(""), settings: carryOn })
-    second.rerender({ running: null, settings: carryOn })
+    const { rerender } = render({ running: entry(""), settings: carryOn })
+    rerender({ running: null, settings: carryOn })
     expect(kept.stop).not.toHaveBeenCalled()
     expect(kept.pause).not.toHaveBeenCalled()
   })
@@ -501,7 +505,11 @@ describe("stopping the timer", () => {
     act(() => void installed.current?.playRef(UPLOAD))
 
     rerender({ running: null, settings: AUTOPLAY })
+    // BOTH, because the stop branch now silences by pausing. Asserting only on
+    // `stop` would leave this case passing vacuously — the guard it exists to
+    // hold could break and nothing here would notice.
     expect(player.stop).not.toHaveBeenCalled()
+    expect(player.pause).not.toHaveBeenCalled()
   })
 })
 

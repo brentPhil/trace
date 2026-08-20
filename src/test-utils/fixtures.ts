@@ -31,8 +31,8 @@ export const SETTINGS = {
   /* Widened to the union rather than pinned with `as const`, unlike the two
    * literal fields above it. Those are never overridden; this one is — a route
    * test passing `{ musicOnStop: "continue" }` would otherwise be a type error
-   * against a fixture type that had narrowed the field to "pause". */
-  musicOnStop: "pause" as "stop" | "pause" | "continue",
+   * against a fixture type that had narrowed the field to "stop". */
+  musicOnStop: "stop" as "stop" | "continue",
   logoUrl: null,
 }
 

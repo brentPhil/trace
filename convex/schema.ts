@@ -696,7 +696,19 @@ export default defineSchema({
      *  has NO PAUSE — an entry is running (`endedAt === null`) or stopped — so
      *  a "pause music when the timer pauses" switch would be a preference that
      *  can never fire, which is worse than a missing one: a user who sets it
-     *  believes something is now true. */
+     *  believes something is now true.
+     *
+     *  `"pause"` IS ACCEPTED HERE AND NOWHERE ELSE. It was a third option once,
+     *  and it was the same reasoning above failing to be applied to its own
+     *  neighbour: `stop` and `pause` differed by a single `currentTime = 0`, so
+     *  they were identical at the moment a timer stopped and differed only in
+     *  whether the NEXT press of Play restarted the track — a distinction that
+     *  did not survive a page reload, let alone a lo-fi loop. The API now
+     *  offers two, and `settings.get` folds a stored `"pause"` into `"stop"`.
+     *  It stays valid here because a schema has to accept what is already on
+     *  disk; dropping it would fail validation on every row that holds it, and
+     *  the fold costs one `===` against a backfill migration. Remove it only
+     *  after a backfill, never before. */
     musicOnStop: v.optional(
       v.union(v.literal("stop"), v.literal("pause"), v.literal("continue"))
     ),

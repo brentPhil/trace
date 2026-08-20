@@ -15,13 +15,28 @@ import { cn } from "@/lib/utils"
  * worse than simply not offering it: a user who turns it on believes it now
  * governs something, and it never will. If a pause state is ever added to
  * entries, this is the file to revisit — not before.
+ *
+ * AND "WHEN TRACKING STOPS" OFFERS TWO, not the three it shipped with. The
+ * cut option was "Pause the music", and the paragraph above is exactly why it
+ * had to go — the reasoning was already written here and simply had not been
+ * turned on the control below it. `stop` and `pause` differed by a single
+ * `currentTime = 0`: identical at the moment the timer stopped, distinguishable
+ * only by whether the NEXT press of Play restarted the track or resumed it, and
+ * not even that across a reload, which clears the position anyway. For a lo-fi
+ * loop with no narrative that is not a difference a person can hear, so it was
+ * a dropdown asking someone to predict a future they cannot feel.
+ *
+ * What survives keeps the gentler behaviour: choosing "Stop the music" calls
+ * the player's `pause`, not its `stop`, so the track resumes where it left off.
+ * Whether the playhead rewinds is an implementation detail, and the moment it
+ * became a question put to the user it became a worse product.
  */
 
 /** The one write this section makes, shaped as a patch so a caller can
  *  forward it straight into the same `save` every other control on the page
  *  already calls, without a second callback prop per field. */
 export type MusicSettingsPatch =
-  { musicAutoplay: boolean } | { musicOnStop: "stop" | "pause" | "continue" }
+  { musicAutoplay: boolean } | { musicOnStop: "stop" | "continue" }
 
 export function MusicSection({
   musicAutoplay,
@@ -29,7 +44,7 @@ export function MusicSection({
   onChange,
 }: {
   musicAutoplay: boolean
-  musicOnStop: "stop" | "pause" | "continue"
+  musicOnStop: "stop" | "continue"
   onChange: (patch: MusicSettingsPatch) => void
 }) {
   return (
@@ -57,7 +72,7 @@ export function MusicSection({
           value={musicOnStop}
           onChange={(event) =>
             onChange({
-              musicOnStop: event.target.value as "stop" | "pause" | "continue",
+              musicOnStop: event.target.value as "stop" | "continue",
             })
           }
           // `fieldClass` on the settings page is a private, un-exported
@@ -71,7 +86,6 @@ export function MusicSection({
           )}
         >
           <option value="stop">Stop the music</option>
-          <option value="pause">Pause the music</option>
           <option value="continue">Keep playing</option>
         </select>
       </label>

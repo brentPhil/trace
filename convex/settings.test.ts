@@ -572,12 +572,12 @@ describe("invoice logo", () => {
 })
 
 describe("music settings", () => {
-  it("defaults to autoplay on and pause on stop", async () => {
+  it("defaults to autoplay on and silence when the timer stops", async () => {
     const t = setup()
     await t.mutation(internal.settings.ensureAs, { userId: ALICE })
     const settings = await t.query(internal.settings.getAs, { userId: ALICE })
     expect(settings.musicAutoplay).toBe(true)
-    expect(settings.musicOnStop).toBe("pause")
+    expect(settings.musicOnStop).toBe("stop")
   })
 
   it("round-trips both fields", async () => {
@@ -611,6 +611,40 @@ describe("music settings", () => {
     })
     const settings = await t.query(internal.settings.getAs, { userId: ALICE })
     expect(settings.musicAutoplay).toBe(true)
-    expect(settings.musicOnStop).toBe("pause")
+    expect(settings.musicOnStop).toBe("stop")
+  })
+
+  /*
+   * The one column with a THIRD value on disk that the API no longer speaks.
+   *
+   * "pause" was an option until it was noticed that it and "stop" differed by
+   * a single `currentTime = 0` — the same silence at the moment a timer
+   * stopped, and a difference only in whether the NEXT press of Play rewound
+   * the track, which a page reload erased anyway. The schema still accepts the
+   * value because rows hold it; `settings.get` has to fold it, because its own
+   * `returns` validator no longer permits it.
+   *
+   * Without the fold this query THROWS for those accounts rather than
+   * degrading: a returns validator is enforced, so the failure is total and
+   * lands on every read of /settings, not on the music section alone. That is
+   * the whole reason this test exists rather than a backfill migration.
+   */
+  it('folds a stored "pause" into "stop" rather than failing to validate', async () => {
+    const t = setup()
+    await t.run(async (ctx) => {
+      await ctx.db.insert("userSettings", {
+        userId: ALICE,
+        timezone: "UTC",
+        weekStartDay: 1,
+        durationDisplay: "hms",
+        timeFormat: "24",
+        runawayThresholdMs: 8 * 60 * 60 * 1000,
+        tabTitleClock: true,
+        musicOnStop: "pause",
+        updatedAt: Date.now(),
+      })
+    })
+    const settings = await t.query(internal.settings.getAs, { userId: ALICE })
+    expect(settings.musicOnStop).toBe("stop")
   })
 })
