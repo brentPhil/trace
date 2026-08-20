@@ -35,55 +35,36 @@ export const TICK_CANDIDATES_LIMIT = 100
 /**
  * Who has work this minute.
  *
- * A SKIP SCAN over `by_user_track_entry`, not a scan of the table.
+ * ONE RANGE READ OVER PENDING TICKS, and the index it uses exists for this.
  *
- * That index leads with `userId`, so "every pending row, across all users" is
- * not an expressible key range — a range must start at the first field. The
- * alternative, reading the table and filtering in JavaScript, costs one read
- * per tracking row the user has EVER had, and this table is never pruned: it
- * would grow forever while the answer it produces stays tiny.
+ * `by_user_track_entry` cannot answer it: that index leads with `userId`, and a
+ * Convex key range must begin at the first field, so "every pending row across
+ * all users" is not expressible against it. The first version of this walked
+ * the distinct users instead — one read to find the next `userId` in the index,
+ * one exact-key probe to ask whether that user had anything pending.
  *
- * So this walks the distinct users instead. One read finds the next userId
- * present in the index at all, and one indexed read at the exact key
- * `(userId, true, null)` answers whether that user has anything pending. Two
- * reads per user who has ever ticked a meeting, none per meeting — and a user
- * who has never ticked anything has no row here and costs nothing.
+ * That was correct and unboundedly expensive. The loop's guard counted users
+ * COLLECTED, not users EXAMINED, so a user with tracking rows and nothing
+ * pending advanced the cursor without advancing the bound — and since this
+ * table is never pruned, every user who has ever ticked a meeting stays in it
+ * forever. Two reads each, every sixty seconds, growing with the user base
+ * while the answer stays a handful of rows.
+ *
+ * `by_track_entry_user` is led by the two filters, so `(true, null)` is an
+ * exact key range whose size is the number of pending ticks in the world.
  */
 export const dueUsers = internalQuery({
   args: {},
   returns: v.array(v.string()),
   handler: async (ctx) => {
-    const users: Array<string> = []
-    let after: string | null = null
+    const rows = await ctx.db
+      .query("googleEventTracking")
+      .withIndex("by_track_entry_user", (q) =>
+        q.eq("trackOnStart", true).eq("entryId", null)
+      )
+      .take(TICK_USERS_LIMIT)
 
-    while (users.length < TICK_USERS_LIMIT) {
-      // Annotated, and copied into a `const`, so the range callback does not
-      // ask control-flow analysis for a type that only exists once the callback
-      // has been typed. Without the annotation that is a cycle, and TypeScript
-      // reports it as an implicit `any` rather than as the loop it is.
-      const from: string | null = after
-      const next: Doc<"googleEventTracking"> | null = await ctx.db
-        .query("googleEventTracking")
-        .withIndex("by_user_track_entry", (q) =>
-          from === null ? q : q.gt("userId", from)
-        )
-        .first()
-      if (next === null) break
-      after = next.userId
-
-      const pending = await ctx.db
-        .query("googleEventTracking")
-        .withIndex("by_user_track_entry", (q) =>
-          q
-            .eq("userId", next.userId)
-            .eq("trackOnStart", true)
-            .eq("entryId", null)
-        )
-        .first()
-      if (pending !== null) users.push(next.userId)
-    }
-
-    if (users.length === TICK_USERS_LIMIT) {
+    if (rows.length === TICK_USERS_LIMIT) {
       // `console.error`, not a throw — the same device `google.ts` uses for a
       // truncated page read. Some users being a minute late is recoverable
       // (the next minute catches them); a cron that throws is not. But this
@@ -92,7 +73,9 @@ export const dueUsers = internalQuery({
         limit: TICK_USERS_LIMIT,
       })
     }
-    return users
+    // Deduplicated: one user with four ticked meetings is one switch, and
+    // `switchUser` picks between them itself.
+    return [...new Set(rows.map((row) => row.userId))]
   },
 })
 

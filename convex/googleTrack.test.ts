@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest"
 import schema from "./schema"
 import { internal } from "./_generated/api"
 import { meetingClientKey, parseMeetingClientKey } from "./googleTrack"
+import { traceErrorCode } from "./lib/codes"
 
 // convex-test discovers function modules by globbing from the file that calls
 // it, so the glob lives here rather than in a shared helper.
@@ -16,6 +17,25 @@ const modules = import.meta.glob("./**/*.*s")
 const setup = () => convexTest(schema, modules)
 
 const USER = "user_alice"
+
+/**
+ * A refusal, asserted by its CODE rather than by the fact that something threw.
+ *
+ * `rejects.toThrow()` was what these tests used first, and it is close to
+ * worthless here: a mutation that does not exist rejects too, so the assertion
+ * passed for every refusal case before a single line of the implementation was
+ * written. The code is what a client branches on, so the code is what is
+ * pinned. Same helper shape as `clients.test.ts` and `entries.edit.test.ts`.
+ */
+async function expectCode(promise: Promise<unknown>, code: string): Promise<void> {
+  try {
+    await promise
+  } catch (error) {
+    expect(traceErrorCode(error) ?? String(error)).toBe(code)
+    return
+  }
+  throw new Error(`expected rejection with code ${code}, but it resolved`)
+}
 /** Seeded from the real clock, never a literal. A fixture instant compared
  *  against `Date.now()` inside a mutation passes for a day and then fails on
  *  its own — this suite has already been bitten by exactly that. */
@@ -303,29 +323,34 @@ describe("setTrackOnStart", () => {
 
   it("refuses to tick a meeting that is not on this account", async () => {
     const t = setup()
-    await expect(
+    await expectCode(
       t.mutation(internal.googleTrack.setTrackOnStartForUser, {
         userId: USER,
         calendarId: "primary",
         eventId: "nope",
         track: true,
-      })
-    ).rejects.toThrow()
+      }),
+      "NOT_FOUND"
+    )
   })
 
-  it("refuses to tick an all-day event", async () => {
+  it("refuses to tick an all-day event, and says why", async () => {
     const t = setup()
     await t.run(async (ctx) => {
       await ctx.db.insert("googleEvents", eventRow({ isAllDay: true }))
     })
-    await expect(
+    // NOT_TRACKABLE, not NOT_FOUND. The meeting is right there on the grid, and
+    // telling someone it does not exist would send them hunting for a sync
+    // problem that is not there.
+    await expectCode(
       t.mutation(internal.googleTrack.setTrackOnStartForUser, {
         userId: USER,
         calendarId: "primary",
         eventId: "evt_standup",
         track: true,
-      })
-    ).rejects.toThrow()
+      }),
+      "NOT_TRACKABLE"
+    )
   })
 
   it("leaves an already-materialised entry alone when the tick is removed", async () => {
@@ -497,12 +522,13 @@ describe("undoSwitch", () => {
       clientKey: "typed",
       title: "Deep work",
     })
-    await expect(
+    await expectCode(
       t.mutation(internal.googleTrack.undoSwitchForUser, {
         userId: USER,
         entryId: typed.entryId,
-      })
-    ).rejects.toThrow()
+      }),
+      "NOT_A_SWITCH"
+    )
   })
 
   it("refuses a switch older than the undo window", async () => {
@@ -521,11 +547,15 @@ describe("undoSwitch", () => {
       eventId: "evt_standup",
       mode: "live",
     })
-    await expect(
+    // UNDO_EXPIRED, not NOT_A_SWITCH: the answers differ. That one means never,
+    // this one means the moment has passed and the entry is now ordinary
+    // recorded time the user can edit or delete like any other.
+    await expectCode(
       t.mutation(internal.googleTrack.undoSwitchForUser, {
         userId: USER,
         entryId: switched!.entryId,
-      })
-    ).rejects.toThrow()
+      }),
+      "UNDO_EXPIRED"
+    )
   })
 })

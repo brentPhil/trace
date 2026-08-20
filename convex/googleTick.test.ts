@@ -191,4 +191,29 @@ describe("dueUsers", () => {
     const users = await t.query(internal.googleTick.dueUsers, {})
     expect(users).toEqual([])
   })
+
+  it("drops a user whose ticked meetings have all become entries", async () => {
+    /*
+     * The other half of the key, and the half that decides whether this query
+     * stays cheap. A materialised row keeps `trackOnStart: true` forever —
+     * `upsertTracking` only sets `entryId` — so `entryId: null` is the ONLY
+     * thing that takes a row off the work list.
+     *
+     * `googleEventTracking` is never pruned, so without this a user who ticked
+     * one meeting last March would be woken every sixty seconds for the rest of
+     * the account's life.
+     */
+    const t = setup()
+    await seedMeeting(t, {}, { trackOnStart: true })
+    await t.mutation(internal.googleTick.switchUser, { userId: USER })
+
+    const rows = await t.run(
+      async (ctx) => await ctx.db.query("googleEventTracking").collect()
+    )
+    expect(rows[0]!.entryId).not.toBeNull()
+    expect(rows[0]!.trackOnStart).toBe(true)
+
+    const users = await t.query(internal.googleTick.dueUsers, {})
+    expect(users).toEqual([])
+  })
 })

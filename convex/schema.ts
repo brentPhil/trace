@@ -602,7 +602,25 @@ export default defineSchema({
      * stays small without a prune — which is what lets both jobs read it every
      * minute.
      */
-    .index("by_user_track_entry", ["userId", "trackOnStart", "entryId"]),
+    .index("by_user_track_entry", ["userId", "trackOnStart", "entryId"])
+    /*
+     * THE SAME WORK LIST, ACROSS USERS — which is a different index, not a
+     * different query, because a Convex index range must begin at the index's
+     * first field.
+     *
+     * `googleTick` runs every minute and has no user to scope to, so it needs
+     * "who has pending work" answered globally. Off the index above that is
+     * impossible: `trackOnStart` is the second field, so the only way to reach
+     * it is to walk every distinct `userId` and probe each one. That costs two
+     * reads per user who has EVER ticked a meeting — and this table is never
+     * pruned, so the cost grows with the user base forever while the answer
+     * stays tiny.
+     *
+     * Led by the two filters instead, `(true, null)` is one exact key range
+     * whose size is the number of pending ticks in the world. `userId` trails
+     * so the page comes off in a stable order and the rows carry the answer.
+     */
+    .index("by_track_entry_user", ["trackOnStart", "entryId", "userId"]),
 
   userSettings: defineTable({
     userId: v.string(),
