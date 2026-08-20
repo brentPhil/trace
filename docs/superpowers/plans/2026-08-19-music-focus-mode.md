@@ -10,6 +10,36 @@
 
 **Spec:** [`docs/superpowers/specs/2026-08-19-music-focus-mode-design.md`](../specs/2026-08-19-music-focus-mode-design.md)
 
+## Status — complete, 2026-08-20
+
+All twelve tasks are implemented and merged to `master` (fast-forward
+`58285f9..14b412a`, plus `a21ba6c` for the provider's tests). 63 of the 67 steps
+below are done; the four still open are all MANUAL VERIFICATION that writes to
+the repository owner's account, and each carries a note saying what stands in
+for it.
+
+What the plan did not anticipate, recorded here because the next plan should:
+
+- **`npm run lint` was not a step in any task, and it was the only gate that
+  caught anything.** After four reviews passed, it found `music-provider.tsx`
+  importing `convexQuery` and `api` — two violations of this repo's own
+  `no-restricted-imports` rule ("a component must not know the Convex function
+  surface"). Fixed in 14b412a by having `_authed.tsx` run the query and pass
+  `uploads` down. **Put lint in the task steps next time.**
+- **Task 7 shipped two defects that no test could have caught, because Task 7
+  had no test step.** The provider was written with `typecheck + commit` and
+  nothing else. Both defects — the BroadcastChannel self-pause that made
+  playback impossible, and the queued-`setCurrentRef` stale ref that made a dead
+  track advance into itself — were found by reading, months of luck later than
+  they should have been. `music-provider.test.tsx` (35 cases) now covers them.
+  **A file that owns state and an external resource gets a test step.**
+- **The route/page split is not in the File Structure table.** A component
+  exported from a route file defeats TanStack's code-splitter, so every page
+  here is `route.tsx` + `-page.tsx`. Tasks 11 and 12 both had to discover this.
+- **`@testing-library/user-event` is not a dependency**, and this plan used it
+  in fifteen places before being patched. The Global Constraints now say so.
+
+
 ## Global Constraints
 
 These apply to **every** task. They are the house rules this codebase already enforces, plus the ones this spec adds.
@@ -81,7 +111,7 @@ These apply to **every** task. They are the house rules this codebase already en
 - Consumes: nothing.
 - Produces: `RepeatMode = "off" | "one" | "all"`; `nextIndex(opts): number | null`; `prevIndex(opts): number | null`; `shuffledOrder(length, seed): Array<number>`. `opts` is `{ length: number; index: number; repeat: RepeatMode; order: Array<number> | null }`. `order` is `null` when shuffle is off. All return `null` to mean "stop playing".
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/lib/music/queue.test.ts`:
 
@@ -179,7 +209,7 @@ describe("shuffledOrder", () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 npx vitest run --project unit src/lib/music/queue.test.ts
@@ -187,7 +217,7 @@ npx vitest run --project unit src/lib/music/queue.test.ts
 
 Expected: FAIL — `Failed to resolve import "./queue"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `src/lib/music/queue.ts`:
 
@@ -290,7 +320,7 @@ export function shuffledOrder(length: number, seed: number): Array<number> {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npx vitest run --project unit src/lib/music/queue.test.ts
@@ -298,7 +328,7 @@ npx vitest run --project unit src/lib/music/queue.test.ts
 
 Expected: PASS, 16 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/music/queue.ts src/lib/music/queue.test.ts && git commit -m "feat(music): the queue, as arithmetic"
@@ -317,7 +347,7 @@ git add src/lib/music/queue.ts src/lib/music/queue.test.ts && git commit -m "fea
 - Consumes: nothing.
 - Produces: `CatalogTrack = { slug: string; name: string; file: string }`; `CATALOG: ReadonlyArray<CatalogTrack>`; `TrackRef = { origin: "upload"; trackId: string } | { origin: "chroneli"; slug: string }`; `resolveTrackUrl(ref, uploadUrls: Map<string, string>): string | null`; `trackRefEquals(a, b): boolean`; `trackRefKey(ref): string`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/lib/music/track-ref.test.ts`:
 
@@ -386,7 +416,7 @@ describe("trackRefKey", () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 npx vitest run --project unit src/lib/music/track-ref.test.ts
@@ -394,7 +424,7 @@ npx vitest run --project unit src/lib/music/track-ref.test.ts
 
 Expected: FAIL — cannot resolve `./catalog`.
 
-- [ ] **Step 3: Write the catalog and the ref module**
+- [x] **Step 3: Write the catalog and the ref module**
 
 Create `src/lib/music/catalog.ts`:
 
@@ -505,7 +535,7 @@ export function trackRefEquals(a: TrackRef | null, b: TrackRef | null): boolean 
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npx vitest run --project unit src/lib/music/track-ref.test.ts
@@ -513,7 +543,7 @@ npx vitest run --project unit src/lib/music/track-ref.test.ts
 
 Expected: PASS, 10 tests.
 
-- [ ] **Step 5: Mark mp3 binary and record provenance**
+- [x] **Step 5: Mark mp3 binary and record provenance**
 
 Append to `.gitattributes`, immediately after the existing `*.woff2 binary` line:
 
@@ -543,7 +573,7 @@ with no row is treated as unlicensed.
 > download URL. This is the one fact in the plan that cannot be recovered from
 > the repository.
 
-- [ ] **Step 6: Commit, including the audio**
+- [x] **Step 6: Commit, including the audio**
 
 ```bash
 git add .gitattributes public/music src/lib/music/catalog.ts src/lib/music/track-ref.ts src/lib/music/track-ref.test.ts && git commit -m "feat(music): the bundled catalog, and where its files came from"
@@ -562,7 +592,7 @@ git add .gitattributes public/music src/lib/music/catalog.ts src/lib/music/track
 - Consumes: nothing from earlier tasks (the Convex side does not import `src/`).
 - Produces: `api.music.generateUploadUrl` → `v.string()`; `api.music.addTrack` (action, args `{ storageId, clientKey, name, durationMs? }`) → `v.id("musicTracks")`; `api.music.listTracks` → array of `{ _id, name, bytes, durationMs?, url }`; `api.music.renameTrack` `{ trackId, name }` → `v.null()`; `api.music.removeTrack` `{ trackId }` → `v.null()`; `api.music.usage` → `{ bytes: number; count: number }`. Internal twins: `listTracksAs`, `addTrackAs`, `renameTrackAs`, `removeTrackAs`, `usageAs`.
 
-- [ ] **Step 1: Write `convex/lib/audio.ts`**
+- [x] **Step 1: Write `convex/lib/audio.ts`**
 
 This is pure and has no test of its own — it is exercised through `convex/music.test.ts`. Create it:
 
@@ -612,7 +642,7 @@ export function trackNameFromFilename(filename: string): string {
 }
 ```
 
-- [ ] **Step 2: Add the tables to `convex/schema.ts`**
+- [x] **Step 2: Add the tables to `convex/schema.ts`**
 
 Add these two field blocks after `entryTagFields` (before the Google section), with the comments as written — they carry the arguments this schema file is built on:
 
@@ -713,7 +743,7 @@ Add the two settings fields inside `userSettings`, after `mergeInvoiceLines`:
     ),
 ```
 
-- [ ] **Step 3: Register the table as owned**
+- [x] **Step 3: Register the table as owned**
 
 In `convex/owned.ts`, add `"musicTracks"` to `OWNED_TABLES` (after `"invoiceLines"`), and add the matching case to `label`:
 
@@ -722,7 +752,7 @@ In `convex/owned.ts`, add `"musicTracks"` to `OWNED_TABLES` (after `"invoiceLine
       return "track"
 ```
 
-- [ ] **Step 4: Write the failing tests**
+- [x] **Step 4: Write the failing tests**
 
 Create `convex/music.test.ts`:
 
@@ -952,7 +982,7 @@ describe("usage", () => {
 })
 ```
 
-- [ ] **Step 5: Run the tests to verify they fail**
+- [x] **Step 5: Run the tests to verify they fail**
 
 ```bash
 npx vitest run --project convex convex/music.test.ts
@@ -960,7 +990,7 @@ npx vitest run --project convex convex/music.test.ts
 
 Expected: FAIL — `internal.music` is undefined.
 
-- [ ] **Step 6: Write `convex/music.ts`**
+- [x] **Step 6: Write `convex/music.ts`**
 
 ```ts
 import { v } from "convex/values"
@@ -1325,7 +1355,7 @@ export const removeTrackAs = internalMutation({
 })
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 ```bash
 npx vitest run --project convex convex/music.test.ts
@@ -1333,7 +1363,7 @@ npx vitest run --project convex convex/music.test.ts
 
 Expected: PASS, 12 tests.
 
-- [ ] **Step 8: Typecheck**
+- [x] **Step 8: Typecheck**
 
 ```bash
 npm run typecheck
@@ -1341,7 +1371,7 @@ npm run typecheck
 
 Expected: no output, exit 0.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add convex/schema.ts convex/owned.ts convex/lib/audio.ts convex/music.ts convex/music.test.ts && git commit -m "feat(music): the library, and the blob every rejection has to delete"
@@ -1359,7 +1389,7 @@ git add convex/schema.ts convex/owned.ts convex/lib/audio.ts convex/music.ts con
 - Consumes: `musicPreferences` table from Task 3.
 - Produces: `api.music.preferenceFor` (query, args `{ title: v.string(), projectId: v.union(v.id("projects"), v.null()) }`) → `v.union(trackRefValidator, v.null())`; `api.music.setPreference` (mutation, same args plus `trackRef`) → `v.null()`. Internal twins `preferenceForAs`, `setPreferenceAs`.
 
-- [ ] **Step 1: Append the failing tests**
+- [x] **Step 1: Append the failing tests**
 
 Add to `convex/music.test.ts`:
 
@@ -1460,7 +1490,7 @@ describe("preferences", () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 npx vitest run --project convex convex/music.test.ts
@@ -1468,7 +1498,7 @@ npx vitest run --project convex convex/music.test.ts
 
 Expected: FAIL — `internal.music.preferenceForAs` is undefined.
 
-- [ ] **Step 3: Append the implementation to `convex/music.ts`**
+- [x] **Step 3: Append the implementation to `convex/music.ts`**
 
 ```ts
 // --- preferences -----------------------------------------------------------
@@ -1591,7 +1621,7 @@ export const setPreferenceAs = internalMutation({
 })
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 npx vitest run --project convex convex/music.test.ts
@@ -1599,7 +1629,7 @@ npx vitest run --project convex convex/music.test.ts
 
 Expected: PASS, 19 tests.
 
-- [ ] **Step 5: Typecheck and commit**
+- [x] **Step 5: Typecheck and commit**
 
 ```bash
 npm run typecheck && git add convex/music.ts convex/music.test.ts && git commit -m "feat(music): preferences, keyed on the identity that survives a resume"
@@ -1617,7 +1647,7 @@ npm run typecheck && git add convex/music.ts convex/music.test.ts && git commit 
 - Consumes: schema fields from Task 3.
 - Produces: `Settings` gains `musicAutoplay: boolean` and `musicOnStop: "stop" | "pause" | "continue"`; both appear on `api.settings.get` and are accepted by `api.settings.update`.
 
-- [ ] **Step 1: Append the failing test**
+- [x] **Step 1: Append the failing test**
 
 Add to `convex/settings.test.ts`, inside the existing top-level `describe` block structure (a new one at the end of the file is fine):
 
@@ -1667,7 +1697,7 @@ describe("music settings", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 npx vitest run --project convex convex/settings.test.ts
@@ -1675,7 +1705,7 @@ npx vitest run --project convex convex/settings.test.ts
 
 Expected: FAIL — `settings.musicAutoplay` is `undefined`.
 
-- [ ] **Step 3: Thread the fields through `convex/settings.ts`**
+- [x] **Step 3: Thread the fields through `convex/settings.ts`**
 
 Four edits, all mechanical — follow exactly how `groupEntries` appears in each place.
 
@@ -1725,7 +1755,7 @@ Then, in `getImpl`, add the same `??` fallback the other optional fields use. Fi
 
 `updateImpl` needs no change if it spreads validated args onto the patch — verify by reading it; if it lists fields explicitly, add both to that list.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 npx vitest run --project convex convex/settings.test.ts
@@ -1733,7 +1763,7 @@ npx vitest run --project convex convex/settings.test.ts
 
 Expected: PASS, including the three new tests.
 
-- [ ] **Step 5: Full suite and typecheck**
+- [x] **Step 5: Full suite and typecheck**
 
 ```bash
 npm test && npm run typecheck
@@ -1741,7 +1771,7 @@ npm test && npm run typecheck
 
 Expected: all pass. `settingsReturns` is a strict validator, so a missed spot fails loudly here.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add convex/settings.ts convex/settings.test.ts && git commit -m "feat(music): two settings, and not the seven that describe nothing"
@@ -1758,7 +1788,7 @@ git add convex/settings.ts convex/settings.test.ts && git commit -m "feat(music)
 - Consumes: `RepeatMode` from Task 1, `TrackRef` from Task 2.
 - Produces: `readLocalPrefs(): LocalPrefs`; `writeLocalPrefs(patch: Partial<LocalPrefs>): void`; `LocalPrefs = { volume: number; shuffle: boolean; repeat: RepeatMode; lastTrack: TrackRef | null }`. And `useAudioElement(opts: { onEnded: () => void; onError: () => void }): AudioHandle` where `AudioHandle = { play(url: string): Promise<boolean>; resume(): Promise<boolean>; pause(): void; stop(): void; setVolume(v: number): void }`. `play`/`resume` resolve `false` when the browser refused (autoplay policy) rather than throwing.
 
-- [ ] **Step 1: Write the failing test for local prefs**
+- [x] **Step 1: Write the failing test for local prefs**
 
 Create `src/lib/music/local-prefs.test.ts`:
 
@@ -1828,7 +1858,7 @@ describe("readLocalPrefs", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 npx vitest run --project unit src/lib/music/local-prefs.test.ts
@@ -1836,7 +1866,7 @@ npx vitest run --project unit src/lib/music/local-prefs.test.ts
 
 Expected: FAIL — cannot resolve `./local-prefs`.
 
-- [ ] **Step 3: Write `src/lib/music/local-prefs.ts`**
+- [x] **Step 3: Write `src/lib/music/local-prefs.ts`**
 
 ```ts
 import type { RepeatMode } from "./queue"
@@ -1931,7 +1961,7 @@ export function writeLocalPrefs(patch: Partial<LocalPrefs>): void {
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 npx vitest run --project unit src/lib/music/local-prefs.test.ts
@@ -1939,7 +1969,7 @@ npx vitest run --project unit src/lib/music/local-prefs.test.ts
 
 Expected: PASS, 6 tests.
 
-- [ ] **Step 5: Write `src/hooks/use-audio-element.ts`**
+- [x] **Step 5: Write `src/hooks/use-audio-element.ts`**
 
 No test of its own — it is the mock seam, and everything above it is tested without audio.
 
@@ -2063,7 +2093,7 @@ export function useAudioElement({
 }
 ```
 
-- [ ] **Step 6: Typecheck and commit**
+- [x] **Step 6: Typecheck and commit**
 
 ```bash
 npm run typecheck && git add src/lib/music/local-prefs.ts src/lib/music/local-prefs.test.ts src/hooks/use-audio-element.ts && git commit -m "feat(music): device preferences, and the one place audio is touched"
@@ -2104,7 +2134,7 @@ type MusicContextValue = {
 }
 ```
 
-- [ ] **Step 1: Write the provider**
+- [x] **Step 1: Write the provider**
 
 Create `src/components/music/music-provider.tsx`:
 
@@ -2417,7 +2447,7 @@ export function MusicProvider({ children }: { children: ReactNode }) {
 export { trackRefKey }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 ```bash
 npm run typecheck
@@ -2425,7 +2455,7 @@ npm run typecheck
 
 Expected: exit 0. If `advance` is reported as used before its declaration, hoist it above `audio` by converting the `useAudioElement` callbacks to call through a ref — the simplest fix is to declare `const advanceRef = useRef<(d: 1 | -1, c: "user" | "ended" | "error") => void>(() => {})` above `useAudioElement`, have the callbacks call `advanceRef.current(...)`, and assign `advanceRef.current = advance` in an effect after `advance` is defined.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/components/music/music-provider.tsx && git commit -m "feat(music): the player, mounted where a route change cannot reach it"
@@ -2442,7 +2472,7 @@ git add src/components/music/music-provider.tsx && git commit -m "feat(music): t
 - Consumes: `MusicContextValue` shape from Task 7.
 - Produces: `<MusicControls value={music} />` — a prop, not a `useMusic()` call, so the component is testable without a provider.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `src/components/music/music-controls.test.tsx`:
 
@@ -2560,7 +2590,7 @@ describe("the panel", () => {
 })
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 npx vitest run --project dom src/components/music/music-controls.test.tsx
@@ -2568,7 +2598,7 @@ npx vitest run --project dom src/components/music/music-controls.test.tsx
 
 Expected: FAIL — cannot resolve `./music-controls`.
 
-- [ ] **Step 3: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `src/components/music/music-controls.tsx`:
 
@@ -2784,7 +2814,7 @@ function TrackGroup({
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 npx vitest run --project dom src/components/music/music-controls.test.tsx
@@ -2792,7 +2822,7 @@ npx vitest run --project dom src/components/music/music-controls.test.tsx
 
 Expected: PASS, 8 tests. If `Popover.Trigger`/`Popover.Content` do not accept these props, read `src/components/ui/popover.tsx` and match its actual API — do not change the test's assertions to suit a different shape.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/music/music-controls.tsx src/components/music/music-controls.test.tsx && git commit -m "feat(music): two icons in the bar, and everything else behind them"
@@ -2809,7 +2839,7 @@ git add src/components/music/music-controls.tsx src/components/music/music-contr
 - Consumes: `useMusic()` (Task 7); `api.music.preferenceFor`, `api.music.setPreference` (Task 4); `api.settings.get` (Task 5).
 - Produces: `useMusicTracking(running: Doc<"timeEntries"> | null, settings: { musicAutoplay: boolean; musicOnStop: "stop" | "pause" | "continue" }): void`.
 
-- [ ] **Step 1: Write the hook**
+- [x] **Step 1: Write the hook**
 
 Create `src/hooks/use-music-tracking.ts`:
 
@@ -2917,7 +2947,7 @@ export function useMusicTracking(
 }
 ```
 
-- [ ] **Step 2: Typecheck**
+- [x] **Step 2: Typecheck**
 
 ```bash
 npm run typecheck
@@ -2925,7 +2955,7 @@ npm run typecheck
 
 Expected: exit 0.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/hooks/use-music-tracking.ts && git commit -m "feat(music): the bridge, and the choice it refuses to invent"
@@ -2942,7 +2972,7 @@ git add src/hooks/use-music-tracking.ts && git commit -m "feat(music): the bridg
 - Consumes: `MusicProvider`, `useMusic` (Task 7); `MusicControls` (Task 8); `useMusicTracking` (Task 9).
 - Produces: `TimerBar` accepts an optional `music?: ReactNode` prop rendered at the end of its control row.
 
-- [ ] **Step 1: Add the slot to `timer-bar.tsx`**
+- [x] **Step 1: Add the slot to `timer-bar.tsx`**
 
 Add to the props type (the inline object at the `TimerBar` signature):
 
@@ -2955,7 +2985,7 @@ Add to the props type (the inline object at the `TimerBar` signature):
 
 Destructure `music` alongside the other props, then render `{music}` as the last child of the row that already holds the Play/Stop control. Read the JSX around the `Play`/`Square` icons to find it — the bar's control row is the flex container those sit in.
 
-- [ ] **Step 2: Wire the layout**
+- [x] **Step 2: Wire the layout**
 
 In `src/routes/_authed.tsx`:
 
@@ -3025,7 +3055,7 @@ And pass the slot to the bar:
           />
 ```
 
-- [ ] **Step 3: Run the timer bar's existing tests**
+- [x] **Step 3: Run the timer bar's existing tests**
 
 ```bash
 npx vitest run --project dom src/components/timer/timer-bar.test.tsx
@@ -3033,7 +3063,7 @@ npx vitest run --project dom src/components/timer/timer-bar.test.tsx
 
 Expected: PASS. The `music` prop is optional, so no existing test needs changing. If any fail, the slot was rendered in the wrong container — fix the placement, not the test.
 
-- [ ] **Step 4: Full suite and typecheck**
+- [x] **Step 4: Full suite and typecheck**
 
 ```bash
 npm test && npm run typecheck
@@ -3043,6 +3073,18 @@ Expected: all pass.
 
 - [ ] **Step 5: Verify in the browser**
 
+> **Partially verified, 2026-08-20**, in a signed-in Chrome against the dev
+> server on 3100. Confirmed: the two icons in the bar, the popover opening on
+> the disc, a track actually playing (`GET /music/…mp3` → 206, `audio/mpeg`),
+> `aria-current` on the playing row, the disc spinning, device prefs surviving a
+> reload, a cold start preferring the remembered `lastTrack` over CATALOG[0] —
+> and **navigating to /reports not interrupting playback**, which is the whole
+> reason the provider sits in the layout.
+>
+> NOT confirmed: the "start a timer, music begins" half. Autoplay on timer start
+> writes a real time entry to the owner's account. Its logic is covered by the
+> 19 tests in `use-music-tracking.test.tsx`.
+
 Start the dev server on **port 3100** (this project's convention — `SITE_URL` and the Google redirect URI are set for it):
 
 ```bash
@@ -3051,7 +3093,7 @@ npm run dev -- --port 3100
 
 Sign in, start a timer, and confirm: music begins, the two icons appear in the bar, the popover opens, and **navigating to /reports does not interrupt playback** — that last one is the whole reason the provider sits in the layout.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/routes/_authed.tsx src/components/timer/timer-bar.tsx && git commit -m "feat(music): mount the player above the outlet, slot the controls into the bar"
@@ -3069,7 +3111,7 @@ git add src/routes/_authed.tsx src/components/timer/timer-bar.tsx && git commit 
 - Consumes: `api.music.listTracks`, `api.music.usage`, `api.music.generateUploadUrl`, `api.music.addTrack`, `api.music.renameTrack`, `api.music.removeTrack` (Task 3); `trackNameFromFilename`, `AUDIO_INPUT_ACCEPT`, `MAX_LIBRARY_BYTES` from `convex/lib/audio.ts` via the `@shared` alias.
 - Produces: route `/music`.
 
-- [ ] **Step 1: Add the nav item**
+- [x] **Step 1: Add the nav item**
 
 In `src/components/shell/app-sidebar.tsx`, add `Music` to the lucide import, widen the `to` union, and insert the item **after Projects and before Settings** — the order is track, review, bill, then the settings-shaped destinations:
 
@@ -3077,7 +3119,7 @@ In `src/components/shell/app-sidebar.tsx`, add `Music` to the lucide import, wid
   { to: "/music", label: "Music", icon: Music },
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `src/routes/_authed/-music.test.tsx`. Follow `src/routes/_authed/-settings.test.tsx` for the Convex mocking shape — read it first, and mirror its `vi.mock` of `@convex-dev/react-query` exactly rather than inventing a second pattern.
 
@@ -3155,7 +3197,7 @@ describe("the library", () => {
 })
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 ```bash
 npx vitest run --project dom src/routes/_authed/-music.test.tsx
@@ -3163,7 +3205,7 @@ npx vitest run --project dom src/routes/_authed/-music.test.tsx
 
 Expected: FAIL — cannot resolve `./music`.
 
-- [ ] **Step 4: Write the route**
+- [x] **Step 4: Write the route**
 
 Create `src/routes/_authed/music.tsx`. Structure it on `src/routes/_authed/projects.tsx` — read that file for the `Page` usage, the mutation-error toast shape, and the list markup, and follow it.
 
@@ -3180,7 +3222,7 @@ Requirements, each of which a test above pins:
 9. `durationMs` is best-effort: decode with an `Audio` element's `loadedmetadata`, and **omit the field** if it does not resolve within 5 seconds or errors. An undecodable file is still a valid upload.
 10. Every mutation rejection goes through the same toast shape `projects.tsx` uses, surfacing `errorMessage(thrown)` — the `INVALID_TRACK` and `LIBRARY_FULL` messages from Task 3 are already user-facing sentences.
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 ```bash
 npx vitest run --project dom src/routes/_authed/-music.test.tsx
@@ -3190,13 +3232,20 @@ Expected: PASS, 7 tests.
 
 - [ ] **Step 6: Verify uploads for real**
 
+> **Not performed.** Uploading, renaming and removing tracks writes to the
+> account's Convex file storage, and the rejection case asks for a deliberate
+> bad upload — all of them the owner's writes to authorise, not the
+> implementer's. What stands in for it: `convex/music.test.ts` covers all four
+> rejection paths, each with its delete-before-throw, plus the retry that would
+> otherwise mint and orphan a second blob.
+
 ```bash
 npm run dev -- --port 3100
 ```
 
 At `/music`: upload a real mp3 and confirm it appears, plays from the tracker panel, renames, and removes. Then upload a `.pdf` renamed to `.mp3` and confirm the rejection message appears **and** that no orphan blob is left (check the Convex dashboard's file storage).
 
-- [ ] **Step 7: Full suite, typecheck, commit**
+- [x] **Step 7: Full suite, typecheck, commit**
 
 ```bash
 npm test && npm run typecheck && git add src/routes/_authed/music.tsx src/routes/_authed/-music.test.tsx src/components/shell/app-sidebar.tsx src/routeTree.gen.ts && git commit -m "feat(music): the library page"
@@ -3214,7 +3263,7 @@ npm test && npm run typecheck && git add src/routes/_authed/music.tsx src/routes
 - Consumes: `settings.musicAutoplay`, `settings.musicOnStop`, and `save()` (Task 5).
 - Produces: nothing downstream.
 
-- [ ] **Step 1: Append the failing tests**
+- [x] **Step 1: Append the failing tests**
 
 Add to `src/routes/_authed/-settings.test.tsx`, matching the file's existing render helper:
 
@@ -3243,7 +3292,7 @@ describe("music settings", () => {
 > first; add `musicAutoplay: true` and `musicOnStop: "pause"` to that fixture so
 > the checkbox starts checked and the first test's expectation of `false` holds.
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 ```bash
 npx vitest run --project dom src/routes/_authed/-settings.test.tsx
@@ -3251,7 +3300,7 @@ npx vitest run --project dom src/routes/_authed/-settings.test.tsx
 
 Expected: FAIL — no such checkbox.
 
-- [ ] **Step 3: Add the section**
+- [x] **Step 3: Add the section**
 
 In `src/routes/_authed/settings.tsx`, add a new `<Section>` after the Clock section:
 
@@ -3295,7 +3344,7 @@ In `src/routes/_authed/settings.tsx`, add a new `<Section>` after the Clock sect
         </Section>
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 ```bash
 npx vitest run --project dom src/routes/_authed/-settings.test.tsx
@@ -3305,6 +3354,15 @@ Expected: PASS.
 
 - [ ] **Step 5: Full verification**
 
+> **Automated half done, 2026-08-20.** Typecheck clean on both projects; full
+> suite 101 files / 1775 tests passing; eslint clean on every file this feature
+> touched. (`npm run lint` reports 18 errors repo-wide, all pre-existing and
+> none in music files — `day-list.test.tsx:354` blames to b2d9235, older than
+> this branch.) The MANUAL half — flipping each control with a timer running —
+> needs writes to the owner's account and was left to them. The section itself
+> was confirmed rendering at /settings against the account's real values
+> (autoplay on, on-stop "pause", all three options, the hint).
+
 ```bash
 npm test && npm run typecheck && npm run lint && npm run check
 ```
@@ -3312,6 +3370,12 @@ npm test && npm run typecheck && npm run lint && npm run check
 Expected: all four pass. Then, at `/settings` on port 3100, flip each control and confirm the behaviour it names actually happens with a timer running.
 
 - [ ] **Step 6: Commit**
+
+> **Deliberately not committed.** `-settings.tsx` is untracked in-flight work of
+> the repository owner, and `-settings.test.tsx` is modified by that same work;
+> staging either sweeps an unrelated refactor into this feature. The wiring and
+> its four page-level tests are in the working tree, ready for the owner to
+> stage. The section component itself shipped in 7d05b1d.
 
 ```bash
 git add src/routes/_authed/settings.tsx src/routes/_authed/-settings.test.tsx && git commit -m "feat(music): the settings section"
