@@ -35,24 +35,38 @@ const base = {
 const pill = () => screen.getByRole("button", { name: /date range/i })
 
 describe("RangeBar — the pill", () => {
-  it("prints the range in the format this product puts on paper", () => {
+  it("names the range the way /reports names the same one", () => {
+    // The base range IS this week, so the pill says so. It used to print
+    // "08/10/2026 - 08/16/2026" here while /reports printed prose for the
+    // identical span — two spellings of one fact, on a control that is now
+    // literally the same component.
     render(<RangeBar {...base} />)
-    expect(screen.getByText("08/10/2026 - 08/16/2026")).toBeTruthy()
+    expect(screen.getByText("This week")).toBeTruthy()
   })
 
-  it("says something else to a screen reader than to the eye", () => {
+  it("falls back to the dates when no preset claims the range", () => {
+    render(
+      <RangeBar {...base} range={{ from: "2026-07-01", to: "2026-09-30" }} />
+    )
+    expect(screen.getByText("1 Jul – 30 Sep 2026")).toBeTruthy()
+  })
+
+  it("still says more to a screen reader than to the eye", () => {
     render(<RangeBar {...base} />)
-    // Twenty digits read aloud answer none of the questions this control is
-    // there to answer; "This week" answers the first one.
+    // The pill reads "This week"; the grid can say WHICH week it drew, so on
+    // the calendar the spoken name still carries the dates the eye can now
+    // read off the columns.
     expect(pill().getAttribute("aria-label")).toBe(
       "Date range — This week · 10–16 Aug"
     )
   })
 
-  it("shows the field's own shape, and disables the arrows, for All dates", () => {
+  it("says the range is unbounded, and disables the arrows, for All dates", () => {
     render(<RangeBar {...base} range={null} view="list" />)
 
-    expect(screen.getByText("MM/DD/YYYY - MM/DD/YYYY")).toBeTruthy()
+    // Was "MM/DD/YYYY - MM/DD/YYYY", the shape of an empty field. The range is
+    // not missing, it is unbounded — a different thing to be told.
+    expect(screen.getByText("All dates")).toBeTruthy()
     // "All dates" already reaches every entry in both directions. An arrow
     // there would either do nothing or bound a selection nobody made.
     expect(

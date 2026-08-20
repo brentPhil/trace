@@ -1,7 +1,5 @@
 import { useEffect } from "react"
-import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DateRangePicker } from "@/components/history/date-range-picker"
-import { Button } from "@/components/ui/button"
+import { RangeStepper } from "@/components/history/range-stepper"
 import {
   REPORTS_DEFAULT_PRESET,
   REPORTS_PRESETS,
@@ -74,101 +72,59 @@ export function PeriodControls({
     return () => document.removeEventListener("keydown", onKey)
   }, [onChange])
 
+  /*
+    THE DAY / WEEK / MONTH CHIPS ARE GONE, removed 2026-08-12 at the user's
+    request. They set the range by a coarser name than the picker's own rail
+    already does — This week, This month, This quarter, This year — so they were
+    a second control for one thing, and the one that could say less.
+
+    THE ARROWS AND THE PILL now come from `RangeStepper`, shared with /timer.
+    They were the same three parts in the same order on both pages, drawn with
+    different buttons and printing a different date format; this page's version
+    is the one that survived.
+
+    `stepPeriod` still steps by whatever the current range's WIDTH is, so the
+    arrows keep working for a quarter or a year even though no chip names those.
+    The ← / → document binding above is unchanged and stays HERE rather than
+    moving into the shared control: it is a page-level key binding on the
+    document, and /timer's grid has its own claim on the arrow keys.
+  */
   return (
-    <div className="flex flex-wrap items-center gap-1">
-      {/*
-        THE DAY / WEEK / MONTH CHIPS ARE GONE, removed 2026-08-12 at the user's
-        request. They set the range by a coarser name than the picker's own rail
-        already does — This week, This month, This quarter, This year — so they
-        were a second control for one thing, and the one that could say less.
-
-        THE ARROWS STAYED, and moved: they used to be their own group at the far
-        left with the chips between them and the pill, so the three controls read
-        as three. Hugging the pill they read as one — a range, and the two ways
-        to move it — which is the shape /timer's `RangeBar` already uses and the
-        shape the user's own reference draws.
-
-        `stepPeriod` still steps by whatever the current range's WIDTH is, so the
-        arrows keep working for a quarter or a year even though no chip names
-        those. The ← / → document binding above is unchanged and is now the only
-        thing on this page that still calls itself "period".
-      */}
-      <IconButton
-        label="Previous period"
-        onClick={() => onChange((f) => stepPeriod(f, -1))}
-      >
-        <ChevronLeft className="size-4" />
-      </IconButton>
-
-      {/* The trigger's WORDS are this page's, not the picker's: /reports names
-          the active period ("This week") where /timer prints US dates. See
-          `date-range-picker.tsx` for why that moved out to the callers.
-
-          The RAIL is this page's for the same reason, and it is a different
-          list from /timer's: quarters and years are the spans a freelancer
-          reports and invoices on, and "All dates" is not a range this page
-          can scan. Two months and the week numbers because there is room for
-          them here — /timer forces one month to leave the rail its width. */}
-      <DateRangePicker
-        from={filters.from}
-        to={filters.to}
-        today={today}
-        weekStartDay={weekStartDay}
-        showWeekNumber
-        label={rangeTriggerLabel(
-          filters.period,
-          filters.from,
-          filters.to,
-          today,
-          weekStartDay
-        )}
-        presets={{
-          items: REPORTS_PRESETS.map((preset) => ({
-            value: preset,
-            label: REPORTS_PRESET_LABELS[preset],
-            badge: preset === REPORTS_DEFAULT_PRESET ? "Default" : undefined,
-          })),
-          active: activeReportsPreset(filters.from, filters.to, today, weekStartDay),
-          onSelect: (value) =>
-            onChange((f) =>
-              reportsPresetFilters(value as ReportsPreset, today, weekStartDay, f)
-            ),
-        }}
-        onChange={(range) => onChange((f) => ({ ...f, period: "custom", ...range }))}
-      />
-
-      <IconButton label="Next period" onClick={() => onChange((f) => stepPeriod(f, 1))}>
-        <ChevronRight className="size-4" />
-      </IconButton>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-
-function IconButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <Button
-      type="button"
-      variant="quiet"
-      size="icon-row"
-      aria-label={label}
-      onClick={onClick}
-      // `border-edge`, and this row is the reason the distinction is worth
-      // keeping: it sits on the page's own GROUND, above the band, where
-      // --edge measures 3.15:1. The chips beside it are fill-less and could
-      // land on either layer, which is why `Chip` hard-codes --edge-raised.
-      className="border-edge motion-reduce:transition-none"
-    >
-      {children}
-    </Button>
+    <RangeStepper
+      from={filters.from}
+      to={filters.to}
+      today={today}
+      weekStartDay={weekStartDay}
+      stepUnit="period"
+      /* The trigger's WORDS are this page's, not the picker's: /reports names
+         the active period ("This week") and falls back to a prose range. See
+         `date-range-picker.tsx` for why that moved out to the callers. */
+      label={rangeTriggerLabel(
+        filters.period,
+        filters.from,
+        filters.to,
+        today,
+        weekStartDay
+      )}
+      /* The RAIL is this page's too, and it is a different list from /timer's:
+         quarters and years are the spans a freelancer reports and invoices on,
+         and "All dates" is not a range this page can scan. Two months — the
+         default — because there is room for them here; /timer forces one to
+         leave the rail its width. */
+      presets={{
+        items: REPORTS_PRESETS.map((preset) => ({
+          value: preset,
+          label: REPORTS_PRESET_LABELS[preset],
+          badge: preset === REPORTS_DEFAULT_PRESET ? "Default" : undefined,
+        })),
+        active: activeReportsPreset(filters.from, filters.to, today, weekStartDay),
+        onSelect: (value) =>
+          onChange((f) =>
+            reportsPresetFilters(value as ReportsPreset, today, weekStartDay, f)
+          ),
+      }}
+      onStep={(delta) => onChange((f) => stepPeriod(f, delta))}
+      onChange={(range) => onChange((f) => ({ ...f, period: "custom", ...range }))}
+    />
   )
 }

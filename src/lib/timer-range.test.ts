@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest"
 import {
   CALENDAR_PRESETS,
   LIST_PRESETS,
-  RANGE_PLACEHOLDER,
   activePreset,
   calendarSnap,
   instantsOf,
@@ -311,15 +310,39 @@ describe("the instants a bounded range means", () => {
 })
 
 describe("what the pill says", () => {
-  it("prints the range in the one format this product prints", () => {
-    expect(rangePillLabel({ from: "2026-08-10", to: "2026-08-16" })).toBe(
-      "08/10/2026 - 08/16/2026"
-    )
+  it("prints a plain range as prose, the way /reports does", () => {
+    // TODAY is a Wednesday in August 2026; this span is neither this week nor
+    // last week, so no preset claims it and the dates themselves are shown.
+    expect(
+      rangePillLabel({ from: "2026-07-01", to: "2026-09-30" }, TODAY, MONDAY)
+    ).toBe("1 Jul – 30 Sep 2026")
   })
 
-  it("shows the field's own shape when nothing is bounded", () => {
-    expect(rangePillLabel(null)).toBe(RANGE_PLACEHOLDER)
-    expect(RANGE_PLACEHOLDER).toBe("MM/DD/YYYY - MM/DD/YYYY")
+  it("names the range when a preset is exactly what is selected", () => {
+    // "This week" beats "10 – 16 Aug 2026" for a span the user picked BY that
+    // name. The rail already knows which preset is active; the pill asks it.
+    expect(
+      rangePillLabel({ from: "2026-08-10", to: "2026-08-16" }, TODAY, MONDAY)
+    ).toBe("This week")
+  })
+
+  it("stops naming a preset once an arrow steps off it", () => {
+    // The guard against a stale label, and the same one `activePreset` carries:
+    // step twice off this week and the pill must describe the span it is on
+    // rather than keep claiming a name it has left.
+    const gone = stepRange(
+      stepRange({ from: "2026-08-10", to: "2026-08-16" }, "week", 1),
+      "week",
+      1
+    )
+    expect(rangePillLabel(gone, TODAY, MONDAY)).toBe("24 – 30 Aug 2026")
+  })
+
+  it("says the range is unbounded rather than drawing an empty field", () => {
+    // Was "MM/DD/YYYY - MM/DD/YYYY". The range is not MISSING, it is
+    // unbounded, and those are different things to be told — which is what the
+    // spoken label had said all along.
+    expect(rangePillLabel(null, TODAY, MONDAY)).toBe("All dates")
   })
 
   it("says something a screen reader can use instead of the digits", () => {

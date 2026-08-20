@@ -300,10 +300,11 @@ describe("the header's label and the grid's own columns", () => {
         })
         expect({ anchor, pillText }).toEqual({
           anchor,
-          pillText: rangePillLabel({
-            from: columns[0],
-            to: columns[columns.length - 1],
-          }),
+          pillText: rangePillLabel(
+              { from: columns[0], to: columns[columns.length - 1] },
+              TODAY,
+              weekStartDay
+            ),
         })
 
         cleanup()
@@ -365,10 +366,11 @@ describe("the header's label and the grid's own columns", () => {
         })
         expect({ anchor, pillText }).toEqual({
           anchor,
-          pillText: rangePillLabel({
-            from: columns[0],
-            to: columns[columns.length - 1],
-          }),
+          pillText: rangePillLabel(
+              { from: columns[0], to: columns[columns.length - 1] },
+              TODAY,
+              weekStartDay
+            ),
         })
 
         cleanup()
@@ -423,7 +425,8 @@ describe("the header's label and the grid's own columns", () => {
       })
       expect({ anchor, pillText }).toEqual({
         anchor,
-        pillText: rangePillLabel({ from: anchor, to: anchor }),
+        // `1` is the week start `measure` was called with, three lines up.
+        pillText: rangePillLabel({ from: anchor, to: anchor }, TODAY, 1),
       })
 
       cleanup()

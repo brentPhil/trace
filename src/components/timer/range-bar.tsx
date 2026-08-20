@@ -1,6 +1,4 @@
-import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DateRangePicker } from "@/components/history/date-range-picker"
-import { Button } from "@/components/ui/button"
+import { RangeStepper } from "@/components/history/range-stepper"
 import { formatTotal } from "@/lib/format-total"
 import { staleProps } from "@/lib/stale"
 import {
@@ -118,54 +116,38 @@ export function RangeBar({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Previous ${unit}`}
-          className="size-7"
-          disabled={stepDisabled}
-          onClick={() => onStep(-1)}
-        >
-          <ChevronLeft className="size-4" />
-        </Button>
-
-        <DateRangePicker
-          from={range?.from ?? null}
-          to={range?.to ?? null}
-          today={today}
-          weekStartDay={weekStartDay}
-          // Digits for the eye, prose for the ear. See `rangeSpokenLabel`.
-          label={rangePillLabel(range)}
-          spokenLabel={rangeSpokenLabel(
-            range,
-            view === "calendar" ? size : null,
-            today
-          )}
-          // ONE month, against /reports' two. The rail takes the width the
-          // second month would have had, and a range picked here is nearly
-          // always a week or less — the spans this page steps through.
-          months={1}
-          showWeekNumber
-          presets={{
-            items: presets,
-            active: activePreset(range, today, weekStartDay),
-            onSelect: (value) => onPresetChange(value as TimerPreset),
-          }}
-          onChange={onRangeChange}
-        />
-
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={`Next ${unit}`}
-          className="size-7"
-          disabled={stepDisabled}
-          onClick={() => onStep(1)}
-        >
-          <ChevronRight className="size-4" />
-        </Button>
-      </div>
+      {/* THE SAME CONTROL /reports DRAWS, and since 2026-08-21 literally the
+          same component. What stays here is what this page alone knows: which
+          presets a time grid can express, that one month leaves the rail its
+          width, and what the arrows step by. */}
+      <RangeStepper
+        from={range?.from ?? null}
+        to={range?.to ?? null}
+        today={today}
+        weekStartDay={weekStartDay}
+        label={rangePillLabel(range, today, weekStartDay)}
+        // The pill now READS as prose, so the spoken name is only worth
+        // overriding where it can say more: on the grid, `calendarLabel` names
+        // the window that was actually drawn ("This week · 10–16 Aug").
+        spokenLabel={rangeSpokenLabel(
+          range,
+          view === "calendar" ? size : null,
+          today
+        )}
+        // ONE month, against /reports' two. The rail takes the width the second
+        // month would have had, and a range picked here is nearly always a week
+        // or less — the spans this page steps through.
+        months={1}
+        presets={{
+          items: presets,
+          active: activePreset(range, today, weekStartDay),
+          onSelect: (value) => onPresetChange(value as TimerPreset),
+        }}
+        stepUnit={unit}
+        stepDisabled={stepDisabled}
+        onStep={onStep}
+        onChange={onRangeChange}
+      />
 
       {/*
         THE GRID'S OWN TWO CONTROLS, and they go with the grid.

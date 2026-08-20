@@ -330,9 +330,16 @@ const pill = () => screen.getByRole("button", { name: /date range/i })
 const calendarRows = () => screen.getByTestId("calendar-rows").textContent
 
 /** "Today1:00:00" — the label and the figure it belongs to, as one string, so
- *  an assertion cannot pick up an identical figure from somewhere else. */
+ *  an assertion cannot pick up an identical figure from somewhere else.
+ *
+ *  NOT `getByText` alone, since the range pill started naming its range: "This
+ *  week" and "Today" are now the pill's words as well as this row's, and a bare
+ *  text query matches both. The pill is a button and these labels are not,
+ *  which is the one structural difference that separates them. */
 const pageTotal = (label: "Today" | "This week") =>
-  screen.getByText(label).parentElement?.textContent
+  screen
+    .getAllByText(label)
+    .find((node) => node.closest("button") === null)?.parentElement?.textContent
 
 /** The calendar's own total. `getByText` matches on an element's DIRECT text
  *  nodes, so this finds the wrapper and reads the figure inside it. */
@@ -439,8 +446,8 @@ describe("Timer — Calendar and List", () => {
 
     // …and `TotalsRow` still says today and this week, which are facts about
     // the clock rather than about what the grid happens to be showing.
-    expect(screen.getByText("Today")).toBeTruthy()
-    expect(screen.getByText("This week")).toBeTruthy()
+    expect(pageTotal("Today")).toContain("Today")
+    expect(pageTotal("This week")).toContain("This week")
   })
 
   it("steps the range without touching the page totals", () => {
@@ -449,13 +456,14 @@ describe("Timer — Calendar and List", () => {
 
     // NOW is Wednesday 5 August 2026, weekStartDay 1 (Monday) — so "All dates"
     // snaps to the week containing today, and one step back leaves it. The pill
-    // prints the format this product puts on paper; the accessible name says
-    // the prose.
-    expect(screen.getByText("08/03/2026 - 08/09/2026")).toBeTruthy()
+    // NAMES a range that is exactly a preset and spells out one that is not;
+    // the accessible name carries the dates either way, which is what pins the
+    // step below to the days it actually moved.
+    expect(pill().textContent).toContain("This week")
 
     fireEvent.click(screen.getByRole("button", { name: "Previous week" }))
 
-    expect(screen.getByText("07/27/2026 - 08/02/2026")).toBeTruthy()
+    expect(pill().textContent).toContain("Last week")
     expect(pill().getAttribute("aria-label")).toBe("Date range — 27 Jul – 2 Aug")
   })
 
@@ -509,7 +517,7 @@ describe("Timer — Calendar and List", () => {
     fireEvent.click(screen.getByRole("button", { name: "Previous week" }))
 
     // The grid is on last week, and its total says so…
-    expect(screen.getByText("07/27/2026 - 08/02/2026")).toBeTruthy()
+    expect(pill().textContent).toContain("Last week")
     expect(rangeTotal()).toBe("Range total2:30:00")
 
     // …while today and this week are facts about the clock, unmoved.
@@ -540,7 +548,7 @@ describe("Timer — the range control", () => {
   it("opens on All dates, with nothing to step", () => {
     renderTimer()
 
-    expect(screen.getByText("MM/DD/YYYY - MM/DD/YYYY")).toBeTruthy()
+    expect(screen.getByText("All dates")).toBeTruthy()
     // Unbounded already reaches every entry in both directions, so an arrow
     // would either do nothing or bound a selection nobody made.
     expect(
@@ -615,7 +623,13 @@ describe("Timer — the range control", () => {
     fireEvent.click(screen.getByRole("button", { name: "Yesterday" }))
 
     expect(screen.getByTestId("entry-log").textContent).toBe("1 day groups")
-    expect(screen.getByText("08/04/2026 - 08/04/2026")).toBeTruthy()
+    // Through the pill rather than `getByText`: "Yesterday" is also the name of
+    // the rail button that was just clicked, so a bare text query would pass on
+    // finding the control instead of the answer.
+    expect(pill().textContent).toContain("Yesterday")
+    // And the accessible name still pins the DAY it resolved to — the preset
+    // name alone would pass even if it had selected the wrong date.
+    expect(pill().getAttribute("aria-label")).toBe("Date range — 4 Aug 2026")
     // Nothing left to load: `listRange` answers with the whole range at once,
     // so a button offering to load more of it would do nothing.
     expect(screen.queryByText("Load earlier entries")).toBeNull()
@@ -669,12 +683,14 @@ describe("Timer — the range control", () => {
     renderTimer()
     fireEvent.click(pill())
     fireEvent.click(screen.getByRole("button", { name: "Last 30 days" }))
-    expect(screen.getByText("07/07/2026 - 08/05/2026")).toBeTruthy()
+    // Through the pill, not `getByText`: "Last 30 days" also names the rail
+    // button just clicked. The accessible name is what pins the span.
+    expect(pill().getAttribute("aria-label")).toBe("Date range — 7 Jul – 5 Aug 2026")
 
     fireEvent.click(tab("Calendar"))
 
     // The week containing 7 July, Monday-start.
-    expect(screen.getByText("07/06/2026 - 07/12/2026")).toBeTruthy()
+    expect(pill().textContent).toContain("6 – 12 Jul 2026")
     expect(screen.getByTestId("calendar-panel").dataset.days).toBe(
       [
         "2026-07-06",
@@ -698,7 +714,9 @@ describe("Timer — the range control", () => {
     fireEvent.click(tab("Calendar"))
     fireEvent.click(tab("List"))
 
-    expect(screen.getByText("07/07/2026 - 08/05/2026")).toBeTruthy()
+    // The wide selection came back intact — pinned by the dates in the
+    // accessible name, not by the preset name that is also a button.
+    expect(pill().getAttribute("aria-label")).toBe("Date range — 7 Jul – 5 Aug 2026")
   })
 })
 

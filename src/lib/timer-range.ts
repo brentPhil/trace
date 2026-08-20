@@ -2,7 +2,6 @@ import { rangeOf } from "@/lib/calendar-events"
 import { calendarLabel } from "@/lib/calendar-label"
 import { formatDayRange } from "@/lib/date-range-picker"
 import { daysBetween } from "@/lib/history-filters"
-import { usDate } from "@/lib/us-date"
 import { addDays, dayWindow, weekStartOf } from "@shared/day"
 import type { CalendarRange } from "@/lib/calendar-events"
 import type { CalendarSize } from "@/lib/calendar-label"
@@ -246,27 +245,40 @@ export function instantsOf(
 }
 
 /**
- * What the pill shows when nothing is bounded.
+ * The pill's own text: "This week", or "10 – 16 Aug 2026".
  *
- * The FORMAT rather than a word, because the control is a date-range field and
- * an empty one says what it wants by showing its own shape. It is also what the
- * reference screenshot carries.
- */
-export const RANGE_PLACEHOLDER = "MM/DD/YYYY - MM/DD/YYYY"
-
-/**
- * The pill's own text: "08/10/2026 - 08/16/2026".
+ * THE SAME SENTENCE /reports PUTS ON THE SAME CONTROL, and it used to be a
+ * different one: `usDate` twice with a hyphen between, so /timer read
+ * "08/10/2026 - 08/16/2026" while /reports read "10 – 16 Aug 2026" for the
+ * identical span. Two spellings of one fact, on two pages, in a control that is
+ * now literally the same component.
  *
- * `usDate`, the one date format this product PRINTS — the same one on the
- * invoices and the PDF reports, so a range typed into an invoice's period field
- * reads identically to the range it was taken from. A plain hyphen with spaces,
- * matching the placeholder above: this is the machine-shaped rendering of a
- * date, and the en dash belongs with the prose one (`formatDayRange`), which is
- * what a screen reader gets — see `rangeSpokenLabel`.
+ * The digits lost, and `rangeSpokenLabel` right below is why: the accessible
+ * name for this pill was ALREADY prose, because "zero eight slash one zero
+ * slash two zero two six", twice, answers none of the questions the control is
+ * there to answer. What a screen reader was given is what the eye should have
+ * had.
+ *
+ * `usDate` keeps its job — it is what this product PRINTS, on invoices and PDF
+ * reports, where a machine-shaped date belongs. A control you steer by is not
+ * a document you file.
+ *
+ * `null` is "All dates", named rather than drawn as an empty field's format
+ * string: the range is not missing, it is unbounded, and those are different
+ * things to be told.
  */
-export function rangePillLabel(range: TimerRange): string {
-  if (range === null) return RANGE_PLACEHOLDER
-  return `${usDate(range.from)} - ${usDate(range.to)}`
+export function rangePillLabel(
+  range: TimerRange,
+  today: DayString,
+  weekStartDay: number
+): string {
+  if (range === null) return TIMER_PRESET_LABELS["all-dates"]
+  // A range that IS a preset says the preset's name — "This week" beats
+  // "10 – 16 Aug 2026" for a span the user picked by that name. The rail
+  // already knows which one is active; this asks it the same question.
+  const preset = activePreset(range, today, weekStartDay)
+  if (preset !== null) return TIMER_PRESET_LABELS[preset]
+  return formatDayRange(range.from, range.to)
 }
 
 /**
