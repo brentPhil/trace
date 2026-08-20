@@ -7,8 +7,6 @@ import {
   useRef,
   useState,
 } from "react"
-import { convexQuery } from "@convex-dev/react-query"
-import { useQuery } from "@tanstack/react-query"
 import { useAudioElement } from "@/hooks/use-audio-element"
 import { CATALOG } from "@/lib/music/catalog"
 import { nextIndex, prevIndex, shuffledOrder } from "@/lib/music/queue"
@@ -22,7 +20,6 @@ import {
   readLocalPrefs,
   writeLocalPrefs,
 } from "@/lib/music/local-prefs"
-import { api } from "../../../convex/_generated/api"
 import type { RepeatMode } from "@/lib/music/queue"
 import type { TrackRef } from "@/lib/music/track-ref"
 import type { ReactNode } from "react"
@@ -32,6 +29,31 @@ export type PlayableTrack = {
   name: string
   url: string | null
   origin: "chroneli" | "upload"
+}
+
+/**
+ * One row of `api.music.listTracks`, described STRUCTURALLY rather than
+ * imported.
+ *
+ * The three fields the player actually needs, and not one more: an id to build
+ * a `TrackRef` from, a name to draw, and the signed URL (`null` when the blob
+ * has gone missing — see `trackReturns` in convex/music.ts). The query also
+ * returns `bytes`, `durationMs` and `_creationTime`; a structural type ignores
+ * them, so the route can pass the rows through untouched while this file stays
+ * a statement of what a PLAYER needs rather than a copy of what the query
+ * happens to select today.
+ *
+ * `_id` is a plain `string`, not `Id<"musicTracks">`, for exactly the reason
+ * `track-ref.ts` gives for its own `trackId`: the branded id is a generated
+ * Convex type, and a component that imports one has learned the backend's
+ * shape. A real `Id` is assignable to this, so `_authed.tsx` passes the query
+ * result through untouched and the server's validator remains the only thing
+ * that enforces the brand.
+ */
+export type MusicUpload = {
+  _id: string
+  name: string
+  url: string | null
 }
 
 export type MusicContextValue = {
@@ -173,12 +195,56 @@ function mintTabId(): string {
  * It knows nothing about timers. `use-music-tracking.ts` is the only file aware
  * of both halves — delete that one file and this keeps working, which is the
  * test of whether the boundary is real.
+ *
+ * ITS DATA ARRIVES AS A PROP, AND THAT IS THE SAME RULE `TimerBarActions`
+ * FOLLOWS. This used to call `useQuery(convexQuery(api.music.listTracks, {}))`
+ * itself, which is the shorter diff and the one the codebase forbids — the
+ * lint rule in eslint.config.js names the case that earned it: a design
+ * harness rendered the timer bar against fixtures while the bar reached for
+ * live Convex internally, and fired real writes at the backend carrying
+ * fixture ids. Nothing here writes, so the danger is milder; the reason is
+ * not. A component that imports `api` has learned the backend's function
+ * surface, and every consequence of that follows whether or not the call
+ * happens to be a read: it cannot be rendered against fixtures, it cannot be
+ * mounted without a Convex client, and the one file allowed to know both
+ * halves of this feature stops being the only one that does.
+ *
+ * The alternative worth arguing with is not "import `api` anyway" but "take
+ * the finished `tracks` array as a prop and drop the catalog code too". That
+ * is wrong for a specific reason: `CATALOG` is a pure local module, compiled
+ * into the bundle, needing no client and no network, and it is what makes this
+ * provider render something playable on its very first frame. Pushing it up to
+ * the route would make every caller assemble the same two halves in the same
+ * order, and would move the one part of the library that CANNOT fail to arrive
+ * behind something that can. So the split is: the half that needs a server
+ * comes in as a prop, the half that does not is built here.
+ *
+ * `uploads` being OPTIONAL is what keeps "mount this with no Convex client at
+ * all" true — more true than before, since there is no longer a query to fail.
+ * A provider rendered with no `uploads` plays the catalog and reports
+ * `tracksReady: false`, which is precisely the honest answer: nobody has told
+ * it what this account has uploaded.
  */
 export function MusicProvider({
   children,
+  uploads,
   onError,
 }: {
   children: ReactNode
+  /**
+   * What `api.music.listTracks` returned, or `undefined` while it has not
+   * answered — and the DISTINCTION IS LOAD-BEARING, not incidental laxity
+   * about optional props.
+   *
+   * `undefined` means "no answer yet"; `[]` means "this account has uploaded
+   * nothing". Both produce the same `tracks` array below — catalog only — and
+   * `tracksReady` on the context type exists solely because a consumer
+   * resolving a stored upload ref has to tell them apart. Passing the query's
+   * `data` straight through preserves that difference for free: TanStack Query
+   * already spells "not settled" as `undefined`, so nothing here has to invent
+   * a second flag alongside the array and keep the two in step.
+   */
+  uploads?: Array<MusicUpload>
   /**
    * "One quiet toast", and the reason it is a PROP.
    *
@@ -195,15 +261,10 @@ export function MusicProvider({
    */
   onError?: (message: string) => void
 }) {
-  // Not `useSuspenseQuery`: the library is not worth blocking the authed shell
-  // on, and an empty list is a correct first render — the catalog is still
-  // playable while uploads load.
-  const { data: uploads } = useQuery(convexQuery(api.music.listTracks, {}))
-
-  // `undefined` is TanStack Query's "no answer yet"; `[]` is a real answer
-  // meaning "this account has uploaded nothing". Those two produce the same
-  // `tracks` array below — catalog only — and a consumer resolving a stored
-  // upload ref has to tell them apart. See `tracksReady` on the context type.
+  // The whole of "has the library arrived?", derived from the prop rather than
+  // held as a second one. Two props that must agree is two props that can
+  // disagree; see the `uploads` doc above and `tracksReady` on the context
+  // type.
   const tracksReady = uploads !== undefined
 
   const [prefs, setPrefs] = useState(DEFAULT_LOCAL_PREFS)
@@ -219,8 +280,8 @@ export function MusicProvider({
   const [shuffleSeed, setShuffleSeed] = useState(1)
 
   const tracks = useMemo<Array<PlayableTrack>>(() => {
-    const uploadUrls = new Map(
-      (uploads ?? []).map((t) => [t._id as string, t.url ?? ""])
+    const uploadUrls = new Map<string, string>(
+      (uploads ?? []).map((t) => [t._id, t.url ?? ""])
     )
     return [
       ...CATALOG.map((track) => ({
@@ -233,7 +294,7 @@ export function MusicProvider({
         origin: "chroneli" as const,
       })),
       ...(uploads ?? []).map((track) => ({
-        ref: { origin: "upload" as const, trackId: track._id as string },
+        ref: { origin: "upload" as const, trackId: track._id },
         name: track.name,
         url: track.url,
         origin: "upload" as const,
@@ -553,7 +614,17 @@ export function MusicProvider({
         prefs.lastTrack === null
           ? undefined
           : tracks.find((t) => trackRefEquals(t.ref, prefs.lastTrack))
-      const track = remembered ?? tracks[0]
+      // `.at(0)`, not `[0]`. This project does not set
+      // `noUncheckedIndexedAccess`, so `tracks[0]` types as a `PlayableTrack`
+      // even on an empty array and the guard below reads to the linter as dead
+      // code — while at runtime it is the only thing standing between an empty
+      // list and `start(undefined)`. `.at` returns `PlayableTrack | undefined`,
+      // which is what is actually true, so the check survives on its own merits
+      // rather than as a suppression. Today `tracks` always holds the compiled-in
+      // catalog and cannot be empty; that is a fact about `catalog.ts`, not
+      // about this function, and it stops being true the day the catalog moves
+      // to R2 — the exact move `resolveTrackUrl`'s indirection exists for.
+      const track = remembered ?? tracks.at(0)
       if (track === undefined) return
       void start(track)
       return
@@ -600,8 +671,11 @@ export function MusicProvider({
         if (shuffle) setShuffleSeed((seed) => seed + 1)
       },
       cycleRepeat: () => {
-        const order: Array<RepeatMode> = ["off", "all", "one"]
-        const repeat = order[(order.indexOf(prefs.repeat) + 1) % order.length]
+        // Named `modes`, not `order`: `order` is already the shuffle
+        // permutation memoised above, and two different things under one name
+        // in nested scopes is how a later edit reaches for the wrong one.
+        const modes: Array<RepeatMode> = ["off", "all", "one"]
+        const repeat = modes[(modes.indexOf(prefs.repeat) + 1) % modes.length]
         setPrefs((p) => ({ ...p, repeat }))
         writeLocalPrefs({ repeat })
       },

@@ -13,14 +13,22 @@ describe("MusicSection", () => {
         onChange={vi.fn()}
       />
     )
-    const checkbox = screen.getByRole("checkbox", {
+    // The element type goes in the TYPE PARAMETER, not in a trailing `as`.
+    // `getByRole<T extends HTMLElement = HTMLElement>` can only infer `T` from
+    // the call's contextual type, and a type assertion supplies exactly that —
+    // so `getByRole(...) as HTMLInputElement` was inferring `T =
+    // HTMLInputElement` and then asserting the result to the type it had just
+    // caused. The assertion narrowed nothing and checked nothing; the linter
+    // is right that it is dead. Naming `T` outright is the same guarantee said
+    // once instead of in a circle.
+    const checkbox = screen.getByRole<HTMLInputElement>("checkbox", {
       name: /play music when tracking starts/i,
-    }) as HTMLInputElement
+    })
     expect(checkbox.checked).toBe(true)
 
-    const select = screen.getByRole("combobox", {
+    const select = screen.getByRole<HTMLSelectElement>("combobox", {
       name: /when tracking stops/i,
-    }) as HTMLSelectElement
+    })
     expect(select.value).toBe("pause")
   })
 

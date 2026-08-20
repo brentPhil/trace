@@ -6,7 +6,7 @@ import {
   useLocation,
 } from "@tanstack/react-router"
 import { ConvexError } from "convex/values"
-import { useSuspenseQuery } from "@tanstack/react-query"
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { buttonVariants } from "@/components/ui/button"
 import { Toast } from "@/components/ui/toast"
@@ -100,11 +100,29 @@ export const Route = createFileRoute("/_authed")({
  * lives in `__root.tsx`, above both, so `useToastManager` is legal at this
  * level — and the provider gets the app's ordinary error channel instead of
  * growing a toast import of its own.
+ *
+ * The uploads query is read HERE for the same class of reason, spelled out in
+ * eslint.config.js and enforced by it: a component may not import `api`, so
+ * the route runs the query and hands the rows down. This is the nearest legal
+ * home for it — this component is the one that renders the provider — and the
+ * furthest up it should go: `__root.tsx` covers /login too, and an unauthed
+ * page has no player to feed.
  */
 function AuthedLayout() {
   const toasts = Toast.useToastManager()
+  // Not `useSuspenseQuery`, and deliberately absent from the route `loader`
+  // above: the library is not worth blocking the authed shell on, and
+  // `undefined` is a correct first render — the provider plays the compiled-in
+  // catalog while this is in flight and flips `tracksReady` when it lands.
+  const { data: uploads } = useQuery(convexQuery(api.music.listTracks, {}))
   return (
     <MusicProvider
+      // Passed through exactly as TanStack Query reports it, `undefined`
+      // included. That `undefined` is the provider's only way to distinguish
+      // "no answer yet" from "this account has uploaded nothing", and
+      // defaulting it to `[]` here would quietly tell every consumer the
+      // library had arrived empty — see `uploads` on `MusicProvider`.
+      uploads={uploads}
       onError={(message) => {
         // `priority: "high"` and the 8s timeout match `AuthedShell`'s `report`
         // exactly. Music failing is not more urgent than a failed save, but it
