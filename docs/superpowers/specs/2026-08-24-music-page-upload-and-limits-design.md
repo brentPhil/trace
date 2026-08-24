@@ -3,7 +3,7 @@
 **Date:** 2026-08-24
 **Status:** designed; not implemented
 **Scope:** The `/music` page only — its upload path, its limit readouts, and
-its list. Preview playback is deliberately out; see *Out of scope* below.
+its list. Preview playback is deliberately out; see _Out of scope_ below.
 
 `/music` works. Files go up, tracks come back, renames and removals hold. What
 it does not do is **say anything while it works, or before it refuses**. This
@@ -30,11 +30,11 @@ is the single technical reason this design touches the network call at all.
 
 The backend enforces four caps. The page mentions one.
 
-| Cap | Value | Stated on the page today |
-|---|---|---|
-| `MAX_LIBRARY_BYTES` | 500 MB | Yes — the meter |
-| `MAX_TRACK_BYTES` | 20 MiB | **No** |
-| `MAX_TRACK_COUNT` | 500 | **No** |
+| Cap                            | Value   | Stated on the page today      |
+| ------------------------------ | ------- | ----------------------------- |
+| `MAX_LIBRARY_BYTES`            | 500 MB  | Yes — the meter               |
+| `MAX_TRACK_BYTES`              | 20 MiB  | **No**                        |
+| `MAX_TRACK_COUNT`              | 500     | **No**                        |
 | `ACCEPTED_AUDIO_CONTENT_TYPES` | 5 types | Only as the picker's `accept` |
 
 `MAX_TRACK_BYTES` and `MAX_TRACK_COUNT` appear in **no frontend file at all**.
@@ -58,12 +58,12 @@ const report = (thrown: unknown) => {
 
 `upload()` catches per file, deliberately, so one bad file costs that file and
 not the nine behind it. Good. But `report` receives only the thrown error, and
-the backend's sentences are written about *tracks in general*, not about *this
-file*: "A track needs a name.", "Your music library is full."
+the backend's sentences are written about _tracks in general_, not about _this
+file_: "A track needs a name.", "Your music library is full."
 
 So a folder drop with three unsupported files produces **three identical
 toasts**, each timing out after eight seconds, none of which says which file
-failed. The information the user needs — *which* one — is the one thing not in
+failed. The information the user needs — _which_ one — is the one thing not in
 the message. This is what motivates a persistent queue rather than better toasts.
 
 ---
@@ -84,16 +84,16 @@ function precheck(
 ): PrecheckResult
 ```
 
-Checked in this order, each returning a sentence written about *this file*:
+Checked in this order, each returning a sentence written about _this file_:
 
 1. `file.size > MAX_TRACK_BYTES` →
-   *"That track is 34.2 MB. The limit is 20 MB per track."*
+   _"That track is 34.2 MB. The limit is 20 MB per track."_
 2. `file.type !== "" && !isAcceptedAudioContentType(file.type)` →
-   *"Chroneli plays MP3, M4A, WAV, OGG and FLAC."*
+   _"Chroneli plays MP3, M4A, WAV, OGG and FLAC."_
 3. `libraryBytes + file.size > MAX_LIBRARY_BYTES` →
-   *"Your library has 12 MB free; this track needs 18 MB."*
+   _"Your library has 12 MB free; this track needs 18 MB."_
 4. `trackCount + 1 > MAX_TRACK_COUNT` →
-   *"Your library holds 500 tracks. Remove one to make room."*
+   _"Your library holds 500 tracks. Remove one to make room."_
 
 **The type check fires only when the OS gave a type**, and this is the load-
 bearing part. `addTrackAction` falls through to the blob's own sniffed type when
@@ -123,7 +123,7 @@ function postFileWithProgress(
   url: string,
   file: File,
   onProgress: (sent: number, total: number) => void
-): Promise<string>   // the storageId
+): Promise<string> // the storageId
 ```
 
 It carries forward, unchanged, the two decisions the current `fetch` call makes
@@ -144,20 +144,20 @@ byte-level bar, since a single moving row beats ten fighting for the same pipe.
 
 Above the meter, rendered only when the queue is non-empty.
 
-**The summary line is the only `aria-live="polite"` region**: *"Uploading 3 of
-10"* while running, *"8 added · 2 failed"* when done. Announcing each row would
+**The summary line is the only `aria-live="polite"` region**: _"Uploading 3 of
+10"_ while running, _"8 added · 2 failed"_ when done. Announcing each row would
 turn a folder drop into a firehose in a screen reader; announcing the count
 gives the same information at the rate a person can absorb it.
 
 Each row carries the file's name and size, and one of five states:
 
-| State | Row shows |
-|---|---|
-| `queued` | Name and size, dimmed |
-| `uploading` | A bar, and "7.3 of 18.2 MB" |
-| `saving` | "Saving…" — the `addTrack` action, after the bytes have landed |
-| `done` | A check; the row self-dismisses after 2 seconds |
-| `failed` | The reason, in place of the bar, and a **Retry** |
+| State       | Row shows                                                      |
+| ----------- | -------------------------------------------------------------- |
+| `queued`    | Name and size, dimmed                                          |
+| `uploading` | A bar, and "7.3 of 18.2 MB"                                    |
+| `saving`    | "Saving…" — the `addTrack` action, after the bytes have landed |
+| `done`      | A check; the row self-dismisses after 2 seconds                |
+| `failed`    | The reason, in place of the bar, and a **Retry**               |
 
 `saving` is a distinct state rather than a rounding-up of `uploading` to 100%,
 because it is a real and separately-failing step: the bytes can be entirely
@@ -174,9 +174,23 @@ The `Usage` component grows from one sentence into the page's honest header:
 
 - **"142 MB of 500 MB used · 37 of 500 tracks"** — `usage.count` finally drawn.
 - **"358 MB free"** as the second line.
-- Past 90%, the bar takes `brass` **and the sentence leads with what is left**.
-  DESIGN.md's rule is that meaning is never carried by colour alone, so the
-  colour shift is the redundant half of the signal, not the signal.
+- Past 90%, the sentence leads with what is left: _"Nearly full — 12 MB free.
+  Remove a track to make room."_ **No colour change.**
+- At the cap, and only there, the bar and sentence take `alarm`:
+  _"Library full. Remove a track to make room."_
+
+**No brass, deliberately.** The obvious move is a warning-coloured bar past
+90%, and styles.css forbids it. All three signals are reserved by meaning —
+enlarger is RUNNING and nothing else, brass is MONEY, safelight is "act here" —
+strictly enough that the twelve-hue project palette **skips hues ~230 and ~85
+entirely** so a project tint can never be misread as a state. A storage meter
+is none of those three things.
+
+That leaves a two-step. "Nearly full" is _information_, and information in this
+system is carried by words at the ordinary muted weight. "Full" is an _error_ —
+`acceptTrack` really will refuse the next upload — and `alarm` is the system's
+colour for precisely that. Both states change their wording, so in the one case
+that has a colour, the colour is the redundant half.
 
 Beneath the picker, once: **"MP3, M4A, WAV, OGG or FLAC · up to 20 MB each."**
 The empty state says the same thing, since a user with no tracks reads that
