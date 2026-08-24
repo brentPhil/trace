@@ -1,13 +1,26 @@
 # The music page tells you what is happening and what it will refuse
 
 **Date:** 2026-08-24
-**Status:** designed; not implemented
+**Status:** implemented
 **Scope:** The `/music` page only — its upload path, its limit readouts, and
 its list. Preview playback is deliberately out; see _Out of scope_ below.
 
 `/music` works. Files go up, tracks come back, renames and removals hold. What
 it does not do is **say anything while it works, or before it refuses**. This
 design is about those two silences.
+
+> **Amendment, 2026-08-24 (after implementation).** The caps below were raised
+> immediately after this shipped: `MAX_TRACK_BYTES` 20 MiB → **250 MiB**, and
+> `MAX_LIBRARY_BYTES` 500 MiB → **2 GiB**. The library cap had to move with the
+> per-track cap — at 500 MiB a 250 MiB track would have meant an account was
+> full after two uploads. Every figure quoted in this document is the value at
+> design time; the constants in `convex/lib/audio.ts` are the authority.
+>
+> The raise also exposed two things this design had left alone: the server's
+> rejection sentence hardcoded "no larger than 20 MB" in two places, and there
+> were **four** hand-rolled `formatMb` copies that would each have rendered the
+> new library cap as "2048 MB". Both are now one `formatBytes` in the shared
+> layer, used by the server's error string and the client alike.
 
 ---
 
