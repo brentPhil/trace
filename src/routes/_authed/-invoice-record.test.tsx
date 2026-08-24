@@ -8,7 +8,10 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { Toast, ToastViewport } from "@/components/ui/toast"
-import { InvoicePage, InvoiceUnreachable } from "@/routes/_authed/-invoice-record"
+import {
+  InvoicePage,
+  InvoiceUnreachable,
+} from "@/routes/_authed/-invoice-record"
 import { Route } from "@/routes/_authed/invoices_.$invoiceId"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
@@ -272,6 +275,25 @@ describe("the invoice record — the document", () => {
     renderRecord({ logoUrl: null })
     expect(document.querySelector('img[src="/invoice-logo.png"]')).toBeNull()
     expect(screen.queryByText(/logo/i)).toBeNull()
+  })
+
+  /*
+   * THE LOGO IS LEVEL WITH THE META ROWS, and that is a structural fact rather
+   * than a class name: the mark and the `<dl>` are siblings in one row, so the
+   * mark cannot sit above the invoice number with a band of empty space under
+   * it. The paper does the same thing by geometry — `LOGO_BOX` occupies
+   * `TOP - 48 .. TOP` while the rows start at `TOP - 34` — and the two
+   * renderings are supposed to be one document.
+   *
+   * Asserted through the DOM because jsdom computes no layout: what can be
+   * checked is the containment, which is what a stacked masthead would break.
+   */
+  it("puts the logo in the same row as the meta list, not above it", () => {
+    renderRecord({ logoUrl: "/invoice-logo.png" })
+    const logo = document.querySelector('img[src="/invoice-logo.png"]')
+    const row = logo?.parentElement
+    expect(row?.querySelector("dl")).toBeTruthy()
+    expect(row?.querySelector("dl")?.textContent).toContain("Invoice number")
   })
 
   /* Empty notes print nothing at all rather than an empty heading: nobody was

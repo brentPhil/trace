@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { COL, LOGO_BAND, LOGO_BOX, invoiceDocPages } from "./invoice-doc"
+import { COL, LOGO_BOX, invoiceDocPages } from "./invoice-doc"
 import { PAGE, TYPE } from "./paper"
 import { textWidth } from "./ops"
 import type { InvoiceDoc, InvoiceDocLine } from "./invoice-doc"
@@ -83,7 +83,7 @@ describe("invoiceDocPages — the head", () => {
     expect(strings).toContain("08/26/2026")
   })
 
-  it("adds one top-right logo box and shifts the first-page head by its band", () => {
+  it("adds one top-right logo box and shifts no part of the head", () => {
     const bytes = new Uint8Array([1, 2, 3])
     const withoutLogo = invoiceDocPages(makeInvoice())[0]
     const withLogo = invoiceDocPages(
@@ -102,15 +102,25 @@ describe("invoiceDocPages — the head", () => {
       },
     ])
 
+    /*
+     * NOTHING MOVES. The box sits in the band the first two meta rows occupy —
+     * see LOGO_BOX — so a logo costs the head no height and the word Invoice,
+     * the invoice number and everything under them land on the same y whether
+     * an account has uploaded one or not. The head used to be pushed down by a
+     * band the height of the box, which is the empty stripe this asserts is
+     * gone: checking the FIRST meta row and the table header pins both ends of
+     * the head, so a shift reintroduced anywhere between them fails here.
+     */
     const yOf = (page: { ops: Array<PdfOp> }, value: string) =>
       textOps(page).find((op) => op.text === value)?.y
     expect(yOf(withLogo, "Invoice")).toBe(yOf(withoutLogo, "Invoice"))
-    expect(yOf(withLogo, "DESCRIPTION")).toBe(
-      (yOf(withoutLogo, "DESCRIPTION") ?? 0) - LOGO_BAND
+    expect(yOf(withLogo, "Invoice number")).toBe(
+      yOf(withoutLogo, "Invoice number")
     )
+    expect(yOf(withLogo, "DESCRIPTION")).toBe(yOf(withoutLogo, "DESCRIPTION"))
   })
 
-  it("uses the smaller first-page row budget and never repeats the logo", () => {
+  it("spends no first-page row budget on the logo, and never repeats it", () => {
     const lines = Array.from({ length: 80 }, (_, n) =>
       makeLine({ description: `Logo line ${n}` })
     )
@@ -124,7 +134,11 @@ describe("invoiceDocPages — the head", () => {
     const firstPageRows = (pages: Array<{ ops: Array<PdfOp> }>) =>
       textOf(pages[0]).filter((value) => /^Logo line \d+$/.test(value)).length
 
-    expect(firstPageRows(withLogo)).toBeLessThan(firstPageRows(withoutLogo))
+    // Equal, not smaller: the logo draws beside the meta rows rather than
+    // above them, so the first page fits exactly as many lines with one as
+    // without. This used to be `toBeLessThan` — a page of billable work lost
+    // to a stripe of white space.
+    expect(firstPageRows(withLogo)).toBe(firstPageRows(withoutLogo))
     expect(
       withLogo.flatMap((page) => page.ops).filter((op) => op.kind === "image")
     ).toHaveLength(1)

@@ -36,8 +36,22 @@ const RIGHT = PAGE.width - PAGE.margin
 const TOP = PAGE.height - PAGE.margin
 const BOTTOM = PAGE.margin
 
+/**
+ * The logo's box, top-right, ALONGSIDE the meta grid rather than above it.
+ *
+ * It costs the head no height, and that is the point. The head used to be
+ * pushed down by a band the height of this box, which put an empty stripe
+ * between the word Invoice and the invoice number on every invoice carrying a
+ * logo — the eye crossing 58pt of nothing to reach the two figures a client
+ * checks first. The box occupies `TOP - 48 .. TOP`, the band the first two
+ * meta rows sit in, and the two cannot collide horizontally: the value column
+ * starts at `LEFT + META_LABEL_WIDTH` and the only rows level with the logo are
+ * the invoice number and the invoice date, both short and both bounded
+ * (`082426-0005`, `08/24/2026`) with 229pt of clear paper before this box's
+ * left edge. The rows that CAN run long — Purchase order, Payment terms — are
+ * the fourth and the fifth, well below it.
+ */
 export const LOGO_BOX = { width: 160, height: 48 } as const
-export const LOGO_BAND = 58
 
 /* Re-exported from the shape they now live in, so `to-pdf.ts` and the export
  * button keep importing the document's type from the module that prints it. */
@@ -195,7 +209,7 @@ function headOps(invoice: InvoiceDoc): { ops: Array<PdfOp>; tableTop: number } {
   /* Which rows exist, and what they say, is the DOCUMENT's decision and lives
    * in `invoice-document.ts` — the record page draws the same list. What is
    * decided here is only where they sit on the paper. */
-  let y = TOP - 34 - (invoice.logo === undefined ? 0 : LOGO_BAND)
+  let y = TOP - 34
   for (const { label, value } of invoiceMetaRows(invoice)) {
     ops.push(
       text({ x: LEFT, y, text: label, size: TYPE.tick, color: PAPER.inkMuted }),

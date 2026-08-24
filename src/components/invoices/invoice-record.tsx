@@ -108,7 +108,7 @@ export function InvoiceRecord({
      * inset because a document's text should not sit on its own edge.
      */
     <article className="flex flex-col gap-8 rounded-lg border border-edge-soft bg-surface p-6">
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
         {/*
           THE MASTHEAD, and it is inside the document rather than above it.
           The paper opens with the word "Invoice" set large and bold at the top
@@ -116,35 +116,58 @@ export function InvoiceRecord({
           heading OUTSIDE the record, which read as a section label on an app
           screen rather than as the first line of a document. It is an `<h1>`
           because it is this page's subject.
+
+          `gap-4` under it, not `gap-6`, and the title no longer shares a row
+          with the logo: both are the same correction. The row used to be
+          `min-h-12` — the logo's own height — so on any invoice with a logo the
+          word Invoice sat alone above 48px of nothing and the meta rows began
+          somewhere below it. 16px puts the title's baseline the same distance
+          above the first meta row as `TOP` sits above `TOP - 34` on the paper,
+          at this size: one title, then the figures it introduces.
         */}
-        <div className="flex min-h-12 items-start justify-between gap-6">
-          <h1 className="text-2xl font-medium tracking-[-0.01em]">Invoice</h1>
+        <h1 className="text-2xl font-medium tracking-[-0.01em]">Invoice</h1>
+
+        {/*
+          THE LOGO IS LEVEL WITH THE META ROWS, which is where the paper draws
+          it: `LOGO_BOX` occupies `TOP - 48 .. TOP` while the rows start at
+          `TOP - 34`, so on both renderings the mark sits opposite the invoice
+          number and the invoice date rather than above them.
+
+          `items-start` so a short mark hangs from the top of the group instead
+          of centring itself against a five-row grid, and the `<dl>` keeps
+          `min-w-0` — it is the flex child that must be allowed to give, so a
+          wide logo shortens the value column rather than pushing it out of the
+          panel.
+        */}
+        <div className="flex items-start justify-between gap-6">
+          {/* A `<dl>`: this is a document's name/value list, and it is what
+              makes "Due date" read as the name of the value beside it. */}
+          <dl className="flex min-w-0 flex-col gap-2">
+            {metaRows.map((row) => (
+              <div
+                key={row.label}
+                className="grid grid-cols-[9rem_1fr] items-baseline gap-3"
+              >
+                <dt className="text-[0.8125rem] font-medium text-muted-foreground">
+                  {row.label}
+                </dt>
+                {/* Tabular on every one of them: a number, a date and an
+                    invoice id are all digits somebody reads down a column. */}
+                <dd className="min-w-0 font-mono text-sm tracking-[-0.02em] tabular-nums">
+                  {row.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
           {invoice.logoUrl === null ? null : (
             <img
               src={invoice.logoUrl}
               alt=""
-              className="max-h-12 max-w-40 object-contain"
+              className="max-h-12 max-w-40 shrink-0 object-contain"
             />
           )}
         </div>
-
-        {/* A `<dl>`: this is a document's name/value list, and it is what makes
-            "Due date" read as the name of the value beside it. */}
-        <dl className="flex flex-col gap-2">
-          {metaRows.map((row) => (
-            <div
-              key={row.label}
-              className="grid grid-cols-[9rem_1fr] items-baseline gap-3"
-            >
-              <dt className="text-[0.8125rem] font-medium text-muted-foreground">
-                {row.label}
-              </dt>
-              {/* Tabular on every one of them: a number, a date and an invoice
-                  id are all digits somebody reads down a column. */}
-              <dd className="font-mono tabular-nums tracking-[-0.02em] min-w-0 text-sm">{row.value}</dd>
-            </div>
-          ))}
-        </dl>
       </div>
 
       {/*
