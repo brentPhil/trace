@@ -25,6 +25,7 @@ import {
   useConvexMutation,
 } from "@convex-dev/react-query"
 import { Pencil, Trash2 } from "lucide-react"
+import { LibraryUsage } from "@/components/music/library-usage"
 import { UploadQueuePanel } from "@/components/music/upload-queue-panel"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
@@ -34,11 +35,11 @@ import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { errorMessage } from "@/lib/error-message"
 import { postFileWithProgress } from "@/lib/music/post-file"
-import { advance, precheck } from "@/lib/music/upload-queue"
+import { acceptedFormatList, advance, precheck } from "@/lib/music/upload-queue"
 import { cn } from "@/lib/utils"
 import {
   AUDIO_INPUT_ACCEPT,
-  MAX_LIBRARY_BYTES,
+  MAX_TRACK_BYTES,
   trackNameFromFilename,
 } from "@shared/audio"
 import { api } from "../../../convex/_generated/api"
@@ -281,6 +282,9 @@ export function Music() {
             }}
             className="max-w-full text-sm file:mr-3 file:rounded-md file:border file:border-edge file:bg-ground file:px-2 file:py-1.5 file:text-sm"
           />
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {`${acceptedFormatList()} · up to ${formatMb(MAX_TRACK_BYTES)} each`}
+          </span>
         </label>
       }
     >
@@ -291,7 +295,7 @@ export function Music() {
           onDismiss={dismissFinished}
         />
 
-        <Usage bytes={usage.bytes} />
+        <LibraryUsage bytes={usage.bytes} count={usage.count} />
 
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -358,9 +362,10 @@ export function Music() {
         >
           {tracks.length === 0 ? (
             <Empty>
-              No music uploaded yet. Add an MP3, M4A, WAV, OGG or FLAC and it
-              becomes selectable from the tracker&apos;s music control, beside
-              the tracks that ship with Chroneli.
+              No music uploaded yet. Add {acceptedFormatList()} files up to{" "}
+              {formatMb(MAX_TRACK_BYTES)} each, and they become selectable from
+              the tracker&apos;s music control, beside the tracks that ship with
+              Chroneli.
             </Empty>
           ) : visible.length === 0 ? (
             <Empty>Nothing here matches “{search}”.</Empty>
@@ -435,38 +440,6 @@ function orderTracks(
       : b._creationTime - a._creationTime
   )
   return filtered
-}
-
-/**
- * The storage meter.
- *
- * The ceiling is `MAX_LIBRARY_BYTES`, never a literal 500: the number in this
- * sentence and the number `acceptTrack` refuses an upload against are the same
- * constant, so they cannot drift into telling the user two different things.
- *
- * The bar is `aria-hidden` and the sentence carries the value, rather than a
- * `progressbar` role with a `valuenow` — the sentence is already the exact
- * figure in the units a person thinks in, and a progressbar would announce the
- * same number a second time as a bare percentage.
- */
-function Usage({ bytes }: { bytes: number }) {
-  const fraction = Math.min(1, bytes / MAX_LIBRARY_BYTES)
-  return (
-    <div className="flex max-w-prose flex-col gap-1.5">
-      <p className="text-xs text-muted-foreground">
-        {`${formatMb(bytes)} of ${formatMb(MAX_LIBRARY_BYTES)} used`}
-      </p>
-      <div
-        aria-hidden="true"
-        className="h-1 overflow-hidden rounded-full bg-surface-raised"
-      >
-        <div
-          className="h-full rounded-full bg-ink-muted"
-          style={{ width: `${(fraction * 100).toFixed(1)}%` }}
-        />
-      </div>
-    </div>
-  )
 }
 
 /**

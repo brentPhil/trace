@@ -191,6 +191,38 @@ describe("the library", () => {
     expect(screen.getByText(/of 500 MB/i)).toBeTruthy()
   })
 
+  /* `usage.count` has been computed, validated and sent on every page load
+   * since the feature shipped, and rendered nowhere. */
+  it("reports the track count against its own cap", () => {
+    renderMusic()
+    expect(screen.getByText(/2 of 500 tracks/i)).toBeTruthy()
+  })
+
+  it("says how much room is left", () => {
+    renderMusic()
+    expect(screen.getByText(/497.1 MB free/i)).toBeTruthy()
+  })
+
+  /* Colour is never the only signal — DESIGN.md — and the signal colours are
+   * reserved by meaning, so a nearly-full library changes only the SENTENCE. */
+  it("leads with what is left when the library is nearly full", () => {
+    renderMusic(TRACKS, { bytes: 495 * 1024 * 1024, count: 2 })
+    expect(screen.getByText(/nearly full/i)).toBeTruthy()
+  })
+
+  /* Full is the one state that IS an error — the next upload will be refused
+   * — so it is the one that earns `alarm`. */
+  it("says the library is full at the cap", () => {
+    renderMusic(TRACKS, { bytes: 500 * 1024 * 1024, count: 2 })
+    expect(screen.getByText(/library full/i)).toBeTruthy()
+  })
+
+  it("states the accepted formats and the per-track cap up front", () => {
+    renderMusic()
+    expect(screen.getByText(/MP3, M4A, WAV, OGG or FLAC/i)).toBeTruthy()
+    expect(screen.getByText(/up to 20 MB each/i)).toBeTruthy()
+  })
+
   it("filters by search", () => {
     renderMusic()
     fireEvent.change(screen.getByRole("searchbox", { name: /search/i }), {
