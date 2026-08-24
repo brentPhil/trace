@@ -100,6 +100,63 @@ const TRACKS = [
   },
 ]
 
+/*
+ * A stand-in for XMLHttpRequest.
+ *
+ * The upload POST moved off `fetch` because `fetch` resolves only when the
+ * body has finished going out and reports nothing on the way — there is no
+ * progress event to listen for. XHR's `upload` object has one, which is the
+ * entire reason this fake exists.
+ *
+ * `emitProgress` lets a test drive the bar to a known point and assert what
+ * the row says, rather than racing a real transfer.
+ */
+class FakeXhr {
+  static last: FakeXhr | null = null
+  upload = { onprogress: null as null | ((e: ProgressEvent) => void) }
+  status = 200
+  responseText = JSON.stringify({ storageId: "storage-1" })
+  onload: null | (() => void) = null
+  onerror: null | (() => void) = null
+  onabort: null | (() => void) = null
+  method = ""
+  url = ""
+  headers: Record<string, string> = {}
+  body: unknown = null
+
+  constructor() {
+    FakeXhr.last = this
+  }
+  open(method: string, url: string) {
+    this.method = method
+    this.url = url
+  }
+  setRequestHeader(key: string, value: string) {
+    this.headers[key] = value
+  }
+  send(body: unknown) {
+    this.body = body
+  }
+  abort() {}
+
+  emitProgress(loaded: number, total: number) {
+    this.upload.onprogress?.({
+      loaded,
+      total,
+      lengthComputable: true,
+    } as ProgressEvent)
+  }
+  finish() {
+    this.onload?.()
+  }
+}
+
+function useFakeXhr() {
+  FakeXhr.last = null
+  vi.stubGlobal("XMLHttpRequest", FakeXhr)
+  return FakeXhr
+}
+
 function renderMusic(
   tracks: Array<Record<string, unknown>> = TRACKS,
   usage: { bytes: number; count: number } = { bytes: 3_000_000, count: 2 }
@@ -229,14 +286,7 @@ describe("the library", () => {
    * rather than sent as null or zero.
    */
   it("uploads a file and hands the returned storage id to addTrack", async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ storageId: "storage-1" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-    )
-    vi.stubGlobal("fetch", fetchMock)
+    useFakeXhr()
     renderMusic()
 
     const file = new File([new Uint8Array([1, 2, 3])], "Rain On Glass.mp3", {
@@ -247,10 +297,15 @@ describe("the library", () => {
     })
 
     await waitFor(() => expect(generateUploadUrl).toHaveBeenCalledWith({}))
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://upload.example/track",
-      expect.objectContaining({ method: "POST", body: file })
-    )
+    await waitFor(() => expect(FakeXhr.last).not.toBeNull())
+
+    const xhr = FakeXhr.last!
+    expect(xhr.method).toBe("POST")
+    expect(xhr.url).toBe("https://upload.example/track")
+    expect(xhr.body).toBe(file)
+    expect(xhr.headers["Content-Type"]).toBe("audio/mpeg")
+    xhr.finish()
+
     await waitFor(() => expect(addTrack).toHaveBeenCalled())
     const sent = addTrack.mock.calls[0][0]
     expect(sent.storageId).toBe("storage-1")
@@ -259,14 +314,31 @@ describe("the library", () => {
     expect("durationMs" in sent).toBe(false)
   })
 
+  /*
+   * The header is OMITTED, not sent empty, when the OS gave the file no type.
+   * An empty Content-Type is a claim that the type is "", which Convex records
+   * and `isAcceptedAudioContentType` then refuses — so the file that had the
+   * best chance of being sniffed correctly is the one guaranteed to fail.
+   */
+  it("sends no Content-Type at all for a file the OS did not type", async () => {
+    useFakeXhr()
+    renderMusic()
+
+    fireEvent.change(screen.getByLabelText("Music files"), {
+      target: {
+        files: [new File([new Uint8Array([1])], "untyped", { type: "" })],
+      },
+    })
+
+    await waitFor(() => expect(FakeXhr.last).not.toBeNull())
+    expect("Content-Type" in FakeXhr.last!.headers).toBe(false)
+  })
+
   /* The backend's own sentences — INVALID_TRACK, LIBRARY_FULL — are already
    * written for a person, so the page shows them verbatim rather than
    * translating them into a second vocabulary. */
-  it("surfaces a rejected upload without rewriting the reason", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => new Response(null, { status: 503 }))
-    )
+  it("surfaces a failed POST without rewriting the reason", async () => {
+    useFakeXhr()
     renderMusic()
 
     fireEvent.change(screen.getByLabelText("Music files"), {
@@ -277,11 +349,17 @@ describe("the library", () => {
       },
     })
 
-    // Two nodes: the toast renders its title in a live region as well as on
-    // screen — see -settings.test.tsx, which documents the same doubling.
+    await waitFor(() => expect(FakeXhr.last).not.toBeNull())
+    FakeXhr.last!.status = 503
+    FakeXhr.last!.finish()
+
+    // `findAllByText` with a length floor rather than an exact count: the
+    // reason is about to be rendered in a queue row as well (Task 3), and a
+    // test asserting exactly two nodes would break on a change that improves
+    // the thing it is testing.
     expect(
-      await screen.findAllByText("That didn't save. Try again.")
-    ).toHaveLength(2)
+      await screen.findAllByText(/That didn't save\. Try again\./)
+    ).not.toHaveLength(0)
     expect(addTrack).not.toHaveBeenCalled()
   })
 })

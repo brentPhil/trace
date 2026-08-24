@@ -32,6 +32,7 @@ import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { errorMessage } from "@/lib/error-message"
+import { postFileWithProgress } from "@/lib/music/post-file"
 import { cn } from "@/lib/utils"
 import {
   AUDIO_INPUT_ACCEPT,
@@ -100,26 +101,11 @@ export function Music() {
     const durationMs = await decodeDurationMs(file)
 
     const uploadUrl = await generateUploadUrl({})
-    const response = await fetch(uploadUrl, {
-      method: "POST",
-      // Omitted rather than sent empty when the OS gave the file no type: an
-      // empty `Content-Type` is a header claiming a type of "", which Convex
-      // would then record as the blob's type and `isAcceptedAudioContentType`
-      // would reject. With no header at all, `addTrackAction` falls through to
-      // the blob's own sniffed type, which is the answer that can be right.
-      ...(file.type === "" ? {} : { headers: { "Content-Type": file.type } }),
-      body: file,
-    })
-    if (!response.ok) throw new Error("upload failed")
-    const payload: unknown = await response.json()
-    const storageId =
-      typeof payload === "object" &&
-      payload !== null &&
-      "storageId" in payload &&
-      typeof payload.storageId === "string"
-        ? payload.storageId
-        : null
-    if (storageId === null) throw new Error("upload returned no id")
+    // The POST lives in `postFileWithProgress` because `fetch` cannot report
+    // how far a request body has got — it resolves only once the whole body
+    // has gone out. Everything that call used to do here, including the
+    // Content-Type omission for an untyped file, moved with it.
+    const storageId = await postFileWithProgress(uploadUrl, file, () => {})
 
     await addTrack({
       storageId: storageId as Id<"_storage">,
