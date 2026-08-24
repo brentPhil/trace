@@ -138,7 +138,11 @@ class FakeXhr {
   send(body: unknown) {
     this.body = body
   }
-  abort() {}
+  aborted = false
+  abort() {
+    this.aborted = true
+    this.onabort?.()
+  }
 
   emitProgress(loaded: number, total: number) {
     this.upload.onprogress?.({
@@ -454,6 +458,50 @@ describe("the library", () => {
     FakeXhr.last!.emitProgress(5 * 1024 * 1024, 10 * 1024 * 1024)
 
     expect(await screen.findByText(/5 MB of 10 MB/)).toBeTruthy()
+  })
+
+  /*
+   * CANCEL, which only became necessary when the per-track cap went to 250 MB.
+   * At 20 MB a mistaken upload was over before you could regret it; at 250 MB
+   * it can hold the queue for minutes with no way out.
+   */
+  it("cancels an upload in flight and lets it be retried", async () => {
+    useFakeXhr()
+    renderMusic()
+
+    const big = new File([new Uint8Array(1)], "Wrong Album.flac", {
+      type: "audio/flac",
+    })
+    Object.defineProperty(big, "size", { value: 200 * 1024 * 1024 })
+
+    fireEvent.change(screen.getByLabelText("Music files"), {
+      target: { files: [big] },
+    })
+
+    await waitFor(() => expect(FakeXhr.last).not.toBeNull())
+    const xhr = FakeXhr.last!
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: /cancel wrong album\.flac/i })
+    )
+
+    // The request is really torn down, not merely forgotten about — otherwise
+    // the bytes keep going out and the "cancel" is a lie told to the user.
+    await waitFor(() => expect(xhr.aborted).toBe(true))
+
+    // A cancellation is not a failure: it says so plainly and still offers
+    // the retry, because "wrong file, start over" is the reason to cancel.
+    // The row and the summary BOTH say it, which is why this matches all
+    // rather than one.
+    expect(await screen.findByText("Cancelled")).toBeTruthy()
+
+    // And the summary counts it apart from a failure, so a batch the user
+    // stopped on purpose does not report itself back as broken.
+    expect(await screen.findByText(/0 added · 1 cancelled/)).toBeTruthy()
+    expect(
+      await screen.findByRole("button", { name: /retry wrong album\.flac/i })
+    ).toBeTruthy()
+    expect(addTrack).not.toHaveBeenCalled()
   })
 
   it("summarises the batch in one live region", async () => {

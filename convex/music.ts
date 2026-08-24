@@ -261,6 +261,19 @@ async function addTrackAction(
 
   // Convex does not always record a content type; fall back to the blob's
   // own, now that its size is known to be within bounds.
+  //
+  // DO NOT "OPTIMISE" THIS FETCH AWAY, and do not gate it behind a size
+  // threshold. At a 250 MiB cap it looks like an obvious cost to cut — read a
+  // quarter-gigabyte just to learn a MIME type — and it is not. Measured
+  // under convex-test: a blob stored WITH `audio/mpeg` comes back with
+  // `_storage` metadata whose `contentType` is `undefined` and a Blob whose
+  // `.type` is `"audio/mpeg"`. The metadata is undefined for the typed and
+  // untyped cases alike, so this fallback is the only thing that resolves a
+  // type at all there — skipping it for large files would reject every upload
+  // over the threshold rather than saving a read.
+  //
+  // The size check above is what keeps this bounded, which is the whole
+  // reason it runs first.
   const blob =
     metadata.contentType === undefined
       ? await ctx.storage.get(args.storageId)

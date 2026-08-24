@@ -18,14 +18,31 @@
  *  the same sentence the `fetch` version produced. */
 export class UploadFailed extends Error {}
 
+/** Thrown when the caller aborted the request. DISTINCT from `UploadFailed`
+ *  because a cancellation is something the user did on purpose, and reporting
+ *  it as an error would be the interface disagreeing with them about it. */
+export class UploadCancelled extends Error {}
+
 export function postFileWithProgress(
   url: string,
   file: File,
-  onProgress: (sent: number, total: number) => void
+  onProgress: (sent: number, total: number) => void,
+  /** Aborting this tears the request down mid-flight. At a 250 MiB cap an
+   *  upload can run for minutes, so "stop" has to actually stop the bytes
+   *  rather than just stop watching them. */
+  signal?: AbortSignal
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open("POST", url)
+
+    if (signal !== undefined) {
+      if (signal.aborted) {
+        reject(new UploadCancelled("upload cancelled"))
+        return
+      }
+      signal.addEventListener("abort", () => xhr.abort(), { once: true })
+    }
 
     // OMITTED ENTIRELY when the OS gave the file no type, never sent empty. An
     // empty `Content-Type` is a header CLAIMING a type of "", which Convex then
@@ -70,7 +87,7 @@ export function postFileWithProgress(
     }
 
     xhr.onerror = () => reject(new UploadFailed("upload failed"))
-    xhr.onabort = () => reject(new UploadFailed("upload cancelled"))
+    xhr.onabort = () => reject(new UploadCancelled("upload cancelled"))
 
     xhr.send(file)
   })

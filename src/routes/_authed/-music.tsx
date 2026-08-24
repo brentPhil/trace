@@ -17,7 +17,7 @@
  * Nothing on this page needs to clean up after a refusal; that is exactly why
  * the validation lives in the action rather than here.
  */
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import {
   convexQuery,
@@ -35,7 +35,7 @@ import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { errorMessage } from "@/lib/error-message"
-import { postFileWithProgress } from "@/lib/music/post-file"
+import { UploadCancelled, postFileWithProgress } from "@/lib/music/post-file"
 import { acceptedFormatList, advance, precheck } from "@/lib/music/upload-queue"
 import { cn } from "@/lib/utils"
 import {
@@ -61,6 +61,19 @@ type Track = {
 }
 
 type SortKey = "name" | "recent" | "largest" | "longest"
+
+/**
+ * How a thrown upload ends up on its row.
+ *
+ * A CANCELLATION IS NOT A FAILURE. `errorMessage` would turn the abort into
+ * "That didn't save. Try again." — a generic apology for something the user
+ * did deliberately, drawn in `alarm` beside a warning triangle. `cancelled`
+ * carries no reason string because "Cancelled" is the whole story.
+ */
+function settle(thrown: unknown): Partial<QueuedUpload> {
+  if (thrown instanceof UploadCancelled) return { status: "cancelled" }
+  return { status: "failed", reason: errorMessage(thrown) }
+}
 
 export function Music() {
   const { data: tracks } = useSuspenseQuery(
@@ -107,6 +120,23 @@ export function Music() {
   }
 
   /**
+   * The abort handle for each in-flight upload, by queue id.
+   *
+   * A REF, NOT STATE: nothing renders from it, and putting it in state would
+   * re-render the whole page on every upload just to store a handle. Entries
+   * are deleted as each upload settles, so the map does not grow with a long
+   * session.
+   */
+  const aborters = useRef(new Map<string, AbortController>())
+
+  /** Stops one upload mid-flight. No-op once it has settled, because the
+   *  handle is deleted the moment the request ends — so a Cancel racing the
+   *  last byte does nothing rather than something wrong. */
+  const cancel = (id: string) => {
+    aborters.current.get(id)?.abort()
+  }
+
+  /**
    * One file, all the way in.
    *
    * The duration is decoded FIRST and separately, so a file the browser cannot
@@ -118,13 +148,29 @@ export function Music() {
 
     patch(id, { status: "uploading", sent: 0 })
     const uploadUrl = await generateUploadUrl({})
-    // The POST lives in `postFileWithProgress` because `fetch` cannot report
-    // how far a request body has got — it resolves only once the whole body
-    // has gone out. Everything that call used to do here, including the
-    // Content-Type omission for an untyped file, moved with it.
-    const storageId = await postFileWithProgress(uploadUrl, file, (sent) => {
-      patch(id, { sent })
-    })
+
+    // Registered before the request starts and cleared in `finally`, so a
+    // Cancel arriving at any point during the transfer finds a live handle and
+    // one arriving after it does not.
+    const controller = new AbortController()
+    aborters.current.set(id, controller)
+    let storageId: string
+    try {
+      // The POST lives in `postFileWithProgress` because `fetch` cannot report
+      // how far a request body has got — it resolves only once the whole body
+      // has gone out. Everything that call used to do here, including the
+      // Content-Type omission for an untyped file, moved with it.
+      storageId = await postFileWithProgress(
+        uploadUrl,
+        file,
+        (sent) => {
+          patch(id, { sent })
+        },
+        controller.signal
+      )
+    } finally {
+      aborters.current.delete(id)
+    }
 
     // A DISTINCT STATE, not a bar rounded up to 100%. The bytes have all
     // landed and `addTrackAction` can still refuse the blob on its sniffed
@@ -201,7 +247,7 @@ export function Music() {
           await uploadOne(entry.file, entry.id)
           state = advance(state, candidate)
         } catch (thrown) {
-          patch(entry.id, { status: "failed", reason: errorMessage(thrown) })
+          patch(entry.id, settle(thrown))
         }
       }
     } finally {
@@ -232,7 +278,7 @@ export function Music() {
       try {
         await uploadOne(entry.file, id)
       } catch (thrown) {
-        patch(id, { status: "failed", reason: errorMessage(thrown) })
+        patch(id, settle(thrown))
       } finally {
         setBusy(false)
       }
@@ -311,6 +357,7 @@ export function Music() {
         <UploadQueuePanel
           items={queue}
           onRetry={retry}
+          onCancel={cancel}
           onDismiss={dismissFinished}
         />
 

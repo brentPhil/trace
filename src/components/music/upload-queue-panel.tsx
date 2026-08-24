@@ -1,4 +1,4 @@
-import { Check, RotateCw, TriangleAlert } from "lucide-react"
+import { Check, RotateCw, TriangleAlert, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { formatBytes } from "@shared/audio"
@@ -16,7 +16,18 @@ import { formatBytes } from "@shared/audio"
  * Presentational only. The page owns the queue and every transition in it.
  */
 
-export type UploadStatus = "queued" | "uploading" | "saving" | "done" | "failed"
+export type UploadStatus =
+  | "queued"
+  | "uploading"
+  | "saving"
+  | "done"
+  | "failed"
+  /** Its OWN state rather than a `failed` with a friendly reason: a
+   *  cancellation is something the user chose, and drawing it in `alarm`
+   *  beside a warning triangle would be the interface treating their decision
+   *  as a problem. It still offers Retry, because "wrong file" is the usual
+   *  reason to cancel and starting over is the usual next step. */
+  | "cancelled"
 
 export type QueuedUpload = {
   id: string
@@ -48,25 +59,37 @@ function summarise(items: Array<QueuedUpload>): string {
     (item) => item.status === "uploading" || item.status === "saving"
   ).length
 
+  const cancelled = items.filter((item) => item.status === "cancelled").length
+
   if (running > 0) return `Uploading ${done + 1} of ${items.length}`
-  if (failed > 0) return `${done} added · ${failed} failed`
-  return `${done} added`
+  // Cancellations are counted separately from failures, so a batch the user
+  // deliberately stopped does not report itself back to them as broken.
+  const tail = [
+    failed > 0 ? `${failed} failed` : null,
+    cancelled > 0 ? `${cancelled} cancelled` : null,
+  ].filter((part) => part !== null)
+  return [`${done} added`, ...tail].join(" · ")
+}
+
+/** The three states a row can end in, and so the ones a Dismiss can clear. */
+function isFinished(status: UploadStatus): boolean {
+  return status === "done" || status === "failed" || status === "cancelled"
 }
 
 export function UploadQueuePanel({
   items,
   onRetry,
+  onCancel,
   onDismiss,
 }: {
   items: Array<QueuedUpload>
   onRetry: (id: string) => void
+  onCancel: (id: string) => void
   onDismiss: () => void
 }) {
   if (items.length === 0) return null
 
-  const settled = items.every(
-    (item) => item.status === "done" || item.status === "failed"
-  )
+  const settled = items.every((item) => isFinished(item.status))
 
   return (
     <section
@@ -125,6 +148,10 @@ export function UploadQueuePanel({
               {item.status === "failed" ? (
                 <p className="text-xs text-alarm">{item.reason}</p>
               ) : null}
+
+              {item.status === "cancelled" ? (
+                <p className="text-xs text-muted-foreground">Cancelled</p>
+              ) : null}
             </div>
 
             <span className="shrink-0 font-mono text-xs tracking-[-0.02em] text-muted-foreground tabular-nums">
@@ -135,7 +162,23 @@ export function UploadQueuePanel({
                   : mb(item.bytes)}
             </span>
 
-            {item.status === "failed" ? (
+            {/* Cancel is offered while there is still something to stop. The
+                `saving` step is deliberately NOT cancellable: the bytes have
+                already been paid for and `addTrack` is a short call, so an
+                abort there would orphan a stored blob to save nothing. */}
+            {item.status === "queued" || item.status === "uploading" ? (
+              <Button
+                type="button"
+                variant="quiet"
+                size="icon-row"
+                aria-label={`Cancel ${item.name}`}
+                onClick={() => onCancel(item.id)}
+              >
+                <X className="size-4" />
+              </Button>
+            ) : null}
+
+            {item.status === "failed" || item.status === "cancelled" ? (
               <Button
                 type="button"
                 variant="quiet"
