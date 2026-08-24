@@ -60,6 +60,13 @@ export function InvoiceForm({
             is, and this product has no pay-to setting to read one from — so
             every invoice raised before this form existed went to a client with
             the "where do I send the money" question unanswered.
+
+            It now OPENS WITH THE LAST INVOICE'S BLOCK (`invoices.lastDetails`,
+            through `newInvoiceDraft`), which is the same answer arrived at one
+            step further along: asking once is right, asking every month for the
+            same bank details is the product forgetting what it was told. Still
+            a plain box with the text in it — a carried-over value the user can
+            read and overwrite, not a setting hidden behind a page.
           */}
           <PartyBlock
             label="Pay to"
@@ -225,7 +232,7 @@ function DateField({
         }}
         className={cn(
           INVOICE_FIELD,
-          "font-mono tabular-nums tracking-[-0.02em]",
+          "font-mono tracking-[-0.02em] tabular-nums",
           fieldBorder(error !== undefined)
         )}
       />

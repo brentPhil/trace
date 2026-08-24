@@ -32,6 +32,7 @@ function draftOf(over: Partial<InvoiceDraft> = {}): InvoiceDraft {
       timeZone: "UTC",
       currency: "USD",
       client: null,
+      previous: null,
       mergeInvoiceLines: true,
     }),
     ...over,
@@ -46,6 +47,7 @@ describe("newInvoiceDraft", () => {
         timeZone: "UTC",
         currency: "EUR",
         client: null,
+        previous: null,
         mergeInvoiceLines: true,
       })
     ).toEqual({
@@ -73,6 +75,7 @@ describe("newInvoiceDraft", () => {
       timeZone: "Pacific/Auckland",
       currency: "USD",
       client: null,
+      previous: null,
       mergeInvoiceLines: true,
     })
     expect(draft.issuedOn).toBe("2026-08-06")
@@ -98,6 +101,7 @@ describe("newInvoiceDraft", () => {
           name: "Vessel Vanguard",
           address: "Bonita Springs, FL\n34134",
         },
+        previous: null,
         mergeInvoiceLines: true,
       }).billedTo
     ).toBe("Vessel Vanguard\nBonita Springs, FL\n34134")
@@ -110,19 +114,129 @@ describe("newInvoiceDraft", () => {
         timeZone: "UTC",
         currency: "USD",
         client: { name: "Acme", address: "   " },
+        previous: null,
         mergeInvoiceLines: true,
       }).billedTo
     ).toBe("Acme")
   })
 
   /*
-   * PAY TO IS EMPTY, and it is the field this whole page exists for. Nothing in
-   * a range of time entries says who the freelancer is and there is no setting
-   * to read one from, so every invoice raised before this form existed went out
-   * without telling the client where to send the money.
+   * PAY TO IS EMPTY UNTIL AN INVOICE HAS ONE. Nothing in a range of time
+   * entries says who the freelancer is and there is no setting to read one
+   * from, so the FIRST invoice an account raises is the one place the question
+   * has to be asked — and the answer is then carried, which is the case below.
    */
-  it("leaves pay to empty, because nothing in the product knows it", () => {
+  it("leaves pay to empty on the first invoice an account raises", () => {
     expect(draftOf().payTo).toBe("")
+  })
+
+  /*
+   * THE LAST INVOICE'S ARRANGEMENT, carried onto the next one.
+   *
+   * Pay to, payment terms and the notes at the foot are facts about who is
+   * billing whom and how they get paid, not about this range of work — and a
+   * freelancer invoicing the same client every month was retyping a bank block
+   * from memory onto a write-once document. This is the answer they already
+   * gave, in a box they can still change.
+   */
+  it("carries pay to, terms and notes from the last invoice", () => {
+    const draft = newInvoiceDraft({
+      nowMs: NOON,
+      timeZone: "UTC",
+      currency: "USD",
+      client: null,
+      previous: {
+        billedTo: "Acme Corp\n1 Way",
+        payTo: "Jo Freelance\nIBAN GB33BUKB20201555555555",
+        paymentTerms: "Net 14",
+        notes: "Thanks — payment by transfer only.",
+      },
+      mergeInvoiceLines: true,
+    })
+    expect(draft.payTo).toBe("Jo Freelance\nIBAN GB33BUKB20201555555555")
+    expect(draft.paymentTerms).toBe("Net 14")
+    expect(draft.notes).toBe("Thanks — payment by transfer only.")
+  })
+
+  /*
+   * A PURCHASE ORDER IS NEVER CARRIED, and it is the one field of the four
+   * excluded. It refers to one particular order rather than to the standing
+   * arrangement, so a stale one would look right and be wrong on a document
+   * with no editor behind it — a client's accounts department matching this
+   * month's invoice to work it has already paid for.
+   */
+  it("never carries a purchase order, even when the last invoice had one", () => {
+    expect(
+      newInvoiceDraft({
+        nowMs: NOON,
+        timeZone: "UTC",
+        currency: "USD",
+        client: null,
+        previous: {
+          billedTo: "Acme Corp",
+          payTo: "Jo Freelance",
+          paymentTerms: "Net 14",
+          notes: "",
+        },
+        mergeInvoiceLines: true,
+      }).purchaseOrder
+    ).toBe("")
+  })
+
+  /*
+   * THE RANGE'S CLIENT BEATS THE CARRIED BLOCK. One is evidence about the work
+   * in front of the user; the other is evidence about the last job. Billing this
+   * month's work to last month's client is the one carry-over that could put a
+   * document in the wrong company's inbox, so it only ever fills a box the
+   * range has nothing to say about.
+   */
+  it("prefers the range's client to the last invoice's billed-to block", () => {
+    const previous = {
+      billedTo: "Old Client\nElsewhere",
+      payTo: "Jo Freelance",
+    }
+    expect(
+      newInvoiceDraft({
+        nowMs: NOON,
+        timeZone: "UTC",
+        currency: "USD",
+        client: { name: "Acme", address: "1 Way" },
+        previous,
+        mergeInvoiceLines: true,
+      }).billedTo
+    ).toBe("Acme\n1 Way")
+    // Nothing from the range: the last invoice's block is better than a blank
+    // box, and this is the account whose projects carry no client at all.
+    expect(
+      newInvoiceDraft({
+        nowMs: NOON,
+        timeZone: "UTC",
+        currency: "USD",
+        client: null,
+        previous,
+        mergeInvoiceLines: true,
+      }).billedTo
+    ).toBe("Old Client\nElsewhere")
+  })
+
+  /*
+   * AN ABSENT STORED FIELD IS AN EMPTY BOX. `paymentTerms` and `notes` are
+   * optional on the invoice document, so an invoice raised without them hands
+   * on nothing — and `undefined` reaching a controlled `<input>` is React
+   * silently switching it to uncontrolled, which is a box that stops accepting
+   * what is typed into it.
+   */
+  it("reads an unset term or note as an empty box, never undefined", () => {
+    const draft = newInvoiceDraft({
+      nowMs: NOON,
+      timeZone: "UTC",
+      currency: "USD",
+      client: null,
+      previous: { billedTo: "Acme", payTo: "Jo" },
+      mergeInvoiceLines: true,
+    })
+    expect(draft.paymentTerms).toBe("")
+    expect(draft.notes).toBe("")
   })
 
   it("prefills the shared summary label and follows the account merge setting", () => {
@@ -134,6 +248,7 @@ describe("newInvoiceDraft", () => {
         timeZone: "UTC",
         currency: "USD",
         client: null,
+        previous: null,
         mergeInvoiceLines: false,
       }).mergeLines
     ).toBe(false)

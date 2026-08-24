@@ -1250,6 +1250,13 @@ type InvoiceOver = {
   issuedAt: number
   userId?: string
   billedTo?: string
+  /** The three the NEXT invoice's form reads back — see `lastDetails`. Left
+   *  off, they seed as an invoice raised without them: `payTo` empty and the
+   *  other two absent, which is what every invoice minted before /invoices/new
+   *  existed actually looks like. */
+  payTo?: string
+  paymentTerms?: string
+  notes?: string
   currency?: string
   taxes?: Array<{ label: string; basisPoints: number }>
   deletedAt?: number | null
@@ -1266,7 +1273,9 @@ async function seedInvoice(
       number: over.number,
       clientId: null,
       billedTo: over.billedTo ?? "Acme Corp\n1 Way, Springfield",
-      payTo: "",
+      payTo: over.payTo ?? "",
+      paymentTerms: over.paymentTerms,
+      notes: over.notes,
       currency: over.currency ?? "USD",
       issuedAt: over.issuedAt,
       dueAt: over.issuedAt + 30 * 24 * HOUR,
@@ -2056,5 +2065,130 @@ describe("invoices.createFromRange — the preview cannot diverge from it", () =
 
     expect(previewed.map((line) => line.description)).toEqual(["Website"])
     expect(stored.lines.map((line) => line.description)).toEqual(["Website"])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// lastDetails
+// ---------------------------------------------------------------------------
+
+/*
+ * What /invoices/new opens with, on the second invoice and every one after it.
+ *
+ * The rules under test are about WHICH fields travel and WHICH invoice they
+ * travel from, so these seed rows directly, for the same reason the list tests
+ * do: every property here is a property of the rows, not of the mutation that
+ * wrote them.
+ */
+const lastDetailsAs = async (t: ReturnType<typeof setup>, userId = ALICE) =>
+  await t.query(internal.invoices.lastDetailsAs, { userId })
+
+describe("invoices.lastDetails", () => {
+  it("rejects an anonymous caller", async () => {
+    const t = setup()
+    await expectCode(t.query(api.invoices.lastDetails, {}), "UNAUTHENTICATED")
+  })
+
+  it("answers null for an account that has never raised one", async () => {
+    const t = setup()
+    expect(await lastDetailsAs(t)).toBeNull()
+  })
+
+  /*
+   * THE FOUR THAT TRAVEL, and the one that does not.
+   *
+   * `purchaseOrder` is a reference to one particular order rather than a
+   * standing fact, so it is not on the returned shape at all: a stale PO
+   * carried onto a write-once document is the one field here that would look
+   * right and be wrong. Asserted as a WHOLE SHAPE rather than field by field,
+   * because the failure worth catching is a fifth field quietly joining them.
+   */
+  it("returns the arrangement and nothing about one particular order", async () => {
+    const t = setup()
+    await seedInvoice(t, {
+      number: "010126-0001",
+      issuedAt: MON,
+      billedTo: "Acme Corp\n1 Way",
+      payTo: "Jo Freelance\nIBAN GB33BUKB20201555555555",
+      paymentTerms: "Net 14",
+      notes: "Thanks. Transfer only, please.",
+    })
+
+    expect(await lastDetailsAs(t)).toEqual({
+      billedTo: "Acme Corp\n1 Way",
+      payTo: "Jo Freelance\nIBAN GB33BUKB20201555555555",
+      paymentTerms: "Net 14",
+      notes: "Thanks. Transfer only, please.",
+    })
+  })
+
+  /*
+   * NEWEST BY ISSUE DATE, not by insertion — seeded apart on purpose, the same
+   * fixture shape `list` uses. An account that raises last month's invoice
+   * today reads its details off the document with the later date on it, which
+   * is the more current arrangement of the two.
+   */
+  it("reads the newest invoice by issue date, not the last one inserted", async () => {
+    const t = setup()
+    await seedInvoice(t, {
+      number: "010126-0001",
+      issuedAt: MON + 5 * 24 * HOUR,
+      payTo: "The current block",
+    })
+    await seedInvoice(t, {
+      number: "010126-0002",
+      issuedAt: MON,
+      payTo: "Two addresses ago",
+    })
+
+    expect((await lastDetailsAs(t))?.payTo).toBe("The current block")
+  })
+
+  it("steps over a trashed invoice at the head of the index", async () => {
+    const t = setup()
+    await seedInvoice(t, {
+      number: "010126-0001",
+      issuedAt: MON,
+      payTo: "The live one",
+    })
+    await seedInvoice(t, {
+      number: "010126-0002",
+      issuedAt: MON + HOUR,
+      payTo: "The trashed one",
+      deletedAt: MON + 2 * HOUR,
+    })
+
+    expect((await lastDetailsAs(t))?.payTo).toBe("The live one")
+  })
+
+  /*
+   * An invoice raised before there was a form to type these into hands on
+   * nothing but its billed-to block — and the two absent fields come back
+   * ABSENT rather than as empty strings. The form's own fallback is what turns
+   * them into empty boxes; see `newInvoiceDraft`.
+   */
+  it("hands on nothing it was never given", async () => {
+    const t = setup()
+    await seedInvoice(t, { number: "010126-0001", issuedAt: MON })
+
+    expect(await lastDetailsAs(t)).toEqual({
+      billedTo: "Acme Corp\n1 Way, Springfield",
+      payTo: "",
+      paymentTerms: undefined,
+      notes: undefined,
+    })
+  })
+
+  it("never reads another user's invoice", async () => {
+    const t = setup()
+    await seedInvoice(t, {
+      userId: BOB,
+      number: "010126-0001",
+      issuedAt: MON,
+      payTo: "Bob's own bank details",
+    })
+
+    expect(await lastDetailsAs(t, ALICE)).toBeNull()
+    expect((await lastDetailsAs(t, BOB))?.payTo).toBe("Bob's own bank details")
   })
 })

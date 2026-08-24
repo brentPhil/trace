@@ -123,6 +123,23 @@ export function NewInvoicePage({
     convexQuery(api.projects.list, {})
   )
   const { data: clients } = useSuspenseQuery(convexQuery(api.clients.list, {}))
+  /*
+   * The last invoice's standing fields — pay to, payment terms, notes, and the
+   * billed-to block as a fallback. See `newInvoiceDraft` for which of them wins
+   * over what, and `invoiceCarryOver` in convex/invoices.ts for why the
+   * purchase order is not among them.
+   *
+   * SUSPENDED like the three above rather than a plain `useQuery`, so the boxes
+   * are filled on the FIRST paint. A late-arriving prefill is the one thing this
+   * page's draft handling cannot absorb gracefully: `typed` overlays the base,
+   * so a value landing after somebody has started typing either loses to them
+   * (leaving the carried-over block invisible) or overwrites them. One more
+   * bounded read on a page that already blocks on three is the cheaper half of
+   * that trade.
+   */
+  const { data: previousInvoice } = useSuspenseQuery(
+    convexQuery(api.invoices.lastDetails, {})
+  )
   const { createInvoice } = useCreateInvoice()
 
   const timeZone = settings.timezone
@@ -249,9 +266,16 @@ export function NewInvoicePage({
         timeZone,
         currency: settings.currency,
         client: clientBlock,
+        previous: previousInvoice,
         mergeInvoiceLines: settings.mergeInvoiceLines,
       }),
-    [timeZone, settings.currency, settings.mergeInvoiceLines, clientBlock]
+    [
+      timeZone,
+      settings.currency,
+      settings.mergeInvoiceLines,
+      clientBlock,
+      previousInvoice,
+    ]
   )
   const [typed, setTyped] = useState<Partial<InvoiceDraft>>({})
   const draft: InvoiceDraft = { ...prefill, ...typed }

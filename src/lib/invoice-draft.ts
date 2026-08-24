@@ -143,45 +143,78 @@ export function singleClientId(
 export const DEFAULT_TERM_DAYS = 30
 
 /**
- * The form as it opens: today, thirty days, the account's currency, and the
- * range's own client.
+ * The standing half of the last invoice raised, as `invoices.lastDetails`
+ * returns it — or null for an account that has never raised one.
+ *
+ * `paymentTerms` and `notes` are optional because the STORED fields are: an
+ * invoice raised without them has nothing to hand on, and that absence must
+ * read as an empty box rather than as a value somebody typed.
+ */
+export type InvoiceCarryOver = {
+  billedTo: string
+  payTo: string
+  paymentTerms?: string
+  notes?: string
+}
+
+/**
+ * The form as it opens: today, thirty days, the account's currency, the range's
+ * own client, and whatever the last invoice already settled.
  *
  * WHAT IS PREFILLED AND WHAT IS NOT is the whole content of this function.
  *
  *   - `billedTo` comes from the client whose work the range touched, through
  *     the SAME `partyBlockOf` the mutation would snapshot — so the box shows
  *     exactly what would otherwise be written behind the user's back, where
- *     they can read it and change it. `null` when the range touches no client
- *     or more than one: a guess between two clients is the one prefill that
- *     could put a document in the wrong company's inbox.
- *   - `payTo` is EMPTY, and this is the field the form exists for. Nothing in a
- *     range of time entries says who the freelancer is, and this product has no
- *     pay-to setting to read one from. An invoice with no pay-to block tells a
- *     client nothing about where to send the money.
+ *     they can read it and change it. THE RANGE WINS over the carried-over
+ *     block whenever it names one client: that is evidence about the work in
+ *     front of the user, where the last invoice is evidence about the last job.
+ *     It falls back to the previous block only when the range names NO client
+ *     at all — the case where nothing contradicts it, and the case a freelancer
+ *     whose projects carry no client is in on every invoice they raise. A range
+ *     spanning TWO clients also prefills the previous block and still cannot
+ *     mint anything: `createFromRange` refuses `MIXED_CLIENTS` over the rows it
+ *     bills whatever block is sent, so that ambiguity is answered by a refusal
+ *     rather than by a guess in a box.
+ *   - `payTo`, `paymentTerms` and `notes` COME FROM THE LAST INVOICE, and that
+ *     is what this form learned. Nothing in a range of time entries says who
+ *     the freelancer is or where the money goes, and this product has no pay-to
+ *     setting to read one from — so before this, every invoice meant retyping a
+ *     bank block from memory onto a document with no editor behind it. A value
+ *     the same person typed last month is not an invented default; it is the
+ *     answer they already gave, shown in a box they can still change.
  *   - `issuedOn` is today IN THE STORED ZONE. A freelancer raising an invoice
  *     from an airport must not date it a day either side of what they think.
  *   - `dueOn` is thirty days after the ISSUE date rather than after today, so
  *     back-dating the document moves its due date with it.
  *
- * The three that print as nothing when unset — purchase order, payment terms,
- * notes — open empty, because an invented default there is a sentence the user
- * did not write appearing on a document they cannot edit afterwards.
+ * `purchaseOrder` OPENS EMPTY EVEN WHEN THE LAST INVOICE CARRIED ONE, and it is
+ * the one field deliberately left out of the carry-over: it is a reference to
+ * one particular order rather than a standing fact, so a stale one would look
+ * right and be wrong on a document nobody can correct afterwards — see
+ * `invoiceCarryOver` in convex/invoices.ts for the whole of that reasoning.
  */
 export function newInvoiceDraft(opts: {
   nowMs: number
   timeZone: string
   currency: string
   client: { name: string; address: string } | null
+  /** The last invoice's standing fields, or null for an account with none. */
+  previous: InvoiceCarryOver | null
   mergeInvoiceLines: boolean
 }): InvoiceDraft {
   const issuedOn = dayOf(opts.nowMs, opts.timeZone)
+  const previous = opts.previous
   return {
-    billedTo: opts.client === null ? "" : partyBlockOf(opts.client),
-    payTo: "",
+    billedTo:
+      opts.client !== null
+        ? partyBlockOf(opts.client)
+        : (previous?.billedTo ?? ""),
+    payTo: previous?.payTo ?? "",
     purchaseOrder: "",
-    paymentTerms: "",
+    paymentTerms: previous?.paymentTerms ?? "",
     summaryDescription: SUMMARY_LABEL,
-    notes: "",
+    notes: previous?.notes ?? "",
     currency: opts.currency,
     issuedOn,
     dueOn: addDays(issuedOn, DEFAULT_TERM_DAYS),

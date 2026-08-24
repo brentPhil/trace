@@ -244,6 +244,15 @@ function renderNew(
     }
     projects?: Array<Doc<"projects">>
     clients?: Array<Doc<"clients">>
+    /** What `invoices.lastDetails` answers — the standing fields of the last
+     *  invoice this account raised. Defaults to null, which is the account
+     *  raising its first one. */
+    previous?: {
+      billedTo: string
+      payTo: string
+      paymentTerms?: string
+      notes?: string
+    } | null
   } = {}
 ) {
   const search = opts.search ?? { from: WEEK.fromMs, to: WEEK.toMs }
@@ -281,6 +290,10 @@ function renderNew(
         address: "1 Way\nSpringfield",
       }),
     ]
+  )
+  queryClient.setQueryData(
+    convexKey(api.invoices.lastDetails, {}),
+    opts.previous ?? null
   )
   if (opts.breakdown !== null) {
     queryClient.setQueryData(breakdownKey(search), opts.breakdown ?? BREAKDOWN)
@@ -527,7 +540,8 @@ describe("/invoices/new — the form", () => {
 
   /* Two clients is the one prefill that could put a document in the wrong
    * company's inbox. The server refuses `MIXED_CLIENTS` over the rows it will
-   * bill; the form declines to guess in the meantime. */
+   * bill; the form declines to guess in the meantime — and with no invoice
+   * behind it there is nothing to carry either. */
   it("prefills nothing when the range touches two clients", () => {
     const other = "c-globex" as unknown as Id<"clients">
     const { dateSpy } = renderNew({
@@ -543,6 +557,56 @@ describe("/invoices/new — the form", () => {
     })
     expect(screen.getByLabelText<HTMLTextAreaElement>("Billed to").value).toBe(
       ""
+    )
+    dateSpy.mockRestore()
+  })
+
+  /*
+   * THE ARRANGEMENT CARRIES, and this is the page test for it — the rules are
+   * asserted on `newInvoiceDraft` and `invoices.lastDetails`, so what this
+   * proves is the wiring: the query is read, and its answer reaches the boxes
+   * on the FIRST paint rather than after one.
+   */
+  it("opens the standing fields with the last invoice's values", () => {
+    const { dateSpy } = renderNew({
+      previous: {
+        billedTo: "Old Client\nElsewhere",
+        payTo: "Jo Freelance\nIBAN GB33BUKB20201555555555",
+        paymentTerms: "Net 14",
+        notes: "Thanks. Transfer only, please.",
+      },
+    })
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Pay to").value).toBe(
+      "Jo Freelance\nIBAN GB33BUKB20201555555555"
+    )
+    expect(screen.getByLabelText<HTMLInputElement>("Payment terms").value).toBe(
+      "Net 14"
+    )
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Notes").value).toBe(
+      "Thanks. Transfer only, please."
+    )
+    // The RANGE's client wins the billed-to box: it is evidence about the work
+    // in front of the user, where the last invoice is evidence about the last
+    // job. The carried block only fills a box the range says nothing about.
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Billed to").value).toBe(
+      "Acme Corp\n1 Way\nSpringfield"
+    )
+    // Never the purchase order — a reference to one particular order, and the
+    // one carried value that would look right and be wrong.
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Purchase order").value
+    ).toBe("")
+    dateSpy.mockRestore()
+  })
+
+  it("falls back to the last invoice's client when the range names none", () => {
+    const { dateSpy } = renderNew({
+      projects: [projectRow({ _id: WEBSITE, name: "Website" })],
+      clients: [],
+      previous: { billedTo: "Old Client\nElsewhere", payTo: "Jo Freelance" },
+    })
+    expect(screen.getByLabelText<HTMLTextAreaElement>("Billed to").value).toBe(
+      "Old Client\nElsewhere"
     )
     dateSpy.mockRestore()
   })

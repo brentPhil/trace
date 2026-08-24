@@ -224,6 +224,97 @@ export const listAs = internalQuery({
 })
 
 // ---------------------------------------------------------------------------
+// lastDetails
+// ---------------------------------------------------------------------------
+
+/**
+ * The standing half of the last invoice, for the next one's form to open with.
+ *
+ * FOUR FIELDS, and which four is the whole decision. `billedTo`, `payTo`,
+ * `paymentTerms` and `notes` are facts about an ARRANGEMENT — who is billing
+ * whom, where the money goes, on what terms, and the bank block at the foot —
+ * and a freelancer invoicing the same client every month retypes all four every
+ * time, from memory, onto a document that cannot be edited afterwards. Reading
+ * them off the last invoice is not inventing a default: it is the value the same
+ * person typed the last time they were asked.
+ *
+ * `purchaseOrder` is deliberately NOT here. It is not a standing fact but a
+ * reference to one particular order, and a stale PO carried onto a new
+ * write-once document is the one field on this list that would look right and
+ * be wrong — the failure mode is a client's accounts department matching an
+ * invoice to work it has already paid for. It opens empty, every time.
+ *
+ * `.pick` off `invoiceDoc` rather than a hand-written object, for the reason
+ * convex/lib/docs.ts gives: a return validator written out again drifts from the
+ * schema and then rejects correct documents at runtime. It also keeps
+ * `paymentTerms` and `notes` OPTIONAL, which is honest — an invoice raised
+ * without them carries no value to hand on, and the form reads that absence as
+ * an empty box rather than as a string somebody typed.
+ */
+const invoiceCarryOver = invoiceDoc.pick(
+  "billedTo",
+  "payTo",
+  "paymentTerms",
+  "notes"
+)
+
+const lastDetailsReturns = v.union(invoiceCarryOver, v.null())
+
+/**
+ * How far back this looks for a live row.
+ *
+ * Small on purpose: it wants ONE row, and the only reason it reads more than
+ * one is that `deletedAt` is not in `by_user_issued`'s key — so a trashed
+ * invoice at the head of the index must be stepped over rather than returned.
+ * Eight is far more trash than any account will accumulate at the head (nothing
+ * in this product can soft-delete an invoice yet at all) and is a bounded read
+ * either way. An account whose eight newest invoices are all trashed prefills
+ * nothing, which is the same answer a brand-new account gets and the same
+ * one it can always overwrite by typing.
+ */
+const CARRY_OVER_SCAN_LIMIT = 8
+
+/**
+ * The newest invoice's carried-over fields, or null when there is no invoice.
+ *
+ * NEWEST BY ISSUE DATE, `by_user_issued` descending — the same order /invoices
+ * lists in, and the same sense of "the last one" a human means. It is not
+ * strictly the last one TYPED: an invoice back-dated to the month a job
+ * finished sorts behind one raised today, so an account that back-dates reads
+ * its details off the document with the later date on it. That is the right
+ * answer for the field this exists for — the arrangement a document dated later
+ * describes is the more current one — and every one of these values is shown in
+ * a box the user can change before anything is minted.
+ */
+async function lastDetailsImpl(ctx: QueryCtx, userId: string) {
+  const page = await ctx.db
+    .query("invoices")
+    .withIndex("by_user_issued", (q) => q.eq("userId", userId))
+    .order("desc")
+    .take(CARRY_OVER_SCAN_LIMIT)
+  const last = page.find((row) => row.deletedAt === null)
+  if (last === undefined) return null
+  return {
+    billedTo: last.billedTo,
+    payTo: last.payTo,
+    paymentTerms: last.paymentTerms,
+    notes: last.notes,
+  }
+}
+
+export const lastDetails = query({
+  args: {},
+  returns: lastDetailsReturns,
+  handler: async (ctx) => await lastDetailsImpl(ctx, await requireUserId(ctx)),
+})
+
+export const lastDetailsAs = internalQuery({
+  args: { userId: v.string() },
+  returns: lastDetailsReturns,
+  handler: async (ctx, args) => await lastDetailsImpl(ctx, args.userId),
+})
+
+// ---------------------------------------------------------------------------
 // What a human may type onto an invoice, and how long it may be
 // ---------------------------------------------------------------------------
 
