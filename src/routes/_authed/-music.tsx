@@ -17,7 +17,7 @@
  * Nothing on this page needs to clean up after a refusal; that is exactly why
  * the validation lives in the action rather than here.
  */
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import {
   convexQuery,
@@ -25,6 +25,7 @@ import {
   useConvexMutation,
 } from "@convex-dev/react-query"
 import { Pencil, Trash2 } from "lucide-react"
+import { UploadQueuePanel } from "@/components/music/upload-queue-panel"
 import { Page } from "@/components/shell/page"
 import { Button } from "@/components/ui/button"
 import { Empty } from "@/components/ui/empty"
@@ -40,6 +41,7 @@ import {
   trackNameFromFilename,
 } from "@shared/audio"
 import { api } from "../../../convex/_generated/api"
+import type { QueuedUpload } from "@/components/music/upload-queue-panel"
 import type { Id } from "../../../convex/_generated/dataModel"
 
 /** How a track is shaped once it has crossed the wire — see `trackReturns` in
@@ -87,8 +89,17 @@ export function Music() {
   const [sort, setSort] = useState<SortKey>("name")
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
+  const [queue, setQueue] = useState<Array<QueuedUpload>>([])
 
   const visible = orderTracks(tracks, search, sort)
+
+  /** One entry's fields, changed in place. Every transition below goes through
+   *  here so the queue is only ever replaced, never mutated. */
+  const patch = (id: string, fields: Partial<QueuedUpload>) => {
+    setQueue((current) =>
+      current.map((item) => (item.id === id ? { ...item, ...fields } : item))
+    )
+  }
 
   /**
    * One file, all the way in.
@@ -97,15 +108,23 @@ export function Music() {
    * decode never reaches a branch that could abandon the upload — see
    * `decodeDurationMs`, which resolves `undefined` rather than rejecting.
    */
-  const uploadOne = async (file: File) => {
+  const uploadOne = async (file: File, id: string) => {
     const durationMs = await decodeDurationMs(file)
 
+    patch(id, { status: "uploading", sent: 0 })
     const uploadUrl = await generateUploadUrl({})
     // The POST lives in `postFileWithProgress` because `fetch` cannot report
     // how far a request body has got — it resolves only once the whole body
     // has gone out. Everything that call used to do here, including the
     // Content-Type omission for an untyped file, moved with it.
-    const storageId = await postFileWithProgress(uploadUrl, file, () => {})
+    const storageId = await postFileWithProgress(uploadUrl, file, (sent) => {
+      patch(id, { sent })
+    })
+
+    // A DISTINCT STATE, not a bar rounded up to 100%. The bytes have all
+    // landed and `addTrackAction` can still refuse the blob on its sniffed
+    // type — a full bar during a step that can fail is a bar telling a lie.
+    patch(id, { status: "saving", sent: file.size })
 
     await addTrack({
       storageId: storageId as Id<"_storage">,
@@ -120,6 +139,8 @@ export function Music() {
       // as an absence; a zero would be a claim about the track that is false.
       ...(durationMs === undefined ? {} : { durationMs }),
     })
+
+    patch(id, { status: "done" })
   }
 
   /**
@@ -133,23 +154,73 @@ export function Music() {
    * a bad file's toast names the file that came before the rest are still going.
    *
    * A refusal does NOT stop the run: one unsupported file in a folder drop
-   * should cost that file, not the nine good ones behind it.
+   * should cost that file, not the nine good ones behind it — and the failure
+   * now lands on that file's own queue row, which is the thing the toast it
+   * replaced could not do.
    */
   const upload = async (files: Array<File>) => {
     if (files.length === 0) return
+
+    const entries: Array<QueuedUpload> = files.map((file) => ({
+      id: newClientKey(),
+      file,
+      name: file.name,
+      bytes: file.size,
+      sent: 0,
+      status: "queued",
+    }))
+    setQueue((current) => [...current, ...entries])
+
     setBusy(true)
     try {
-      for (const file of files) {
+      for (const entry of entries) {
         try {
-          await uploadOne(file)
+          await uploadOne(entry.file, entry.id)
         } catch (thrown) {
-          report(thrown)
+          patch(entry.id, { status: "failed", reason: errorMessage(thrown) })
         }
       }
     } finally {
       setBusy(false)
     }
   }
+
+  /** Re-runs one failed entry. The `File` is still held by the queue, so this
+   *  costs the user nothing — which is the whole reason a failure stays on
+   *  screen instead of timing out like the toast it replaced. */
+  const retry = (id: string) => {
+    const entry = queue.find((item) => item.id === id)
+    if (entry === undefined || busy) return
+    patch(id, { status: "queued", sent: 0, reason: undefined })
+    setBusy(true)
+    void (async () => {
+      try {
+        await uploadOne(entry.file, id)
+      } catch (thrown) {
+        patch(id, { status: "failed", reason: errorMessage(thrown) })
+      } finally {
+        setBusy(false)
+      }
+    })()
+  }
+
+  const dismissFinished = () => {
+    setQueue((current) =>
+      current.filter(
+        (item) => item.status !== "done" && item.status !== "failed"
+      )
+    )
+  }
+
+  /* A finished row is information for about as long as it takes to read it.
+   * Failures are NOT swept — they are the reason this panel exists. */
+  useEffect(() => {
+    if (!queue.some((item) => item.status === "done")) return
+    const timer = setTimeout(() => {
+      setQueue((current) => current.filter((item) => item.status !== "done"))
+    }, 2_000)
+    return () => clearTimeout(timer)
+  }, [queue])
 
   return (
     /*
@@ -182,6 +253,12 @@ export function Music() {
       }
     >
       <div className="flex flex-1 flex-col gap-4 px-4 pb-6">
+        <UploadQueuePanel
+          items={queue}
+          onRetry={retry}
+          onDismiss={dismissFinished}
+        />
+
         <Usage bytes={usage.bytes} />
 
         <div className="flex flex-wrap items-center gap-2">

@@ -337,6 +337,75 @@ describe("the library", () => {
   /* The backend's own sentences — INVALID_TRACK, LIBRARY_FULL — are already
    * written for a person, so the page shows them verbatim rather than
    * translating them into a second vocabulary. */
+  it("shows a row with live bytes while a file uploads", async () => {
+    useFakeXhr()
+    renderMusic()
+
+    // A real size, not `new Uint8Array(10)` — the row renders `mb(item.bytes)`
+    // off `file.size`, so a ten-BYTE file correctly reads "of 0 MB".
+    const long = new File([new Uint8Array(10)], "Long Track.mp3", {
+      type: "audio/mpeg",
+    })
+    Object.defineProperty(long, "size", { value: 10 * 1024 * 1024 })
+
+    fireEvent.change(screen.getByLabelText("Music files"), {
+      target: { files: [long] },
+    })
+
+    // The row names the file, which is the thing the old anonymous toast
+    // could not do.
+    expect(await screen.findByText("Long Track.mp3")).toBeTruthy()
+
+    await waitFor(() => expect(FakeXhr.last).not.toBeNull())
+    FakeXhr.last!.emitProgress(5 * 1024 * 1024, 10 * 1024 * 1024)
+
+    expect(await screen.findByText(/5 MB of 10 MB/)).toBeTruthy()
+  })
+
+  it("summarises the batch in one live region", async () => {
+    useFakeXhr()
+    renderMusic()
+
+    fireEvent.change(screen.getByLabelText("Music files"), {
+      target: {
+        files: [
+          new File([new Uint8Array(1)], "One.mp3", { type: "audio/mpeg" }),
+          new File([new Uint8Array(1)], "Two.mp3", { type: "audio/mpeg" }),
+        ],
+      },
+    })
+
+    expect(await screen.findByText(/Uploading 1 of 2/)).toBeTruthy()
+  })
+
+  /*
+   * THE POINT OF THE PANEL. The old path reported a failure through a toast
+   * carrying only the backend's sentence — so three bad files in a folder drop
+   * produced three identical messages, none of which said WHICH file failed,
+   * and all of which timed out after eight seconds.
+   */
+  it("keeps a failed row, with its file name and a retry", async () => {
+    useFakeXhr()
+    renderMusic()
+
+    fireEvent.change(screen.getByLabelText("Music files"), {
+      target: {
+        files: [
+          new File([new Uint8Array(1)], "Broken.mp3", { type: "audio/mpeg" }),
+        ],
+      },
+    })
+
+    await waitFor(() => expect(FakeXhr.last).not.toBeNull())
+    FakeXhr.last!.status = 500
+    FakeXhr.last!.finish()
+
+    expect(await screen.findByText("Broken.mp3")).toBeTruthy()
+    expect(
+      await screen.findByRole("button", { name: /retry broken\.mp3/i })
+    ).toBeTruthy()
+  })
+
   it("surfaces a failed POST without rewriting the reason", async () => {
     useFakeXhr()
     renderMusic()
