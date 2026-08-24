@@ -24,12 +24,13 @@ import {
   useConvexAction,
   useConvexMutation,
 } from "@convex-dev/react-query"
-import { Pencil, Trash2 } from "lucide-react"
+import { Pencil, Trash2, Upload } from "lucide-react"
 import { LibraryUsage } from "@/components/music/library-usage"
 import { UploadQueuePanel } from "@/components/music/upload-queue-panel"
 import { Page } from "@/components/shell/page"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Empty } from "@/components/ui/empty"
+import { Input } from "@/components/ui/input"
 import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
@@ -58,7 +59,7 @@ type Track = {
   url: string | null
 }
 
-type SortKey = "name" | "recent"
+type SortKey = "name" | "recent" | "largest" | "longest"
 
 export function Music() {
   const { data: tracks } = useSuspenseQuery(
@@ -264,28 +265,45 @@ export function Music() {
     <Page
       title="Music"
       actions={
-        <label className="text-sm">
-          <span className="sr-only">Music files</span>
-          <input
-            type="file"
-            accept={AUDIO_INPUT_ACCEPT}
-            multiple
-            disabled={busy}
-            aria-label="Music files"
-            onChange={(event) => {
-              const files = Array.from(event.target.files ?? [])
-              // Cleared so choosing the SAME file again still fires `change` —
-              // which is what a person does after a rejection they have since
-              // fixed, and the one case a file input silently swallows.
-              event.target.value = ""
-              void upload(files)
-            }}
-            className="max-w-full text-sm file:mr-3 file:rounded-md file:border file:border-edge file:bg-ground file:px-2 file:py-1.5 file:text-sm"
-          />
-          <span className="mt-1 block text-xs text-muted-foreground">
+        /*
+          A LABEL STYLED AS A BUTTON, wrapping an `sr-only` input — not a bare
+          `<input type="file">` with `file:` utilities on it. The browser's own
+          picker chrome was the one control on this page drawn by the engine
+          rather than by the design system, and it sat in the header where the
+          eye lands first. The input keeps its `aria-label`, so it is still the
+          same control to a screen reader and to every test that finds it.
+        */
+        <div className="flex flex-col items-end gap-1">
+          <label
+            className={cn(
+              buttonVariants({ variant: "outline", size: "sm" }),
+              "cursor-pointer",
+              busy && "pointer-events-none opacity-50"
+            )}
+          >
+            <Upload className="size-4" />
+            Add music
+            <input
+              type="file"
+              accept={AUDIO_INPUT_ACCEPT}
+              multiple
+              disabled={busy}
+              aria-label="Music files"
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? [])
+                // Cleared so choosing the SAME file again still fires `change`
+                // — which is what a person does after a rejection they have
+                // since fixed, and the one case a file input swallows silently.
+                event.target.value = ""
+                void upload(files)
+              }}
+              className="sr-only"
+            />
+          </label>
+          <span className="text-xs text-muted-foreground">
             {`${acceptedFormatList()} · up to ${formatMb(MAX_TRACK_BYTES)} each`}
           </span>
-        </label>
+        </div>
       }
     >
       <div className="flex flex-1 flex-col gap-4 px-4 pb-6">
@@ -298,16 +316,13 @@ export function Music() {
         <LibraryUsage bytes={usage.bytes} count={usage.count} />
 
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <Input
             type="search"
             value={search}
             aria-label="Search music"
             placeholder="Search"
             onChange={(event) => setSearch(event.target.value)}
-            className={cn(
-              "w-48 rounded-md border border-edge bg-ground px-2 py-1 text-sm",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            )}
+            className="h-8 w-48 text-sm"
           />
           <select
             value={sort}
@@ -320,7 +335,17 @@ export function Music() {
           >
             <option value="name">Name</option>
             <option value="recent">Recently added</option>
+            <option value="largest">Largest</option>
+            <option value="longest">Longest</option>
           </select>
+
+          {/* Only while searching: a count beside an unfiltered list is a
+              restatement of the list. */}
+          {search.trim() === "" ? null : (
+            <span className="text-xs text-muted-foreground">
+              {`${visible.length} of ${tracks.length}`}
+            </span>
+          )}
         </div>
 
         {/*
@@ -356,10 +381,18 @@ export function Music() {
             void upload(Array.from(event.dataTransfer.files))
           }}
           className={cn(
-            "rounded-md transition-colors",
+            "relative rounded-md transition-colors",
             dragging && "ring-2 ring-ring"
           )}
         >
+          {/* The ring alone was a visual change with no stated meaning. The
+              target is still THE LIST — see the note above on why there is no
+              permanent dashed band — so only the feedback improves. */}
+          {dragging ? (
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-ground/80 text-sm text-foreground">
+              Drop to add
+            </div>
+          ) : null}
           {tracks.length === 0 ? (
             <Empty>
               No music uploaded yet. Add {acceptedFormatList()} files up to{" "}
@@ -434,11 +467,19 @@ function orderTracks(
     needle === ""
       ? [...tracks]
       : tracks.filter((track) => track.name.toLowerCase().includes(needle))
-  filtered.sort((a, b) =>
-    sort === "name"
-      ? a.name.localeCompare(b.name)
-      : b._creationTime - a._creationTime
-  )
+  filtered.sort((a, b) => {
+    if (sort === "name") return a.name.localeCompare(b.name)
+    if (sort === "recent") return b._creationTime - a._creationTime
+    // `bytes` is always present; every row the query returns has one.
+    if (sort === "largest") return b.bytes - a.bytes
+    // `durationMs` is OPTIONAL — a track the browser could not decode has no
+    // length, which is not the same as a length of zero. `-1` sorts those
+    // after every known duration rather than ahead of all of them, which is
+    // where a `?? 0` would have put them.
+    const left = a.durationMs ?? -1
+    const right = b.durationMs ?? -1
+    return right - left
+  })
   return filtered
 }
 

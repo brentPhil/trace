@@ -240,6 +240,52 @@ describe("the library", () => {
     expect(rows[0].textContent).toContain("Beta")
   })
 
+  it("sorts by largest", () => {
+    renderMusic()
+    fireEvent.change(screen.getByRole("combobox", { name: /sort/i }), {
+      target: { value: "largest" },
+    })
+    // Alpha is 2 MB, Beta is 1 MB.
+    expect(screen.getAllByRole("listitem")[0].textContent).toContain("Alpha")
+  })
+
+  /*
+   * `durationMs` is optional. A track without one is not a zero-length track,
+   * so it sorts last rather than first.
+   *
+   * The CREATION ORDER IS THE REVERSE of the answer, deliberately: while
+   * "longest" fell through to the `recent` branch this test passed for the
+   * wrong reason, because the fixture happened to already be in the order it
+   * asserted. NoDuration is the newer row, so a fall-through now fails.
+   */
+  it("puts tracks with no known duration last under longest", () => {
+    renderMusic([
+      { _id: "t1", name: "NoDuration", bytes: 1, _creationTime: 2, url: "u" },
+      {
+        _id: "t2",
+        name: "HasDuration",
+        bytes: 1,
+        durationMs: 60_000,
+        _creationTime: 1,
+        url: "u",
+      },
+    ])
+    fireEvent.change(screen.getByRole("combobox", { name: /sort/i }), {
+      target: { value: "longest" },
+    })
+    const rows = screen.getAllByRole("listitem")
+    expect(rows[0].textContent).toContain("HasDuration")
+    expect(rows[1].textContent).toContain("NoDuration")
+  })
+
+  it("says how many of how many match a search", () => {
+    renderMusic()
+    fireEvent.change(screen.getByRole("searchbox", { name: /search/i }), {
+      target: { value: "alph" },
+    })
+    expect(screen.getByText(/1 of 2/)).toBeTruthy()
+  })
+
   it("renames a track", async () => {
     renderMusic()
     fireEvent.click(screen.getByRole("button", { name: /rename alpha/i }))
