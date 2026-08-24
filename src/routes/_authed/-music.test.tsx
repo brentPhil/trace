@@ -406,6 +406,53 @@ describe("the library", () => {
     ).toBeTruthy()
   })
 
+  /*
+   * The file never leaves the browser. Before this, a 300 MB file was uploaded
+   * IN FULL, stored by Convex, read by `addTrackAction`, refused, and deleted
+   * — with the user watching the whole transfer for an answer that `file.size`
+   * already contained.
+   */
+  it("refuses an oversized file without sending it", async () => {
+    useFakeXhr()
+    renderMusic()
+
+    const huge = new File([new Uint8Array(1)], "Huge.wav", {
+      type: "audio/wav",
+    })
+    Object.defineProperty(huge, "size", { value: 40 * 1024 * 1024 })
+
+    fireEvent.change(screen.getByLabelText("Music files"), {
+      target: { files: [huge] },
+    })
+
+    expect(await screen.findByText(/The limit is 20 MB per track/)).toBeTruthy()
+    expect(FakeXhr.last).toBeNull()
+    expect(generateUploadUrl).not.toHaveBeenCalled()
+  })
+
+  /* One bad file costs that file, not the good one behind it. */
+  it("uploads the good file in a batch whose first file is refused", async () => {
+    useFakeXhr()
+    renderMusic()
+
+    const huge = new File([new Uint8Array(1)], "Huge.wav", {
+      type: "audio/wav",
+    })
+    Object.defineProperty(huge, "size", { value: 40 * 1024 * 1024 })
+    const good = new File([new Uint8Array(1)], "Fine.mp3", {
+      type: "audio/mpeg",
+    })
+
+    fireEvent.change(screen.getByLabelText("Music files"), {
+      target: { files: [huge, good] },
+    })
+
+    await waitFor(() => expect(FakeXhr.last).not.toBeNull())
+    FakeXhr.last!.finish()
+    await waitFor(() => expect(addTrack).toHaveBeenCalledTimes(1))
+    expect(addTrack.mock.calls[0][0].name).toBe("Fine")
+  })
+
   it("surfaces a failed POST without rewriting the reason", async () => {
     useFakeXhr()
     renderMusic()

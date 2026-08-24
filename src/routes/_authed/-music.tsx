@@ -34,6 +34,7 @@ import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { errorMessage } from "@/lib/error-message"
 import { postFileWithProgress } from "@/lib/music/post-file"
+import { advance, precheck } from "@/lib/music/upload-queue"
 import { cn } from "@/lib/utils"
 import {
   AUDIO_INPUT_ACCEPT,
@@ -42,6 +43,7 @@ import {
 } from "@shared/audio"
 import { api } from "../../../convex/_generated/api"
 import type { QueuedUpload } from "@/components/music/upload-queue-panel"
+import type { LibraryState } from "@/lib/music/upload-queue"
 import type { Id } from "../../../convex/_generated/dataModel"
 
 /** How a track is shaped once it has crossed the wire — see `trackReturns` in
@@ -173,9 +175,28 @@ export function Music() {
 
     setBusy(true)
     try {
+      // The library as this batch will leave it, advanced per success — so the
+      // fifth file into a library with room for four is refused HERE, rather
+      // than uploaded in full and refused by the server one file at a time.
+      let state: LibraryState = {
+        libraryBytes: usage.bytes,
+        trackCount: usage.count,
+      }
+
       for (const entry of entries) {
+        const candidate = {
+          name: entry.name,
+          size: entry.bytes,
+          type: entry.file.type,
+        }
+        const verdict = precheck(candidate, state)
+        if (!verdict.ok) {
+          patch(entry.id, { status: "failed", reason: verdict.reason })
+          continue
+        }
         try {
           await uploadOne(entry.file, entry.id)
+          state = advance(state, candidate)
         } catch (thrown) {
           patch(entry.id, { status: "failed", reason: errorMessage(thrown) })
         }
@@ -191,6 +212,17 @@ export function Music() {
   const retry = (id: string) => {
     const entry = queue.find((item) => item.id === id)
     if (entry === undefined || busy) return
+
+    // Re-checked, because the library may have filled since this row failed.
+    const verdict = precheck(
+      { name: entry.name, size: entry.bytes, type: entry.file.type },
+      { libraryBytes: usage.bytes, trackCount: usage.count }
+    )
+    if (!verdict.ok) {
+      patch(id, { status: "failed", reason: verdict.reason })
+      return
+    }
+
     patch(id, { status: "queued", sent: 0, reason: undefined })
     setBusy(true)
     void (async () => {
