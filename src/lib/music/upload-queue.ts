@@ -3,6 +3,7 @@ import {
   MAX_LIBRARY_BYTES,
   MAX_TRACK_BYTES,
   MAX_TRACK_COUNT,
+  formatBytes,
   isAcceptedAudioContentType,
 } from "@shared/audio"
 
@@ -12,7 +13,8 @@ import {
  * ADVISORY, NEVER AUTHORITATIVE. `acceptTrack` in convex/music.ts remains the
  * only thing that decides whether a track is stored, and every sentence below
  * is a local echo of a rule it already enforces. The value here is not a second
- * layer of safety — it is that a 300 MB file currently uploads IN FULL, gets
+ * layer of safety — it is that an oversized file would otherwise upload IN
+ * FULL (and at a 250 MiB cap the file that trips it is a big one), gets
  * stored by Convex, is read by `addTrackAction`, is refused, and is deleted,
  * with the user watching a progress bar the whole way for an answer that was
  * knowable from `file.size` alone.
@@ -28,12 +30,10 @@ export type PrecheckResult = { ok: true } | { ok: false; reason: string }
 
 const OK: PrecheckResult = { ok: true }
 
-/** Megabytes as the rest of the page writes them — see `formatMb` in
- *  -music.tsx, whose rounding this deliberately matches so "12 MB free" here
- *  and "12 MB of 500 MB used" there cannot disagree by a decimal. */
-function mb(bytes: number): string {
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-}
+/** Every size in this file goes through the shared `formatBytes`, so the
+ *  sentence the server rejects with and the sentence this refuses with are
+ *  spelled by the same function from the same constant. */
+const mb = formatBytes
 
 /** "MP3, M4A, WAV, OGG or FLAC", built from the allow-list rather than typed
  *  out, so a format added to the server appears in this sentence by itself. */

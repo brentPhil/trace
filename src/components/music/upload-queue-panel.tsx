@@ -1,6 +1,7 @@
 import { Check, RotateCw, TriangleAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { formatBytes } from "@shared/audio"
 
 /*
  * What an upload looks like while it is happening.
@@ -28,11 +29,10 @@ export type QueuedUpload = {
   reason?: string
 }
 
-/** Megabytes as `formatMb` writes them, kept identical so the queue row and
- *  the meter beneath it never disagree by a decimal. */
-function mb(bytes: number): string {
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-}
+/** The shared spelling, so a queue row and the meter beneath it cannot
+ *  disagree by a decimal — or by a unit, now that a track can be large enough
+ *  for the two to differ on whether to say MB or GB at all. */
+const mb = formatBytes
 
 /**
  * The one sentence a screen reader hears.

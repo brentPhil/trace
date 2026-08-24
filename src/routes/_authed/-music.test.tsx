@@ -7,6 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
+import { MAX_LIBRARY_BYTES, MAX_TRACK_BYTES, formatBytes } from "@shared/audio"
 import { Toast, ToastViewport } from "@/components/ui/toast"
 import { Music } from "@/routes/_authed/-music"
 import { convexKey } from "@/test-utils/convex-query"
@@ -185,10 +186,20 @@ describe("the library", () => {
   })
 
   /* The ceiling is read from `MAX_LIBRARY_BYTES`, so the number in the
-   * sentence and the number the server enforces cannot drift apart. */
+   * sentence and the number the server enforces cannot drift apart — and the
+   * assertion derives it too, for the same reason. */
   it("reports usage against the cap", () => {
     renderMusic()
-    expect(screen.getByText(/of 500 MB/i)).toBeTruthy()
+    expect(
+      screen.getByText(new RegExp(`of ${formatBytes(MAX_LIBRARY_BYTES)} used`))
+    ).toBeTruthy()
+  })
+
+  /* The 2 GiB cap must not read "2048 MB". This is the assertion that would
+   * have caught it. */
+  it("spells the library cap in gigabytes", () => {
+    renderMusic()
+    expect(screen.getByText(/of 2 GB used/)).toBeTruthy()
   })
 
   /* `usage.count` has been computed, validated and sent on every page load
@@ -200,27 +211,32 @@ describe("the library", () => {
 
   it("says how much room is left", () => {
     renderMusic()
-    expect(screen.getByText(/497.1 MB free/i)).toBeTruthy()
+    const free = MAX_LIBRARY_BYTES - 3_000_000
+    expect(
+      screen.getByText(new RegExp(`${formatBytes(free)} free`))
+    ).toBeTruthy()
   })
 
   /* Colour is never the only signal — DESIGN.md — and the signal colours are
    * reserved by meaning, so a nearly-full library changes only the SENTENCE. */
   it("leads with what is left when the library is nearly full", () => {
-    renderMusic(TRACKS, { bytes: 495 * 1024 * 1024, count: 2 })
+    renderMusic(TRACKS, { bytes: MAX_LIBRARY_BYTES * 0.95, count: 2 })
     expect(screen.getByText(/nearly full/i)).toBeTruthy()
   })
 
   /* Full is the one state that IS an error — the next upload will be refused
    * — so it is the one that earns `alarm`. */
   it("says the library is full at the cap", () => {
-    renderMusic(TRACKS, { bytes: 500 * 1024 * 1024, count: 2 })
+    renderMusic(TRACKS, { bytes: MAX_LIBRARY_BYTES, count: 2 })
     expect(screen.getByText(/library full/i)).toBeTruthy()
   })
 
   it("states the accepted formats and the per-track cap up front", () => {
     renderMusic()
     expect(screen.getByText(/MP3, M4A, WAV, OGG or FLAC/i)).toBeTruthy()
-    expect(screen.getByText(/up to 20 MB each/i)).toBeTruthy()
+    expect(
+      screen.getByText(new RegExp(`up to ${formatBytes(MAX_TRACK_BYTES)} each`))
+    ).toBeTruthy()
   })
 
   it("filters by search", () => {
@@ -497,13 +513,19 @@ describe("the library", () => {
     const huge = new File([new Uint8Array(1)], "Huge.wav", {
       type: "audio/wav",
     })
-    Object.defineProperty(huge, "size", { value: 40 * 1024 * 1024 })
+    Object.defineProperty(huge, "size", {
+      value: MAX_TRACK_BYTES + 1024 * 1024,
+    })
 
     fireEvent.change(screen.getByLabelText("Music files"), {
       target: { files: [huge] },
     })
 
-    expect(await screen.findByText(/The limit is 20 MB per track/)).toBeTruthy()
+    expect(
+      await screen.findByText(
+        new RegExp(`The limit is ${formatBytes(MAX_TRACK_BYTES)} per track`)
+      )
+    ).toBeTruthy()
     expect(FakeXhr.last).toBeNull()
     expect(generateUploadUrl).not.toHaveBeenCalled()
   })
@@ -516,7 +538,9 @@ describe("the library", () => {
     const huge = new File([new Uint8Array(1)], "Huge.wav", {
       type: "audio/wav",
     })
-    Object.defineProperty(huge, "size", { value: 40 * 1024 * 1024 })
+    Object.defineProperty(huge, "size", {
+      value: MAX_TRACK_BYTES + 1024 * 1024,
+    })
     const good = new File([new Uint8Array(1)], "Fine.mp3", {
       type: "audio/mpeg",
     })

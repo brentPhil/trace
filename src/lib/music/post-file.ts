@@ -2,10 +2,12 @@
  * The upload POST, with a progress event.
  *
  * WHY NOT `fetch`. `fetch` resolves when the request body has finished going
- * out; it exposes nothing while it is going. A 20 MiB track on a slow
- * connection is therefore a completely silent minute, which is what the page
- * did before this file existed. `XMLHttpRequest.upload` emits `progress`, and
- * that single capability is the whole reason for the older API here.
+ * out; it exposes nothing while it is going. A 250 MiB track on a slow
+ * connection is therefore a completely silent stretch of many minutes, which
+ * is what the page did before this file existed — and the case only got
+ * starker when the per-track cap went from 20 MiB to 250. `XMLHttpRequest`'s
+ * `upload` emits `progress`, and that single capability is the whole reason
+ * for the older API here.
  *
  * Everything else is carried over unchanged from the `fetch` this replaces,
  * including the two decisions that are easy to get wrong — see below.

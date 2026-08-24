@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils"
 import {
   AUDIO_INPUT_ACCEPT,
   MAX_TRACK_BYTES,
+  formatBytes,
   trackNameFromFilename,
 } from "@shared/audio"
 import { api } from "../../../convex/_generated/api"
@@ -616,12 +617,10 @@ function TrackRow({
 
 // ---------------------------------------------------------------------------
 
-/** Megabytes to one decimal, and the trailing `.0` dropped — so the cap reads
- *  "500 MB" rather than "500.0 MB" while a small file still reads "0.9 MB"
- *  instead of rounding away to "1 MB". MiB, matching the constants it renders. */
-function formatMb(bytes: number): string {
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-}
+/** One decimal with the trailing `.0` dropped, and GB above a gibibyte — the
+ *  shared spelling from `@shared/audio`, which the server's own rejection
+ *  sentence also uses. There were four copies of this before it had a home. */
+const formatMb = formatBytes
 
 /** A duration as a person reads one off a player: 3:07, never 187000. */
 function formatClock(ms: number): string {
@@ -672,7 +671,9 @@ function decodeDurationMs(file: File): Promise<number | undefined> {
       settled = true
       if (timer !== undefined) clearTimeout(timer)
       // Revoked on every path, including success: an object URL holds the file
-      // in memory until it is released, and these are up to 20 MiB each.
+      // in memory until it is released, and these are up to 250 MiB each —
+      // leaking one now costs twelve times what it did at the old cap, across
+      // a whole folder drop held at once.
       if (objectUrl !== null) URL.revokeObjectURL(objectUrl)
       resolve(value)
     }

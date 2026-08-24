@@ -3,6 +3,7 @@ import {
   MAX_LIBRARY_BYTES,
   MAX_TRACK_BYTES,
   MAX_TRACK_COUNT,
+  formatBytes,
 } from "@shared/audio"
 import { advance, precheck } from "./upload-queue"
 
@@ -26,8 +27,11 @@ describe("precheck", () => {
     const result = precheck(file({ size: MAX_TRACK_BYTES + MB }), empty)
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("expected a refusal")
-    expect(result.reason).toContain("21 MB")
-    expect(result.reason).toContain("20 MB")
+    // Both sizes are DERIVED, not typed out: this assertion went stale once
+    // already when the cap moved from 20 MB to 250 MB, and a literal here is
+    // just a promise to break again the next time it moves.
+    expect(result.reason).toContain(formatBytes(MAX_TRACK_BYTES + MB))
+    expect(result.reason).toContain(formatBytes(MAX_TRACK_BYTES))
   })
 
   it("accepts a track exactly at the per-track cap", () => {

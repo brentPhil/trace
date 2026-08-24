@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest"
 import schema from "./schema"
 import { api, internal } from "./_generated/api"
 import { traceErrorCode } from "./lib/codes"
-import { MAX_TRACK_BYTES } from "./lib/audio"
+import { MAX_LIBRARY_BYTES, MAX_TRACK_BYTES } from "./lib/audio"
 import type { Id } from "./_generated/dataModel"
 
 const modules = import.meta.glob("./**/*.*s")
@@ -170,8 +170,11 @@ describe("upload validation", () => {
 
   it("rejects an upload that would exceed the account cap AND deletes the blob", async () => {
     const t = setup()
-    // Seed the library right up to the cap without uploading 500 MB: write the
-    // row directly, which is what the sum reads.
+    // Seed the library right up to the cap without actually uploading a
+    // library's worth of bytes: write the row directly, which is what the sum
+    // reads. Derived from `MAX_LIBRARY_BYTES` rather than spelled out — this
+    // seed was a literal `500 * 1024 * 1024` and silently stopped reaching the
+    // cap the moment the cap moved.
     await t.run(async (ctx) => {
       await ctx.db.insert("musicTracks", {
         userId: ALICE,
@@ -181,7 +184,7 @@ describe("upload validation", () => {
         ),
         name: "Seed",
         contentType: "audio/mpeg",
-        bytes: 500 * 1024 * 1024 - 10,
+        bytes: MAX_LIBRARY_BYTES - 10,
         updatedAt: Date.now(),
         deletedAt: null,
       })

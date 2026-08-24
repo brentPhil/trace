@@ -16,6 +16,7 @@ import {
   MAX_TRACK_BYTES,
   MAX_TRACK_COUNT,
   MAX_TRACK_NAME_LENGTH,
+  formatBytes,
   isAcceptedAudioContentType,
 } from "./lib/audio"
 import type { Id } from "./_generated/dataModel"
@@ -32,7 +33,7 @@ import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server"
  *
  * One thing it does NOT copy from `setLogoAction`: the order size and content
  * type are checked in. See the comment on the size check in `addTrackAction`
- * for why a 20 MiB cap earns a different order than a 1 MiB one.
+ * for why a 250 MiB cap earns a different order than a 1 MiB one.
  */
 
 const trackReturns = v.object({
@@ -234,22 +235,27 @@ async function addTrackAction(
   // `settings.setLogoAction` reads the blob's own content type BEFORE
   // checking size, and the plan modeled this action on that same order. That
   // order is fine for a logo, whose cap is 1 MiB: the worst an untyped upload
-  // can force into the action's memory is one megabyte. This cap is 20 MiB —
-  // twenty times as much — and `Content-Type` is entirely client-controlled,
-  // so omitting it costs an attacker nothing and can be repeated for free.
-  // Fetching the blob before its size is known would materialize an
-  // arbitrarily large file in memory on every such attempt, and if that OOMs
-  // or times out, the cleanup below never runs and the blob is orphaned for
-  // good. So here the size check runs FIRST, against metadata alone — nothing
-  // this cheap to trigger should ever cause a blob fetch — and the blob is
-  // only read once a file is already known to fit.
+  // can force into the action's memory is one megabyte. This cap is 250 MiB —
+  // two hundred and fifty times as much — and `Content-Type` is entirely
+  // client-controlled, so omitting it costs an attacker nothing and can be
+  // repeated for free. Fetching the blob before its size is known would
+  // materialize an arbitrarily large file in memory on every such attempt,
+  // and if that OOMs or times out, the cleanup below never runs and the blob
+  // is orphaned for good. So here the size check runs FIRST, against metadata
+  // alone — nothing this cheap to trigger should ever cause a blob fetch —
+  // and the blob is only read once a file is already known to fit.
+  //
+  // THE ORDER MATTERS MORE SINCE THE CAP ROSE, not less. It is what bounds
+  // the fetch below at 250 MiB rather than at whatever an attacker uploads;
+  // even so, that fetch is now a large read, and it happens only on the rare
+  // path where Convex recorded no content type at all.
   if (metadata === null || metadata.size > MAX_TRACK_BYTES) {
     await ctx.runMutation(internal.music.deleteUpload, {
       storageId: args.storageId,
     })
     traceError(
       "INVALID_TRACK",
-      "Use an MP3, M4A, WAV, OGG or FLAC file no larger than 20 MB."
+      `Use an MP3, M4A, WAV, OGG or FLAC file no larger than ${formatBytes(MAX_TRACK_BYTES)}.`
     )
   }
 
@@ -267,7 +273,7 @@ async function addTrackAction(
     })
     traceError(
       "INVALID_TRACK",
-      "Use an MP3, M4A, WAV, OGG or FLAC file no larger than 20 MB."
+      `Use an MP3, M4A, WAV, OGG or FLAC file no larger than ${formatBytes(MAX_TRACK_BYTES)}.`
     )
   }
 

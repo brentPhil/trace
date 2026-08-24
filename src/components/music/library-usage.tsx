@@ -1,4 +1,4 @@
-import { MAX_LIBRARY_BYTES, MAX_TRACK_COUNT } from "@shared/audio"
+import { MAX_LIBRARY_BYTES, MAX_TRACK_COUNT, formatBytes } from "@shared/audio"
 import { cn } from "@/lib/utils"
 
 /*
@@ -33,9 +33,9 @@ import { cn } from "@/lib/utils"
 
 const NEARLY_FULL = 0.9
 
-function formatMb(bytes: number): string {
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-}
+/** The shared spelling — which is what renders the 2 GiB library cap as
+ *  "2 GB" rather than the "2048 MB" a megabytes-only formatter would give. */
+const formatMb = formatBytes
 
 export function LibraryUsage({
   bytes,
