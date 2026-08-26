@@ -43,11 +43,19 @@ export const Route = createRootRouteWithContext<{
       {
         title: pageTitle(),
       },
+      {
+        name: "theme-color",
+        content: "#14110e",
+      },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
+      },
+      {
+        rel: "manifest",
+        href: "/manifest.json",
       },
     ],
   }),
