@@ -24,11 +24,48 @@ struct TrayHandles {
     status: MenuItem<tauri::Wry>,
     start: MenuItem<tauri::Wry>,
     stop: MenuItem<tauri::Wry>,
+    /// Which icon the tray is currently showing — `Some(true)` for recording,
+    /// `Some(false)` for idle, `None` if the last swap failed and we should try
+    /// again. Only ever touched on the main thread inside `render_tray`, so it
+    /// is never contended; the `Mutex` is here for interior mutability, not for
+    /// synchronisation.
+    shown_running: Mutex<Option<bool>>,
 }
 
 const TRAY_ID: &str = "chroneli-tray";
 const IDLE_ICON: &[u8] = include_bytes!("../icons/tray-idle.png");
 const RECORDING_ICON: &[u8] = include_bytes!("../icons/tray-recording.png");
+
+/// The wire contract with the web app, in one place.
+///
+/// These four strings are the whole of the shell's public surface, and every
+/// one of them is matched by a bare literal in `src/lib/desktop-bridge.ts`. A
+/// rename on this side is not a compile error on either side — it is a shell
+/// that silently stops responding — so `the_wire_identifiers_are_pinned` holds
+/// them still. They are `pub` because they genuinely are this crate's exported
+/// contract, and because that keeps `TIMER_STATE_COMMAND` (which nothing in the
+/// Rust build reads — see below) out of the dead-code lint.
+///
+/// `#[tauri::command]` derives the invoke name from the function IDENTIFIER, so
+/// this const cannot be the source of truth for it; it is a tripwire that
+/// `the_command_const_matches_the_handler_function` checks against the real
+/// identifier. Do not "clean up" by renaming the `timer_state` fn to match some
+/// other spelling of the const — the fn name is what goes on the wire.
+pub const TIMER_STATE_COMMAND: &str = "timer_state";
+/// Emitted when Start is chosen in the tray menu; the webview does the work.
+pub const TRAY_START_EVENT: &str = "tray-start";
+/// Emitted when Stop is chosen in the tray menu; the webview does the work.
+pub const TRAY_STOP_EVENT: &str = "tray-stop";
+/// The label of the one window, as declared in `tauri.conf.json`.
+pub const MAIN_WINDOW_LABEL: &str = "main";
+
+const IDLE_TOOLTIP: &str = "Chroneli — no timer running";
+const IDLE_STATUS: &str = "No timer running";
+/// Shown in place of the elapsed time when a running entry arrives with no
+/// start time. Convex will not currently produce that, but a frozen "0:00" is
+/// indistinguishable from a timer that just started, and a tray that lies is
+/// worse than one that admits it does not know.
+const UNKNOWN_ELAPSED: &str = "—:—";
 
 fn format_elapsed(ms: i64) -> String {
     let total_secs = (ms.max(0)) / 1000;
@@ -49,6 +86,47 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// The single line the tray shows for `state` — tooltip and status item both.
+/// `None` means nothing is running, and the caller renders the idle text.
+///
+/// Pure, so the parts that are easy to get quietly wrong (the empty-title
+/// fallback, a missing start time, an elapsed clock that has gone backwards)
+/// are reachable from a test without a running event loop.
+fn tray_line(state: &TimerState, now: i64) -> Option<String> {
+    if !state.running {
+        return None;
+    }
+    let trimmed = state.title.trim();
+    let title = if trimmed.is_empty() {
+        "Untitled"
+    } else {
+        trimmed
+    };
+    let elapsed = match state.started_at_ms {
+        Some(started_at) => format_elapsed(now - started_at),
+        None => UNKNOWN_ELAPSED.to_string(),
+    };
+    Some(format!("{elapsed} · {title}"))
+}
+
+/// Which icon depicts `running`.
+fn tray_icon_bytes(running: bool) -> &'static [u8] {
+    if running {
+        RECORDING_ICON
+    } else {
+        IDLE_ICON
+    }
+}
+
+/// Whether the menu offers Start and Stop, in that order.
+///
+/// A one-line function for a one-line decision, extracted only because nothing
+/// else would catch an inversion: the types are identical, the app still runs,
+/// and the symptom is a tray that offers Start while a timer is running.
+fn start_stop_enabled(running: bool) -> (bool, bool) {
+    (!running, running)
+}
+
 /// The web app pushes every running-entry change through here.
 #[tauri::command]
 fn timer_state(app: AppHandle, running: bool, title: String, started_at_ms: Option<i64>) {
@@ -63,9 +141,49 @@ fn timer_state(app: AppHandle, running: bool, title: String, started_at_ms: Opti
     refresh_tray(&app);
 }
 
-/// Rewrites icon, tooltip and menu from the current state. Called on every
-/// state push and once a second by the ticker while running.
+/// Asks for the tray to be rewritten from the current state. Safe to call from
+/// any thread; see `render_tray` for why it must go through the main thread as
+/// one piece.
 fn refresh_tray(app: &AppHandle) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || render_tray(&handle));
+}
+
+/// Rewrites icon, tooltip and menu from the current state. **Main thread only**
+/// — go through `refresh_tray`.
+///
+/// The snapshot is taken *here*, inside the main-thread task, and every native
+/// write happens before this function returns. That is load-bearing rather than
+/// tidy. Each of `set_tooltip`, `set_text` and `set_enabled` is a blocking
+/// round trip to the main thread (tauri's `run_item_main_thread!`), and when
+/// they are issued from a worker thread the main thread goes back to its event
+/// loop between them. An IPC `timer_state(running: false)` could therefore run
+/// to completion in the middle of the ticker's refresh, and the ticker's
+/// remaining writes — taken from a snapshot that was true a moment ago — would
+/// land last and win: recording icon, a stale "0:12 · Foo", Stop enabled, for a
+/// timer that has already stopped. The ticker's own guard is `if running`, so
+/// nothing would ever come back to correct it; the tray stayed wrong until the
+/// user started something else.
+///
+/// Dispatching the whole render as one task closes that. `run_on_main_thread`
+/// from a worker queues a task the event loop runs to completion, and the
+/// nested round trips inside it resolve inline rather than re-entering the loop
+/// (tauri-runtime-wry's `send_user_message` runs the message directly when it
+/// is already on the main thread), so no second render can interleave. Called
+/// from the main thread it runs inline and synchronously — same guarantee, no
+/// deadlock. And because `timer_state` writes the state *before* asking for a
+/// refresh, whichever render runs last necessarily reads the newest state.
+///
+/// LOCKS: nothing here may hold a `MutexGuard` across a tray or menu call. The
+/// current shape is deliberate — `state` is cloned out of a temporary scope,
+/// and `shown_running` is read into a `bool` and only re-locked afterwards — so
+/// no guard is alive when a native call blocks. Hoist either of those into a
+/// named guard and you get a hang: the ticker thread would hold the mutex while
+/// blocking on the main-thread round trip, while the main thread blocks in
+/// `lock()` inside `timer_state`. Both threads wedged, tray dead, window frozen,
+/// only the task manager left. It is a two-line change to cause and gives no
+/// warning at compile time.
+fn render_tray(app: &AppHandle) {
     let state = { app.state::<Shared>().state.lock().unwrap().clone() };
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
@@ -74,35 +192,36 @@ fn refresh_tray(app: &AppHandle) {
         return;
     };
 
-    let icon_bytes = if state.running {
-        RECORDING_ICON
-    } else {
-        IDLE_ICON
-    };
-    if let Ok(icon) = tauri::image::Image::from_bytes(icon_bytes) {
-        let _ = tray.set_icon(Some(icon));
+    // Once a second forever is a lot of PNG decoding and native icon swapping
+    // for an image that changes when a timer starts or stops. Only touch it
+    // when the state it depicts actually changed.
+    let shown_running = *handles.shown_running.lock().unwrap();
+    if shown_running != Some(state.running) {
+        if let Ok(icon) = tauri::image::Image::from_bytes(tray_icon_bytes(state.running)) {
+            if tray.set_icon(Some(icon)).is_ok() {
+                *handles.shown_running.lock().unwrap() = Some(state.running);
+            }
+        }
     }
 
-    if state.running {
-        let title = if state.title.trim().is_empty() {
-            "Untitled"
-        } else {
-            state.title.trim()
-        };
-        let elapsed = format_elapsed(now_ms() - state.started_at_ms.unwrap_or(now_ms()));
-        let line = format!("{elapsed} · {title}");
-        let _ = tray.set_tooltip(Some(&line));
-        let _ = handles.status.set_text(&line);
-    } else {
-        let _ = tray.set_tooltip(Some("Chroneli — no timer running"));
-        let _ = handles.status.set_text("No timer running");
+    match tray_line(&state, now_ms()) {
+        Some(line) => {
+            let _ = tray.set_tooltip(Some(&line));
+            let _ = handles.status.set_text(&line);
+        }
+        None => {
+            let _ = tray.set_tooltip(Some(IDLE_TOOLTIP));
+            let _ = handles.status.set_text(IDLE_STATUS);
+        }
     }
-    let _ = handles.start.set_enabled(!state.running);
-    let _ = handles.stop.set_enabled(state.running);
+
+    let (start_enabled, stop_enabled) = start_stop_enabled(state.running);
+    let _ = handles.start.set_enabled(start_enabled);
+    let _ = handles.stop.set_enabled(stop_enabled);
 }
 
 fn show_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -116,7 +235,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![timer_state])
         .setup(|app| {
-            let status = MenuItem::with_id(app, "status", "No timer running", false, None::<&str>)?;
+            let status = MenuItem::with_id(app, "status", IDLE_STATUS, false, None::<&str>)?;
             let start = MenuItem::with_id(app, "start", "Start timer", true, None::<&str>)?;
             let stop = MenuItem::with_id(app, "stop", "Stop timer", false, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "Open Chroneli", true, None::<&str>)?;
@@ -124,18 +243,18 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&status, &start, &stop, &open, &quit])?;
 
             TrayIconBuilder::with_id(TRAY_ID)
-                .icon(tauri::image::Image::from_bytes(IDLE_ICON)?)
-                .tooltip("Chroneli — no timer running")
+                .icon(tauri::image::Image::from_bytes(tray_icon_bytes(false))?)
+                .tooltip(IDLE_TOOLTIP)
                 .menu(&menu)
                 .show_menu_on_left_click(true)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     // The webview owns the mutations (auth lives there); the
                     // tray only asks. See use-desktop-bridge.ts.
                     "start" => {
-                        let _ = app.emit("tray-start", ());
+                        let _ = app.emit(TRAY_START_EVENT, ());
                     }
                     "stop" => {
-                        let _ = app.emit("tray-stop", ());
+                        let _ = app.emit(TRAY_STOP_EVENT, ());
                     }
                     "open" => show_main_window(app),
                     "quit" => app.exit(0),
@@ -143,10 +262,18 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            app.manage(TrayHandles { status, start, stop });
+            app.manage(TrayHandles {
+                status,
+                start,
+                stop,
+                // The builder above just drew the idle icon.
+                shown_running: Mutex::new(Some(false)),
+            });
 
             // Second-hand for the tray: the web app pushes only state CHANGES,
-            // the elapsed text ticks here.
+            // the elapsed text ticks here. Idle needs no tick — the line does
+            // not change — and a stale tray can no longer outlive the push that
+            // made it stale, so there is nothing for an idle tick to repair.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(1));
@@ -172,7 +299,21 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::format_elapsed;
+    use super::{
+        format_elapsed, start_stop_enabled, tray_icon_bytes, tray_line, TimerState, IDLE_ICON,
+        MAIN_WINDOW_LABEL, RECORDING_ICON, TIMER_STATE_COMMAND, TRAY_START_EVENT, TRAY_STOP_EVENT,
+    };
+
+    /// A running entry started `ago` ms before `NOW`.
+    const NOW: i64 = 1_700_000_000_000;
+
+    fn running(title: &str, ago: i64) -> TimerState {
+        TimerState {
+            running: true,
+            title: title.to_string(),
+            started_at_ms: Some(NOW - ago),
+        }
+    }
 
     #[test]
     fn under_an_hour_shows_minutes_and_seconds() {
@@ -190,5 +331,110 @@ mod tests {
     #[test]
     fn negative_clock_skew_clamps_to_zero() {
         assert_eq!(format_elapsed(-5_000), "0:00");
+    }
+
+    #[test]
+    fn a_running_entry_reads_elapsed_then_title() {
+        assert_eq!(
+            tray_line(&running("Invoice run", 12_000), NOW).as_deref(),
+            Some("0:12 · Invoice run")
+        );
+    }
+
+    #[test]
+    fn an_idle_state_has_no_line_at_all() {
+        assert_eq!(tray_line(&TimerState::default(), NOW), None);
+        // A stopped entry keeps its title and start time in the struct; neither
+        // may leak into the tray.
+        let stopped = TimerState {
+            running: false,
+            ..running("Invoice run", 12_000)
+        };
+        assert_eq!(tray_line(&stopped, NOW), None);
+    }
+
+    #[test]
+    fn an_empty_or_blank_title_falls_back_to_untitled() {
+        assert_eq!(
+            tray_line(&running("", 5_000), NOW).as_deref(),
+            Some("0:05 · Untitled")
+        );
+        assert_eq!(
+            tray_line(&running("   \t ", 5_000), NOW).as_deref(),
+            Some("0:05 · Untitled")
+        );
+    }
+
+    #[test]
+    fn a_title_is_trimmed_but_otherwise_left_alone() {
+        assert_eq!(
+            tray_line(&running("  Invoice run  ", 5_000), NOW).as_deref(),
+            Some("0:05 · Invoice run")
+        );
+    }
+
+    #[test]
+    fn the_line_rolls_over_into_hours() {
+        assert_eq!(
+            tray_line(&running("Long one", 3_600_000 + 5_000), NOW).as_deref(),
+            Some("1:00:05 · Long one")
+        );
+    }
+
+    #[test]
+    fn a_clock_that_went_backwards_shows_zero_not_a_negative() {
+        // The entry claims to start ten seconds in the future.
+        assert_eq!(
+            tray_line(&running("Skewed", -10_000), NOW).as_deref(),
+            Some("0:00 · Skewed")
+        );
+    }
+
+    #[test]
+    fn running_without_a_start_time_admits_it_does_not_know() {
+        let state = TimerState {
+            running: true,
+            title: "Orphan".to_string(),
+            started_at_ms: None,
+        };
+        // Not "0:00" — that is indistinguishable from a timer that just began
+        // and would sit frozen there forever.
+        assert_eq!(tray_line(&state, NOW).as_deref(), Some("—:— · Orphan"));
+    }
+
+    #[test]
+    fn the_icon_follows_the_running_state() {
+        assert_eq!(tray_icon_bytes(true), RECORDING_ICON);
+        assert_eq!(tray_icon_bytes(false), IDLE_ICON);
+        assert_ne!(tray_icon_bytes(true), tray_icon_bytes(false));
+    }
+
+    #[test]
+    fn the_menu_offers_stop_while_running_and_start_while_idle() {
+        // (start_enabled, stop_enabled). An inversion here compiles, runs, and
+        // is invisible to everything except this assertion.
+        assert_eq!(start_stop_enabled(true), (false, true));
+        assert_eq!(start_stop_enabled(false), (true, false));
+    }
+
+    #[test]
+    fn the_wire_identifiers_are_pinned() {
+        // Matched by bare literals in src/lib/desktop-bridge.ts and by the
+        // window label in tauri.conf.json. Changing one of these strings means
+        // changing them there too, in the same commit.
+        assert_eq!(TIMER_STATE_COMMAND, "timer_state");
+        assert_eq!(TRAY_START_EVENT, "tray-start");
+        assert_eq!(TRAY_STOP_EVENT, "tray-stop");
+        assert_eq!(MAIN_WINDOW_LABEL, "main");
+    }
+
+    #[test]
+    fn the_command_const_matches_the_handler_function() {
+        // `#[tauri::command]` puts the function's IDENTIFIER on the wire, so the
+        // const alone would not notice a rename. Naming the item here makes a
+        // rename a compile error, and `stringify!` pins the spelling that the
+        // web side's `invoke(...)` has to match.
+        let _handler = super::timer_state;
+        assert_eq!(TIMER_STATE_COMMAND, stringify!(timer_state));
     }
 }
