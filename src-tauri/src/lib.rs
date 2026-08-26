@@ -256,7 +256,23 @@ fn show_main_window(app: &AppHandle) {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Close only hides the window and Quit lives ONLY in the tray menu, so a
+    // user whose tray icon is buried in Windows 11's overflow flyout sees no
+    // window and no icon and does the obvious thing: runs the exe again. Without
+    // this guard that is a whole second instance — second webview, second tray
+    // icon, second 1 Hz ticker — and neither one is obviously the impostor.
+    // Hand the second launch's intent to the first instance instead.
+    //
+    // Registered before everything else so the second process gives up before it
+    // builds a tray. Desktop only; the plugin does not exist on mobile.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        show_main_window(app);
+    }));
+
+    builder
         .manage(Shared {
             state: Mutex::new(TimerState::default()),
         })

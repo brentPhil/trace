@@ -15,3 +15,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Close hides to tray and Quit lives only in the tray menu, so a user who has
+# lost the tray icon in Windows 11's overflow flyout will relaunch the exe —
+# and without this get a second webview, a second tray icon and a second
+# ticker thread. Desktop only: mobile has no second launch to guard against,
+# and the plugin does not build there. It registers no IPC commands, so it
+# widens nothing in capabilities/default.json.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
