@@ -82,16 +82,31 @@ describe("onTrayCommand", () => {
     cleanup() // must not throw
   })
 
-  it("routes tray events to the handlers and unlistens on cleanup", async () => {
+  /**
+   * Per event, not per total.
+   *
+   * This test used to fire both listeners and then assert that `start` and
+   * `stop` had each been called once — which is equally true of wiring that
+   * swaps them, `tray-start` → `stop()` and `tray-stop` → `start()`. That is a
+   * one-character mistake that turns the tray's Start into a Stop, and every
+   * runtime failure on this bridge is silent (see `reportPushFailure` in
+   * use-desktop-bridge.ts), so there is nothing downstream to catch it. These
+   * assertions are the only thing holding the wire direction in place, so each
+   * event asserts BOTH that its own handler ran and that the other one did not.
+   */
+  it("routes each tray event to its own handler and unlistens on cleanup", async () => {
     enterShell()
     const start = vi.fn()
     const stop = vi.fn()
     const cleanup = await onTrayCommand({ start, stop })
 
     listeners.get("tray-start")?.({ payload: null })
-    listeners.get("tray-stop")?.({ payload: null })
     expect(start).toHaveBeenCalledTimes(1)
+    expect(stop).not.toHaveBeenCalled()
+
+    listeners.get("tray-stop")?.({ payload: null })
     expect(stop).toHaveBeenCalledTimes(1)
+    expect(start).toHaveBeenCalledTimes(1)
 
     cleanup()
     expect(unlisten).toHaveBeenCalledTimes(2)
