@@ -46,6 +46,23 @@ await sharp(svg)
   .png()
   .toFile("src-tauri/app-icon.png")
 
+// Tray icons: 32px. Idle is the mark alone; recording adds a red dot badge.
+// Same no-density render as above, for the same pixel-limit reason.
+const tray = await sharp(svg)
+  .resize(32, 32, { fit: "contain", background: transparent })
+  .png()
+  .toBuffer()
+
+await sharp(tray).png().toFile("src-tauri/icons/tray-idle.png")
+
+const dot = Buffer.from(
+  '<svg width="32" height="32" xmlns="http://www.w3.org/2000/svg"><circle cx="24" cy="24" r="7" fill="#e5484d" stroke="#14110e" stroke-width="2"/></svg>',
+)
+await sharp(tray)
+  .composite([{ input: dot }])
+  .png()
+  .toFile("src-tauri/icons/tray-recording.png")
+
 console.log(
-  "wrote public/logo192.png, logo512.png, logo512-maskable.png, src-tauri/app-icon.png",
+  "wrote public/logo192.png, logo512.png, logo512-maskable.png, src-tauri/app-icon.png, src-tauri/icons/tray-idle.png, src-tauri/icons/tray-recording.png",
 )
