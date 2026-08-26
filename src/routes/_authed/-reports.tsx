@@ -16,6 +16,7 @@ import { Link } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
+import { CopyEntriesButton } from "@/components/entries/copy-entries-button"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilterBand } from "@/components/history/filter-band"
@@ -30,11 +31,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryActions } from "@/hooks/use-entry-actions"
 import { breakdownArgs } from "@/lib/breakdown-args"
+import { entriesText } from "@/lib/export/entries-text"
 import { groupByDay } from "@/lib/group-entries"
 import {
   entryFilterOf,
   hasClientSideFilter,
   matches,
+  narrowingLabels,
   rangeOf,
 } from "@/lib/history-filters"
 import { reportsDefaultFilters } from "@/lib/date-range-picker"
@@ -653,14 +656,14 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
 
   return (
     <div className="flex flex-col">
-      <div className="w-full px-4 py-3">
+      <div className="flex w-full flex-wrap items-start justify-between gap-3 px-4 py-3">
         {/*
           Totals as a sentence, not a dashboard — and two different sentences,
           because the honest claim genuinely changes. Unfiltered, the server has
           counted the whole range exactly. Filtered, the number describes what
           is on screen, and says so.
         */}
-        <p aria-live="polite" className="text-sm text-muted-foreground">
+        <p aria-live="polite" className="min-w-0 flex-1 text-sm text-muted-foreground">
           {stillLoading ? (
             "Loading the rest of this period…"
           ) : summaryUnknown && !filtering ? (
@@ -799,6 +802,70 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
             </span>
           )}
         </p>
+
+        {/*
+          BESIDE THE SENTENCE THAT COUNTS THE ROWS, not up in the header with
+          Export.
+
+          Those two controls answer "send this range to someone else" and are
+          governed by the whole page's range; this one copies exactly the rows
+          drawn underneath it, which is a narrower and more volatile claim —
+          the search box, the project picker and the pagination all change it.
+          Putting it against the figure that reports the same set is what makes
+          "N records matching these filters" and the copy the same statement.
+
+          It is also why it is not in the header at all: the header is shared
+          with Summary, which has no rows to copy.
+
+          `shrink-0` so a long unpriced-rate sentence beside it wraps rather
+          than squeezing the button; `items-start` on the row keeps the button
+          on the first line while that sentence grows downward.
+        */}
+        <CopyEntriesButton
+          count={completed.length}
+          /*
+            REFUSED WHILE THE LOG IS ONLY PART OF THE RANGE, which is the same
+            rule the sentence beside it already follows and the same one
+            `ExportMenu` follows for a truncated breakdown.
+
+            `entriesText` writes a header naming this range and then a record
+            count and a total under it. Copied off a half-paginated log, that
+            header states a FLOOR as the answer for the whole quarter — and the
+            paste has no "Load earlier entries" button under it to reveal the
+            other three hundred rows. Two states reach that:
+
+              - `stillLoading`: the filtered bulk load. The log area is showing
+                `LogSkeleton` at this moment, so the button would be copying
+                rows the reader cannot see — the exact opposite of what it
+                promises.
+              - unfiltered with `CanLoadMore`: the ordinary first page of 100,
+                with the manual load-more control below.
+          */
+          disabledReason={
+            stillLoading
+              ? "Still loading this period. Copy once every record is on screen."
+              : !filtering && status === "CanLoadMore"
+                ? "Only the entries loaded so far are on screen. Load earlier entries first, so the copy covers the whole range."
+                : null
+          }
+          build={() =>
+            entriesText(groups, {
+              timeZone: settings.timezone,
+              use12Hour: settings.timeFormat === "12",
+              display: settings.durationDisplay,
+              projectName: (id) =>
+                id === undefined ? "" : (projectsById.get(id)?.name ?? ""),
+              range: { from: filters.from, to: filters.to },
+              // Named in the copied text, because a paste has no filter bar
+              // above it to explain why a week looks light.
+              narrowing: narrowingLabels(
+                filters,
+                (id) => projectsById.get(id)?.name ?? null
+              ),
+            })
+          }
+          className="shrink-0"
+        />
       </div>
 
       {/*

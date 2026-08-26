@@ -60,7 +60,7 @@ const PROPS = {
 
 // `ExportMenu` reads `Toast.useToastManager()`, which throws with no
 // ancestor `Toast.Provider` — the same wrapper `RootComponent` supplies app
-// wide (see routes/__root.tsx) and `note-sheet.test.tsx` copies for the same
+// wide (see routes/__root.tsx) and `copy-entries-button.test.tsx` copies for the same
 // reason.
 function renderMenu(props: ComponentProps<typeof ExportMenu>) {
   return render(

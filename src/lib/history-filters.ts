@@ -1,5 +1,10 @@
 import { addDays, dayOf, dayWindow, weekWindow } from "@shared/day"
-import { isFilterActive, matchesFilter } from "@shared/entryFilter"
+import {
+  NO_PROJECT_FILTER,
+  isFilterActive,
+  matchesFilter,
+} from "@shared/entryFilter"
+import { NO_PROJECT_LABEL } from "@shared/labels"
 import type { DayString } from "@shared/day"
 import type { EntryFilter, Preset } from "@shared/entryFilter"
 import type { Doc } from "../../convex/_generated/dataModel"
@@ -67,7 +72,10 @@ export type QuickFilters = {
   text: string
 }
 
-export function defaultFilters(today: DayString, weekStartDay: number): Filters {
+export function defaultFilters(
+  today: DayString,
+  weekStartDay: number
+): Filters {
   const week = weekWindow(today, "UTC", weekStartDay)
   return {
     period: "week",
@@ -199,6 +207,52 @@ export function hasClientSideFilter(filters: FilterInput): boolean {
   return isFilterActive(entryFilterOf(filters))
 }
 
+/**
+ * The active filters, in words — "project Acme", "billable only", "search …".
+ *
+ * FOR TEXT THAT LEAVES THE SCREEN. The filter bar is self-describing while you
+ * are looking at it, so nothing on /reports needs this; the clipboard writer
+ * does, because a week's rows pasted into a standup note look like the whole
+ * week, and the three hours a project filter removed are invisible in the
+ * paste. Naming the narrowing is what stops the copy from being a quiet
+ * overclaim.
+ *
+ * The RANGE is deliberately absent — it is not a narrowing of the log so much
+ * as the log's subject, and `entriesText` prints it as the heading rather than
+ * as one item in a list.
+ *
+ * `projectName` answers `null` for an id it does not recognise, which is a
+ * real case: a project archived and then deleted in another tab leaves its id
+ * in `filters`. Named as unknown rather than printed as an opaque id, for the
+ * same reason /invoices/new does it — the reader can then explain the short
+ * list instead of wondering about it.
+ */
+export function narrowingLabels(
+  filters: FilterInput,
+  projectName: (id: string) => string | null
+): Array<string> {
+  const filter = entryFilterOf(filters)
+  const labels: Array<string> = []
+
+  if (filter.projectId !== null) {
+    labels.push(
+      // NO `project ` PREFIX on the sentinel. It names a bucket rather than a
+      // client, and its label is already a whole phrase — prefixing it read
+      // "project no project" in a document written to be pasted into a message.
+      filter.projectId === NO_PROJECT_FILTER
+        ? NO_PROJECT_LABEL.toLowerCase()
+        : `project ${projectName(filter.projectId) ?? "unknown"}`
+    )
+  }
+  if (filter.billableOnly) labels.push("billable only")
+  if (filter.text.trim() !== "") labels.push(`search “${filter.text.trim()}”`)
+  for (const preset of filter.presets) {
+    labels.push(PRESET_LABELS[preset].toLowerCase())
+  }
+
+  return labels
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -212,7 +266,8 @@ export function hasClientSideFilter(filters: FilterInput): boolean {
  */
 export function daysBetween(from: DayString, to: DayString): number {
   return Math.round(
-    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+      86_400_000
   )
 }
 

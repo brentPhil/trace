@@ -3,6 +3,7 @@ import {
   defaultFilters,
   hasClientSideFilter,
   matches,
+  narrowingLabels,
   periodFilters,
   stepPeriod,
 } from "./history-filters"
@@ -145,5 +146,49 @@ describe("client-side filters", () => {
     expect(hasClientSideFilter({ ...base, text: "  " })).toBe(false)
     expect(hasClientSideFilter({ ...base, text: "x" })).toBe(true)
     expect(hasClientSideFilter({ ...base, billableOnly: true })).toBe(true)
+  })
+})
+
+/*
+ * THE FILTERS, IN WORDS, for text that leaves the screen.
+ *
+ * The filter bar is self-describing while you are looking at it. A week's rows
+ * pasted into a standup note are not — so the copy names what narrowed them,
+ * and the words it uses have to read as English in someone else's inbox.
+ */
+describe("naming the narrowing", () => {
+  const named = (id: string) => (id === "p1" ? "Acme" : null)
+
+  it("names a project, a billable filter and a search", () => {
+    expect(
+      narrowingLabels(
+        { ...base, projectId: "p1", billableOnly: true, text: " dropdown " },
+        named
+      )
+    ).toEqual(["project Acme", "billable only", "search “dropdown”"])
+  })
+
+  /*
+   * NO `project ` PREFIX on the sentinel. It names a bucket rather than a
+   * client and its label is already a whole phrase — prefixed, it read
+   * "project no project" in a document written to be pasted into a message.
+   */
+  it("names the no-project bucket without prefixing it", () => {
+    expect(narrowingLabels({ ...base, projectId: "" }, named)).toEqual([
+      "no project",
+    ])
+  })
+
+  /* A project archived and then deleted in another tab leaves its id behind.
+   * Named as unknown rather than printed as an opaque id, so the short list is
+   * explicable rather than mysterious. */
+  it("says so when the project id resolves to nothing", () => {
+    expect(narrowingLabels({ ...base, projectId: "gone" }, named)).toEqual([
+      "project unknown",
+    ])
+  })
+
+  it("is empty when only the date range applies", () => {
+    expect(narrowingLabels(base, named)).toEqual([])
   })
 })

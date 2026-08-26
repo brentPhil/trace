@@ -15,6 +15,7 @@ import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
 import { usePaginatedQuery } from "convex/react"
 import { WrapText } from "lucide-react"
 import { CalendarPanel, NO_MEETINGS } from "@/components/calendar/calendar-panel"
+import { CopyEntriesButton } from "@/components/entries/copy-entries-button"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
 import { FilteredLogStatus } from "@/components/entries/filtered-log-status"
@@ -31,6 +32,7 @@ import { useEntryActions } from "@/hooks/use-entry-actions"
 import { useLatest } from "@/hooks/use-latest"
 import { boundsOf, dayTotals, rangeOf, totalOverDays } from "@/lib/calendar-events"
 import { errorMessage } from "@/lib/error-message"
+import { entriesText } from "@/lib/export/entries-text"
 import { groupByDay } from "@/lib/group-entries"
 import { periodTotals } from "@/lib/period-totals"
 import {
@@ -582,6 +584,47 @@ export function Timer() {
             </div>
 
             {/*
+              COPY, beside the toggle that decides how much of a note is
+              legible — and in List only, for the same reason that toggle is.
+              The grid draws blocks, and what this puts on the clipboard is a
+              transcript of ROWS: day headings, one line per record, the note
+              underneath it. A control offering to copy a list while a calendar
+              is on screen would be copying something the reader cannot see.
+
+              It copies whatever the range above has left in the log, notes and
+              all, which is what makes it useful for a standup — and it copies
+              the FULL note regardless of the toggle beside it, because
+              clipping is a scanning affordance for a screen and there is no
+              scanning to do in a paste.
+            */}
+            {view === "list" ? (
+              <CopyEntriesButton
+                count={rowCount}
+                build={() =>
+                  entriesText(groups, {
+                    timeZone: settings.timezone,
+                    use12Hour: settings.timeFormat === "12",
+                    display: settings.durationDisplay,
+                    projectName: (id) =>
+                      id === undefined ? "" : (projectsById.get(id)?.name ?? ""),
+                    // `range`, not `shownRange`: this is the LIST's bounds, and
+                    // `shownRange` substitutes the grid's own span while the
+                    // calendar is showing. Null here is "All dates", which is a
+                    // real state on this page and genuinely has no bounds to
+                    // name — `entriesText` leaves the heading's range off
+                    // rather than inventing one.
+                    range,
+                    // Nothing on this page narrows the log beyond its range:
+                    // the text/project/billable bar was removed from /timer,
+                    // and the notes toggle changes legibility, not membership.
+                    narrowing: [],
+                  })
+                }
+                className="shrink-0"
+              />
+            ) : null}
+
+            {/*
               FULL NOTES — the log's second job, given a switch.
 
               IN LIST ONLY, and it is not a control that could sensibly be
@@ -781,15 +824,20 @@ export function Timer() {
           /*
             ONE `EntryLog` ELEMENT FOR BOTH LIST MODES, deliberately.
 
-            `EntryLog` owns `NoteSheet`, and `NoteSheet` owns `draftsRef` — the
-            in-memory copy of a note whose save is still in flight or has
-            failed. Two sibling branches each rendering their own `EntryLog`
-            would put it at a different position in the tree per mode, so React
-            would unmount one and mount the other, and every held draft would go
-            with it. That is the regression `-timer.test.tsx` exists for, in a
-            new spelling: it used to be a filter keystroke, it would now be a
-            preset click. The conditional pieces are the alert above and the
-            load-more below; the log itself stays put.
+            `EntryLog` and the tree beneath it hold every piece of state that
+            describes what the reader is DOING rather than what the data is:
+            the selection, which sittings are disclosed, and — since the note
+            became an inline field — the half-typed note itself, which lives in
+            the `InlineEdit` inside the row. Two sibling branches each rendering
+            their own `EntryLog` would put all of it at a different position in
+            the tree per mode, so React would unmount one and mount the other,
+            and the lot would go with it mid-sentence.
+
+            That is the regression `-timer.test.tsx` exists for, respelt twice
+            now: it began as a filter keystroke, became a preset click, and the
+            thing at risk was a held note draft before the dialog that held them
+            was replaced by a field in the row. The conditional pieces are the
+            alert above and the load-more below; the log itself stays put.
           */
           <>
             {rangeQuery.isError && range !== null ? (

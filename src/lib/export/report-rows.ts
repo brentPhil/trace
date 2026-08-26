@@ -24,10 +24,15 @@ import type { DayString } from "@shared/day"
  * time is real. An empty description cell reads as a rendering fault; a stated
  * placeholder reads as work nobody named, which is the truth.
  *
- * Not exported: nothing outside this file needs to name the placeholder
- * itself, only the rows it produces.
+ * EXPORTED as of the clipboard writer. It was not, on the stated ground that
+ * nothing outside this file needed to name the placeholder itself — and that
+ * held while every export came through `reportRows`. `entries-text.ts` does
+ * not (it writes individual entries, not the aggregated document), so it has
+ * to name an untitled entry itself, and two literals is how a CSV comes to say
+ * "(no description)" while the text beside it says something else about the
+ * very same entry.
  */
-const NO_DESCRIPTION = "(no description)"
+export const NO_DESCRIPTION = "(no description)"
 
 export type ReportProjectRow = {
   name: string
