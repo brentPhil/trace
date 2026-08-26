@@ -38,4 +38,14 @@ await sharp({
   .png()
   .toFile("public/logo512-maskable.png")
 
-console.log("wrote public/logo192.png, logo512.png, logo512-maskable.png")
+// Desktop app icon source for `tauri icon` (Task 4). Same native-size
+// render + downsample as above — no explicit density, for the same
+// pixel-limit reason.
+await sharp(svg)
+  .resize(1024, 1024, { fit: "contain", background: transparent })
+  .png()
+  .toFile("src-tauri/app-icon.png")
+
+console.log(
+  "wrote public/logo192.png, logo512.png, logo512-maskable.png, src-tauri/app-icon.png",
+)

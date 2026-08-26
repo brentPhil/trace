@@ -1,0 +1,9 @@
+{
+  "identifier": "remote-chroneli",
+  "description": "The production site is the app; it may use IPC.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["https://chroneli.com"]
+  },
+  "permissions": ["core:default"]
+}
