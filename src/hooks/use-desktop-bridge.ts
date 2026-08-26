@@ -4,6 +4,43 @@ import { getSkewMs } from "@/lib/clock"
 import { isDesktopShell, onTrayCommand, pushTimerState } from "@/lib/desktop-bridge"
 import type { Doc } from "../../convex/_generated/dataModel"
 
+/** So the log below happens once per page load, not once per failed push. */
+let pushFailureLogged = false
+
+/**
+ * A failed push stays non-fatal for the user and stops being invisible to us.
+ *
+ * The original here was a bare `.catch(() => {})` with a comment arguing that
+ * there is nothing useful to tell the user and the next state change retries.
+ * That reasoning is exactly right for the case it imagined — the shell is
+ * mid-restart, one push is lost, the next one lands — and exactly wrong for a
+ * PERMANENT rejection, which retries forever and never succeeds. And that is
+ * what actually happened: a Tauri ACL misconfiguration rejected every
+ * `invoke("timer_state", …)` for the entire life of this branch. The tray never
+ * once heard about a timer. There was no console output, no toast, no failed
+ * test — the empty catch ate the only evidence — so the feature shipped
+ * completely inert through six code reviews.
+ *
+ * A toast is still wrong: the user cannot act on it, and a stale tray does not
+ * stop them tracking time. A console error in development is the smallest thing
+ * that would have caught this, so that is what this is — and ONCE, not once per
+ * push, because the failing case is a push that fails every time and a tray
+ * timer pushes on every start and stop for as long as the app is open. One line
+ * says everything a second thousand would.
+ *
+ * Deliberately never reset. Whether the cause is permanent or a shell that came
+ * back a moment later, the developer only needs telling that pushes can fail
+ * here at all; from there the console has the rejection to read.
+ */
+function reportPushFailure(thrown: unknown): void {
+  if (!import.meta.env.DEV || pushFailureLogged) return
+  pushFailureLogged = true
+  console.error(
+    "Desktop bridge: pushing timer state to the shell failed, so the tray is now stale. Check the Tauri capability in src-tauri/capabilities/ and the command name in src/lib/desktop-bridge.ts.",
+    thrown
+  )
+}
+
 /**
  * Keeps the desktop shell's tray in step with the running entry, and lets the
  * tray's Start/Stop go through the exact mutations the timer bar uses.
@@ -26,8 +63,6 @@ export function useDesktopBridge(
 
   useEffect(() => {
     if (!isDesktopShell()) return
-    // A failed push means the shell side is gone or mid-restart; there is
-    // nothing useful to tell the user, and the next state change retries.
     void pushTimerState({
       running: running !== null,
       title: running?.title ?? "",
@@ -37,7 +72,7 @@ export function useDesktopBridge(
       // time a running entry reaches us (the start mutation's own return value
       // feeds it), and any later correction arrives with the next push.
       startedAtMs: running === null ? null : running.startedAt - getSkewMs(),
-    }).catch(() => {})
+    }).catch(reportPushFailure)
   }, [running])
 
   /**
@@ -65,7 +100,7 @@ export function useDesktopBridge(
         running: false,
         title: "",
         startedAtMs: null,
-      }).catch(() => {})
+      }).catch(reportPushFailure)
     }
   }, [])
 
