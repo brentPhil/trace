@@ -27,6 +27,7 @@ import {
   useTabTitleClock,
 } from "@/hooks/use-timer-effects"
 import { useMusicTracking } from "@/hooks/use-music-tracking"
+import { useDesktopBridge } from "@/hooks/use-desktop-bridge"
 import { useLatest } from "@/hooks/use-latest"
 import { useSwitchUndo } from "@/lib/use-switch-undo"
 import { MusicProvider, useMusic } from "@/components/music/music-provider"
@@ -203,6 +204,19 @@ function AuthedShell() {
       timeout: 8_000,
     })
   }
+
+  // Mounted here rather than up with `useTabTitleClock` and the other
+  // `running` watchers: it needs `entryMutations` and `report`, both declared
+  // below that block, and React only requires hooks to run unconditionally in
+  // the same order every render — it does not care what plain declarations
+  // sit between them. Same survives-navigation reasoning as `useSwitchUndo`
+  // above: this is the one mount that outlives every page, so the tray never
+  // goes stale because the user changed pages.
+  useDesktopBridge(
+    running,
+    { start: entryMutations.start, stop: entryMutations.stop },
+    report
+  )
 
   const announce = useAnnounce()
 
