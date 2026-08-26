@@ -54,7 +54,7 @@ type Invoice = {
  *   - The screen is a warm dark ground and the paper is white. Nothing about
  *     the document changes; `PAPER` (pdf/paper.ts) exists because a `bg-ground`
  *     PDF is one nobody can print.
- *   - The paper's column headers are set in caps because at 8pt on paper caps
+ *   - The paper's column headers are set in caps because at 10pt on paper caps
  *     are what separates a header from a figure. On screen they are sentence
  *     case — The Sentence Case Rule, and the header row has a rule under it and
  *     a muted tone to do that work. See `InvoiceLines`.
@@ -103,11 +103,13 @@ export function InvoiceRecord({
      * document does not float (The Tonal Depth Rule), and this is the whole
      * reason it can look like a sheet without looking like paper simulation.
      *
-     * Full width, `p-6` inside its own border — the page's `px-4` gutter is on
+     * Full width, `p-8` inside its own border — the page's `px-4` gutter is on
      * the element above, per The One Measure Rule, and this panel adds its own
-     * inset because a document's text should not sit on its own edge.
+     * inset because a document's text should not sit on its own edge. The inset
+     * grew with the type: 24px of margin around 12pt-equivalent text reads as a
+     * document, around 16px-equivalent text it reads as a cramped panel.
      */
-    <article className="flex flex-col gap-8 rounded-lg border border-edge-soft bg-surface p-6">
+    <article className="flex flex-col gap-10 rounded-lg border border-edge-soft bg-surface p-8">
       <div className="flex flex-col gap-4">
         {/*
           THE MASTHEAD, and it is inside the document rather than above it.
@@ -121,39 +123,83 @@ export function InvoiceRecord({
           with the logo: both are the same correction. The row used to be
           `min-h-12` — the logo's own height — so on any invoice with a logo the
           word Invoice sat alone above 48px of nothing and the meta rows began
-          somewhere below it. 16px puts the title's baseline the same distance
-          above the first meta row as `TOP` sits above `TOP - 34` on the paper,
-          at this size: one title, then the figures it introduces.
+          somewhere below it. 16px puts the title's baseline about the same
+          distance above the first meta row as `TOP` sits above `TOP - 48` on the
+          paper, at this size: one title, then the figures it introduces.
+
+          `text-4xl`, up from `text-2xl`, tracking the paper's own masthead from
+          20pt to 30pt. This is the first thing a reader sees and the only word
+          on the document that has no competition for space — `INVOICE_TYPE` in
+          pdf/paper.ts argues the whole raise, and the argument is the same on
+          either medium.
         */}
-        <h1 className="text-2xl font-medium tracking-[-0.01em]">Invoice</h1>
+        <h1 className="text-4xl font-medium tracking-[-0.015em]">Invoice</h1>
 
         {/*
           THE LOGO IS LEVEL WITH THE META ROWS, which is where the paper draws
-          it: `LOGO_BOX` occupies `TOP - 48 .. TOP` while the rows start at
-          `TOP - 34`, so on both renderings the mark sits opposite the invoice
-          number and the invoice date rather than above them.
+          it: `LOGO_BOX` occupies `TOP - 64 .. TOP` while the rows start at
+          `TOP - 48`, so on both renderings the mark sits opposite the invoice
+          number rather than above it.
+
+          `max-h-16 max-w-56`, matching the paper's raise from 160x48 to 200x64.
+          A mark small enough to be tasteful is a mark nobody can identify, and
+          this is the one element on the document that is not the product's
+          design but the freelancer's own.
 
           `items-start` so a short mark hangs from the top of the group instead
           of centring itself against a five-row grid, and the `<dl>` keeps
           `min-w-0` — it is the flex child that must be allowed to give, so a
           wide logo shortens the value column rather than pushing it out of the
           panel.
+
+          THE ROW BREAKS BELOW `sm`, and it has to. Side by side on a 375px
+          phone the mark and the label column together claim more than the panel
+          has, and `min-w-0` resolves that by giving the VALUE column what is
+          left — which measured 0px: the invoice number, both dates, the PO and
+          the payment terms all present and all zero pixels wide, on the page
+          whose entire claim is that it shows what the client received. Stacked,
+          each gets the full measure.
+
+          `flex-col-reverse`, so the mark sits ABOVE the details rather than
+          under them: that is what a letterhead does, and it is the same reading
+          order the paper gives (mark at the top of the page, details beneath
+          and beside it). It costs nothing in the accessibility tree — the image
+          is `alt=""`, decorative, and is skipped either way, so DOM order and
+          reading order still agree for anyone not looking at it.
         */}
-        <div className="flex items-start justify-between gap-6">
+        <div className="flex flex-col-reverse items-start gap-6 sm:flex-row sm:justify-between sm:gap-8">
           {/* A `<dl>`: this is a document's name/value list, and it is what
               makes "Due date" read as the name of the value beside it. */}
-          <dl className="flex min-w-0 flex-col gap-2">
+          {/* `w-full` while stacked: `items-start` on the row above sizes
+              every child to its own content, which left the whole meta list as
+              wide as its longest VALUE (99px) with the rest of the panel empty
+              beside it.
+
+              `sm:flex-1` for the same reason at the other end: content-sized,
+              the value column measured 93px on a 1280px screen, so a
+              `Payment terms` of "Net 30 from receipt of invoice" wrapped to
+              three lines with 700px of empty panel beside it. Capped at
+              `max-w-xl` — the block is a document header, not a table, and a
+              value column running the full 1200px would leave the label and
+              its value at opposite ends of the room. */}
+          <dl className="flex w-full min-w-0 flex-col gap-2.5 sm:w-auto sm:max-w-xl sm:flex-1">
             {metaRows.map((row) => (
               <div
                 key={row.label}
-                className="grid grid-cols-[9rem_1fr] items-baseline gap-3"
+                /* STACKED BELOW `sm`, two columns from there. A 168px label
+                   column inside a 279px panel leaves 111px for a value, and a
+                   `Payment terms` of "Net 30 from receipt" then wraps to four
+                   words a line. The label reads as a heading over its value
+                   when they stack, which is the same relationship the grid
+                   states horizontally. */
+                className="grid grid-cols-1 items-baseline gap-x-3 gap-y-0.5 sm:grid-cols-[10.5rem_1fr]"
               >
-                <dt className="text-[0.8125rem] font-medium text-muted-foreground">
+                <dt className="text-sm font-medium text-muted-foreground">
                   {row.label}
                 </dt>
                 {/* Tabular on every one of them: a number, a date and an
                     invoice id are all digits somebody reads down a column. */}
-                <dd className="min-w-0 font-mono text-sm tracking-[-0.02em] tabular-nums">
+                <dd className="min-w-0 font-mono text-base tracking-[-0.02em] tabular-nums">
                   {row.value}
                 </dd>
               </div>
@@ -164,7 +210,7 @@ export function InvoiceRecord({
             <img
               src={invoice.logoUrl}
               alt=""
-              className="max-h-12 max-w-40 shrink-0 object-contain"
+              className="max-h-16 max-w-56 shrink-0 object-contain"
             />
           )}
         </div>
@@ -177,7 +223,7 @@ export function InvoiceRecord({
         address move the second block and the two documents would then disagree
         about where the reader's eye goes for "where do I send the money".
       */}
-      <div className="grid gap-6 sm:grid-cols-2">
+      <div className="grid gap-8 sm:grid-cols-2">
         <PartyBlockRecord label="Billed to" value={invoice.billedTo} />
         <PartyBlockRecord label="Pay to" value={invoice.payTo} />
       </div>
@@ -227,10 +273,8 @@ export function InvoiceRecord({
 function PartyBlockRecord({ label, value }: { label: string; value: string }) {
   return (
     <dl className="flex min-w-0 flex-col gap-1.5">
-      <dt className="text-[0.8125rem] font-medium text-muted-foreground">
-        {label}
-      </dt>
-      <dd className="text-sm leading-relaxed whitespace-pre-line">{value}</dd>
+      <dt className="text-sm font-medium text-muted-foreground">{label}</dt>
+      <dd className="text-base leading-relaxed whitespace-pre-line">{value}</dd>
     </dl>
   )
 }

@@ -52,15 +52,21 @@ export function InvoiceLines({
       that keeps the dashed `Empty` frame out of the no-lines cell below.
 
       `overflow-x-auto` stays: four columns of figures on a phone scroll rather
-      than wrap into unreadable stacks.
+      than wrap into unreadable stacks — and the `min-w` on the table is what
+      makes that promise true. The three numeric columns are fixed widths
+      summing to 416px; inside a 279px panel `table-fixed` handed the
+      DESCRIPTION column whatever was left, which was nothing, so on a phone
+      every line was a row of figures with no name against it. The minimum keeps
+      128px of description in view and lets the row scroll to reach the rest,
+      which is what the scrolling was for.
     */
     <div className="overflow-x-auto">
-      <table className="w-full table-fixed border-collapse text-sm">
+      <table className="w-full min-w-[34rem] table-fixed border-collapse text-base">
         <caption className="sr-only">Invoice lines, in the order they print</caption>
         {/*
           SENTENCE CASE, where the paper sets these in caps.
           A deliberate difference and one of only three (see `InvoiceRecord`):
-          at 8pt on paper, caps are what separates a header from a figure, while
+          at 10pt on paper, caps are what separates a header from a figure, while
           on screen there is a rule under the row and a muted tone already doing
           that work — and a tracked-out uppercase eyebrow is the scaffold
           DESIGN.md rejects by name. The ORDER is identical, which is the part
@@ -68,17 +74,17 @@ export function InvoiceLines({
           same as `COL` in pdf/invoice-doc.ts.
         */}
         <thead>
-          <tr className="border-b border-edge-soft text-[0.8125rem] font-medium text-muted-foreground">
-            <th scope="col" className="pr-3 py-2 text-left">
+          <tr className="border-b border-edge-soft text-sm font-medium text-muted-foreground">
+            <th scope="col" className="pr-4 py-2.5 text-left">
               Description
             </th>
-            <th scope="col" className="w-24 px-3 py-2 text-right">
+            <th scope="col" className="w-28 px-4 py-2.5 text-right">
               Quantity
             </th>
-            <th scope="col" className="w-32 px-3 py-2 text-right">
+            <th scope="col" className="w-36 px-4 py-2.5 text-right">
               Rate
             </th>
-            <th scope="col" className="w-32 pl-3 py-2 text-right">
+            <th scope="col" className="w-40 pl-4 py-2.5 text-right">
               Amount
             </th>
           </tr>
@@ -101,7 +107,7 @@ export function InvoiceLines({
           */}
           {lines.length === 0 ? (
             <tr>
-              <td colSpan={4} className="pr-3 py-4 text-muted-foreground">
+              <td colSpan={4} className="pr-4 py-5 text-muted-foreground">
                 No lines on this invoice. Lines come from the range it was raised
                 from on Reports — billable time on a project with a rate. Time
                 nobody has priced is left off rather than billed at nothing.
@@ -116,25 +122,25 @@ export function InvoiceLines({
               key={`${index}-${line.description}`}
               className="border-b border-edge-soft last:border-b-0"
             >
-              <th scope="row" className="truncate pr-3 py-2 text-left font-normal">
+              <th scope="row" className="truncate pr-4 py-3 text-left font-normal">
                 {line.description}
               </th>
               {/* Decimal hours, 2 dp, floored — a QUANTITY, not money, so Ink.
                   A billable duration is time that will become money and renders
                   like every other duration (The Two Temperatures Rule). */}
-              <td className="px-3 py-2 text-right font-mono tabular-nums tracking-[-0.02em]">
+              <td className="px-4 py-3 text-right font-mono tabular-nums tracking-[-0.02em]">
                 {quantityText(line.quantityCentis)}
               </td>
               {/* Muted, the same treatment /projects gives a project's rate:
                   it is the multiplier beside the figure, not the figure. */}
-              <td className="px-3 py-2 text-right font-mono tabular-nums tracking-[-0.02em] text-muted-foreground">
+              <td className="px-4 py-3 text-right font-mono tabular-nums tracking-[-0.02em] text-muted-foreground">
                 {line.kind === "time"
                   ? formatRate(line.unitCents, currency)
                   : formatMoney(line.unitCents, currency)}
               </td>
               {/* The one brass column: a currency amount, in this invoice's own
                   snapshotted currency. */}
-              <td className="pl-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
+              <td className="pl-4 py-3 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
                 {formatMoney(line.amountCents, currency)}
               </td>
             </tr>
@@ -162,19 +168,21 @@ export function InvoiceLines({
                 THE TOTAL IS A STEP LARGER, not merely bolder — the eye has to
                 land on it without reading the block.
 
-                The paper draws it at `TYPE.strong` (12) over a body of 10, and
-                the screen used to answer that with `text-sm` for both: same
-                size, heavier weight, on the one figure the whole document
-                exists to state. `text-base` over `text-sm` is the same ratio,
-                so the two renderings put their emphasis in the same place.
+                The paper draws it at `INVOICE_TYPE.strong` (15) over a body of
+                12, and the screen answers with `text-xl` over `text-base`. Both
+                are the same 1.25 ratio, so the two renderings put their emphasis
+                in the same place and by the same amount. It was `text-base` over
+                `text-sm` before the document was set larger throughout; keeping
+                that pair would have left the TOTAL the same size as an ordinary
+                line's amount.
               */}
               <th
                 scope="row"
                 colSpan={3}
                 className={
                   row.strong
-                    ? "pr-3 pt-3 pb-2 text-right text-base font-semibold"
-                    : "pr-3 py-2 text-right text-[0.8125rem] font-medium text-muted-foreground"
+                    ? "pr-4 pt-4 pb-2.5 text-right text-xl font-semibold"
+                    : "pr-4 py-2.5 text-right text-sm font-medium text-muted-foreground"
                 }
               >
                 {row.label}
@@ -182,8 +190,8 @@ export function InvoiceLines({
               <td
                 className={
                   row.strong
-                    ? "pl-3 pt-3 pb-2 text-right text-base font-semibold font-mono tabular-nums tracking-[-0.02em] text-brass"
-                    : "pl-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass"
+                    ? "pl-4 pt-4 pb-2.5 text-right text-xl font-semibold font-mono tabular-nums tracking-[-0.02em] text-brass"
+                    : "pl-4 py-2.5 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass"
                 }
               >
                 {formatMoney(row.cents, currency)}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { COL, LOGO_BOX, invoiceDocPages } from "./invoice-doc"
-import { PAGE, TYPE } from "./paper"
+import { INVOICE_TYPE as TYPE, PAGE } from "./paper"
 import { textWidth } from "./ops"
 import type { InvoiceDoc, InvoiceDocLine } from "./invoice-doc"
 import type { PdfOp } from "./ops"

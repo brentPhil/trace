@@ -6,7 +6,7 @@ import {
   quantityText,
 } from "@/lib/invoice-document"
 import { rect, text, textWidth, wrapToWidth } from "./ops"
-import { PAGE, PAPER, TYPE } from "./paper"
+import { INVOICE_TYPE as TYPE, PAGE, PAPER } from "./paper"
 import type { PdfOp, PdfPage } from "./ops"
 import type { InvoiceDoc, InvoiceDocLine } from "@/lib/invoice-document"
 
@@ -43,15 +43,21 @@ const BOTTOM = PAGE.margin
  * pushed down by a band the height of this box, which put an empty stripe
  * between the word Invoice and the invoice number on every invoice carrying a
  * logo — the eye crossing 58pt of nothing to reach the two figures a client
- * checks first. The box occupies `TOP - 48 .. TOP`, the band the first two
- * meta rows sit in, and the two cannot collide horizontally: the value column
- * starts at `LEFT + META_LABEL_WIDTH` and the only rows level with the logo are
- * the invoice number and the invoice date, both short and both bounded
- * (`082426-0005`, `08/24/2026`) with 229pt of clear paper before this box's
- * left edge. The rows that CAN run long — Purchase order, Payment terms — are
- * the fourth and the fifth, well below it.
+ * checks first. The box occupies `TOP - 64 .. TOP`, the band the first meta
+ * row sits in, and the two cannot collide horizontally: the value column starts
+ * at `LEFT + META_LABEL_WIDTH` (180pt) and the only row level with the logo is
+ * the invoice number, short and bounded (`082426-0005`), with 167pt of clear
+ * paper before this box's left edge at 347pt. The rows that CAN run long —
+ * Purchase order, Payment terms — are the fourth and the fifth, well below it.
+ *
+ * 200x64, up from 160x48. A mark reproduced at 160pt on A4 is about 5.6cm and
+ * reads as a footnote beside a 30pt masthead; this is the size a letterhead
+ * actually uses. It still costs the head no height, because the meta grid grew
+ * with the type at the same time — five rows at 20pt now run past it either
+ * way. `render.ts` fits the image INSIDE the box preserving its aspect ratio,
+ * so a wide wordmark and a square badge both land without distortion.
  */
-export const LOGO_BOX = { width: 160, height: 48 } as const
+export const LOGO_BOX = { width: 200, height: 64 } as const
 
 /* Re-exported from the shape they now live in, so `to-pdf.ts` and the export
  * button keep importing the document's type from the module that prints it. */
@@ -70,14 +76,16 @@ export type { InvoiceDoc, InvoiceDocLine } from "@/lib/invoice-document"
  * project name is whatever the user typed. Each numeric column's gap is sized
  * to clear ITS OWN worst-case string at the body size below, not its neighbour's
  * — every one is right-aligned, so a column's glyphs grow leftward into the gap
- * to its left. RATE gets 90 (`$99,999.99/hr`, the widest thing it draws, is
- * ~67pt) and AMOUNT gets 110 (`$999,999.99` is ~72pt, and the TOTAL row draws it
- * bold at `TYPE.strong`, which is wider still).
+ * to its left. Every gap here is measured at the INVOICE scale, which is a fifth
+ * larger than the report's: RATE gets 108 (`$99,999.99/hr`, the widest thing it
+ * draws, is ~80pt at 12pt) and AMOUNT gets 132 (`$999,999.99` is ~86pt at 12pt,
+ * and the TOTAL row draws it bold at `TYPE.strong` = 15, ~108pt — which is what
+ * the 132 is actually sized for).
  */
 export const COL = {
   description: LEFT,
-  quantity: RIGHT - 200,
-  rate: RIGHT - 110,
+  quantity: RIGHT - 240,
+  rate: RIGHT - 132,
   amount: RIGHT,
 } as const
 
@@ -86,14 +94,16 @@ export const COL = {
  * adjacent cells read as two columns rather than one run-on line. The same
  * constant and the same reason as `report-doc.ts`'s.
  */
-const GUTTER = 10
+const GUTTER = 12
 
 /** The gap between two wrapped lines inside one cell, and the gap after a
- *  row's last line before the next row starts. They sum to the 20pt slot a
- *  single-line row occupies — the same pair, at the same values, as the report
- *  document, so the two look like one product's output. */
-const LINE_HEIGHT = 12
-const ROW_PADDING = 8
+ *  row's last line before the next row starts. They sum to the 24pt slot a
+ *  single-line row occupies. Both follow `INVOICE_TYPE.body` up from the report's
+ *  12/8 over a 10pt body — leading that does not follow the size it is setting
+ *  is the fastest way to make larger type read WORSE than the small type it
+ *  replaced. 15 over 12 is the same 1.25 ratio the report keeps. */
+const LINE_HEIGHT = 15
+const ROW_PADDING = 9
 
 /** The vertical space a row of `lineCount` wrapped lines occupies, including
  *  the gap before the next row. ONE formula, shared by the packer and by every
@@ -104,13 +114,13 @@ function rowSlotHeight(lineCount: number): number {
 }
 
 /** A block label's baseline to the baseline of the first line beneath it. */
-const LABEL_GAP = 15
+const LABEL_GAP = 18
 
 /** The column-header baseline to the first body row's slot. */
-const COLUMN_HEADER_HEIGHT = 15
+const COLUMN_HEADER_HEIGHT = 19
 
 /** A continuation page's own heading slot, above its repeated column header. */
-const CONTINUED_HEADING_HEIGHT = 30
+const CONTINUED_HEADING_HEIGHT = 36
 
 // ---------------------------------------------------------------------------
 // Text blocks
@@ -174,8 +184,8 @@ function blockOps(
 
 /** The label column of the meta grid, wide enough for `Purchase order` at
  *  `TYPE.tick` with room to spare. */
-const META_LABEL_WIDTH = 110
-const META_ROW_HEIGHT = 16
+const META_LABEL_WIDTH = 132
+const META_ROW_HEIGHT = 20
 
 /** Half the content width, less a gutter, so the two party blocks sit side by
  *  side the way the editor renders them. */
@@ -209,7 +219,7 @@ function headOps(invoice: InvoiceDoc): { ops: Array<PdfOp>; tableTop: number } {
   /* Which rows exist, and what they say, is the DOCUMENT's decision and lives
    * in `invoice-document.ts` — the record page draws the same list. What is
    * decided here is only where they sit on the paper. */
-  let y = TOP - 34
+  let y = TOP - 48
   for (const { label, value } of invoiceMetaRows(invoice)) {
     ops.push(
       text({ x: LEFT, y, text: label, size: TYPE.tick, color: PAPER.inkMuted }),
@@ -540,10 +550,45 @@ export function invoiceDocPages(invoice: InvoiceDoc): Array<PdfPage> {
     ops.push(...columnHeaderOps(tableTop))
 
     let cursor = tableTop - COLUMN_HEADER_HEIGHT
-    for (const row of rows) {
+    rows.forEach((row, n) => {
       ops.push(...lineRowOps(row, cursor - LINE_HEIGHT, currency))
       cursor -= row.height
-    }
+      /*
+       * A HAIRLINE BETWEEN ROWS, so the eye can cross the page.
+       *
+       * A description sits at the left margin and its amount is right-aligned
+       * 499pt away, with two columns of unrelated figures in between — and a
+       * row can be one line or four. Unruled, reading "which amount belongs to
+       * this line" on anything but a three-row invoice means tracking across a
+       * span of blank paper, which is precisely the mistake nobody notices
+       * until a client queries the wrong figure. `PAPER.ruleFaint` exists for
+       * this and says so: fainter than `rule` because it must let the eye track
+       * ACROSS a row, not divide the table into boxes — at `rule`'s weight a
+       * table of twenty rows reads as the enterprise timesheet grid DESIGN.md
+       * rejects by name.
+       *
+       * It is also what the RECORD PAGE has always drawn (`border-b
+       * border-edge-soft` per row in `invoice-lines.tsx`). The paper simply did
+       * not, which made the two renderings of one document disagree about
+       * something a reader sees before they read a word.
+       *
+       * BETWEEN rows only, never after the last one on a page: on the final
+       * page the totals rule lands 6pt below it, and two rules that close
+       * together read as a drawing error rather than as two separate
+       * boundaries.
+       */
+      if (n < rows.length - 1) {
+        ops.push(
+          rect({
+            x: LEFT,
+            y: cursor + ROW_PADDING / 2,
+            width: RIGHT - LEFT,
+            height: 0.5,
+            color: PAPER.ruleFaint,
+          })
+        )
+      }
+    })
 
     /*
      * An invoice with no lines still prints its table and its totals.

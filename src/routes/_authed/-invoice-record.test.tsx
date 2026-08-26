@@ -165,7 +165,7 @@ describe("the invoice record — the page heading", () => {
     const heading = expectPageHeading("Invoice")
     // The masthead's own treatment, not the page-title vocabulary — this is the
     // first line of a document, and it is set the way the paper sets it.
-    expect(heading.className).toContain("text-2xl")
+    expect(heading.className).toContain("text-4xl")
   })
 })
 

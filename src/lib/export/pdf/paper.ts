@@ -65,6 +65,52 @@ export const TYPE = {
 } as const
 
 /**
+ * THE INVOICE READS LARGER THAN THE REPORT, and the two documents are on
+ * separate scales because they are asking the reader for different things.
+ *
+ * The report is an ANALYSIS the freelancer runs on their own work: charts, a
+ * breakdown that can run to hundreds of rows over several pages, read by
+ * someone who already knows what they are looking at. Density is a feature
+ * there — a scale that halves the rows per page makes the document worse.
+ *
+ * The invoice is a DEMAND FOR MONEY sent to somebody else. It is short (a
+ * handful of lines, usually one page), it is read once, by a stranger to the
+ * work, who reconciles four figures off it and files it. Nothing is bought by
+ * fitting more onto the page, and everything is lost if a client squints at
+ * the amount they are being asked to pay. `TYPE.body` at 10pt is a comfortable
+ * table size for the report and it is small for a document somebody prints,
+ * scans, or reads on a phone in a mail client.
+ *
+ * The steps hold `TYPE`'s own 1.15–1.25 ratio between adjacent tiers, with the
+ * same exemption for the title: the word "Invoice" is a masthead rather than
+ * the top of the working scale, so its jump is deliberately larger. At 30pt
+ * bold DM Sans it measures ~126pt of the 499pt content width, and the logo box
+ * begins 347pt in — the two cannot meet.
+ *
+ * A SEPARATE OBJECT rather than a raise to `TYPE`, because `report-doc.ts`
+ * reads every tier above and its geometry (chart boxes, axis ticks, a legend
+ * sized to its longest label) is tuned to those numbers. One scale for two
+ * documents would mean this change silently re-laid-out the report as well.
+ */
+export const INVOICE_TYPE = {
+  /** `Page N / M`. Still the smallest thing on the page, but no longer at the
+   *  floor — a page number on a document that may be printed and stapled is
+   *  worth being able to read. */
+  footer: 8,
+  /** Column headers, meta labels, and a block's own label (`Billed to`). */
+  tick: 10,
+  /** The document's reading size: every line's description, every figure, the
+   *  party blocks and the notes. */
+  body: 12,
+  /** The TOTAL row — the one figure the document exists to state. */
+  strong: 15,
+  /** A continuation page's `Invoice … (continued)` heading. */
+  heading: 17,
+  /** The masthead. See above for why it is exempt from the working ratio. */
+  title: 30,
+} as const
+
+/**
  * THE TABULAR RULE IS NOT APPLIED ON PAPER, and this is the record of why —
  * because it is a named DESIGN.md rule (§3) being deliberately not followed,
  * which without a note here reads as an oversight nobody noticed.
