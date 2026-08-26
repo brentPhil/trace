@@ -40,6 +40,35 @@ export function useDesktopBridge(
     }).catch(() => {})
   }, [running])
 
+  /**
+   * Tells the shell the timer is gone when this hook goes away.
+   *
+   * Sign-out unmounts `AuthedShell`. Without this the last thing the shell ever
+   * heard was "running", so the tray keeps drawing and ticking an entry the page
+   * no longer knows about — and the listener effect below has already cleaned
+   * up, so the tray's Stop emits `tray-stop` into a page with nothing listening
+   * and does nothing at all, silently. A phantom timer with a dead Stop button.
+   *
+   * Mount-scoped (`[]`) ON PURPOSE, and not folded into the push effect above.
+   * That effect's deps are `[running]`, so a cleanup living there would fire on
+   * every single change of the running entry — pushing idle in between, which is
+   * a visible tray flicker at best and, since the pushes are async, a lost state
+   * at worst if the idle push landed after the one that replaced it.
+   */
+  useEffect(() => {
+    // The guard belongs in the cleanup rather than out here: `isDesktopShell()`
+    // is a cheap property read either way, and this keeps the mount path from
+    // calling it a second time for a decision it does not make.
+    return () => {
+      if (!isDesktopShell()) return
+      void pushTimerState({
+        running: false,
+        title: "",
+        startedAtMs: null,
+      }).catch(() => {})
+    }
+  }, [])
+
   useEffect(() => {
     if (!isDesktopShell()) return
     let cleanup: (() => void) | null = null

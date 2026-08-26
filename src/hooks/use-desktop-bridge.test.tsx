@@ -129,6 +129,48 @@ describe("useDesktopBridge", () => {
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * The sign-out case. `AuthedShell` unmounts with a timer running, and if the
+   * shell is not told, the tray goes on drawing and ticking that entry while the
+   * tray-command listener is already gone — so its Stop emits into a page that
+   * is not listening and nothing happens, with no error anywhere.
+   */
+  it("pushes idle once when it unmounts with a timer running", () => {
+    const { unmount } = renderHook(() =>
+      useDesktopBridge(runningEntry(), { start: vi.fn(), stop: vi.fn() }, vi.fn())
+    )
+    bridge.pushTimerState.mockClear()
+
+    unmount()
+    expect(bridge.pushTimerState).toHaveBeenCalledTimes(1)
+    expect(bridge.pushTimerState).toHaveBeenCalledWith({
+      running: false,
+      title: "",
+      startedAtMs: null,
+    })
+  })
+
+  /**
+   * The reason that cleanup is mount-scoped rather than living on the push
+   * effect, which is deps `[running]` and would therefore run its cleanup on
+   * every change of entry. Idle pushed between two running states is a tray
+   * flicker, and because the pushes are async it can also land last and leave
+   * the tray idle under a running timer.
+   */
+  it("does not push idle merely because the running entry changed", () => {
+    const { rerender } = renderHook(
+      ({ running }) => useDesktopBridge(running, { start: vi.fn(), stop: vi.fn() }, vi.fn()),
+      { initialProps: { running: runningEntry() } }
+    )
+    bridge.pushTimerState.mockClear()
+
+    rerender({ running: runningEntry({ _id: "e2" as Doc<"timeEntries">["_id"], title: "Next" }) })
+    expect(bridge.pushTimerState).toHaveBeenCalledTimes(1)
+    expect(bridge.pushTimerState).toHaveBeenCalledWith(
+      expect.objectContaining({ running: true, title: "Next" })
+    )
+  })
+
   it("unlistens on unmount", async () => {
     const unlisten = vi.fn()
     bridge.onTrayCommand.mockResolvedValueOnce(unlisten)
