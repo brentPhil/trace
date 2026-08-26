@@ -27,6 +27,9 @@ function enterShell() {
 }
 
 afterEach(() => {
+  // Undoes stubGlobal("window", undefined) below *before* touching `window`
+  // again, so every later test still sees the real jsdom window.
+  vi.unstubAllGlobals()
   delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
   listeners.clear()
   vi.clearAllMocks()
@@ -40,6 +43,18 @@ describe("isDesktopShell", () => {
   it("is true when the Tauri IPC globals are present", () => {
     enterShell()
     expect(isDesktopShell()).toBe(true)
+  })
+
+  it("is false during SSR, where window does not exist", () => {
+    // The suite otherwise runs under jsdom (enterShell() needs a real
+    // `window` to hang the Tauri globals off of), which would leave the
+    // `typeof window === "undefined"` branch of isDesktopShell untested by
+    // everything else in this file. Stub window away for just this one
+    // assertion to prove that branch still short-circuits: if the
+    // `typeof window !== "undefined"` guard is ever removed, `"x" in window`
+    // throws on the stubbed `undefined` and this test fails.
+    vi.stubGlobal("window", undefined)
+    expect(isDesktopShell()).toBe(false)
   })
 })
 
