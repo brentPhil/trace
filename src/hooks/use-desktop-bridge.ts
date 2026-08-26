@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { useLatest } from "@/hooks/use-latest"
+import { getSkewMs } from "@/lib/clock"
 import { isDesktopShell, onTrayCommand, pushTimerState } from "@/lib/desktop-bridge"
 import type { Doc } from "../../convex/_generated/dataModel"
 
@@ -30,7 +31,12 @@ export function useDesktopBridge(
     void pushTimerState({
       running: running !== null,
       title: running?.title ?? "",
-      startedAtMs: running?.startedAt ?? null,
+      // Server time converted to THIS DEVICE's clock, because that is the only
+      // clock the shell can read — see `ShellTimerState.startedAtMs`. Read at
+      // push time rather than stored: `recordServerNow` has already run by the
+      // time a running entry reaches us (the start mutation's own return value
+      // feeds it), and any later correction arrives with the next push.
+      startedAtMs: running === null ? null : running.startedAt - getSkewMs(),
     }).catch(() => {})
   }, [running])
 
