@@ -1,9 +1,13 @@
 {
   "identifier": "remote-chroneli",
-  "description": "The production site is the app; it may use IPC.",
+  "description": "The production site is the app; it may push timer state and listen for tray commands. Nothing else.",
   "windows": ["main"],
   "remote": {
     "urls": ["https://chroneli.com"]
   },
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-timer-state"
+  ]
 }

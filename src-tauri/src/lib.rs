@@ -25,9 +25,15 @@ struct TrayHandles {
     start: MenuItem<tauri::Wry>,
     stop: MenuItem<tauri::Wry>,
     /// Which icon the tray is currently showing — `Some(true)` for recording,
-    /// `Some(false)` for idle, `None` if the last swap failed and we should try
-    /// again. Only ever touched on the main thread inside `render_tray`, so it
-    /// is never contended; the `Mutex` is here for interior mutability, not for
+    /// `Some(false)` for idle. `None` is the pre-init value only: it is seeded
+    /// `Some(false)` the moment the tray is built, and a failed swap leaves the
+    /// previous value rather than clearing it, so nothing puts it back to
+    /// `None`. It stays an `Option` because `None != Some(_)` is exactly the
+    /// "we do not know what is on screen, draw it" comparison a future
+    /// build-before-seed reordering would need.
+    ///
+    /// Only ever touched on the main thread inside `render_tray`, so it is
+    /// never contended; the `Mutex` is here for interior mutability, not for
     /// synchronisation.
     shown_running: Mutex<Option<bool>>,
 }
@@ -118,13 +124,24 @@ fn tray_icon_bytes(running: bool) -> &'static [u8] {
     }
 }
 
-/// Whether the menu offers Start and Stop, in that order.
+/// Whether the menu offers Start and Stop.
 ///
-/// A one-line function for a one-line decision, extracted only because nothing
-/// else would catch an inversion: the types are identical, the app still runs,
-/// and the symptom is a tray that offers Start while a timer is running.
-fn start_stop_enabled(running: bool) -> (bool, bool) {
-    (!running, running)
+/// Named fields rather than a `(bool, bool)` on purpose. Both halves have the
+/// same type, an inversion still compiles and still runs, and the only symptom
+/// is a tray that offers Start while a timer is running — so the pairing has to
+/// be legible at the call site (`enabled.start` beside `handles.start`) rather
+/// than positional, where destructuring in the other order looked fine.
+#[derive(Debug, PartialEq, Eq)]
+struct MenuEnabled {
+    start: bool,
+    stop: bool,
+}
+
+fn start_stop_enabled(running: bool) -> MenuEnabled {
+    MenuEnabled {
+        start: !running,
+        stop: running,
+    }
 }
 
 /// The web app pushes every running-entry change through here.
@@ -168,21 +185,31 @@ fn refresh_tray(app: &AppHandle) {
 /// Dispatching the whole render as one task closes that. `run_on_main_thread`
 /// from a worker queues a task the event loop runs to completion, and the
 /// nested round trips inside it resolve inline rather than re-entering the loop
-/// (tauri-runtime-wry's `send_user_message` runs the message directly when it
-/// is already on the main thread), so no second render can interleave. Called
-/// from the main thread it runs inline and synchronously — same guarantee, no
-/// deadlock. And because `timer_state` writes the state *before* asking for a
-/// refresh, whichever render runs last necessarily reads the newest state.
+/// (tauri-runtime-wry 2.11.4, `send_user_message` at src/lib.rs:235 — the
+/// `current_thread().id() == context.main_thread_id` branch at :239 runs the
+/// message directly instead of posting it to the proxy; re-check that on a
+/// tauri major bump), so no second render can interleave. Called from the main
+/// thread it runs inline and synchronously — same guarantee, no deadlock. And
+/// because `timer_state` writes the state *before* asking for a refresh,
+/// whichever render runs last necessarily reads the newest state.
 ///
 /// LOCKS: nothing here may hold a `MutexGuard` across a tray or menu call. The
 /// current shape is deliberate — `state` is cloned out of a temporary scope,
 /// and `shown_running` is read into a `bool` and only re-locked afterwards — so
-/// no guard is alive when a native call blocks. Hoist either of those into a
-/// named guard and you get a hang: the ticker thread would hold the mutex while
-/// blocking on the main-thread round trip, while the main thread blocks in
-/// `lock()` inside `timer_state`. Both threads wedged, tray dead, window frozen,
-/// only the task manager left. It is a two-line change to cause and gives no
-/// warning at compile time.
+/// no guard is alive when a native call blocks.
+///
+/// As written today that costs nothing: every caller reaches this through
+/// `refresh_tray`, so the body always runs ON the main thread and the native
+/// calls inside it resolve inline without blocking on anything. The invariant
+/// is here because it goes live again the instant either of two things stops
+/// being true — someone calls `render_tray` directly from the ticker or another
+/// worker thread, or tauri stops running a same-thread `send_user_message`
+/// inline and starts queuing it. Then a hoisted named guard hangs the app: the
+/// worker holds the mutex while blocking on the main-thread round trip, the
+/// main thread blocks in `lock()` inside `timer_state`, and both are wedged —
+/// tray dead, window frozen, only the task manager left. It is a two-line
+/// change to cause and gives no warning at compile time, so keep the scopes
+/// tight even while they are only insurance.
 fn render_tray(app: &AppHandle) {
     let state = { app.state::<Shared>().state.lock().unwrap().clone() };
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
@@ -215,9 +242,9 @@ fn render_tray(app: &AppHandle) {
         }
     }
 
-    let (start_enabled, stop_enabled) = start_stop_enabled(state.running);
-    let _ = handles.start.set_enabled(start_enabled);
-    let _ = handles.stop.set_enabled(stop_enabled);
+    let enabled = start_stop_enabled(state.running);
+    let _ = handles.start.set_enabled(enabled.start);
+    let _ = handles.stop.set_enabled(enabled.stop);
 }
 
 fn show_main_window(app: &AppHandle) {
@@ -300,12 +327,29 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        format_elapsed, start_stop_enabled, tray_icon_bytes, tray_line, TimerState, IDLE_ICON,
-        MAIN_WINDOW_LABEL, RECORDING_ICON, TIMER_STATE_COMMAND, TRAY_START_EVENT, TRAY_STOP_EVENT,
+        format_elapsed, start_stop_enabled, tray_icon_bytes, tray_line, MenuEnabled, TimerState,
+        IDLE_ICON, MAIN_WINDOW_LABEL, RECORDING_ICON, TIMER_STATE_COMMAND, TRAY_START_EVENT,
+        TRAY_STOP_EVENT,
     };
 
     /// A running entry started `ago` ms before `NOW`.
     const NOW: i64 = 1_700_000_000_000;
+
+    /// The same context `run()` builds the app from — `tauri.conf.json`, the
+    /// capabilities in `capabilities/`, and the ACL `build.rs` generated from
+    /// them — so what these tests interrogate is the real resolved ACL and not a
+    /// hand-built stand-in. Written once: `generate_context!` embeds the config
+    /// at every call site it expands at.
+    fn acl_context() -> tauri::Context<tauri::Wry> {
+        tauri::generate_context!()
+    }
+
+    /// The production origin the shipped window actually loads.
+    fn remote_origin() -> tauri::ipc::Origin {
+        tauri::ipc::Origin::Remote {
+            url: "https://chroneli.com/".parse().unwrap(),
+        }
+    }
 
     fn running(title: &str, ago: i64) -> TimerState {
         TimerState {
@@ -411,10 +455,26 @@ mod tests {
 
     #[test]
     fn the_menu_offers_stop_while_running_and_start_while_idle() {
-        // (start_enabled, stop_enabled). An inversion here compiles, runs, and
-        // is invisible to everything except this assertion.
-        assert_eq!(start_stop_enabled(true), (false, true));
-        assert_eq!(start_stop_enabled(false), (true, false));
+        // This pins the DECISION, and only that. It cannot reach `render_tray`'s
+        // call site, which needs a live app handle: swap the two `set_enabled`
+        // arguments there and every test in this file still passes. Naming the
+        // fields on `MenuEnabled` is what covers the other half — `enabled.start`
+        // beside `handles.start` reads wrong as soon as it is wrong, which a
+        // positional `(bool, bool)` did not.
+        assert_eq!(
+            start_stop_enabled(true),
+            MenuEnabled {
+                start: false,
+                stop: true
+            }
+        );
+        assert_eq!(
+            start_stop_enabled(false),
+            MenuEnabled {
+                start: true,
+                stop: false
+            }
+        );
     }
 
     #[test]
@@ -436,5 +496,108 @@ mod tests {
         // web side's `invoke(...)` has to match.
         let _handler = super::timer_state;
         assert_eq!(TIMER_STATE_COMMAND, stringify!(timer_state));
+    }
+
+    /// The one test in this file that crosses the IPC boundary, and the reason
+    /// the others were not enough.
+    ///
+    /// Everything above is a pure function. They all passed while the shell was
+    /// completely inert: the window loads the REMOTE origin, a remote origin can
+    /// only call a command that resolves an explicit ACL entry, `core:default`
+    /// grants core plugins and never app commands, and `build.rs` generated no
+    /// app manifest at all — so every `invoke("timer_state", …)` was rejected,
+    /// the tray never heard about a timer, and the web side's `.catch(() => {})`
+    /// swallowed the evidence. It compiled and shipped broken.
+    ///
+    /// So assert the thing that was actually false: the ACL baked into the
+    /// binary lets the production origin call the command, on the main window.
+    #[test]
+    fn the_acl_lets_chroneli_com_call_timer_state() {
+        let mut context = acl_context();
+        let authority = context.runtime_authority_mut();
+
+        let remote = remote_origin();
+        assert!(
+            authority
+                .resolve_access(
+                    TIMER_STATE_COMMAND,
+                    MAIN_WINDOW_LABEL,
+                    MAIN_WINDOW_LABEL,
+                    &remote,
+                )
+                .is_some(),
+            "the remote origin cannot invoke {TIMER_STATE_COMMAND}: no capability grants it"
+        );
+
+        // Declaring an app manifest flips tauri's app-ACL check on, which starts
+        // gating the LOCAL origin too. The capability does not opt out of local,
+        // so a dev build pointed at a bundled frontend must keep working.
+        assert!(
+            authority
+                .resolve_access(
+                    TIMER_STATE_COMMAND,
+                    MAIN_WINDOW_LABEL,
+                    MAIN_WINDOW_LABEL,
+                    &tauri::ipc::Origin::Local,
+                )
+                .is_some(),
+            "the local origin cannot invoke {TIMER_STATE_COMMAND}"
+        );
+    }
+
+    /// The tray's Start/Stop are `app.emit`s, which the page only receives if it
+    /// may run `plugin:event|listen` — and `onTrayCommand` calls the unlisten it
+    /// returns. Narrowing the capability away from `core:default` is exactly the
+    /// kind of change that takes those away without any other symptom.
+    #[test]
+    fn the_acl_lets_chroneli_com_listen_for_tray_events() {
+        let mut context = acl_context();
+        let authority = context.runtime_authority_mut();
+
+        let remote = remote_origin();
+        for command in ["plugin:event|listen", "plugin:event|unlisten"] {
+            assert!(
+                authority
+                    .resolve_access(command, MAIN_WINDOW_LABEL, MAIN_WINDOW_LABEL, &remote)
+                    .is_some(),
+                "the remote origin cannot call {command}"
+            );
+        }
+    }
+
+    /// The other half of narrowing the capability: what the shell must NOT hand
+    /// a hijacked chroneli.com.
+    ///
+    /// `core:default` used to grant all of these. `core:image:allow-from-path`
+    /// plus `allow-rgba` is an arbitrary local file read for anything that
+    /// decodes as an image — in a shell with no `fs` plugin at all. `TRAY_ID` is
+    /// a public const, so `core:tray:allow-remove-by-id` lets the page delete
+    /// Chroneli's own tray icon; since close only hides and Quit lives only in
+    /// that menu, that leaves a running, invisible, un-quittable process.
+    #[test]
+    fn the_acl_withholds_what_a_plain_browser_tab_could_not_do() {
+        let mut context = acl_context();
+        let authority = context.runtime_authority_mut();
+
+        let remote = remote_origin();
+        for command in [
+            "plugin:image|from_path",
+            "plugin:image|rgba",
+            "plugin:tray|new",
+            "plugin:tray|remove_by_id",
+            "plugin:tray|set_icon",
+            "plugin:tray|set_menu",
+            "plugin:menu|new",
+            "plugin:menu|popup",
+            "plugin:menu|set_as_app_menu",
+            "plugin:path|resolve_directory",
+        ] {
+            assert!(
+                authority
+                    .resolve_access(command, MAIN_WINDOW_LABEL, MAIN_WINDOW_LABEL, &remote)
+                    .is_none(),
+                "the capability still grants {command} to the remote origin"
+            );
+        }
     }
 }
