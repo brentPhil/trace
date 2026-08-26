@@ -35,11 +35,12 @@ type UseClockModule = typeof UseClockModuleType
  * component down.
  *
  * THE REGRESSION THIS FILE EXISTS FOR: a branch that swapped `EntryLog` for
- * something else. `EntryLog` owns `NoteSheet`, and `NoteSheet` owns `draftsRef`
- * — the in-memory copy of a note whose save is still in flight or has failed.
- * It used to be a search keystroke that unmounted it; the filter bar is gone
- * and choosing a date range is the gesture in its place, so that is what is
- * asserted now.
+ * something else. The log holds everything that describes what the reader is
+ * DOING rather than what the data is — the selection, which sittings are open,
+ * and the half-typed note inside a row's inline field — and an unmount takes
+ * all of it mid-sentence. It used to be a search keystroke that unmounted it;
+ * the filter bar is gone and choosing a date range is the gesture in its
+ * place, so that is what is asserted now.
  *
  * The leading `-` in the filename keeps TanStack Router's file-based route
  * generation from treating this as a route (see `-reports.test.tsx`).
@@ -635,12 +636,12 @@ describe("Timer — the range control", () => {
     expect(screen.queryByText("Load earlier entries")).toBeNull()
   })
 
-  it("keeps EntryLog mounted across a change of range, so its drafts survive", () => {
+  it("keeps EntryLog mounted across a change of range, so work in progress survives", () => {
     /*
-     * THE REGRESSION THIS FILE EXISTS FOR, in its current spelling. `EntryLog`
-     * owns `NoteSheet`, which holds the in-memory copy of a note whose save is
-     * in flight or has failed. Two sibling branches each rendering their own
-     * log would unmount one and mount the other on every change of range.
+     * THE REGRESSION THIS FILE EXISTS FOR, in its current spelling. The log
+     * holds the selection, the open sittings and any note being typed into a
+     * row right now. Two sibling branches each rendering their own log would
+     * unmount one and mount the other on every change of range.
      */
     resolvePage(paginatedKey(api.entries.listPage, logRange), {
       page: [makeEntry({ title: "Client call" })],

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react"
 import { DayList, LogSkeleton } from "@/components/entries/day-list"
 import { SittingRow } from "@/components/entries/sitting-row"
@@ -69,8 +69,9 @@ describe("DayList empty state", () => {
    * `empty ?? <EmptyLog/>` made "render nothing" inexpressible: `null` is the
    * obvious way to ask for it and fell straight back to the onboarding copy.
    * Timer's answer was to stop rendering `EntryLog` at all while a filter
-   * matched nothing — which took `NoteSheet` and every held note draft down
-   * with it on a keystroke. This is the API that lets it keep the log mounted.
+   * matched nothing — which took the reader's selection, every open sitting
+   * and any half-typed note down with it on a keystroke. This is the API that
+   * lets it keep the log mounted.
    */
   it("renders nothing at all when the caller explicitly passes null", () => {
     const { container } = render(
@@ -192,16 +193,16 @@ describe("a note in the log", () => {
     expect(note.className).not.toContain("truncate")
 
     // `text-xs` is a label size. Once the note is what you came to read it is
-    // prose, at the size the note sheet itself writes it.
+    // prose, at the size the inline editor itself writes it.
     const control = note.closest("button")
     expect(control).not.toBeNull()
     expect(control!.className).toContain("text-sm")
     expect(control!.className).not.toContain("text-xs")
   })
 
-  it("still opens the note sheet either way", () => {
+  it("still opens the editor either way", () => {
     // The clip is a display mode, not a different control: the one gesture the
-    // note line has — open it and edit it — has to survive the switch.
+    // note line has — click it and edit it in place — has to survive the switch.
     renderLog(true)
     expect(screen.getByText(NOTE).closest("button")?.getAttribute("type")).toBe("button")
   })
@@ -786,12 +787,12 @@ describe("grouped entries", () => {
      */
     const renderSitting = ({
       onClassify = vi.fn(),
-      onNoteOpen = vi.fn(),
+      onNoteSave = vi.fn(),
       members,
       tags = [],
     }: {
       onClassify?: (change: Partial<Classification>) => void
-      onNoteOpen?: () => void
+      onNoteSave?: (note: string) => Promise<void>
       members?: Array<Partial<Doc<"timeEntries">>>
       tags?: Array<Doc<"tags">>
     } = {}) => {
@@ -824,7 +825,7 @@ describe("grouped entries", () => {
           onResume={() => {}}
           onRemove={() => {}}
           onClassify={onClassify}
-          onNoteOpen={onNoteOpen}
+          onNoteSave={onNoteSave}
           onCreateProject={vi.fn()}
           onCreateTag={vi.fn()}
           controls="sitting-panel"
@@ -878,7 +879,7 @@ describe("grouped entries", () => {
           onResume={() => {}}
           onRemove={() => {}}
           onClassify={() => {}}
-          onNoteOpen={() => {}}
+          onNoteSave={async () => {}}
           onCreateProject={vi.fn()}
           onCreateTag={vi.fn()}
           controls="sitting-panel"
@@ -968,16 +969,25 @@ describe("grouped entries", () => {
       expect(onClassify).toHaveBeenCalledWith({ tagIds: [FOCUS._id] })
     })
 
-    it("opens the note editor for the sitting from the parent's own note control", () => {
-      const onNoteOpen = vi.fn()
-      renderSitting({ onNoteOpen })
+    it("edits the sitting's note in place from the parent's own note control", async () => {
+      const onNoteSave = vi.fn(async () => {})
+      renderSitting({ onNoteSave })
 
-      // `twice`'s one member note is enough to reach the note button here —
-      // this test is about the control firing `onNoteOpen`, not about what
-      // text it shows (that is the joined-notes test above).
-      fireEvent.click(screen.getByRole("button", { name: /Finished the assignment modal\./ }))
+      // `twice`'s one member note is enough to reach the note control here —
+      // this test is about the parent OWNING the edit, not about what text it
+      // shows (that is the joined-notes test above).
+      fireEvent.click(
+        screen.getByRole("button", { name: /Finished the assignment modal\./ })
+      )
 
-      expect(onNoteOpen).toHaveBeenCalledTimes(1)
+      // Inline, not a dialog: the field is right there in the row.
+      const field = screen.getByRole("textbox", { name: /Note:/ })
+      fireEvent.change(field, { target: { value: "Rewrote the picker." } })
+      fireEvent.blur(field)
+
+      await waitFor(() =>
+        expect(onNoteSave).toHaveBeenCalledWith("Rewrote the picker.")
+      )
     })
 
     it("no longer counts noted members on the parent", () => {
@@ -1078,7 +1088,7 @@ describe("grouped entries", () => {
           grouped
         />
       )
-      expect(screen.getByRole("button", { name: /\+ add note/i })).toBeTruthy()
+      expect(screen.getByRole("button", { name: /^Add note$/i })).toBeTruthy()
     })
 
     it("hands every member to the classify action", () => {

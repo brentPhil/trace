@@ -59,7 +59,7 @@ export function SittingRow({
   onResume,
   onRemove,
   onClassify,
-  onNoteOpen,
+  onNoteSave,
   onCreateProject,
   onCreateTag,
   controls,
@@ -83,7 +83,9 @@ export function SittingRow({
   onRemove: () => void
   /** Applies a classifier change to EVERY member. See `DayList`. */
   onClassify: (change: Partial<Classification>) => void
-  onNoteOpen: () => void
+  /** Writes ONE note onto every member, from the line's inline editor. The
+   *  line shows their notes joined, so this saves what was on screen. */
+  onNoteSave: (note: string) => Promise<void>
   onCreateProject: EntryRowActions["onCreateProject"]
   onCreateTag: EntryRowActions["onCreateTag"]
   /**
@@ -213,7 +215,7 @@ export function SittingRow({
             <NoteLine
               note={note}
               notesExpanded={notesExpanded}
-              onOpen={onNoteOpen}
+              onSave={onNoteSave}
             />
           </div>
 

@@ -27,7 +27,7 @@ const SHORTCUTS: Array<{ group: string; items: Array<[string, string]> }> = [
       ["Click", "Edit any field in place — title, times, duration"],
       ["Enter", "Commit the edit"],
       ["Esc", "Revert it and return focus to where it was"],
-      ["⌘ / Ctrl + Enter", "Save the note sheet"],
+      ["⌘ / Ctrl + Enter", "Save the note you are editing"],
     ],
   },
   {

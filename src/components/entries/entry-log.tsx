@@ -2,20 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { BulkEntryActions } from "@/components/entries/bulk-entry-actions"
 import { DayList } from "@/components/entries/day-list"
-import { NoteSheet } from "@/components/entries/note-sheet"
 import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { pruneSelection, toggleSelection } from "@/lib/entry-selection"
 import { errorMessage } from "@/lib/error-message"
-import { joinNotes } from "@/lib/group-sittings"
 import { withInheritedBillable } from "@/lib/inherit-billable"
 import { cn } from "@/lib/utils"
-import { dayOf } from "@shared/day"
 import type { ReactNode } from "react"
 import type { EntrySelectionController } from "@/components/entries/day-list"
 import type { EntryRowActions } from "@/components/entries/entry-row"
-import type { NoteTarget } from "@/components/entries/note-sheet"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayGroup, Entry } from "@/lib/group-entries"
@@ -90,9 +86,6 @@ export function EntryLog({
   const { updateMany } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
   const toasts = Toast.useToastManager()
-
-  const [noteTarget, setNoteTarget] = useState<NoteTarget | null>(null)
-  const [noteOpen, setNoteOpen] = useState(false)
 
   const [selectedIds, setSelectedIds] = useState<Set<Id<"timeEntries">>>(
     new Set()
@@ -191,16 +184,22 @@ export function EntryLog({
 
   const actions: EntryRowActions = {
     ...entryActions,
-    onNoteOpen: (entry) => {
-      setNoteTarget({
-        entryIds: [entry._id],
-        key: entry._id,
-        title: entry.title,
-        note: entry.note ?? "",
-        totalMs: entry.durationMs ?? 0,
-      })
-      setNoteOpen(true)
-    },
+    /*
+     * THE NOTE, WRITTEN FROM THE ROW.
+     *
+     * It used to open `NoteSheet` — a dialog with a draft store, a
+     * save-on-dismiss path and an undo toast of its own. The editor is inline
+     * now (`NoteLine` → `InlineEdit`), so what reaches here is a value the user
+     * has already committed rather than a target to open, and all of that
+     * machinery went with the dialog. See `NoteLine`'s header for what that
+     * traded away and why the trade holds.
+     *
+     * The promise is RETURNED rather than dropped: `InlineEdit` awaits it, and
+     * a rejection is what reopens the field with the rejected text and the
+     * server's reason attached. Swallowing it here would close the field on a
+     * write that never happened.
+     */
+    onNoteSave: (entry, note) => updateMany({ entryIds: [entry._id], note }),
     /*
      * THE WHOLE GROUP, IN ONE MUTATION, UNDER ONE UNDO.
      *
@@ -246,80 +245,27 @@ export function EntryLog({
         toasts.add({ title: errorMessage(thrown), priority: "high" })
       })
     },
-    onSittingNoteOpen: (entries) => {
-      // Title + project is unique within a single day, NOT within the whole
-      // log -- this log renders many days, and recurring work (the ordinary
-      // case grouping exists to serve) means the same title+project sitting
-      // recurs on different days. Leaving the day out of the key collided
-      // two days' sittings onto one entry in `drafts` (note-sheet.tsx): note
-      // Aug 9's "Crew dropdowns", dismiss before the save lands, then open
-      // Aug 8's "Crew dropdowns" -- it would seed from Aug 9's still-pending
-      // draft, and a second dismissal would write Aug 9's prose onto Aug
-      // 8's entries.
-      //
-      // The day is derived from `entries[0].startedAt` rather than looked
-      // up from `groups[].day`: a sitting cannot cross a day boundary
-      // (`toLogItems` only ever runs on one `DayGroup`'s own `entries`), so
-      // every member's `startedAt` already resolves, via the same `dayOf`,
-      // to exactly the day this sitting was grouped under -- the same
-      // computation `groupByDay` used to place it there in the first place.
-      // That makes it the direct source rather than a stand-in for one, and
-      // it works without re-finding this sitting inside `groups` by
-      // reference.
-      const day = dayOf(entries[0].startedAt, timeZone)
-      setNoteTarget({
-        entryIds: entries.map((entry) => entry._id),
-        key: `sitting\u0000${day}\u0000${entries[0].title.trim()}\u0000${entries[0].projectId ?? ""}`,
-        title: entries[0].title,
-        note: joinNotes(entries),
-        totalMs: entries.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
-      })
-      setNoteOpen(true)
-    },
+    /*
+     * ONE NOTE ONTO EVERY MEMBER, which is what the joined line on screen
+     * promises.
+     *
+     * `joinNotes` is what the row DISPLAYS — every member's distinct note,
+     * oldest first, separated by a blank line — so saving that same string back
+     * to all of them is what makes the editor write what it showed. For the
+     * case grouping exists to serve, the same note typed on each sitting of one
+     * piece of work, this is an identity. For a sitting whose members genuinely
+     * disagreed, the split is gone once this lands: the same limit the dialog
+     * carried, stated in the spec's Risks section.
+     *
+     * EVERY id it was given, including a member that has since paginated out of
+     * view. Narrowing to what is still on screen would silently drop that
+     * member from the write with nothing to say so; sending them all lets a
+     * genuinely deleted one fail the WHOLE save with `NOT_FOUND`, which
+     * `InlineEdit` reports on the field rather than swallowing.
+     */
+    onSittingNoteSave: (entries, note) =>
+      updateMany({ entryIds: entries.map((entry) => entry._id), note }),
   }
-
-  // The sheet reads the LIVE rows when they are still found in `groups`,
-  // falling back to the snapshot only if every one has since been removed
-  // (deleted, or paginated out from under it) — so it stays in sync with edits
-  // made elsewhere while it is open, rather than going stale mid-sentence.
-  //
-  // `entryIds` ITSELF stays the snapshot below, deliberately, even though
-  // `live` is computed here — the save still targets every id `noteTarget`
-  // was built with, not just the ones still found in `groups`. Narrowing to
-  // `live` would silently under-write a member that merely paginated out of
-  // view, dropping it from the sitting's save with nothing on screen to say
-  // so. The snapshot instead lets a genuinely deleted member fail the WHOLE
-  // save with `NOT_FOUND` — reported by `onSittingClassify`'s toast above (or
-  // the note sheet's own error state, for a note save) rather than silently
-  // dropped from a partial write.
-  const liveNoteTarget = (() => {
-    if (noteTarget === null) return null
-    const byId = new Map(
-      groups.flatMap((group) => group.entries).map((entry) => [entry._id, entry])
-    )
-    const live = noteTarget.entryIds
-      .map((id) => byId.get(id))
-      .filter((entry): entry is Entry => entry !== undefined)
-    if (live.length === 0) return noteTarget
-    return {
-      ...noteTarget,
-      // A rename made in another tab or on another device must show up here
-      // too — the sheet header, the dialog's accessible name, and the undo
-      // toast's label all read `title`. A sitting's members share a title by
-      // construction ONLY AT THE MOMENT THE TARGET IS BUILT — `entryIds` is
-      // fixed then, from `toLogItems`' grouping key, but a member can be
-      // retitled out of the sitting while this sheet stays open (its own
-      // title edit is unreachable from here, but nothing stops a resume,
-      // another tab, or a calendar edit from doing it). If that happens,
-      // `live[0]` may be the departed member, now carrying its new title —
-      // and `joinNotes(live)` and the `totalMs` sum just below share exactly
-      // the same staleness. Nothing to fix here: the sheet re-seeds fresh on
-      // its next open, which is where the target is rebuilt from scratch.
-      title: live[0].title,
-      note: joinNotes(live),
-      totalMs: live.reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
-    }
-  })()
 
   return (
     <>
@@ -378,12 +324,6 @@ export function EntryLog({
           </div>
         )}
       </div>
-      <NoteSheet
-        target={liveNoteTarget}
-        open={noteOpen}
-        onOpenChange={setNoteOpen}
-        onSave={(entryIds, note) => updateMany({ entryIds, note })}
-      />
     </>
   )
 }

@@ -7,9 +7,9 @@ import type { useToastManager } from "@base-ui/react/toast"
  * Every reversible write in this product reports itself the same way: a toast
  * that names what just happened, an Undo that performs the inverse write, and
  * an alarm if that inverse write is itself refused. It was hand-rolled three
- * times — delete and re-date in `entry-log.tsx`, note-dismissal in
- * `note-sheet.tsx` — with the window tied together only by a comment saying the
- * numbers matched. They are the same shape because they are the same promise to
+ * times — delete and re-date in `entry-log.tsx`, and a note dialog's
+ * save-on-dismissal, since deleted along with the dialog — with the window tied
+ * together only by a comment saying the numbers matched. They are the same shape because they are the same promise to
  * the user, so they live in one place and drift together or not at all.
  *
  * Deliberately not a hook and deliberately not a component: the manager is

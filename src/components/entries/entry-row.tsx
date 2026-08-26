@@ -37,7 +37,9 @@ export type EntryRowActions = {
   onClassify: (entry: Entry, change: Partial<Classification>) => void
   onCreateProject: (name: string) => Promise<{ projectId: Id<"projects"> }>
   onCreateTag: (name: string) => Promise<{ tagId: Id<"tags"> }>
-  onNoteOpen: (entry: Entry) => void
+  /** Writes a note onto this entry. The editor is INLINE in the row (see
+   *  `NoteLine`), so this is a save rather than an open. */
+  onNoteSave: (entry: Entry, note: string) => Promise<void>
   onRemove: (entry: Entry) => void
   onResume: (entry: Entry) => void
   /** `onClassify`, for a sitting: applies one change to every member at once.
@@ -46,9 +48,10 @@ export type EntryRowActions = {
     entries: Array<Entry>,
     change: Partial<Classification>
   ) => void
-  /** `onNoteOpen`, for a sitting: opens the note editor on every member's note,
-   *  joined. See `SittingRow.onNoteOpen` and `EntryLog`, which implements it. */
-  onSittingNoteOpen: (entries: Array<Entry>) => void
+  /** `onNoteSave`, for a sitting: writes ONE note onto every member. The line
+   *  shows their notes joined, so what is saved is what was on screen. See
+   *  `SittingRow.onNoteSave` and `EntryLog`, which implements it. */
+  onSittingNoteSave: (entries: Array<Entry>, note: string) => Promise<void>
   /**
    * `onRemove`, for a sitting: deletes every member at once.
    *
@@ -302,7 +305,7 @@ export function EntryRow({
             <NoteLine
               note={note}
               notesExpanded={notesExpanded}
-              onOpen={() => actions.onNoteOpen(entry)}
+              onSave={(next) => actions.onNoteSave(entry, next)}
             />
           ) : null}
         </div>

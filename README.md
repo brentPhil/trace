@@ -36,6 +36,6 @@ now-live deployment, which is the order the Convex docs recommend for exactly
 this reason: the frontend calls functions like `entries.updateMany` by name,
 so a frontend built or shipped against a Convex deployment that doesn't yet
 have that function will fail every call it makes to it — as of this branch,
-that includes the note sheet's only save path, which is the product's core
+that includes the note field's only save path, which is the product's core
 action, not just the sitting feature that introduced it. Do not simplify this
 to "deploy either order" or split it into two unordered commands.

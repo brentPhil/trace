@@ -102,8 +102,9 @@ export function DayList({
    * `null` means "render nothing", and is distinct from omitting the prop.
    * `empty ?? <EmptyLog/>` made that inexpressible — `null` fell back to the
    * onboarding copy, so the only way for a caller to draw nothing was to stop
-   * rendering the log entirely. Timer did exactly that, and unmounted
-   * `NoteSheet` and every held note draft along with it.
+   * rendering the log entirely. Timer did exactly that on a filter keystroke,
+   * and unmounted the whole log — with the reader's selection, every open
+   * sitting and any half-typed note in it — along with the rows.
    */
   empty?: ReactNode
   /**
@@ -123,8 +124,8 @@ export function DayList({
    * In memory and per-tab: a disclosure is a thing the reader is doing right
    * now, not a property of the data, so it resets on reload. It lives HERE
    * rather than in the row so that /timer's deliberate keeping-`EntryLog`-
-   * mounted across a change of range (see that page, and `note-sheet.tsx`)
-   * carries the open groups through with the note drafts.
+   * mounted across a change of range (see that page) carries the open groups
+   * through along with everything else the reader had in progress.
    */
   const [open, setOpen] = useState<Set<string>>(new Set())
 
@@ -321,7 +322,7 @@ export function DayList({
                     // it. `EntryLog` sends this to `onRemoveMany`.
                     onRemove={() => actions.onSittingRemove(item.entries)}
                     onClassify={(change) => actions.onSittingClassify(item.entries, change)}
-                    onNoteOpen={() => actions.onSittingNoteOpen(item.entries)}
+                    onNoteSave={(note) => actions.onSittingNoteSave(item.entries, note)}
                     onCreateProject={actions.onCreateProject}
                     onCreateTag={actions.onCreateTag}
                     controls={panelId}

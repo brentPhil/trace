@@ -94,7 +94,8 @@ export function joinNotes(entries: Array<Entry>): string {
   }
 
   // A blank line between them, matching the paragraph break a note is written
-  // with in the textarea — see `note-sheet.tsx` on Enter inserting a newline.
+  // with in the textarea — see `inline-edit.tsx` on Enter inserting a newline in
+  // a multiline field.
   return notes.join("\n\n")
 }
 
