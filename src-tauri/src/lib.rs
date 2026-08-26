@@ -7,6 +7,15 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 /// What the web app last told us. `title`/`started_at_ms` are only meaningful
 /// while `running` is true.
+///
+/// `started_at_ms` IS NOT the Convex `startedAt`. That value is server time,
+/// and this process subtracts it from the local `SystemTime` clock — so on a
+/// machine whose clock drifts, a raw server instant would make the tray and
+/// the page disagree about the same entry by the full skew. The web app
+/// therefore subtracts its own measured skew before pushing, and what arrives
+/// here is a DEVICE-clock instant: `now_ms() - started_at_ms` is term-for-term
+/// what the page displays. See `ShellTimerState.startedAtMs` in
+/// src/lib/desktop-bridge.ts, which carries the other half of this contract.
 #[derive(Default, Clone)]
 struct TimerState {
     running: bool,
@@ -98,6 +107,9 @@ fn now_ms() -> i64 {
 /// Pure, so the parts that are easy to get quietly wrong (the empty-title
 /// fallback, a missing start time, an elapsed clock that has gone backwards)
 /// are reachable from a test without a running event loop.
+///
+/// `now` and `state.started_at_ms` are both device-clock instants — see
+/// `TimerState` — so the subtraction needs no correction of its own.
 fn tray_line(state: &TimerState, now: i64) -> Option<String> {
     if !state.running {
         return None;
