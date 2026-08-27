@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthedRouteImport } from './routes/_authed'
+import { Route as DesktopCallbackRouteImport } from './routes/desktop-callback'
 import { Route as DesktopLoginRouteImport } from './routes/desktop-login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
@@ -33,6 +34,11 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DesktopCallbackRoute = DesktopCallbackRouteImport.update({
+  id: '/desktop-callback',
+  path: '/desktop-callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DesktopLoginRoute = DesktopLoginRouteImport.update({
@@ -108,6 +114,7 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/desktop-callback': typeof DesktopCallbackRoute
   '/desktop-login': typeof DesktopLoginRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
@@ -125,6 +132,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/desktop-callback': typeof DesktopCallbackRoute
   '/desktop-login': typeof DesktopLoginRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
@@ -144,6 +152,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_authed': typeof AuthedRouteWithChildren
+  '/desktop-callback': typeof DesktopCallbackRoute
   '/desktop-login': typeof DesktopLoginRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
@@ -163,6 +172,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/desktop-callback'
     | '/desktop-login'
     | '/forgot-password'
     | '/login'
@@ -180,6 +190,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/desktop-callback'
     | '/desktop-login'
     | '/forgot-password'
     | '/login'
@@ -198,6 +209,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_authed'
+    | '/desktop-callback'
     | '/desktop-login'
     | '/forgot-password'
     | '/login'
@@ -217,6 +229,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthedRoute: typeof AuthedRouteWithChildren
+  DesktopCallbackRoute: typeof DesktopCallbackRoute
   DesktopLoginRoute: typeof DesktopLoginRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
@@ -239,6 +252,13 @@ declare module '@tanstack/react-router' {
       path: ''
       fullPath: '/'
       preLoaderRoute: typeof AuthedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/desktop-callback': {
+      id: '/desktop-callback'
+      path: '/desktop-callback'
+      fullPath: '/desktop-callback'
+      preLoaderRoute: typeof DesktopCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/desktop-login': {
@@ -370,6 +390,7 @@ const AuthedRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthedRoute: AuthedRouteWithChildren,
+  DesktopCallbackRoute: DesktopCallbackRoute,
   DesktopLoginRoute: DesktopLoginRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,
