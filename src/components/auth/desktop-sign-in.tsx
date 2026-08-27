@@ -2,11 +2,27 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { beginBrowserLogin, onBrowserLogin } from "@/lib/desktop-bridge"
 import { errorMessage } from "@/lib/error-message"
+import type { BrowserLoginFailureReason } from "@/lib/desktop-bridge"
 
-const FAILURE_COPY: Record<string, string> = {
+// `Record<BrowserLoginFailureReason, string>`, not `Record<string, string>`:
+// the wider type let this table silently drift out of sync with the reasons
+// the bridge actually promises to emit — nothing caught a missing key, so a
+// new reason would have quietly fallen through to the generic copy below
+// forever. This narrower type makes a missing key a compile error instead.
+//
+// `onBrowserLogin`'s `failed` callback still hands over a plain `string` —
+// see `BrowserLoginFailureReason` in desktop-bridge.ts for why it is not
+// typed as this union at that boundary — so `isKnownFailure` below is a real
+// runtime check, not a formality: an unrecognised string from Rust is
+// genuinely possible here, and it is what falls through to the generic copy.
+const FAILURE_COPY: Record<BrowserLoginFailureReason, string> = {
   timed_out: "That timed out waiting for your browser. Try again.",
   state_mismatch: "That sign-in did not match this app. Try again.",
   listener_died: "Lost track of your browser’s reply. Try again.",
+}
+
+function isKnownFailure(reason: string): reason is BrowserLoginFailureReason {
+  return reason in FAILURE_COPY
 }
 
 /**
@@ -33,7 +49,11 @@ export function DesktopSignIn() {
       },
       failed: (reason) => {
         setWaiting(false)
-        setFailure(FAILURE_COPY[reason] ?? "Sign-in did not finish. Try again.")
+        setFailure(
+          isKnownFailure(reason)
+            ? FAILURE_COPY[reason]
+            : "Sign-in did not finish. Try again."
+        )
       },
     }).then((unlisten) => {
       // The unmount can land while `listen` is still resolving; a listener

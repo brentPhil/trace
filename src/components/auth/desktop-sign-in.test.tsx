@@ -1,8 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { DesktopSignIn } from "@/components/auth/desktop-sign-in"
+import type { BrowserLoginFailureReason } from "@/lib/desktop-bridge"
 
-type LoginHandlers = { token: (token: string) => void; failed: (reason: string) => void }
+type LoginHandlers = {
+  token: (token: string) => void
+  failed: (reason: BrowserLoginFailureReason) => void
+}
 
 const bridge = vi.hoisted(() => ({
   beginBrowserLogin: vi.fn(async () => undefined),

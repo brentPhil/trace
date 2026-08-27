@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react"
+
 /**
  * The web app's half of the desktop shell conversation.
  *
@@ -34,6 +36,60 @@ export type ShellTimerState = {
 
 export function isDesktopShell(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+}
+
+/** Always used as `getServerSnapshot` below — never `getSnapshot` — so it is
+ *  pulled out rather than inlined: an inline `() => false` reads as an
+ *  arbitrary placeholder, where this name says what it actually is. */
+function alwaysWeb(): boolean {
+  return false
+}
+
+/** `useSyncExternalStore` re-subscribes whenever this identity changes; a
+ *  module-level function that never changes keeps that from happening for a
+ *  subscription that would do nothing differently anyway. */
+function subscribeToNothing(): () => void {
+  // Whether this process is inside the Tauri shell is decided once, before
+  // any React code runs, and never changes for the life of the tab — there is
+  // no event to listen for, so there is nothing to unsubscribe either.
+  return () => {}
+}
+
+/**
+ * `isDesktopShell()`, read the one place it is safe to call during render.
+ *
+ * The direct call this replaced (`isDesktopShell()` inline in JSX) broke on
+ * `/login`: that route is server-rendered, the server has no `window` and so
+ * always guesses "web", but the real Tauri webview already has
+ * `__TAURI_INTERNALS__` on `window` before hydration even starts. The
+ * server's guess and the client's first render disagreed — a hydration
+ * mismatch — and worse, whatever the server guessed (a real, fully wired
+ * `<AuthForm>`, Google button included) stays painted and clickable in the
+ * desktop app until React notices and swaps it out. Google refuses OAuth from
+ * exactly the embedded webview this button would be sitting in.
+ *
+ * `useSyncExternalStore`'s three-argument form exists for precisely this
+ * shape — a value that is real and synchronous on the client but unknowable
+ * on the server. `getServerSnapshot` (`alwaysWeb`) is what SSR renders AND,
+ * critically, what React uses for the client's FIRST render too, during
+ * hydration — so that first client render is guaranteed to match the
+ * server's HTML instead of merely happening to. Only after hydration commits
+ * does React re-read `getSnapshot` (the real `isDesktopShell`) and, if it
+ * disagrees, force a corrective re-render — as part of its own store-
+ * consistency check, not through an app-level `useEffect` + `setState` round
+ * trip the way a `mounted` flag would need. That is one fewer render cycle
+ * between "the wrong, interactive tree is on screen" and "the right one is",
+ * which is the whole reason this is the safer of the two idiomatic options
+ * here.
+ *
+ * What this does NOT do: make the mismatch impossible to see at all. The
+ * very first bytes the browser paints are the server's HTML, guess and all —
+ * nothing client-side can change what already left the server before any JS
+ * ran. The guarantee is about what happens next: no console warning, and the
+ * shortest path React has back to the truth once it can see it.
+ */
+export function useIsDesktopShell(): boolean {
+  return useSyncExternalStore(subscribeToNothing, isDesktopShell, alwaysWeb)
 }
 
 /** Hands the running-entry state to the shell, which owns the tray from there. */
@@ -78,6 +134,22 @@ export async function beginBrowserLogin(): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core")
   await invoke("begin_browser_login")
 }
+
+/**
+ * The finite set of reasons Rust's browser-login listener can fail with.
+ *
+ * Named here, next to the IPC boundary that actually produces them, so a
+ * caller's copy table can be typed `Record<BrowserLoginFailureReason, string>`
+ * and get a compile error the day this list grows and the copy does not.
+ *
+ * `onBrowserLogin` below deliberately does NOT use this type for `failed`'s
+ * parameter — the string arriving over `listen("browser-login-failed", …)`
+ * is whatever Rust actually sends, unchecked, and typing it as this union
+ * would just be asserting away the one case that matters: a value Rust adds
+ * that this list has not caught up with yet. That case is a caller's problem
+ * to guard against at runtime, not something this type can rule out.
+ */
+export type BrowserLoginFailureReason = "timed_out" | "state_mismatch" | "listener_died"
 
 /** The shell's answer to `beginBrowserLogin`, whichever way it went. */
 export async function onBrowserLogin(handlers: {
