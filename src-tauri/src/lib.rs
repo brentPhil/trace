@@ -115,6 +115,24 @@ pub const LOGIN_FAILED_LISTENER_DIED: &str = "listener_died";
 ///
 /// Matched by the route the web app serves at `/desktop-login`; a rename on
 /// either side is a browser tab that 404s, not a compile error.
+///
+/// SPLIT BY BUILD PROFILE, and the reason is worth stating because getting it
+/// wrong wastes an afternoon. The window loads a REMOTE origin, so the sign-in
+/// page, the one-time token and the session cookie all have to come from the
+/// SAME origin the window is on. Send a debug shell pointed at the dev server
+/// off to production to sign in and the handoff still "works" — the browser
+/// signs into production, mints a production token, and posts it back — but the
+/// dev webview then verifies it against localhost, where that token was never
+/// issued. The failure surfaces as an expired-link message with nothing wrong
+/// on either side.
+///
+/// The port here MUST match `devUrl` in `src-tauri/tauri.dev.conf.json` and the
+/// origin allowlisted in `capabilities/dev-localhost.json`, which in turn match
+/// `pnpm dev`'s `--port 3100`. Four places, one number; change one and the dev
+/// loop dies quietly.
+#[cfg(debug_assertions)]
+pub const SIGN_IN_URL_BASE: &str = "http://localhost:3100/desktop-login";
+#[cfg(not(debug_assertions))]
 pub const SIGN_IN_URL_BASE: &str = "https://chroneli.com/desktop-login";
 
 /// How long the shell waits for the browser before giving up.
@@ -688,18 +706,55 @@ mod tests {
         assert_eq!(LOGIN_FAILED_TIMED_OUT, "timed_out");
         assert_eq!(LOGIN_FAILED_STATE_MISMATCH, "state_mismatch");
         assert_eq!(LOGIN_FAILED_LISTENER_DIED, "listener_died");
+        #[cfg(not(debug_assertions))]
         assert_eq!(SIGN_IN_URL_BASE, "https://chroneli.com/desktop-login");
+        #[cfg(debug_assertions)]
+        assert_eq!(SIGN_IN_URL_BASE, "http://localhost:3100/desktop-login");
     }
 
     #[test]
     fn the_sign_in_url_stays_on_the_origin_the_capability_names() {
-        // The window's capability is scoped to https://chroneli.com. Sending the
-        // browser somewhere else would hand a fresh session token to an origin
-        // this shell does not trust, and the resulting page could not talk back
-        // to the shell anyway.
+        // The browser is handed a fresh session token at this origin, and the
+        // page it lands on must be the SAME origin the window is on: the token
+        // is minted there and redeemed there. Sending it anywhere else hands a
+        // session to an origin this shell does not trust, and the page could
+        // not talk back to the shell anyway.
+        //
+        // Release trusts https://chroneli.com (capabilities/default.json).
+        // Debug trusts http://localhost:3100 (capabilities/dev-localhost.json,
+        // with tauri.dev.conf.json pointing devUrl at the same place).
+        #[cfg(debug_assertions)]
+        let origin = "http://localhost:3100";
+        #[cfg(not(debug_assertions))]
+        let origin = "https://chroneli.com";
         assert!(
-            SIGN_IN_URL_BASE.starts_with("https://chroneli.com/"),
-            "the sign-in URL left the trusted origin: {SIGN_IN_URL_BASE}"
+            SIGN_IN_URL_BASE.starts_with(&format!("{origin}/")),
+            "the sign-in URL left the origin this profile trusts: {SIGN_IN_URL_BASE}"
+        );
+
+        // And that origin must be one the CAPABILITY actually allowlists.
+        // Splitting the sign-in URL by profile created a four-place coupling —
+        // this const, devUrl in tauri.dev.conf.json, the remote.urls in the
+        // matching capability, and `pnpm dev --port 3100`. Three of the four are
+        // JSON that no compiler reads, so drift between them is silent: the
+        // window loads, the button works, and every invoke is refused with
+        // nothing on screen. Reading the JSON here is the cheapest thing that
+        // fails loudly instead.
+        #[cfg(debug_assertions)]
+        let capability = include_str!("../tauri.dev.conf.json");
+        #[cfg(not(debug_assertions))]
+        let capability = include_str!("../capabilities/default.json");
+        assert!(
+            capability.contains(origin),
+            "no capability allowlists {origin}, so the page served there cannot invoke anything"
+        );
+
+        // The dev config has to send the window to that same origin, or the
+        // shell signs in at one origin and verifies at another.
+        #[cfg(debug_assertions)]
+        assert!(
+            include_str!("../tauri.dev.conf.json").contains(origin),
+            "tauri.dev.conf.json does not point devUrl at {origin}"
         );
     }
 

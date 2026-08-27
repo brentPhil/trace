@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "devUrl": "http://localhost:3100"
+  },
+  "app": {
+    "security": {
+      "capabilities": [
+        "remote-chroneli",
+        {
+          "identifier": "dev-localhost",
+          "description": "DEVELOPMENT ONLY. The same grants as remote-chroneli, for the local dev server. Deliberately INLINE here rather than a file in capabilities/: a file there is auto-discovered and would ship in every release build, and pinning it out again by listing capabilities in tauri.conf.json is a guarantee that lives in a different file from the risk. Inline, the grant physically cannot exist unless this config is merged, which only `pnpm tauri:dev` does.",
+          "windows": ["main"],
+          "remote": {
+            "urls": ["http://localhost:3100"]
+          },
+          "permissions": [
+            "core:event:allow-listen",
+            "core:event:allow-unlisten",
+            "allow-timer-state",
+            "allow-begin-browser-login"
+          ]
+        }
+      ]
+    }
+  }
+}

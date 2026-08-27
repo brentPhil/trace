@@ -116,6 +116,59 @@ develop bridge changes takes a second step: the capability in
 silently stops receiving state. You would have to add the localhost origin
 there too — and that grant must **not** ship in a release build.
 
+## Running it against your local web app
+
+`pnpm tauri dev` points the shell at **production**. That is right for a smoke
+test of the shipped app and useless for developing, because the shell loads its
+frontend remotely: anything you have not deployed does not exist as far as the
+window is concerned. A sign-in button you just wrote is not there, and
+`/desktop-login` 404s.
+
+For a real loop, run two terminals:
+
+```bash
+pnpm dev
+```
+
+```bash
+pnpm tauri:dev
+```
+
+`tauri:dev` merges `src-tauri/tauri.dev.conf.json` over the base config, which
+does two things that both have to happen together:
+
+- points `devUrl` at `http://localhost:3100`, and
+- grants that origin the same capability the production origin has.
+
+The second is not optional and its absence is invisible. The window would load
+your dev server perfectly, the button would render, and every `invoke` would be
+refused by the ACL with nothing on screen and nothing in the console — the same
+silent failure that made the tray inert for an entire branch. Tauri rejects IPC
+from any origin a capability does not name.
+
+That dev grant is written **inline** in the dev config rather than as a file in
+`capabilities/`. Files there are auto-discovered and would ship in every release
+build; inline, the grant cannot exist unless that config is merged. Verified by
+building both ways and grepping the binary: the dev origin appears only with the
+dev config applied.
+
+`SIGN_IN_URL_BASE` in `src-tauri/src/lib.rs` is split on `debug_assertions` for
+the same reason. The sign-in page, the one-time token and the session cookie
+must all come from the origin the window is on. A debug shell that sent you to
+production to sign in would appear to work — the browser signs into production,
+mints a production token, posts it back — and then the dev webview verifies it
+against localhost, where it was never issued. You would see "that link expired"
+with nothing wrong at either end.
+
+One number lives in four places: `--port 3100` in the `dev` script, `devUrl`,
+the inline capability's `remote.urls`, and `SIGN_IN_URL_BASE`. Three are JSON no
+compiler reads, so `the_sign_in_url_stays_on_the_origin_the_capability_names`
+reads the JSON at compile time and fails loudly if they drift.
+
+Your Convex dev deployment's `SITE_URL` has to match `http://localhost:3100`
+too, and so does the Google OAuth redirect URI, or Better Auth will mint
+cookies for an origin the window is not on.
+
 ## Regenerating icons
 
 Icons are derived from `src/logo.svg`, the same source the PWA icons come
