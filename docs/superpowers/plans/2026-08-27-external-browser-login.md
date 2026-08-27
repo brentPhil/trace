@@ -784,7 +784,7 @@ git commit -m "fix(desktop): a loopback listener that refuses a nonce it did not
 
 **Interfaces:**
 - Consumes: Task 4's `browser_auth::begin`, `Handoff`, `HandoffError`.
-- Produces, used by Task 6: command `begin_browser_login` taking no arguments; events `browser-login-token` (payload `{ token: string }`) and `browser-login-failed` (payload `{ reason: "timed_out" | "state_mismatch" | "bind_failed" }`).
+- Produces, used by Task 6: command `begin_browser_login` taking no arguments; events `browser-login-token` (payload `{ token: string }`) and `browser-login-failed` (payload `{ reason: "timed_out" | "state_mismatch" | "listener_died" }`).
 
 **READ THIS FIRST.** `build.rs` already declares an app manifest listing `timer_state`. A command not in that list is rejected for the remote origin with no error the page can see. Adding it to `generate_handler!` alone is NOT enough — that omission is exactly what made the tray inert for the whole previous branch. Both edits, or the feature silently does nothing.
 
@@ -856,7 +856,7 @@ fn begin_browser_login(app: AppHandle) -> Result<(), String> {
             }
             Ok(Err(browser_auth::HandoffError::StateMismatch)) => "state_mismatch",
             Ok(Err(browser_auth::HandoffError::TimedOut)) => "timed_out",
-            Err(_) => "bind_failed",
+            Err(_) => "listener_died",
         };
         let _ = handle.emit("browser-login-failed", serde_json::json!({ "reason": reason }));
     });
@@ -1072,7 +1072,7 @@ import { errorMessage } from "@/lib/error-message"
 const FAILURE_COPY: Record<string, string> = {
   timed_out: "That timed out waiting for your browser. Try again.",
   state_mismatch: "That sign-in did not match this app. Try again.",
-  bind_failed: "Could not listen for your browser's reply. Try again.",
+  listener_died: "Lost track of your browser’s reply. Try again.",
 }
 
 /**
