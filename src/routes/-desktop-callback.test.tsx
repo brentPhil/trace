@@ -1,3 +1,4 @@
+import { StrictMode } from "react"
 import { cleanup, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { DesktopCallback } from "@/routes/desktop-callback"
@@ -33,5 +34,27 @@ describe("DesktopCallback", () => {
     render(<DesktopCallback token="" />)
     expect(await screen.findByRole("alert")).toBeTruthy()
     expect(verify).not.toHaveBeenCalled()
+  })
+
+  it("does not re-spend the token under StrictMode's mount/cleanup/mount", async () => {
+    verify.mockResolvedValue({ data: { session: {} }, error: null })
+    // StrictMode is what actually reproduces the defect: React deliberately
+    // runs the effect, cleans it up, and runs it again on the very first
+    // mount. Without the ref guard, that second invocation calls `verify`
+    // again with the same, now-consumed token.
+    render(
+      <StrictMode>
+        <DesktopCallback token="tok" />
+      </StrictMode>
+    )
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/timer"))
+    expect(verify).toHaveBeenCalledTimes(1)
+  })
+
+  it("shows the failure state instead of hanging forever when verify rejects", async () => {
+    verify.mockRejectedValue(new Error("network down"))
+    render(<DesktopCallback token="tok" />)
+    expect(await screen.findByRole("alert")).toBeTruthy()
+    expect(replace).not.toHaveBeenCalled()
   })
 })
