@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth/minimal"
 import { createClient } from "@convex-dev/better-auth"
 import { convex } from "@convex-dev/better-auth/plugins"
+import { oneTimeToken } from "better-auth/plugins/one-time-token"
 import { requireActionCtx } from "@convex-dev/better-auth/utils"
 import authConfig from "./auth.config"
 import { sendPasswordResetEmail } from "./email"
@@ -128,6 +129,20 @@ export const createAuth = (ctx: GenericCtx<DataModel>) => {
     plugins: [
       // Required for Convex compatibility.
       convex({ authConfig }),
+      /*
+       * The desktop shell's session handoff.
+       *
+       * Two minutes rather than the three-minute default: the token travels
+       * through a browser redirect into a loopback listener that is already
+       * running and waiting, so the window between mint and redeem is seconds.
+       * A token that grants a full session should not outlive its purpose.
+       *
+       * Storage needs no schema work — the plugin writes through
+       * `createVerificationValue` / `consumeVerificationValue` on the standard
+       * `verification` table, which the Convex Better Auth component already
+       * defines with `identifier` / `value` / `expiresAt`.
+       */
+      oneTimeToken({ expiresIn: 2 }),
     ],
   })
 }
