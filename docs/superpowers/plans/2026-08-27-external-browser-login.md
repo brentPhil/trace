@@ -990,7 +990,11 @@ export async function onBrowserLogin(handlers: {
 Run: `npx vitest run src/lib/desktop-bridge.test.ts`
 Expected: PASS — the existing tests plus 4 new.
 
-- [ ] **Step 5: Write the failing component test** `src/components/auth/desktop-sign-in.test.tsx`:
+- [ ] **Step 5: Write the failing component test** `src/components/auth/desktop-sign-in.test.tsx`.
+
+NOTE: jest-dom is NOT installed in this repo — there is no `toBeInTheDocument`,
+`toHaveTextContent` or `toBeEnabled`. Use plain assertions, as every other test
+here does. `cleanup()` in `afterEach` is required; there is no auto-cleanup.
 
 ```tsx
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -1017,7 +1021,7 @@ describe("DesktopSignIn", () => {
     render(<DesktopSignIn />)
     fireEvent.click(screen.getByRole("button", { name: /continue in browser/i }))
     expect(bridge.beginBrowserLogin).toHaveBeenCalledTimes(1)
-    expect(await screen.findByText(/waiting for your browser/i)).toBeInTheDocument()
+    expect(await screen.findByText(/waiting for your browser/i)).toBeTruthy()
   })
 
   it("enters the app when the token arrives", async () => {
@@ -1038,17 +1042,16 @@ describe("DesktopSignIn", () => {
       failed: (r: string) => void
     }
     handlers.failed("timed_out")
-    expect(await screen.findByRole("alert")).toHaveTextContent(/timed out/i)
-    expect(
-      screen.getByRole("button", { name: /continue in browser/i })
-    ).toBeEnabled()
+    expect((await screen.findByRole("alert")).textContent).toMatch(/timed out/i)
+    const retry = screen.getByRole("button", { name: /continue in browser/i })
+    expect((retry as HTMLButtonElement).disabled).toBe(false)
   })
 
   it("reports a failure to open the browser at all", async () => {
     bridge.beginBrowserLogin.mockRejectedValueOnce(new Error("no port"))
     render(<DesktopSignIn />)
     fireEvent.click(screen.getByRole("button", { name: /continue in browser/i }))
-    expect(await screen.findByRole("alert")).toHaveTextContent(/no port/i)
+    expect((await screen.findByRole("alert")).textContent).toMatch(/no port/i)
   })
 })
 ```
