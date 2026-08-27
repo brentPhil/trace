@@ -1,3 +1,5 @@
+pub mod browser_auth;
+
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

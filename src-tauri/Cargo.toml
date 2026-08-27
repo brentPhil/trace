@@ -15,6 +15,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+getrandom = "0.3"
 
 # Close hides to tray and Quit lives only in the tray menu, so a user who has
 # lost the tray icon in Windows 11's overflow flyout will relaunch the exe —
