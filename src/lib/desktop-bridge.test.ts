@@ -6,7 +6,13 @@
 // file opts into jsdom rather than the whole module inventing a Node-safe
 // window check that nothing else needs.
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { isDesktopShell, onTrayCommand, pushTimerState } from "@/lib/desktop-bridge"
+import {
+  beginBrowserLogin,
+  isDesktopShell,
+  onBrowserLogin,
+  onTrayCommand,
+  pushTimerState,
+} from "@/lib/desktop-bridge"
 
 // vi.mock calls are hoisted above every import by vitest's transform, so
 // this reads top-to-bottom (imports, then the mocks they back) without
@@ -107,6 +113,45 @@ describe("onTrayCommand", () => {
     listeners.get("tray-stop")?.({ payload: null })
     expect(stop).toHaveBeenCalledTimes(1)
     expect(start).toHaveBeenCalledTimes(1)
+
+    cleanup()
+    expect(unlisten).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe("beginBrowserLogin", () => {
+  it("does nothing outside the shell", async () => {
+    await beginBrowserLogin()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it("invokes the command inside the shell", async () => {
+    enterShell()
+    await beginBrowserLogin()
+    expect(invoke).toHaveBeenCalledWith("begin_browser_login")
+  })
+
+  it("lets a rejection propagate so the caller can report it", async () => {
+    enterShell()
+    invoke.mockRejectedValueOnce(new Error("no port"))
+    await expect(beginBrowserLogin()).rejects.toThrow("no port")
+  })
+})
+
+describe("onBrowserLogin", () => {
+  it("routes each event to its own handler", async () => {
+    enterShell()
+    const token = vi.fn()
+    const failed = vi.fn()
+    const cleanup = await onBrowserLogin({ token, failed })
+
+    listeners.get("browser-login-token")?.({ payload: { token: "tok" } })
+    expect(token).toHaveBeenCalledWith("tok")
+    expect(failed).not.toHaveBeenCalled()
+
+    listeners.get("browser-login-failed")?.({ payload: { reason: "timed_out" } })
+    expect(failed).toHaveBeenCalledWith("timed_out")
+    expect(token).toHaveBeenCalledTimes(1)
 
     cleanup()
     expect(unlisten).toHaveBeenCalledTimes(2)

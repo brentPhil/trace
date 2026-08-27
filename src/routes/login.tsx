@@ -1,6 +1,8 @@
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { AuthBackdrop } from "@/components/auth-backdrop"
 import { AuthForm } from "@/components/auth-form"
+import { DesktopSignIn } from "@/components/auth/desktop-sign-in"
+import { isDesktopShell } from "@/lib/desktop-bridge"
 import { safeRedirect } from "@/lib/redirect"
 import { pageTitle } from "@shared/brand"
 
@@ -23,11 +25,15 @@ function LoginRoute() {
   return (
     <main className="relative flex min-h-svh [align-items:safe_center] justify-center p-6">
       <AuthBackdrop />
-      <AuthForm
-        mode="signin"
-        redirectTo={safeRedirect(search.redirect)}
-        className="w-full max-w-sm"
-      />
+      {isDesktopShell() ? (
+        <DesktopSignIn />
+      ) : (
+        <AuthForm
+          mode="signin"
+          redirectTo={safeRedirect(search.redirect)}
+          className="w-full max-w-sm"
+        />
+      )}
     </main>
   )
 }

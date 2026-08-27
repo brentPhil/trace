@@ -64,3 +64,38 @@ export async function onTrayCommand(handlers: {
     unlistenStop()
   }
 }
+
+/**
+ * Asks the shell to open the user's real browser to sign in.
+ *
+ * Rejections are deliberately NOT swallowed here, unlike `pushTimerState`
+ * above: failing to open a browser is the end of the road for the user and
+ * they need to be told. The empty catch on the timer push is defensible only
+ * because the next state change retries it; nothing retries this.
+ */
+export async function beginBrowserLogin(): Promise<void> {
+  if (!isDesktopShell()) return
+  const { invoke } = await import("@tauri-apps/api/core")
+  await invoke("begin_browser_login")
+}
+
+/** The shell's answer to `beginBrowserLogin`, whichever way it went. */
+export async function onBrowserLogin(handlers: {
+  token: (token: string) => void
+  failed: (reason: string) => void
+}): Promise<() => void> {
+  if (!isDesktopShell()) return () => {}
+  const { listen } = await import("@tauri-apps/api/event")
+  const unlistenToken = await listen<{ token: string }>(
+    "browser-login-token",
+    (event) => handlers.token(event.payload.token)
+  )
+  const unlistenFailed = await listen<{ reason: string }>(
+    "browser-login-failed",
+    (event) => handlers.failed(event.payload.reason)
+  )
+  return () => {
+    unlistenToken()
+    unlistenFailed()
+  }
+}
