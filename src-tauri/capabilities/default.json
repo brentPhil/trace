@@ -1,6 +1,6 @@
 {
   "identifier": "remote-chroneli",
-  "description": "The production site is the app; it may push timer state and listen for tray commands. Nothing else.",
+  "description": "The production site is the app; it may push timer state, start a browser sign-in, and listen for shell events. Nothing else. Note what is NOT here: no opener grant. The shell launches the sign-in URL itself from Rust (tauri_plugin_opener::open_url is a plain function call that never crosses IPC and never consults this file), so the page is given no way to make the shell launch anything at all — not even a chroneli.com URL. See begin_browser_login in src/lib.rs and the_acl_withholds_what_a_plain_browser_tab_could_not_do.",
   "windows": ["main"],
   "remote": {
     "urls": ["https://chroneli.com"]
@@ -8,6 +8,7 @@
   "permissions": [
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "allow-timer-state"
+    "allow-timer-state",
+    "allow-begin-browser-login"
   ]
 }

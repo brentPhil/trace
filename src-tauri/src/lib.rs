@@ -1,4 +1,4 @@
-pub mod browser_auth;
+mod browser_auth;
 
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -55,13 +55,14 @@ const RECORDING_ICON: &[u8] = include_bytes!("../icons/tray-recording.png");
 
 /// The wire contract with the web app, in one place.
 ///
-/// These four strings are the whole of the shell's public surface, and every
-/// one of them is matched by a bare literal in `src/lib/desktop-bridge.ts`. A
-/// rename on this side is not a compile error on either side — it is a shell
-/// that silently stops responding — so `the_wire_identifiers_are_pinned` holds
-/// them still. They are `pub` because they genuinely are this crate's exported
-/// contract, and because that keeps `TIMER_STATE_COMMAND` (which nothing in the
-/// Rust build reads — see below) out of the dead-code lint.
+/// These strings are the whole of the shell's public surface, and every one of
+/// them is matched by a bare literal in `src/lib/desktop-bridge.ts`. A rename on
+/// this side is not a compile error on either side — it is a shell that silently
+/// stops responding — so `the_wire_identifiers_are_pinned` and
+/// `the_browser_login_identifiers_are_pinned` hold them still. They are `pub`
+/// because they genuinely are this crate's exported contract, and because that
+/// keeps the command consts (which nothing in the Rust build reads — see below)
+/// out of the dead-code lint.
 ///
 /// `#[tauri::command]` derives the invoke name from the function IDENTIFIER, so
 /// this const cannot be the source of truth for it; it is a tripwire that
@@ -75,6 +76,55 @@ pub const TRAY_START_EVENT: &str = "tray-start";
 pub const TRAY_STOP_EVENT: &str = "tray-stop";
 /// The label of the one window, as declared in `tauri.conf.json`.
 pub const MAIN_WINDOW_LABEL: &str = "main";
+
+/// The command the page calls to start a sign-in in the user's real browser.
+///
+/// Same rules as `TIMER_STATE_COMMAND`: the invoke name comes from the function
+/// IDENTIFIER, this const is the tripwire, and the identifier must also appear
+/// in `build.rs`'s app manifest or the remote origin's invoke is rejected with
+/// nothing the page can see.
+pub const BEGIN_BROWSER_LOGIN_COMMAND: &str = "begin_browser_login";
+/// Emitted with `{ "token": string }` once the browser has handed a session
+/// back. This is the only event that carries a secret.
+pub const BROWSER_LOGIN_TOKEN_EVENT: &str = "browser-login-token";
+/// Emitted with `{ "reason": string }` when a started sign-in ends without a
+/// token. One of the `LOGIN_FAILED_*` reasons below.
+pub const BROWSER_LOGIN_FAILED_EVENT: &str = "browser-login-failed";
+
+/// The browser never came back inside `LOGIN_TIMEOUT`.
+///
+/// Also what a user sees when someone else's request kept hitting the loopback
+/// port with the wrong nonce: the listener answers those 404 and keeps waiting
+/// for the real callback rather than ending the sign-in on a stranger's say-so,
+/// so a sustained mismatch runs the clock out and surfaces here.
+pub const LOGIN_FAILED_TIMED_OUT: &str = "timed_out";
+/// A callback arrived carrying a nonce that was not the one this sign-in
+/// minted, and the listener chose to end the flow rather than continue.
+pub const LOGIN_FAILED_STATE_MISMATCH: &str = "state_mismatch";
+/// The listener stopped without reporting an outcome — its thread died, or the
+/// channel was torn down under it.
+///
+/// Distinct from a BIND failure on purpose. A bind failure happens before the
+/// browser is ever opened and is returned synchronously from
+/// `begin_browser_login`, so the page learns about it as a rejected invoke; if
+/// this event said "bind_failed" it would be telling the user to go looking at
+/// a port that opened perfectly well.
+pub const LOGIN_FAILED_LISTENER_DIED: &str = "listener_died";
+
+/// Where the browser is sent to sign in. `?port=` and `?state=` are appended.
+///
+/// Matched by the route the web app serves at `/desktop-login`; a rename on
+/// either side is a browser tab that 404s, not a compile error.
+pub const SIGN_IN_URL_BASE: &str = "https://chroneli.com/desktop-login";
+
+/// How long the shell waits for the browser before giving up.
+///
+/// Sized for the slowest HONEST sign-in — pick an account, type a password,
+/// reach for a phone and wait out a second factor — not as a cancellation
+/// mechanism. Cancelling is dropping the `Callback`, which frees the port at
+/// once; this number only bounds the case where the user walks away and never
+/// tells us.
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 
 const IDLE_TOOLTIP: &str = "Chroneli — no timer running";
 const IDLE_STATUS: &str = "No timer running";
@@ -170,6 +220,108 @@ fn timer_state(app: AppHandle, running: bool, title: String, started_at_ms: Opti
         };
     }
     refresh_tray(&app);
+}
+
+/// Opens the system browser at the sign-in page and waits for the handoff.
+///
+/// Sign-in cannot happen in this window: Google refuses OAuth in an embedded
+/// webview, so the shell hands the flow to the user's real browser and listens
+/// on loopback for it to come back. See `browser_auth`.
+///
+/// Returns as soon as the browser has been LAUNCHED — the token arrives later
+/// on `BROWSER_LOGIN_TOKEN_EVENT`. Two channels, deliberately, because the two
+/// classes of failure need different treatment:
+///
+///   - Everything that goes wrong before the browser opens (no loopback port,
+///     no system entropy, no browser) is returned as `Err`, which the page sees
+///     as a rejected `invoke`. The user is still looking at the button they
+///     pressed, and nothing has been started that needs cleaning up.
+///   - Everything that goes wrong AFTER (timeout, a mismatched nonce, a
+///     listener that died) arrives as `BROWSER_LOGIN_FAILED_EVENT`, because by
+///     then the invoke has long since resolved.
+///
+/// Not one path is dropped on the floor. A sign-in that fails silently leaves
+/// the user watching a spinner with no way to learn it is over, which is worse
+/// than any of the messages below.
+#[tauri::command]
+fn begin_browser_login(app: AppHandle) -> Result<(), String> {
+    // The two `BeginError` variants are kept apart rather than flattened into
+    // one "could not start sign-in". A bind failure is local and often fixable
+    // by the user (a firewall rule, an exhausted ephemeral port range); an
+    // entropy failure is the OS declining to seed the nonce that is the entire
+    // security of this flow, and continuing without one is not on the table.
+    // Sending someone to check their firewall when the CSPRNG was unavailable
+    // wastes the only diagnostic they get.
+    let (handoff, callback) = browser_auth::begin(LOGIN_TIMEOUT).map_err(|err| match err {
+        browser_auth::BeginError::Bind(_) => {
+            format!("could not open a local port to receive the sign-in: {err}")
+        }
+        browser_auth::BeginError::Entropy(_) => {
+            format!("could not generate a secure sign-in nonce: {err}")
+        }
+    })?;
+
+    // Both values are safe in a query string as they stand — a `u16` and the 64
+    // hex characters `mint_state` produces — so there is nothing here to
+    // percent-encode.
+    let url = format!(
+        "{SIGN_IN_URL_BASE}?port={}&state={}",
+        handoff.port, handoff.state
+    );
+
+    // `tauri_plugin_opener::open_url` is a plain function call: it hands the URL
+    // to the OS handler and never crosses IPC, so it consults neither the
+    // plugin nor the ACL. That is why the opener plugin is NOT registered on the
+    // builder and `capabilities/default.json` grants no `opener:` permission —
+    // the page has no way to make the shell launch anything, not even a
+    // chroneli.com URL. Registering it would also inject the plugin's
+    // click-interception script, which calls `preventDefault()` on every
+    // `target="_blank"` link and then routes it through an ACL that would refuse
+    // anything off-origin, turning the app's external links into dead text.
+    //
+    // On the error path `callback` is dropped right here, and Task 4's leash
+    // means the listener notices within one poll and gives the port back rather
+    // than squatting on it for the full five minutes.
+    tauri_plugin_opener::open_url(&url, None::<&str>)
+        .map_err(|err| format!("could not open your browser to sign in: {err}"))?;
+
+    let handle = app.clone();
+    // `callback` MOVES into this thread and is dropped when the thread returns.
+    // That is what it is for: it is `Send` but not `Sync`, so it could not go
+    // into tauri's managed state without wrapping it, and holding it anywhere
+    // that outlives the flow would re-create the bug the leash exists to fix.
+    // Owning it here means the port is released the instant an outcome is known
+    // — token, timeout or failure — with no separate cleanup path to forget.
+    std::thread::spawn(move || {
+        let reason = match callback.recv() {
+            Ok(Ok(token)) => {
+                // The token goes only to the one window, whose origin is
+                // chroneli.com; there is no other webview to broadcast to.
+                //
+                // A failed emit is ignored because there is nothing left to tell
+                // — `emit` fails when the app is on its way down, and a user
+                // whose window has gone will sign in again on next launch.
+                let _ = handle.emit(
+                    BROWSER_LOGIN_TOKEN_EVENT,
+                    serde_json::json!({ "token": token }),
+                );
+                return;
+            }
+            Ok(Err(browser_auth::HandoffError::StateMismatch)) => LOGIN_FAILED_STATE_MISMATCH,
+            Ok(Err(browser_auth::HandoffError::TimedOut)) => LOGIN_FAILED_TIMED_OUT,
+            // The sender went away without sending: the listener thread is gone.
+            // Rare, and reported as itself rather than folded into "timed out" —
+            // the user did not wait five minutes and should not be told they
+            // did.
+            Err(_) => LOGIN_FAILED_LISTENER_DIED,
+        };
+        let _ = handle.emit(
+            BROWSER_LOGIN_FAILED_EVENT,
+            serde_json::json!({ "reason": reason }),
+        );
+    });
+
+    Ok(())
 }
 
 /// Asks for the tray to be rewritten from the current state. Safe to call from
@@ -290,7 +442,10 @@ pub fn run() {
         .manage(Shared {
             state: Mutex::new(TimerState::default()),
         })
-        .invoke_handler(tauri::generate_handler![timer_state])
+        // Every name here must ALSO be in `build.rs`'s app manifest and granted
+        // in `capabilities/default.json`. This list alone is not enough for the
+        // remote origin — see the comment in build.rs.
+        .invoke_handler(tauri::generate_handler![timer_state, begin_browser_login])
         .setup(|app| {
             let status = MenuItem::with_id(app, "status", IDLE_STATUS, false, None::<&str>)?;
             let start = MenuItem::with_id(app, "start", "Start timer", true, None::<&str>)?;
@@ -358,7 +513,9 @@ pub fn run() {
 mod tests {
     use super::{
         format_elapsed, start_stop_enabled, tray_icon_bytes, tray_line, MenuEnabled, TimerState,
-        IDLE_ICON, MAIN_WINDOW_LABEL, RECORDING_ICON, TIMER_STATE_COMMAND, TRAY_START_EVENT,
+        BEGIN_BROWSER_LOGIN_COMMAND, BROWSER_LOGIN_FAILED_EVENT, BROWSER_LOGIN_TOKEN_EVENT,
+        IDLE_ICON, LOGIN_FAILED_LISTENER_DIED, LOGIN_FAILED_STATE_MISMATCH, LOGIN_FAILED_TIMED_OUT,
+        MAIN_WINDOW_LABEL, RECORDING_ICON, SIGN_IN_URL_BASE, TIMER_STATE_COMMAND, TRAY_START_EVENT,
         TRAY_STOP_EVENT,
     };
 
@@ -519,6 +676,34 @@ mod tests {
     }
 
     #[test]
+    fn the_browser_login_identifiers_are_pinned() {
+        // The other half of the wire contract, matched by bare literals on the
+        // web side. The reasons in particular: the page switches on these
+        // strings to decide what to tell the user, and a rename here degrades
+        // three specific messages into one unhelpful fallback with nothing
+        // failing to warn anyone.
+        assert_eq!(BEGIN_BROWSER_LOGIN_COMMAND, "begin_browser_login");
+        assert_eq!(BROWSER_LOGIN_TOKEN_EVENT, "browser-login-token");
+        assert_eq!(BROWSER_LOGIN_FAILED_EVENT, "browser-login-failed");
+        assert_eq!(LOGIN_FAILED_TIMED_OUT, "timed_out");
+        assert_eq!(LOGIN_FAILED_STATE_MISMATCH, "state_mismatch");
+        assert_eq!(LOGIN_FAILED_LISTENER_DIED, "listener_died");
+        assert_eq!(SIGN_IN_URL_BASE, "https://chroneli.com/desktop-login");
+    }
+
+    #[test]
+    fn the_sign_in_url_stays_on_the_origin_the_capability_names() {
+        // The window's capability is scoped to https://chroneli.com. Sending the
+        // browser somewhere else would hand a fresh session token to an origin
+        // this shell does not trust, and the resulting page could not talk back
+        // to the shell anyway.
+        assert!(
+            SIGN_IN_URL_BASE.starts_with("https://chroneli.com/"),
+            "the sign-in URL left the trusted origin: {SIGN_IN_URL_BASE}"
+        );
+    }
+
+    #[test]
     fn the_command_const_matches_the_handler_function() {
         // `#[tauri::command]` puts the function's IDENTIFIER on the wire, so the
         // const alone would not notice a rename. Naming the item here makes a
@@ -526,6 +711,9 @@ mod tests {
         // web side's `invoke(...)` has to match.
         let _handler = super::timer_state;
         assert_eq!(TIMER_STATE_COMMAND, stringify!(timer_state));
+
+        let _login = super::begin_browser_login;
+        assert_eq!(BEGIN_BROWSER_LOGIN_COMMAND, stringify!(begin_browser_login));
     }
 
     /// The one test in this file that crosses the IPC boundary, and the reason
@@ -575,6 +763,47 @@ mod tests {
         );
     }
 
+    /// The same assertion for the sign-in command, and for the same reason.
+    ///
+    /// A command that is in `tauri::generate_handler!` but missing from
+    /// `build.rs`'s app manifest resolves to `None` here — which at runtime is a
+    /// rejected invoke the page cannot observe. That is precisely how the tray
+    /// shipped inert through six reviews. Nothing else in this crate fails when
+    /// the manifest entry is missing: not the compiler, not the type system, not
+    /// any other test.
+    #[test]
+    fn the_acl_lets_chroneli_com_begin_a_browser_login() {
+        let mut context = acl_context();
+        let authority = context.runtime_authority_mut();
+
+        let remote = remote_origin();
+        assert!(
+            authority
+                .resolve_access(
+                    BEGIN_BROWSER_LOGIN_COMMAND,
+                    MAIN_WINDOW_LABEL,
+                    MAIN_WINDOW_LABEL,
+                    &remote,
+                )
+                .is_some(),
+            "the remote origin cannot invoke {BEGIN_BROWSER_LOGIN_COMMAND}: no capability grants it"
+        );
+
+        // The app manifest gates the LOCAL origin too, so a dev build pointed at
+        // a bundled frontend must keep working.
+        assert!(
+            authority
+                .resolve_access(
+                    BEGIN_BROWSER_LOGIN_COMMAND,
+                    MAIN_WINDOW_LABEL,
+                    MAIN_WINDOW_LABEL,
+                    &tauri::ipc::Origin::Local,
+                )
+                .is_some(),
+            "the local origin cannot invoke {BEGIN_BROWSER_LOGIN_COMMAND}"
+        );
+    }
+
     /// The tray's Start/Stop are `app.emit`s, which the page only receives if it
     /// may run `plugin:event|listen` — and `onTrayCommand` calls the unlisten it
     /// returns. Narrowing the capability away from `core:default` is exactly the
@@ -604,6 +833,15 @@ mod tests {
     /// a public const, so `core:tray:allow-remove-by-id` lets the page delete
     /// Chroneli's own tray icon; since close only hides and Quit lives only in
     /// that menu, that leaves a running, invisible, un-quittable process.
+    ///
+    /// `plugin:opener|*` joins the list now that `tauri-plugin-opener` is a
+    /// dependency. The shell opens the sign-in URL by calling that crate's plain
+    /// `open_url` function, which hands the URL straight to the OS and never
+    /// crosses IPC — so the plugin is not registered on the builder and the page
+    /// is granted nothing. Even an `opener:allow-open-url` narrowed to
+    /// chroneli.com would be a launcher the page has no use for, and
+    /// `open_path` is the sharp one: the OS "open with default program" verb
+    /// aimed at an arbitrary local path, in a shell with no `fs` plugin.
     #[test]
     fn the_acl_withholds_what_a_plain_browser_tab_could_not_do() {
         let mut context = acl_context();
@@ -621,6 +859,9 @@ mod tests {
             "plugin:menu|popup",
             "plugin:menu|set_as_app_menu",
             "plugin:path|resolve_directory",
+            "plugin:opener|open_url",
+            "plugin:opener|open_path",
+            "plugin:opener|reveal_item_in_dir",
         ] {
             assert!(
                 authority
