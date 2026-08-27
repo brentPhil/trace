@@ -93,10 +93,28 @@ pnpm install
 pnpm tauri dev
 ```
 
-This opens the native window pointed at `https://chroneli.com` (or, if you're
-also running the web app locally, whatever `frontendDist` resolves to — check
-`src-tauri/tauri.conf.json` before assuming). There's no frontend to build
-first; the Tauri CLI itself comes from `devDependencies`.
+This opens the native window pointed at `https://chroneli.com`. There's no
+frontend to build first; the Tauri CLI itself comes from `devDependencies`.
+
+**Dev and release read different config keys for that URL**, which is worth
+knowing before you change either. Tauri resolves the window's address in
+`get_app_url`: a release build uses `frontendDist` when that is a URL, but
+`tauri dev` uses **`devUrl` only** and never consults `frontendDist` at all.
+Both are set to `https://chroneli.com` in `src-tauri/tauri.conf.json` so the
+two modes agree. Delete `devUrl` and dev does not fall back to the other key —
+it serves embedded assets instead, of which a URL-valued `frontendDist`
+produces none, and the window shows `asset not found: index.html`.
+
+Note the consequence: **`tauri dev` runs against production**, with real data
+and a real session. That is deliberate — it is what the shipped app does — but
+it means the shell is not the place to try out unreleased web changes.
+
+Pointing `devUrl` at the local web dev server (`http://localhost:3100`) to
+develop bridge changes takes a second step: the capability in
+`src-tauri/capabilities/default.json` allowlists exactly
+`https://chroneli.com`, so IPC from any other origin is rejected and the tray
+silently stops receiving state. You would have to add the localhost origin
+there too — and that grant must **not** ship in a release build.
 
 ## Regenerating icons
 

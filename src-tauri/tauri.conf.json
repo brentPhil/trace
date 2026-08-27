@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.chroneli.desktop",
   "build": {
+    "devUrl": "https://chroneli.com",
     "frontendDist": "https://chroneli.com"
   },
   "app": {
