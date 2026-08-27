@@ -546,13 +546,21 @@ mod tests {
 Run: `export PATH="$PATH:$HOME/.cargo/bin"; cargo test --manifest-path src-tauri/Cargo.toml browser_auth`
 Expected: FAIL to compile — `parse_callback` not found.
 
-- [ ] **Step 3: Implement.** Prepend to `src-tauri/src/browser_auth.rs`, above the test module:
+- [ ] **Step 3: Add the entropy dependency.**
+
+Run: `export PATH="$PATH:$HOME/.cargo/bin"; cargo add getrandom@0.3 --manifest-path src-tauri/Cargo.toml`
+
+This resolves to a crate already present transitively (0.3.4), so it adds no new
+third-party code to the build — it only makes the dependency direct and
+declared.
+
+- [ ] **Step 4: Implement.** Prepend to `src-tauri/src/browser_auth.rs`, above the test module:
 
 ```rust
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 /// What the shell needs in order to send the browser somewhere useful.
 pub struct Handoff {
@@ -649,22 +657,26 @@ fn percent_decode(raw: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// A nonce without pulling in a crypto crate.
+/// A 256-bit nonce from the operating system's CSPRNG.
 ///
-/// Its only job is to be unguessable by a local process racing us for the
-/// port; it authenticates nobody by itself, and the token it guards is
-/// single-use and expires in two minutes. Nanosecond time through a
-/// splitmix64 round gives that without adding `rand` for one string.
-fn mint_state() -> String {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    let mut x = nanos ^ 0x9e37_79b9_7f4a_7c15;
-    x = (x ^ (x >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    x = (x ^ (x >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    x ^= x >> 31;
-    format!("{x:016x}{nanos:016x}")
+/// This value is the only thing standing between a local process that guessed
+/// the port and a token that grants a full session, so it must not be
+/// PREDICTABLE — which rules out anything derived from the clock. A nonce
+/// seeded from the current nanosecond looks random and is not: an attacker who
+/// knows roughly when sign-in began searches a very small space.
+///
+/// `getrandom` rather than `rand`: it is already in this tree transitively,
+/// it is a thin wrapper over the OS entropy source, and one buffer fill is the
+/// entire requirement.
+///
+/// A failure here must be fatal to the flow rather than papered over with a
+/// weaker fallback — an unguessable nonce is the security property, and
+/// continuing without one silently removes it.
+fn mint_state() -> std::io::Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes)
+        .map_err(|e| std::io::Error::other(format!("no system entropy for a sign-in nonce: {e}")))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Binds a loopback port and waits, on its own thread, for one callback.
@@ -681,7 +693,7 @@ pub fn begin(
     let listener = TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))?;
     let port = listener.local_addr()?.port();
     listener.set_nonblocking(true)?;
-    let state = mint_state();
+    let state = mint_state()?;
     let (tx, rx) = channel();
 
     let expected = state.clone();
@@ -745,17 +757,17 @@ fn handle(mut stream: TcpStream, expected_state: &str) -> Option<String> {
 }
 ```
 
-- [ ] **Step 4: Run tests and clippy**
+- [ ] **Step 5: Run tests and clippy**
 
 Run: `export PATH="$PATH:$HOME/.cargo/bin"; cargo test --manifest-path src-tauri/Cargo.toml`
 Expected: all pass — the 7 new `browser_auth` tests plus the 17 existing.
 Run: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets`
 Expected: zero warnings. Fix anything it raises rather than allowing it.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src-tauri/src/browser_auth.rs src-tauri/src/lib.rs
+git add src-tauri/src/browser_auth.rs src-tauri/src/lib.rs src-tauri/Cargo.toml src-tauri/Cargo.lock
 git commit -m "fix(desktop): a loopback listener that refuses a nonce it did not mint"
 ```
 
@@ -981,8 +993,7 @@ Expected: PASS — the existing tests plus 4 new.
 - [ ] **Step 5: Write the failing component test** `src/components/auth/desktop-sign-in.test.tsx`:
 
 ```tsx
-import { render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 const bridge = vi.hoisted(() => ({
@@ -996,14 +1007,15 @@ vi.stubGlobal("location", { ...window.location, replace })
 
 import { DesktopSignIn } from "@/components/auth/desktop-sign-in"
 
-afterEach(() => vi.clearAllMocks())
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
 describe("DesktopSignIn", () => {
   it("opens the browser and shows that it is waiting", async () => {
     render(<DesktopSignIn />)
-    await userEvent.click(
-      screen.getByRole("button", { name: /continue in browser/i })
-    )
+    fireEvent.click(screen.getByRole("button", { name: /continue in browser/i }))
     expect(bridge.beginBrowserLogin).toHaveBeenCalledTimes(1)
     expect(await screen.findByText(/waiting for your browser/i)).toBeInTheDocument()
   })
@@ -1021,9 +1033,7 @@ describe("DesktopSignIn", () => {
 
   it("says so when the wait times out, and offers another go", async () => {
     render(<DesktopSignIn />)
-    await userEvent.click(
-      screen.getByRole("button", { name: /continue in browser/i })
-    )
+    fireEvent.click(screen.getByRole("button", { name: /continue in browser/i }))
     const handlers = bridge.onBrowserLogin.mock.calls[0]![0] as {
       failed: (r: string) => void
     }
@@ -1037,9 +1047,7 @@ describe("DesktopSignIn", () => {
   it("reports a failure to open the browser at all", async () => {
     bridge.beginBrowserLogin.mockRejectedValueOnce(new Error("no port"))
     render(<DesktopSignIn />)
-    await userEvent.click(
-      screen.getByRole("button", { name: /continue in browser/i })
-    )
+    fireEvent.click(screen.getByRole("button", { name: /continue in browser/i }))
     expect(await screen.findByRole("alert")).toHaveTextContent(/no port/i)
   })
 })
