@@ -32,6 +32,27 @@ const config = defineConfig({
     tanstackStart(),
     viteReact(),
   ],
+  /*
+   * Never watch the Rust build directory.
+   *
+   * `pnpm tauri:dev` compiles into `src-tauri/target/`, and the moment cargo
+   * relinks `chroneli_desktop_lib.dll` the file is locked. Vite's watcher had
+   * it open, got EBUSY, and — because chokidar re-emits that as an `error`
+   * event on the FSWatcher — took the whole dev server down with it. The
+   * symptom is the web server dying seconds after the shell starts building,
+   * which reads like an unrelated crash rather than the two watching the same
+   * directory.
+   *
+   * Nothing under `src-tauri/` is part of the web build, so there is no reason
+   * to watch any of it. `target/` alone would be enough today; the whole
+   * directory is excluded because `gen/` is also generated on every build and
+   * the next generated thing should not have to rediscover this.
+   */
+  server: {
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
+  },
   // Must be bundled during SSR, otherwise module resolution fails.
   ssr: {
     noExternal: ["@convex-dev/better-auth"],

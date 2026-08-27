@@ -37,8 +37,27 @@ class DesktopHandoffError extends Error {}
  */
 export const Route = createFileRoute("/desktop-login")({
   head: () => ({ meta: [{ title: pageTitle("Sign in to the desktop app") }] }),
+  /*
+   * `port` is accepted as a NUMBER as well as a string, and that is not
+   * defensive typing — it is the only shape it ever actually arrives in.
+   *
+   * TanStack Router JSON-parses search values, so the shell's `?port=52341`
+   * reaches this function as the number 52341. A `typeof === "string"` test
+   * therefore rejected every real port, `validateSearch` dropped the key, and
+   * the router normalised it back out of the URL — turning every sign-in into
+   * "this link is missing information from the desktop app" with the shell
+   * waiting on a callback that could never come. A live run caught it; nothing
+   * in the unit tests could, because they call `parsePort` directly and never
+   * cross the router.
+   *
+   * Validation still belongs to `parsePort`, which takes `unknown` and is
+   * strict about the range. This only has to stop discarding it.
+   */
   validateSearch: (search: Record<string, unknown>) => ({
-    port: typeof search.port === "string" ? search.port : undefined,
+    port:
+      typeof search.port === "string" || typeof search.port === "number"
+        ? search.port
+        : undefined,
     state: typeof search.state === "string" ? search.state : undefined,
   }),
   beforeLoad: async ({ context, search }) => {
