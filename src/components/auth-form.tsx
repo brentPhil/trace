@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { EyeIcon, EyeOffIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -11,8 +11,36 @@ import {
 import { Input } from "@/components/ui/input"
 import { authClient } from "@/lib/auth-client"
 import { AUTH_ERROR_ID, AuthError, AuthShell } from "@/components/auth-shell"
+import {
+  beginBrowserLogin,
+  isDesktopShell,
+  onBrowserLogin,
+} from "@/lib/desktop-bridge"
+import { errorMessage } from "@/lib/error-message"
+import type { BrowserLoginFailureReason } from "@/lib/desktop-bridge"
 
 type Mode = "signin" | "signup"
+
+// `Record<BrowserLoginFailureReason, string>`, not `Record<string, string>`:
+// the wider type let this table silently drift out of sync with the reasons
+// the bridge actually promises to emit — nothing caught a missing key, so a
+// new reason would have quietly fallen through to the generic copy below
+// forever. This narrower type makes a missing key a compile error instead.
+//
+// `onBrowserLogin`'s `failed` callback still hands over a plain `string` —
+// see `BrowserLoginFailureReason` in desktop-bridge.ts for why it is not
+// typed as this union at that boundary — so `isKnownFailure` below is a real
+// runtime check, not a formality: an unrecognised string from Rust is
+// genuinely possible here, and it is what falls through to the generic copy.
+const FAILURE_COPY: Record<BrowserLoginFailureReason, string> = {
+  timed_out: "That timed out waiting for your browser. Try again.",
+  state_mismatch: "That sign-in did not match this app. Try again.",
+  listener_died: "Lost track of your browser’s reply. Try again.",
+}
+
+function isKnownFailure(reason: string): reason is BrowserLoginFailureReason {
+  return reason in FAILURE_COPY
+}
 
 const COPY = {
   signin: {
@@ -81,6 +109,59 @@ export function AuthForm({
   const [googlePending, setGooglePending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [revealPassword, setRevealPassword] = useState(false)
+  /** Desktop shell only: the browser has been opened and has not answered. */
+  const [waitingForBrowser, setWaitingForBrowser] = useState(false)
+
+  /**
+   * THE LISTENERS GO UP ON MOUNT, NOT ON CLICK. This ordering is the feature.
+   *
+   * `begin_browser_login` resolves as soon as the shell has LAUNCHED the
+   * browser — not when the browser comes back — and Tauri does not replay an
+   * event to a listener that was not there when it fired. Register inside the
+   * click handler (invoke, then listen) and a token arriving in that gap is
+   * simply lost: the browser signed in, the shell emitted, nobody heard, and
+   * the app sits on "Waiting for your browser…" forever for a sign-in that
+   * already succeeded. The gap is small and entirely real — a browser that is
+   * already open with a live session can round-trip in well under the time it
+   * takes to await a dynamic `import("@tauri-apps/api/event")`.
+   *
+   * A mount effect closes it by construction rather than by care: there is no
+   * ordering left to get wrong, because the only path to `beginBrowserLogin`
+   * is a click, and a click cannot precede the mount that renders the button.
+   *
+   * Client-only by nature, so unlike the shell check inside the click handler
+   * this one costs nothing at hydration — effects do not run on the server and
+   * React does not compare them.
+   */
+  useEffect(() => {
+    if (!isDesktopShell()) return
+    let cleanup: (() => void) | null = null
+    let cancelled = false
+    void onBrowserLogin({
+      token: (token) => {
+        // Straight to the route that redeems it; that is what sets the cookie.
+        location.replace(`/desktop-callback?token=${encodeURIComponent(token)}`)
+      },
+      failed: (reason) => {
+        setGooglePending(false)
+        setWaitingForBrowser(false)
+        setError(
+          isKnownFailure(reason)
+            ? FAILURE_COPY[reason]
+            : "Sign-in did not finish. Try again."
+        )
+      },
+    }).then((unlisten) => {
+      // The unmount can land while `listen` is still resolving; a listener
+      // registered after its cleanup ran would survive forever.
+      if (cancelled) unlisten()
+      else cleanup = unlisten
+    })
+    return () => {
+      cancelled = true
+      cleanup?.()
+    }
+  }, [])
 
   /**
    * Sign in with Google — IDENTITY ONLY.
@@ -102,11 +183,53 @@ export function AuthForm({
    * No `await` completes here — the call navigates the document to Google, so
    * anything after it is unreachable. The pending state exists to stop a second
    * click during the hop, not to be cleared afterwards.
+   *
+   * IN THE DESKTOP SHELL, NONE OF THAT WORKS. Google refuses OAuth from
+   * embedded webviews — `disallowed_useragent`, naming WKWebView, which is what
+   * Tauri uses on macOS — so navigating this window to Google is a dead end. So
+   * in the shell the same button hands off to the real browser instead. Only
+   * this one path differs; email and password are typed and submitted right
+   * here, exactly as on the web, because nothing about them was ever broken.
    */
   async function signInWithGoogle() {
     if (pending || googlePending) return
     setError(null)
     setGooglePending(true)
+
+    /*
+     * READ AT CLICK TIME, NOT AT RENDER TIME. `isDesktopShell()` reads
+     * `window.__TAURI_INTERNALS__`, which the server cannot see and so always
+     * answers "web" for. Branching the RENDERED TREE on that answer is what
+     * forced /login off server-rendered markup before: server and client
+     * disagreed, and until React caught up the desktop app showed a live
+     * Google button that could only fail.
+     *
+     * Read here instead and that whole problem evaporates. A click handler is
+     * not part of the markup React diffs during hydration, so the server and
+     * the client render byte-identical HTML and the shell/web difference only
+     * ever materialises after a human has clicked something — by which point
+     * `window` is unambiguous. That is the entire reason /login gets full SSR
+     * back.
+     */
+    if (isDesktopShell()) {
+      setWaitingForBrowser(true)
+      try {
+        await beginBrowserLogin()
+      } catch (thrown) {
+        // Never swallowed: the browser failing to open (or the loopback port
+        // failing to bind) is the end of the road for this sign-in, and the
+        // only other thing on screen is a button stuck looking busy.
+        setWaitingForBrowser(false)
+        setGooglePending(false)
+        setError(errorMessage(thrown))
+      }
+      // The pending state stays ON through the wait, deliberately: the browser
+      // is now the place this sign-in is happening, and a second click would
+      // bind a second port and a second nonce for the same intent. It is
+      // released by the failure handler in the mount effect above, or never —
+      // a token navigates this document away.
+      return
+    }
 
     const result = await authClient.signIn.social({
       provider: "google",
@@ -176,6 +299,22 @@ export function AuthForm({
         <GoogleMark />
         {googlePending ? "Opening Google…" : `${copy.social} with Google`}
       </Button>
+
+      {/*
+        Only in the shell, and only while the browser has the sign-in. The
+        button alone says "Opening Google…", which in a desktop app is
+        ambiguous about WHERE — this line answers that, and tells the user the
+        app is not stuck but waiting on something they now have to go and do.
+
+        Not an `aria-live` region: it appears directly under the control that
+        was just activated and it is not an error. The failure path goes to
+        `AuthError` below, which is the announcing surface.
+      */}
+      {waitingForBrowser && (
+        <p className="text-sm text-muted-foreground">
+          Waiting for your browser… come back once you have signed in.
+        </p>
+      )}
 
       {/*
         A labelled rule, not a bare one. `<span>` on the surface colour cuts the
