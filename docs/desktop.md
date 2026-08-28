@@ -70,6 +70,100 @@ headers are the entire defense here**, exactly as they are for the same site in
 a normal browser. Setting a policy in `tauri.conf.json` would not add one; it
 would only make it look like the app had one.
 
+## Signing in
+
+The login screen in the desktop app is **the login screen** — the same
+`AuthForm` the website renders, email and password fields and all. You type
+them into the window and submit them there, exactly as in a browser. That path
+was never broken and there is no desktop-specific version of it.
+
+**Only the Google button is different.** Google refuses OAuth from embedded
+webviews and says so by name: an attempt from inside one comes back as
+`disallowed_useragent`, and WKWebView — which is what Tauri uses on macOS — is
+called out explicitly in [Google's own announcement of the
+block](https://developers.googleblog.com/en/making-oauth-flows-safer/). So in
+the shell that one button hands the sign-in to the user's real browser instead
+of navigating this window to Google.
+
+What happens when it is clicked, end to end:
+
+1. `AuthForm` sees `isDesktopShell()` and calls `begin_browser_login` instead
+   of `authClient.signIn.social`.
+2. The shell binds a **loopback** listener on an ephemeral port and mints a
+   64-hex-character nonce, then opens the system browser at
+   `/desktop-login?port=…&state=…`.
+3. The browser signs in normally — real Chrome or Safari, so the password
+   manager works and Google is happy — and `/desktop-login` mints a Better
+   Auth **one-time token** and posts it to
+   `http://127.0.0.1:<port>/callback?token=…&state=…`.
+4. The listener checks the nonce, emits `browser-login-token` to the webview,
+   and the page navigates itself to `/desktop-callback?token=…`, which redeems
+   the token and sets the session cookie **on the window's own origin**.
+
+The webview is listening for that event from the moment the login screen
+mounts, not from the moment the button is clicked. `begin_browser_login`
+resolves as soon as the browser has been *launched*, and Tauri does not replay
+an event to a listener that was not registered when it fired — so invoking
+first and listening after leaves a real gap in which a fast round trip is
+dropped on the floor and the app waits forever for a sign-in that already
+succeeded.
+
+### Why loopback and not a custom URL scheme
+
+A `chroneli://` scheme is the other obvious way to get the token back, and it
+is worse here for two independent reasons.
+
+RFC 8252 **§8.1** is the first: any application on the machine can register the
+same private-use scheme, and the OS picks a winner without asking anybody.
+Whoever wins receives the callback — token included. The mitigation OAuth
+normally leans on is PKCE, and it does not apply: what comes back over this
+wire is not an authorization code being exchanged, it is a Better Auth one-time
+token that grants a session to whoever presents it. There is no verifier to
+bind it to. A loopback listener has no such ambiguity — the shell either bound
+the port or it did not, and it knows which port it bound.
+
+The second is plainer: **macOS cannot register a URL scheme at runtime.** It
+comes from `CFBundleURLTypes` in the app bundle's `Info.plist`, which means a
+scheme only works for an *installed, bundled* app — never for `tauri dev`,
+where the sign-in path would then be untestable in exactly the mode it is
+developed in.
+
+Note the literal `127.0.0.1` in `src/lib/desktop-handoff.ts`, never
+`localhost`. RFC 8252 **§8.3**: the name can resolve to something that is not
+the loopback interface, and this URL carries a session-granting token. The
+constant is spelled out and commented there for that reason.
+
+### Adding a command means touching the ACL
+
+`begin_browser_login` is an app command invoked from a **remote** origin, so it
+needs two things that are easy to write only one of:
+
+- an entry in the `commands(&[…])` list in `src-tauri/build.rs`, which
+  autogenerates the `allow-begin-browser-login` permission, and
+- a grant for that permission in `src-tauri/capabilities/default.json`.
+
+Miss the capability and every invoke is rejected with nothing on screen and
+nothing in the console — the same silent failure that made the tray inert for a
+whole branch. The cheap check:
+
+```bash
+grep begin_browser_login src-tauri/gen/schemas/acl-manifests.json
+```
+
+Nothing back means the command is not in the ACL at all, whatever the Rust
+looks like. There is a `the_acl_lets_chroneli_com_*` test per command for the
+same reason; add one with the command.
+
+### Google Calendar connect is still broken on macOS
+
+Signing in is fixed. **Connecting Google Calendar is not.** That flow is
+`linkSocial` in Settings (`src/routes/_authed/-settings.tsx`), it runs in the
+webview, and it goes to exactly the Google consent screen that refuses embedded
+webviews — so on macOS it fails the same way sign-in used to. This is known and
+deliberately not fixed yet: the fix wants the browser to already hold a session
+so the link can happen there, which is a bigger change than this one, and the
+handoff above is the piece it will be built on.
+
 ## Local dev
 
 Prerequisites, once per machine:
