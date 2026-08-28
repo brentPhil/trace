@@ -187,3 +187,58 @@ The handoff machinery (loopback listener, nonce, one-time token,
 a dedicated screen into the Google button. This also let /login regain full
 SSR: the server and client render identical markup again, the shell/web
 difference living entirely in a click handler and an effect.
+
+## Addendum 2 (2026-08-28): the fast path costs one click, and the error table was wrong
+
+### The zero-click fast path was a silent session export
+
+"The already-signed-in browser" above specified minting the token immediately in
+`beforeLoad` and redirecting without rendering anything. Final review killed
+that on two counts, and the fix is the same change for both.
+
+It could not work at all. `beforeLoad` runs on the SERVER. Better Auth resolves
+its baseURL from `window` when none is configured, so with no `window` the
+client is left holding the bare relative string `"/api/auth"` and
+`oneTimeToken.generate()` throws `TypeError: Failed to parse URL` before it
+reaches the network — verified empirically, not reasoned about. That TypeError
+is not a `DesktopHandoffError`, so the route's error screen rethrows it and
+nothing above catches it: every signed-in handoff died on a blank page, and so
+did the email/password path, which re-enters this route authenticated after the
+form submits. An absolute baseURL would only have traded the crash for a 401,
+because an SSR-side fetch carries none of the browser's cookies.
+
+And it should not work. **The URL that lands on `/desktop-login` is authored by
+whoever opened the browser, and it carries BOTH the loopback port and the
+`state` nonce.** So "mint on arrival" means any local process can bind a port of
+its own, open the default browser at `/desktop-login?port=<mine>&state=<mine>`,
+and be handed a full session token by an already-signed-in browser with no human
+involved at any point. The `state` nonce does not help here: it defends the
+SHELL against a token it did not ask for, not the BROWSER against a request it
+did not intend. RFC 8252's loopback redirect is only safe because PKCE binds the
+response to the client that began the exchange, and there is no verifier
+anywhere in this flow.
+
+So the fast path now requires ONE EXPLICIT CLICK. An authenticated visitor gets
+a short confirm screen naming the app and a single "Continue to the desktop app"
+button; the token is minted in that click handler, where cookies exist and
+`window.location.origin` gives an absolute URL, and the browser is then sent to
+the loopback callback with `location.replace`. The unauthenticated path is
+unchanged — the form, `redirectTo` back here, then the confirm screen. The
+deliberate press is what stands in for the missing PKCE verifier, so it is a
+security control rather than friction, and "optimise away the extra click" is
+the regression `src/routes/-desktop-login-screen.test.tsx` exists to catch.
+
+### Correction to the error-handling table
+
+The "User cancels" row describes a Cancel button that does not exist. What is
+actually true:
+
+| Case | Behavior |
+|---|---|
+| User cancels | **No UI for it.** The email/password form stays fully usable while a browser handoff is pending, so the user is never trapped; the listener gives up on its own after `LOGIN_TIMEOUT` (300s, `src-tauri/src/lib.rs`) and the Google button is released with the `timed_out` copy. |
+
+The mechanism for prompt cancellation is wired and tested on the Rust side —
+dropping the `Callback` returned by `browser_auth::begin` frees the port
+immediately rather than waiting out the deadline
+(`cancelling_releases_the_port_without_waiting_out_the_deadline`) — but nothing
+in the UI calls it yet. Recorded as a follow-up, not as shipped behaviour.
