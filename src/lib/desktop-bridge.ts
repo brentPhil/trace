@@ -1,5 +1,3 @@
-import { useSyncExternalStore } from "react"
-
 /**
  * The web app's half of the desktop shell conversation.
  *
@@ -36,60 +34,6 @@ export type ShellTimerState = {
 
 export function isDesktopShell(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
-}
-
-/** Always used as `getServerSnapshot` below — never `getSnapshot` — so it is
- *  pulled out rather than inlined: an inline `() => false` reads as an
- *  arbitrary placeholder, where this name says what it actually is. */
-function alwaysWeb(): boolean {
-  return false
-}
-
-/** `useSyncExternalStore` re-subscribes whenever this identity changes; a
- *  module-level function that never changes keeps that from happening for a
- *  subscription that would do nothing differently anyway. */
-function subscribeToNothing(): () => void {
-  // Whether this process is inside the Tauri shell is decided once, before
-  // any React code runs, and never changes for the life of the tab — there is
-  // no event to listen for, so there is nothing to unsubscribe either.
-  return () => {}
-}
-
-/**
- * `isDesktopShell()`, read the one place it is safe to call during render.
- *
- * The direct call this replaced (`isDesktopShell()` inline in JSX) broke on
- * `/login`: that route is server-rendered, the server has no `window` and so
- * always guesses "web", but the real Tauri webview already has
- * `__TAURI_INTERNALS__` on `window` before hydration even starts. The
- * server's guess and the client's first render disagreed — a hydration
- * mismatch — and worse, whatever the server guessed (a real, fully wired
- * `<AuthForm>`, Google button included) stays painted and clickable in the
- * desktop app until React notices and swaps it out. Google refuses OAuth from
- * exactly the embedded webview this button would be sitting in.
- *
- * `useSyncExternalStore`'s three-argument form exists for precisely this
- * shape — a value that is real and synchronous on the client but unknowable
- * on the server. `getServerSnapshot` (`alwaysWeb`) is what SSR renders AND,
- * critically, what React uses for the client's FIRST render too, during
- * hydration — so that first client render is guaranteed to match the
- * server's HTML instead of merely happening to. Only after hydration commits
- * does React re-read `getSnapshot` (the real `isDesktopShell`) and, if it
- * disagrees, force a corrective re-render — as part of its own store-
- * consistency check, not through an app-level `useEffect` + `setState` round
- * trip the way a `mounted` flag would need. That is one fewer render cycle
- * between "the wrong, interactive tree is on screen" and "the right one is",
- * which is the whole reason this is the safer of the two idiomatic options
- * here.
- *
- * What this does NOT do: make the mismatch impossible to see at all. The
- * very first bytes the browser paints are the server's HTML, guess and all —
- * nothing client-side can change what already left the server before any JS
- * ran. The guarantee is about what happens next: no console warning, and the
- * shortest path React has back to the truth once it can see it.
- */
-export function useIsDesktopShell(): boolean {
-  return useSyncExternalStore(subscribeToNothing, isDesktopShell, alwaysWeb)
 }
 
 /** Hands the running-entry state to the shell, which owns the tray from there. */
