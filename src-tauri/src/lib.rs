@@ -127,9 +127,11 @@ pub const LOGIN_FAILED_LISTENER_DIED: &str = "listener_died";
 /// on either side.
 ///
 /// The port here MUST match `devUrl` in `src-tauri/tauri.dev.conf.json` and the
-/// origin allowlisted in `capabilities/dev-localhost.json`, which in turn match
-/// `pnpm dev`'s `--port 3100`. Four places, one number; change one and the dev
-/// loop dies quietly.
+/// origin allowlisted by the `dev-localhost` capability declared INLINE in that
+/// same file — inline precisely so it cannot ship: a capability file under
+/// `capabilities/` is auto-discovered and would be baked into every release
+/// build. Those in turn match `pnpm dev`'s `--port 3100`. Four places, one
+/// number; change one and the dev loop dies quietly.
 #[cfg(debug_assertions)]
 pub const SIGN_IN_URL_BASE: &str = "http://localhost:3100/desktop-login";
 #[cfg(not(debug_assertions))]
@@ -721,8 +723,10 @@ mod tests {
         // not talk back to the shell anyway.
         //
         // Release trusts https://chroneli.com (capabilities/default.json).
-        // Debug trusts http://localhost:3100 (capabilities/dev-localhost.json,
-        // with tauri.dev.conf.json pointing devUrl at the same place).
+        // Debug trusts http://localhost:3100 — the `dev-localhost` capability
+        // declared inline in tauri.dev.conf.json (deliberately not a file in
+        // capabilities/, which would be auto-discovered and would ship), with
+        // that same file pointing devUrl at the same place.
         #[cfg(debug_assertions)]
         let origin = "http://localhost:3100";
         #[cfg(not(debug_assertions))]
