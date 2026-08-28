@@ -173,3 +173,17 @@ code reviews. Every failure path in this flow reports.
 This changes desktop sign-in for everyone, including Windows users whose
 in-webview login works today. That is the price of one code path instead of
 two, and it was accepted deliberately.
+
+## Addendum (2026-08-28): scope of the browser handoff narrowed
+
+After using the build, the product owner reversed decision 1: the desktop app
+now shows the ordinary login form immediately, and ONLY OAuth (the Google
+button) leaves for the external browser — matching the common desktop-app
+pattern. Email/password submits inside the webview, which has always worked;
+the webview block this feature exists for is specific to OAuth.
+
+The handoff machinery (loopback listener, nonce, one-time token,
+/desktop-login, /desktop-callback) is unchanged — only its trigger moved from
+a dedicated screen into the Google button. This also let /login regain full
+SSR: the server and client render identical markup again, the shell/web
+difference living entirely in a click handler and an effect.
