@@ -16,7 +16,6 @@ import {
   isDesktopShell,
   onBrowserLogin,
 } from "@/lib/desktop-bridge"
-import { errorMessage } from "@/lib/error-message"
 import type { BrowserLoginFailureReason } from "@/lib/desktop-bridge"
 
 type Mode = "signin" | "signup"
@@ -215,13 +214,20 @@ export function AuthForm({
       setWaitingForBrowser(true)
       try {
         await beginBrowserLogin()
-      } catch (thrown) {
+      } catch {
         // Never swallowed: the browser failing to open (or the loopback port
         // failing to bind) is the end of the road for this sign-in, and the
         // only other thing on screen is a button stuck looking busy.
         setWaitingForBrowser(false)
         setGooglePending(false)
-        setError(errorMessage(thrown))
+        // NOT `errorMessage(thrown)`. Its fallback for anything that is not a
+        // TraceError is "That didn't save. Try again." — written for a time
+        // field, nonsense on a login screen, and nothing thrown here is ever a
+        // TraceError: `beginBrowserLogin` rejects with whatever Tauri's
+        // `invoke` produces when the browser will not open or the loopback
+        // port will not bind. A literal in the same register as `FAILURE_COPY`
+        // instead, naming the thing that actually failed.
+        setError("Could not open your browser to sign in. Try again.")
       }
       // The pending state stays ON through the wait, deliberately: the browser
       // is now the place this sign-in is happening, and a second click would

@@ -211,16 +211,23 @@ describe("AuthForm inside the desktop shell", () => {
 
   it("reports a browser that would not open at all", async () => {
     bridge.isDesktopShell.mockReturnValue(true)
-    // `errorMessage` deliberately hides a bare Error's raw text from the user
-    // (see src/lib/error-message.ts), so the only promise this can hold the
-    // implementation to is the documented generic fallback — not "no port".
+    // The raw text is deliberately not shown — "no port" names an internal —
+    // but the copy must still be ABOUT THIS SCREEN. This used to assert on
+    // `errorMessage`'s generic fallback, "That didn't save. Try again.", which
+    // is written for a time field and is nonsense under a sign-in button; the
+    // test encoded the wrong copy as correct, so nothing flagged it. Matching
+    // on "open your browser" is what keeps a stray `errorMessage(thrown)` from
+    // creeping back in: a bare /try again/ would pass for either.
     bridge.beginBrowserLogin.mockRejectedValueOnce(new Error("no port"))
     render(<AuthForm mode="signin" />)
     fireEvent.click(googleButton())
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toMatch(/try again/i)
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /could not open your browser to sign in\. try again\./i
+      )
     )
+    expect(screen.getByRole("alert").textContent).not.toMatch(/didn't save/i)
     expect(googleButton().disabled).toBe(false)
   })
 
