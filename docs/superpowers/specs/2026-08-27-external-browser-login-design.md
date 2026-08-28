@@ -242,3 +242,35 @@ dropping the `Callback` returned by `browser_auth::begin` frees the port
 immediately rather than waiting out the deadline
 (`cancelling_releases_the_port_without_waiting_out_the_deadline`) — but nothing
 in the UI calls it yet. Recorded as a follow-up, not as shipped behaviour.
+
+## Addendum 3 (2026-08-28): a click that can be framed is a click that can be stolen
+
+Addendum 2 ends on "the deliberate press is what stands in for the missing PKCE
+verifier". That is only true of a press the user actually meant to make, and
+until now nothing on chroneli.com said so. **No `frame-ancestors` and no
+`X-Frame-Options` were set anywhere** — not in `wrangler.jsonc`, not in
+`vite.config.ts`, not on any route, and a `public/_headers` file would not have
+covered SSR document responses even if one had existed. So any origin could
+load `https://chroneli.com/desktop-login?port=X&state=Y` in a transparent
+iframe under a decoy button and harvest the one press the whole design rests
+on, arriving back at the zero-click session export Addendum 2 removed.
+
+This is not a new attacker. The one already in the model is a local process
+that can open the default browser at a page of its own choosing; pointing that
+browser at its own framing page instead of at `/desktop-login` directly is one
+step, not a new capability.
+
+**The framing denial is therefore part of the control, not a hardening extra.**
+`src/start.ts` — TanStack Start's start entry, resolved by the Vite plugin and
+so loaded identically by `pnpm dev` and the wrangler build — registers a
+request middleware that sets `Content-Security-Policy: frame-ancestors 'none'`
+and `X-Frame-Options: DENY` on every HTML document response, site-wide.
+Site-wide because `/login` (credentials) and `/desktop-callback` (a one-time
+token) have the same character and nothing here is ever legitimately embedded;
+HTML-only because `/api/auth/*` returns Better Auth's `fetch()` response, whose
+headers are immutable per the Fetch standard, and writing to them throws
+`TypeError: immutable` and 500s every auth call.
+
+The same file re-declares Start's CSRF middleware. Start applies its built-in
+one only while no start entry exists, so creating this file would otherwise
+have unprotected every server function as a side effect of adding a header.
