@@ -100,6 +100,8 @@ alongside `convex({ authConfig })`. No schema change.
 
 ## The already-signed-in browser
 
+> Superseded by Addendum 2: the token is now minted client-side behind an explicit confirm click.
+
 `src/routes/login.tsx:12-14` throws a redirect when `context.isAuthenticated`,
 sending signed-in visitors into the app. **`/desktop-login` must NOT copy that
 pattern.** A browser that already holds a Chroneli session is the common case —
