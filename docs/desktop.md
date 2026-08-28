@@ -124,15 +124,17 @@ frontend remotely: anything you have not deployed does not exist as far as the
 window is concerned. A sign-in button you just wrote is not there, and
 `/desktop-login` 404s.
 
-For a real loop, run two terminals:
-
-```bash
-pnpm dev
-```
+For a real loop, one command:
 
 ```bash
 pnpm tauri:dev
 ```
+
+Note the colon — `pnpm tauri dev` without it is the production smoke test
+above, and it shows you production's OLD login page, which is easy to misread
+as the feature being broken. `tauri:dev` starts the web dev server itself
+(`beforeDevCommand`), waits for it to answer on 3100, opens the window, and
+stops the server when the window closes.
 
 `tauri:dev` merges `src-tauri/tauri.dev.conf.json` over the base config, which
 does two things that both have to happen together:
