@@ -16,7 +16,7 @@
         "height": 800,
         "minWidth": 480,
         "minHeight": 360,
-        "url": "/login"
+        "url": "/timer"
       }
     ],
     "security": {
