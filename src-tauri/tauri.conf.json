@@ -15,7 +15,8 @@
         "width": 1200,
         "height": 800,
         "minWidth": 480,
-        "minHeight": 360
+        "minHeight": 360,
+        "url": "/login"
       }
     ],
     "security": {
@@ -24,7 +25,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg"],
+    "targets": [
+      "nsis",
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
