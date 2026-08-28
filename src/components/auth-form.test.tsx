@@ -229,6 +229,13 @@ describe("AuthForm inside the desktop shell", () => {
     )
     expect(screen.getByRole("alert").textContent).not.toMatch(/didn't save/i)
     expect(googleButton().disabled).toBe(false)
+    // And the waiting line is GONE, not merely covered up. `setWaitingForBrowser(false)`
+    // on this path is easy to drop — the error already renders, so the screen
+    // looks handled — and the result is "Waiting for your browser… come back
+    // once you have signed in." sitting under a message saying the browser
+    // never opened. Unlike the `timed_out` case above, the copy here contains
+    // no "waiting" of its own, so the plain phrase is safe to match on.
+    expect(screen.queryByText(/waiting for your browser/i)).toBeNull()
   })
 
   it("unlistens on unmount", async () => {
