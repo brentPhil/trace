@@ -109,7 +109,7 @@ export function PickerList({
 
   return (
     <div className="flex min-h-0 flex-col">
-      <div className="border-b border-edge-soft p-2">
+      <div className="border-b border-border p-2">
         <input
           ref={inputRef}
           value={query}
@@ -139,7 +139,7 @@ export function PickerList({
             // intercepting it here would leave the popup open with no way out.
           }}
           className={cn(
-            "w-full rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
+            "w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm",
             "placeholder:text-muted-foreground",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           )}
@@ -186,7 +186,7 @@ export function PickerList({
               onClick={() => take(index)}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
-                "data-[active=true]:bg-surface",
+                "data-[active=true]:bg-card",
                 "focus-visible:outline-none"
               )}
             >
@@ -219,7 +219,7 @@ export function PickerList({
               onClick={() => take(visible.length)}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm",
-                "text-muted-foreground data-[active=true]:bg-surface",
+                "text-muted-foreground data-[active=true]:bg-card",
                 "focus-visible:outline-none"
               )}
             >
@@ -232,7 +232,7 @@ export function PickerList({
       </ul>
 
       {footer === undefined ? null : (
-        <div className="border-t border-edge-soft p-1">{footer}</div>
+        <div className="border-t border-border p-1">{footer}</div>
       )}
     </div>
   )

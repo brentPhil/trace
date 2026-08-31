@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Dialog } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
 
 /**
@@ -69,9 +69,9 @@ export function ShortcutsOverlay() {
   }, [])
 
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <Dialog.Popup className="sm:w-[32rem]">
-        <Dialog.Title>Keyboard shortcuts</Dialog.Title>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent className="sm:w-[32rem]">
+        <DialogTitle>Keyboard shortcuts</DialogTitle>
         <div className="flex flex-col gap-4">
           {SHORTCUTS.map((group) => (
             <div key={group.group} className="flex flex-col gap-1.5">
@@ -84,7 +84,7 @@ export function ShortcutsOverlay() {
                     <dt className="w-32 shrink-0">
                       <kbd
                         className={cn(
-                          "rounded border border-edge-soft bg-ground px-1.5 py-0.5",
+                          "rounded border border-border bg-background px-1.5 py-0.5",
                           "font-mono text-[0.7rem]"
                         )}
                       >
@@ -100,7 +100,7 @@ export function ShortcutsOverlay() {
             </div>
           ))}
         </div>
-      </Dialog.Popup>
-    </Dialog.Root>
+      </DialogContent>
+    </Dialog>
   )
 }

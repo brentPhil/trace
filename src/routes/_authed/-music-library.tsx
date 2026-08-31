@@ -1,22 +1,51 @@
 /*
- * /music — THE PAGE, NOT THE ROUTE. The route definition and its loader stay
- * in music.tsx; the `-` prefix keeps this file out of the route tree, the same
- * convention the tests beside it already use.
+ * THE MUSIC LIBRARY — A SETTINGS SECTION, AND IT USED TO BE A PAGE.
  *
- * The component lives here because it has to be EXPORTED — -music.test.tsx
- * renders it against a seeded query client — and an export of a route file is
- * something the router's code-splitter refuses to split: every page shipped in
- * the eager bundle, with a [tanstack-router] warning per route saying so.
- * Imported from a non-route file, `component:` splits as normal.
+ * /music was the sixth destination in the rail until 2026-08-29. The argument
+ * for it, recorded in `app-sidebar.tsx` at the time, was that a library of
+ * files the account owns — uploaded, renamed, deleted, counted against a
+ * storage cap — is not a preference, so folding it into Settings would put a
+ * file manager inside a page of switches.
+ *
+ * THAT ARGUMENT WAS ABOUT THE CONTENT AND THE COST WAS IN THE RAIL. The rail
+ * holds five destinations, each one a place the work is: a timer, a report, an
+ * invoice, a project. A music library was the sixth, at the same weight as the
+ * tracker, permanently on screen, for something a user touches when they first
+ * set up their tracks and then roughly never again. Settings is already where
+ * the two music PREFERENCES live (`music-section.tsx`), so the library was also
+ * the only part of this feature that was somewhere else.
+ *
+ * WHAT DID NOT CHANGE. The component is the page's, moved and unwrapped: the
+ * `Page` shell came off and a section heading took its place, and everything
+ * below that — the queue, the usage bar, the search and sort, the rename and
+ * delete paths, every comment arguing for them — is as it was. The tests moved
+ * with it and still render this directly against a seeded query client, which
+ * is why it is a component and not a route body.
+ *
+ * AND WHY IT IS STILL UNDER `routes/` RATHER THAN `components/settings/`, which
+ * is where a "settings section" belongs by name. It holds its own reads and its
+ * own writes — `convexQuery`, `useConvexAction`, `useConvexMutation`, `api` —
+ * and the ESLint rule in this repo forbids exactly that under `src/components`:
+ * a component takes its data and its writes as props (see `TimerBarActions`).
+ * Moving it there without lifting all four out first would have meant
+ * suppressing that rule to keep a filename, so it stays a PAGE FRAGMENT beside
+ * the page that renders it, `-`-prefixed like every other one here. Lifting the
+ * reads and writes into props is a real option and a separate change; this one
+ * moved a destination, not an architecture.
  *
  * The upload path is `settings.setLogo`'s, deliberately, because the backend's
  * is too: mint a URL, POST the blob straight to Convex, hand the returned
  * storage id to an ACTION that validates it. See convex/music.ts, whose own
  * header makes the same point from the other side — the blob exists before any
  * of our code sees it, so every rejection there deletes what is already stored.
- * Nothing on this page needs to clean up after a refusal; that is exactly why
- * the validation lives in the action rather than here.
+ * Nothing here needs to clean up after a refusal; that is exactly why the
+ * validation lives in the action rather than here.
  */
+import { Empty } from "@/components/ui/empty"
+import { Button, buttonVariants } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
+import { useToastManager } from "@/components/ui/toast"
 import { useEffect, useRef, useState } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import {
@@ -27,11 +56,6 @@ import {
 import { Pencil, Trash2, Upload } from "lucide-react"
 import { LibraryUsage } from "@/components/music/library-usage"
 import { UploadQueuePanel } from "@/components/music/upload-queue-panel"
-import { Page } from "@/components/shell/page"
-import { Button, buttonVariants } from "@/components/ui/button"
-import { Empty } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
-import { Toast } from "@/components/ui/toast"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
 import { errorMessage } from "@/lib/error-message"
@@ -62,6 +86,17 @@ type Track = {
 
 type SortKey = "name" | "recent" | "largest" | "longest"
 
+/** The sort keys and what each one is called, in the order the list offers
+ *  them. One place, because the trigger has to render the same label the
+ *  option does — the value is a key and a bare `SelectValue` would put
+ *  "recent" on the control instead of "Recently added". */
+const SORT_LABELS: Record<SortKey, string> = {
+  name: "Name",
+  recent: "Recently added",
+  largest: "Largest",
+  longest: "Longest",
+}
+
 /**
  * How a thrown upload ends up on its row.
  *
@@ -75,7 +110,7 @@ function settle(thrown: unknown): Partial<QueuedUpload> {
   return { status: "failed", reason: errorMessage(thrown) }
 }
 
-export function Music() {
+export function MusicLibrarySection() {
   const { data: tracks } = useSuspenseQuery(
     convexQuery(api.music.listTracks, {})
   )
@@ -88,7 +123,7 @@ export function Music() {
   const renameTrack = useLatest(useConvexMutation(api.music.renameTrack))
   const removeTrack = useLatest(useConvexMutation(api.music.removeTrack))
 
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   /* The one error posture on this page, and it is /projects' verbatim: the
    * backend's INVALID_TRACK and LIBRARY_FULL messages are already sentences
@@ -303,186 +338,224 @@ export function Music() {
     return () => clearTimeout(timer)
   }, [queue])
 
+  const empty = tracks.length === 0
+
   return (
     /*
-      NOT PINNED — see `Page`'s rule. The header is a title and the file
-      picker; neither is a readout of, nor a control over, the list beneath it,
-      and the search and sort that ARE controls over it sit with the list.
+      NO PAGE SHELL AND NO TITLE OF ITS OWN. Both belonged to /music; the
+      `<Section>` that renders this in -settings.tsx supplies the heading, and
+      a second one here would put "Music" twice on the same screen.
+
+      THE LAYOUT IS THREE BLOCKS ON ONE LEFT EDGE, and it was four on two edges
+      when this arrived from /music. What a page header gave for free — an
+      action pinned opposite a title — became, with the title gone, a button
+      floating alone against the right margin with its format hint stranded
+      under it four hundred pixels from anything it described. Below that sat a
+      three-line storage meter, then a search and a sort over a list that had
+      nothing in it, then an empty state: four blocks, four widths, two
+      alignments, and three of them furniture when the library is empty.
+
+      So:
+
+        1. CONTROLS — one row. Search and sort on the left, the picker at the
+           end. When the library is empty there is nothing to search or sort, so
+           the row is the picker alone and it is LEFT-flush; `ml-auto` is
+           applied only when something is actually to its left, which is what
+           keeps it from floating against a margin with no partner.
+        2. LIMITS — what is used and what is accepted, one block, because they
+           are the same question asked twice ("what will this library take?").
+           Hidden entirely while empty: a meter reading 0% is not information,
+           and the empty state below already spells the formats and the cap.
+        3. THE LIST, which is also the drop target.
     */
-    <Page
-      title="Music"
-      actions={
-        /*
+    <div className="flex flex-col gap-4">
+      <UploadQueuePanel
+        items={queue}
+        onRetry={retry}
+        onCancel={cancel}
+        onDismiss={dismissFinished}
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
+        {empty ? null : (
+          <>
+            <Input
+              type="search"
+              value={search}
+              aria-label="Search music"
+              placeholder="Search"
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-8 w-48 text-sm"
+            />
+            <Select
+              value={sort}
+              onValueChange={setSort}
+            >
+              <SelectTrigger aria-label="Sort" size="sm" className="w-44">
+                {/* Values are keys; the labels are prose. */}
+                <SelectValue>
+                  {/* Annotated rather than asserted: Base UI hands the render
+                      prop an `any`, and naming the parameter's type is the same
+                      guarantee without a cast the linter then calls redundant. */}
+                  {(value: SortKey) => SORT_LABELS[value]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABELS) as Array<SortKey>).map((key) => (
+                  <SelectItem key={key} value={key}>
+                    {SORT_LABELS[key]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Only while searching: a count beside an unfiltered list is a
+                restatement of the list. */}
+            {search.trim() === "" ? null : (
+              <span className="text-xs text-muted-foreground">
+                {`${visible.length} of ${tracks.length}`}
+              </span>
+            )}
+          </>
+        )}
+
+        {/*
           A LABEL STYLED AS A BUTTON, wrapping an `sr-only` input — not a bare
           `<input type="file">` with `file:` utilities on it. The browser's own
           picker chrome was the one control on this page drawn by the engine
-          rather than by the design system, and it sat in the header where the
-          eye lands first. The input keeps its `aria-label`, so it is still the
-          same control to a screen reader and to every test that finds it.
-        */
-        <div className="flex flex-col items-end gap-1">
-          <label
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "cursor-pointer",
-              busy && "pointer-events-none opacity-50"
-            )}
-          >
-            <Upload className="size-4" />
-            Add music
-            <input
-              type="file"
-              accept={AUDIO_INPUT_ACCEPT}
-              multiple
-              disabled={busy}
-              aria-label="Music files"
-              onChange={(event) => {
-                const files = Array.from(event.target.files ?? [])
-                // Cleared so choosing the SAME file again still fires `change`
-                // — which is what a person does after a rejection they have
-                // since fixed, and the one case a file input swallows silently.
-                event.target.value = ""
-                void upload(files)
-              }}
-              className="sr-only"
-            />
-          </label>
-          <span className="text-xs text-muted-foreground">
-            {`${acceptedFormatList()} · up to ${formatMb(MAX_TRACK_BYTES)} each`}
-          </span>
-        </div>
-      }
-    >
-      <div className="flex flex-1 flex-col gap-4 px-4 pb-6">
-        <UploadQueuePanel
-          items={queue}
-          onRetry={retry}
-          onCancel={cancel}
-          onDismiss={dismissFinished}
-        />
-
-        <LibraryUsage bytes={usage.bytes} count={usage.count} />
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            type="search"
-            value={search}
-            aria-label="Search music"
-            placeholder="Search"
-            onChange={(event) => setSearch(event.target.value)}
-            className="h-8 w-48 text-sm"
-          />
-          <select
-            value={sort}
-            aria-label="Sort"
-            onChange={(event) => setSort(event.target.value as SortKey)}
-            className={cn(
-              "rounded-md border border-edge bg-ground px-2 py-1 text-sm",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            )}
-          >
-            <option value="name">Name</option>
-            <option value="recent">Recently added</option>
-            <option value="largest">Largest</option>
-            <option value="longest">Longest</option>
-          </select>
-
-          {/* Only while searching: a count beside an unfiltered list is a
-              restatement of the list. */}
-          {search.trim() === "" ? null : (
-            <span className="text-xs text-muted-foreground">
-              {`${visible.length} of ${tracks.length}`}
-            </span>
-          )}
-        </div>
-
-        {/*
-          THE DROP TARGET IS THE LIST ITSELF, not a separate dashed rectangle
-          above it. A dedicated drop zone is a second control for something the
-          file picker in the header already does, and it costs a permanent band
-          of the page to advertise a gesture that is discovered by trying it.
-          Dropping onto the list is the gesture people actually attempt.
-
-          `dragging` is cleared on drop AND on leave, because a drag that ends
-          outside the window fires neither `drop` nor `dragend` here.
+          rather than by the design system. The input keeps its `aria-label`, so
+          it is still the same control to a screen reader and to every test that
+          finds it.
         */}
-        <div
-          onDragOver={(event) => {
-            event.preventDefault()
-            setDragging(true)
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(event) => {
-            event.preventDefault()
-            setDragging(false)
-            // Ignored, not queued, while `busy`: the file picker above is
-            // already `disabled` for the same reason, but a drop bypasses that
-            // element entirely, so the guard has to be repeated here. Letting a
-            // second drop through would start a concurrent `upload()`, and
-            // `upload`'s own comment explains uploads are SEQUENTIAL precisely
-            // so the account-cap check inside `acceptTrack` cannot be raced by
-            // parallel batches each reading the same pre-upload total — two
-            // concurrent runs from two drops reintroduce exactly that race. The
-            // first run's `finally` would also flip `busy` back to false while
-            // the second run is still going, re-enabling the picker mid-upload.
-            if (busy) return
-            void upload(Array.from(event.dataTransfer.files))
-          }}
+        <label
           className={cn(
-            "relative rounded-md transition-colors",
-            dragging && "ring-2 ring-ring"
+            buttonVariants({ variant: "outline", size: "sm" }),
+            "cursor-pointer",
+            // See the layout note above: pushed right only when it has
+            // something to be pushed away FROM.
+            !empty && "ml-auto",
+            busy && "pointer-events-none opacity-50"
           )}
         >
-          {/* The ring alone was a visual change with no stated meaning. The
-              target is still THE LIST — see the note above on why there is no
-              permanent dashed band — so only the feedback improves. */}
-          {dragging ? (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-ground/80 text-sm text-foreground">
-              Drop to add
-            </div>
-          ) : null}
-          {tracks.length === 0 ? (
-            <Empty>
-              No music uploaded yet. Add {acceptedFormatList()} files up to{" "}
-              {formatMb(MAX_TRACK_BYTES)} each, and they become selectable from
-              the tracker&apos;s music control, beside the tracks that ship with
-              Chroneli.
-            </Empty>
-          ) : visible.length === 0 ? (
-            <Empty>Nothing here matches “{search}”.</Empty>
-          ) : (
-            <ul className="flex flex-col rounded-md border border-edge-soft">
-              {visible.map((track) => (
-                <TrackRow
-                  key={track._id}
-                  track={track}
-                  onRename={(name) =>
-                    // The rejection is reported here, through the same `report`
-                    // the remove and upload paths use, AND rethrown. Swallowing
-                    // it here would mean the docblock's promise above —
-                    // "the server's own 'A track needs a name.' is the sentence
-                    // the user should read" — is a lie: nothing else on this
-                    // path shows the user anything. Rethrowing keeps
-                    // `TrackRow.commit`'s own `.catch` doing its job, which is
-                    // unrelated to whether the user was told why: it reopens the
-                    // field with the rejected text still in it.
-                    renameTrack({ trackId: track._id, name })
-                      .then(() => {})
-                      .catch((thrown: unknown) => {
-                        report(thrown)
-                        throw thrown
-                      })
-                  }
-                  onRemove={() => {
-                    void removeTrack({ trackId: track._id }).catch(report)
-                  }}
-                />
-              ))}
-            </ul>
-          )}
-        </div>
+          <Upload className="size-4" />
+          Add music
+          <input
+            type="file"
+            accept={AUDIO_INPUT_ACCEPT}
+            multiple
+            disabled={busy}
+            aria-label="Music files"
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? [])
+              // Cleared so choosing the SAME file again still fires `change`
+              // — which is what a person does after a rejection they have
+              // since fixed, and the one case a file input swallows silently.
+              event.target.value = ""
+              void upload(files)
+            }}
+            className="sr-only"
+          />
+        </label>
       </div>
-    </Page>
+
+      {empty ? null : (
+        <div className="flex max-w-prose flex-col gap-1.5">
+          <LibraryUsage bytes={usage.bytes} count={usage.count} />
+          {/* The upload bound, beside the storage bound. Two answers to one
+              question, so they are one block rather than two — and this is the
+              only place either is stated once the empty state is gone. */}
+          <p className="text-xs text-muted-foreground">
+            {`${acceptedFormatList()} · up to ${formatMb(MAX_TRACK_BYTES)} each`}
+          </p>
+        </div>
+      )}
+
+      {/*
+        THE DROP TARGET IS THE LIST ITSELF, not a separate dashed rectangle
+        above it. A dedicated drop zone is a second control for something the
+        file picker in the header already does, and it costs a permanent band
+        of the page to advertise a gesture that is discovered by trying it.
+        Dropping onto the list is the gesture people actually attempt.
+
+        `dragging` is cleared on drop AND on leave, because a drag that ends
+        outside the window fires neither `drop` nor `dragend` here.
+      */}
+      <div
+        onDragOver={(event) => {
+          event.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setDragging(false)
+          // Ignored, not queued, while `busy`: the file picker above is
+          // already `disabled` for the same reason, but a drop bypasses that
+          // element entirely, so the guard has to be repeated here. Letting a
+          // second drop through would start a concurrent `upload()`, and
+          // `upload`'s own comment explains uploads are SEQUENTIAL precisely
+          // so the account-cap check inside `acceptTrack` cannot be raced by
+          // parallel batches each reading the same pre-upload total — two
+          // concurrent runs from two drops reintroduce exactly that race. The
+          // first run's `finally` would also flip `busy` back to false while
+          // the second run is still going, re-enabling the picker mid-upload.
+          if (busy) return
+          void upload(Array.from(event.dataTransfer.files))
+        }}
+        className={cn(
+          "relative rounded-md transition-colors",
+          dragging && "ring-2 ring-ring"
+        )}
+      >
+        {/* The ring alone was a visual change with no stated meaning. The
+            target is still THE LIST — see the note above on why there is no
+            permanent dashed band — so only the feedback improves. */}
+        {dragging ? (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/80 text-sm text-foreground">
+            Drop to add
+          </div>
+        ) : null}
+        {tracks.length === 0 ? (
+          <Empty>
+            No music uploaded yet. Add {acceptedFormatList()} files up to{" "}
+            {formatMb(MAX_TRACK_BYTES)} each, and they become selectable from
+            the tracker&apos;s music control, beside the tracks that ship with
+            Chroneli.
+          </Empty>
+        ) : visible.length === 0 ? (
+          <Empty>Nothing here matches “{search}”.</Empty>
+        ) : (
+          <ul className="flex flex-col rounded-md border border-border">
+            {visible.map((track) => (
+              <TrackRow
+                key={track._id}
+                track={track}
+                onRename={(name) =>
+                  // The rejection is reported here, through the same `report`
+                  // the remove and upload paths use, AND rethrown. Swallowing
+                  // it here would mean the docblock's promise above —
+                  // "the server's own 'A track needs a name.' is the sentence
+                  // the user should read" — is a lie: nothing else on this
+                  // path shows the user anything. Rethrowing keeps
+                  // `TrackRow.commit`'s own `.catch` doing its job, which is
+                  // unrelated to whether the user was told why: it reopens the
+                  // field with the rejected text still in it.
+                  renameTrack({ trackId: track._id, name })
+                    .then(() => {})
+                    .catch((thrown: unknown) => {
+                      report(thrown)
+                      throw thrown
+                    })
+                }
+                onRemove={() => {
+                  void removeTrack({ trackId: track._id }).catch(report)
+                }}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -585,7 +658,7 @@ function TrackRow({
     <li
       className={cn(
         "group flex items-center gap-3 px-3 py-2",
-        "border-b border-edge-soft last:border-b-0"
+        "border-b border-border last:border-b-0"
       )}
     >
       {editing ? (
@@ -608,7 +681,7 @@ function TrackRow({
             }
           }}
           className={cn(
-            "min-w-0 flex-1 rounded-sm border border-edge bg-ground px-1.5 py-0.5 text-sm",
+            "min-w-0 flex-1 rounded-sm border border-input bg-background px-1.5 py-0.5 text-sm",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           )}
         />
@@ -629,7 +702,7 @@ function TrackRow({
         {editing ? null : (
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="icon-row"
             aria-label={`Rename ${track.name}`}
             onClick={open}
@@ -648,11 +721,11 @@ function TrackRow({
           // is already hidden here for the reverse reason.
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="icon-row"
             aria-label={`Remove ${track.name}`}
             onClick={onRemove}
-            className="opacity-100 hover:text-alarm focus-visible:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
+            className="opacity-100 hover:text-destructive focus-visible:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
           >
             <Trash2 className="size-4" />
           </Button>

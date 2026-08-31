@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
-import { Popover } from "@/components/ui/popover"
 import { TimePopoverFields } from "@/components/entries/time-popover-fields"
 import {
   formatTimeOfInstant,
@@ -73,7 +73,7 @@ export function EntryTimePopover({
    * elapsed duration in its place, so a timer running there can be edited
    * without a second calendar implementation. Must already be a full
    * interactive element — Base UI's `render` prop merges the trigger's own
-   * behaviour onto whatever is passed here, the same as `Popover.Trigger`
+   * behaviour onto whatever is passed here, the same as `PopoverTrigger`
    * always does.
    */
   trigger?: React.ReactElement
@@ -142,13 +142,13 @@ export function EntryTimePopover({
   }
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
-      <Popover.Trigger
+    <Popover open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
+      <PopoverTrigger
         render={
           trigger ?? (
             <Button
               type="button"
-              variant="quiet"
+              variant="ghost"
               size="row-trigger"
               aria-label={`Edit times — ${formatTimeRange(entry.startedAt, entry.endedAt, timeZone, use12Hour)}`}
               className={cn(
@@ -160,7 +160,7 @@ export function EntryTimePopover({
                 // growing the box, which is what `--entry-row-height` depends
                 // on.
                 "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
-                "font-mono tabular-nums tracking-[-0.02em] shrink-0 text-xs hover:bg-surface-raised/70",
+                "font-mono tabular-nums tracking-[-0.02em] shrink-0 text-xs hover:bg-popover/70",
                 className
               )}
             >
@@ -175,7 +175,7 @@ export function EntryTimePopover({
         }
       />
 
-      <Popover.Popup className="w-[19.5rem] gap-0 p-0">
+      <PopoverContent className="w-[19.5rem] gap-0 p-0">
         <TimePopoverFields
           running={running}
           startValue={start}
@@ -204,7 +204,7 @@ export function EntryTimePopover({
             })
           }}
         />
-      </Popover.Popup>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   )
 }

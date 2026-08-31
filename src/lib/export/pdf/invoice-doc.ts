@@ -568,7 +568,7 @@ export function invoiceDocPages(invoice: InvoiceDoc): Array<PdfPage> {
        * rejects by name.
        *
        * It is also what the RECORD PAGE has always drawn (`border-b
-       * border-edge-soft` per row in `invoice-lines.tsx`). The paper simply did
+       * border-border` per row in `invoice-lines.tsx`). The paper simply did
        * not, which made the two renderings of one document disagree about
        * something a reader sees before they read a word.
        *

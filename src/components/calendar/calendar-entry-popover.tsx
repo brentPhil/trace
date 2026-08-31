@@ -1,4 +1,7 @@
 import { ArrowRight, CalendarDays, Copy, EllipsisVertical, Play, Trash2, X } from "lucide-react"
+import { Popover, PopoverClose, PopoverContent } from "@/components/ui/popover"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   BillableToggle,
   ProjectPicker,
@@ -6,9 +9,6 @@ import {
 } from "@/components/classifiers/classifier-pickers"
 import { EditableDuration, EditableTitle } from "@/components/entries/editable-fields"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
-import { Button, buttonVariants } from "@/components/ui/button"
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu"
-import { Popover } from "@/components/ui/popover"
 import { formatTimeOfInstant } from "@/lib/format-time"
 import { cn } from "@/lib/utils"
 import type { EntryActions } from "@/hooks/use-entry-actions"
@@ -55,7 +55,7 @@ export function CalendarEntryPopover({
   /**
    * The block's own element, handed over by FullCalendar's `eventClick`.
    *
-   * There is no `Popover.Trigger` here because there is no element of ours to
+   * There is no `PopoverTrigger` here because there is no element of ours to
    * make one out of — the grid draws the blocks. A midnight TAIL anchors the
    * same entry's popover as its head does: both segments carry the same
    * `entryId`, and the tail is a continuation rather than a second entry, so
@@ -78,7 +78,7 @@ export function CalendarEntryPopover({
   const running = entry.endedAt === null
 
   return (
-    <Popover.Root
+    <Popover
       open
       onOpenChange={(next) => {
         // Escape, an outside press and the × below all arrive here. The panel
@@ -87,7 +87,7 @@ export function CalendarEntryPopover({
         if (!next) onClose()
       }}
     >
-      <Popover.Popup
+      <PopoverContent
         anchor={anchor}
         // Beside the block rather than under it. A day column is 48px an hour
         // tall and the popover is ~200px; opening downward from a 2 PM block
@@ -145,14 +145,14 @@ export function CalendarEntryPopover({
               </IconButton>
             )}
 
-            <Menu>
-              <MenuTrigger
+            <DropdownMenu>
+              <DropdownMenuTrigger
                 aria-label={`More actions for ${label}`}
                 className={ICON_BUTTON}
               >
                 <EllipsisVertical className="size-4" />
-              </MenuTrigger>
-              <MenuContent>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
                 {/*
                   Delete is the log row's own `onRemove`: the same optimistic
                   drop, the same six-second undo toast naming what went, the
@@ -160,8 +160,8 @@ export function CalendarEntryPopover({
                   dialog, because that is the posture the log already has and
                   an Undo that works is worth more than a modal that asks.
                 */}
-                <MenuItem
-                  className="text-alarm"
+                <DropdownMenuItem
+                  className="text-destructive"
                   onClick={() => {
                     actions.onRemove(entry)
                     onClose()
@@ -169,16 +169,16 @@ export function CalendarEntryPopover({
                 >
                   <Trash2 className="size-4" />
                   Delete entry
-                </MenuItem>
-              </MenuContent>
-            </Menu>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-            <Popover.Close
+            <PopoverClose
               aria-label="Close"
               className={cn(ICON_BUTTON, "ml-auto")}
             >
               <X className="size-4" />
-            </Popover.Close>
+            </PopoverClose>
           </div>
 
           <div className="flex min-w-0">
@@ -260,12 +260,12 @@ export function CalendarEntryPopover({
               trigger={
                 <Button
                   type="button"
-                  variant="quiet"
+                  variant="ghost"
                   size="row-trigger"
                   aria-label={`Edit start, end and day — ${timesLabel(entry, timeZone, use12Hour)}`}
                   className={cn(
                     "min-w-0 justify-start gap-1.5 rounded-md px-1.5 py-1",
-                    "text-sm text-foreground hover:bg-surface"
+                    "text-sm text-foreground hover:bg-card"
                   )}
                 >
                   <CalendarDays
@@ -319,15 +319,15 @@ export function CalendarEntryPopover({
                 and wants the panel gone without hunting for the ×.
 
                 `variant="default"` is `bg-primary`, deliberately NOT
-                `enlarger`. Cold light means a timer is running; a save button
+                `enlarger`. The accent means a timer is running; a save button
                 wearing it would say so on every completed entry on the grid.
               */}
-              <Popover.Close render={<Button size="sm">Save</Button>} />
+              <PopoverClose render={<Button size="sm">Save</Button>} />
             </div>
           </div>
         </div>
-      </Popover.Popup>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -339,9 +339,9 @@ export function CalendarEntryPopover({
  * as a wall of buttons, and a popover holding one entry has no such problem.
  */
 /* `buttonVariants` rather than a `<Button>`, because two of the three controls
- * wearing this are not buttons we render: `MenuTrigger` and `Popover.Close`
+ * wearing this are not buttons we render: `DropdownMenuTrigger` and `PopoverClose`
  * bring their own element and take only a className. */
-const ICON_BUTTON = buttonVariants({ variant: "quiet", size: "icon-row" })
+const ICON_BUTTON = buttonVariants({ variant: "ghost", size: "icon-row" })
 
 function IconButton({
   label,
@@ -355,7 +355,7 @@ function IconButton({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="icon-row"
       aria-label={label}
       onClick={onClick}

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render } from "@testing-library/react"
 import { Sidebar, SidebarProvider, SidebarRail } from "@/components/ui/sidebar"
+import { SIDEBAR_RAIL_INSIDE_EDGE } from "@/components/shell/app-sidebar"
 
 afterEach(cleanup)
 
@@ -31,7 +32,7 @@ function mountRail(defaultOpen: boolean) {
   const { container } = render(
     <SidebarProvider defaultOpen={defaultOpen}>
       <Sidebar collapsible="icon">
-        <SidebarRail />
+        <SidebarRail className={SIDEBAR_RAIL_INSIDE_EDGE} />
       </Sidebar>
     </SidebarProvider>
   )
@@ -41,8 +42,12 @@ function mountRail(defaultOpen: boolean) {
 }
 
 /*
- * The rail used to be centred ON the divider — 16px wide, half of it lying
- * over the page. Measured at 256px expanded it occupied x 247→263 against a
+ * The rail is centred ON the divider in shadcn's own file — 16px wide, half
+ * of it lying over the page. `SIDEBAR_RAIL_INSIDE_EDGE` (app-sidebar.tsx) is
+ * the call-site override that pulls it back, and this renders the same
+ * composition the shell does rather than the bare registry component.
+ *
+ * Historically: Measured at 256px expanded it occupied x 247→263 against a
  * divider at 255, so the leftmost 8px of every entry row in the log showed an
  * `e-resize` cursor and swallowed the click. Nothing about that is visible,
  * which is why it survived: the only trace is a click that does not land.
@@ -72,8 +77,10 @@ describe("SidebarRail", () => {
       expect(classes.filter((n) => /(?:^|:)-(?:right|left)-(?!px$)/.test(n))).toEqual([])
 
       // …and nothing may shift it afterwards either. `-translate-x-1/2` on a
-      // 16px rail is precisely how 8px of it ended up over the log.
-      expect(classes.filter((n) => n.includes("translate-x"))).toEqual([])
+      // 16px rail is precisely how 8px of it ended up over the log. The
+      // `translate-x-0` pair IS the override that cancels it, so the rule is
+      // "no translate that moves anything", not "no translate utility".
+      expect(classes.filter((n) => /translate-x-(?!0$)/.test(n))).toEqual([])
 
       cleanup()
     }

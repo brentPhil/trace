@@ -10,7 +10,7 @@ type PopoverForceClose = typeof PopoverForceCloseModule
  * One shared actions ref, swapped in for the hook the component calls.
  *
  * Base UI populates `actionsRef` through `useImperativeHandle` inside
- * `Popover.Root`, so a ref that comes back non-null is proof the prop actually
+ * `Popover`, so a ref that comes back non-null is proof the prop actually
  * reached it. Without this, DELETING `actionsRef={actionsRef}` — and with it
  * every force-close guarantee — was invisible to the whole suite: nothing else
  * in jsdom observes that prop.
@@ -217,7 +217,7 @@ describe("EntryTimePopover", () => {
     expect(onCommitDay).not.toHaveBeenCalled()
   })
 
-  it("hands its actions ref to Popover.Root", () => {
+  it("hands its actions ref to Popover", () => {
     // The force-close safety net is only reachable through this prop, and
     // nothing else in jsdom can tell whether it was passed — see the mock at
     // the top of this file for why that mattered.

@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react"
-import { Toast } from "@/components/ui/toast"
+import { useToastManager } from "@/components/ui/toast"
 import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
@@ -55,7 +55,7 @@ export function useEntryActions(timeZone: string): EntryActions {
   // Already queried (and cached) by every surface that renders a picker; read
   // here so `onClassify` can resolve a picked project's billable default.
   const { projectsById } = useClassifiers()
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   const createProject = useCallback(
     async (name: string) => await createProjectRaw({ name }),

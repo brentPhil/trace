@@ -32,7 +32,7 @@ export function AuthBackdrop() {
         // One hairline every 48px. `0 1px` then `transparent 1px 48px` draws
         // the rule and the gap in one repeating stop list, so the line stays
         // exactly one pixel at any zoom rather than scaling into a band.
-        "bg-[repeating-linear-gradient(to_bottom,var(--edge-soft)_0_1px,transparent_1px_48px)]",
+        "bg-[repeating-linear-gradient(to_bottom,var(--border)_0_1px,transparent_1px_48px)]",
         // 40% read as JPEG banding rather than ruling — the uncanny middle
         // where a viewer asks whether the screen is broken. edge-soft against
         // ground is only a 0.12 lightness delta at FULL strength, so 75% is

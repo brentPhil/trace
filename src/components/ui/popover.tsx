@@ -1,76 +1,108 @@
-import { Popover as BasePopover } from "@base-ui/react/popover"
+import * as React from "react"
+import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
+
 import { cn } from "@/lib/utils"
-import type { ComponentProps } from "react"
 
-/**
- * Thin styled wrapper over Base UI's popover.
- *
- * The Positioner is not optional decoration: it is what keeps a picker opened
- * from the last row of a long log from being clipped by an `overflow` ancestor
- * or hanging off the bottom of a phone. It flips and shifts on its own.
- */
-const Root = BasePopover.Root
-const Trigger = BasePopover.Trigger
-const Close = BasePopover.Close
+function Popover({ ...props }: PopoverPrimitive.Root.Props) {
+  return <PopoverPrimitive.Root data-slot="popover" {...props} />
+}
 
-function Popup({
+function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
+  return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
+}
+
+function PopoverContent({
   className,
-  align = "start",
-  /* `side` is forwarded, and deliberately has NO default here: Base UI's
-     positioner already defaults to "bottom", and repeating it would mean this
-     wrapper owning a value it is not choosing — the next Base UI default to
-     change would then be silently overridden by a copy of the old one.
-     Forwarded at all because a popover anchored to the SIDEBAR has to open
-     sideways: the rail is 56px wide when collapsed and pinned to the bottom of
-     the viewport, where "below" is nowhere. The positioner still flips on its
-     own when the chosen side has no room. */
-  side,
-  sideOffset = 6,
-  /* WHAT THE POPUP HANGS OFF, when it is not a `Popover.Trigger`.
-     A block on the calendar grid is drawn by FullCalendar, so there is no
-     element of ours to make the trigger — the click hands us the block's own
-     node and this is how it reaches the positioner. Everything else about the
-     popup is unchanged: with no `anchor` Base UI falls back to the trigger, as
-     every other caller relies on. */
+  align = "center",
+  alignOffset = 0,
+  side = "bottom",
+  sideOffset = 4,
   anchor,
-  children,
   ...props
-}: ComponentProps<typeof BasePopover.Popup> & {
-  align?: "start" | "center" | "end"
-  /* The positioner's own type, not a hand-written union: it also accepts the
-     logical `inline-start`/`inline-end`, which a four-value union quietly
-     took away. */
-  side?: ComponentProps<typeof BasePopover.Positioner>["side"]
-  sideOffset?: number
-  anchor?: ComponentProps<typeof BasePopover.Positioner>["anchor"]
-}) {
+}: PopoverPrimitive.Popup.Props &
+  // `anchor` is the one addition to the registry's Pick: two calendar
+  // popovers anchor to a FullCalendar event element rather than to a trigger
+  // they rendered, which is a Positioner prop with no styling attached.
+  Pick<
+    PopoverPrimitive.Positioner.Props,
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
+  >) {
   return (
-    <BasePopover.Portal>
-      <BasePopover.Positioner
+    <PopoverPrimitive.Portal>
+      <PopoverPrimitive.Positioner
         align={align}
+        alignOffset={alignOffset}
+        anchor={anchor}
         side={side}
         sideOffset={sideOffset}
-        anchor={anchor}
-        className="z-50"
+        className="isolate z-50"
       >
-        <BasePopover.Popup
+        <PopoverPrimitive.Popup
+          data-slot="popover-content"
           className={cn(
-            "flex max-h-[min(22rem,60svh)] w-[17rem] flex-col overflow-hidden",
-            "rounded-lg border border-edge-soft bg-surface-raised shadow-xl",
-            "focus-visible:outline-none",
-            "transition-[opacity,transform] duration-100 ease-out",
-            "data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0",
-            "data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0",
-            "motion-reduce:transition-none",
+            "z-50 flex w-72 origin-(--transform-origin) flex-col gap-4 rounded-3xl bg-popover p-4 text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/5 outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             className
           )}
           {...props}
-        >
-          {children}
-        </BasePopover.Popup>
-      </BasePopover.Positioner>
-    </BasePopover.Portal>
+        />
+      </PopoverPrimitive.Positioner>
+    </PopoverPrimitive.Portal>
   )
 }
 
-export const Popover = { Root, Trigger, Popup, Close }
+function PopoverHeader({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="popover-header"
+      className={cn("flex flex-col gap-1 text-sm", className)}
+      {...props}
+    />
+  )
+}
+
+function PopoverTitle({ className, ...props }: PopoverPrimitive.Title.Props) {
+  return (
+    <PopoverPrimitive.Title
+      data-slot="popover-title"
+      className={cn("text-base font-medium", className)}
+      {...props}
+    />
+  )
+}
+
+function PopoverDescription({
+  className,
+  ...props
+}: PopoverPrimitive.Description.Props) {
+  return (
+    <PopoverPrimitive.Description
+      data-slot="popover-description"
+      className={cn("text-muted-foreground", className)}
+      {...props}
+    />
+  )
+}
+
+/**
+ * The one export the registry does not ship, and it is a bare passthrough.
+ *
+ * Ten call sites close a popover from inside it — "Save", "Cancel", a picked
+ * date — which Base UI does with `Popover.Close`. base-luma's popover exports
+ * Trigger and Content but no Close, so without this every one of those sites
+ * would import `@base-ui/react/popover` directly and reach around this file.
+ *
+ * No className, no variant, no styling of any kind: it renders whatever the
+ * call site's `render` prop gives it, so a picked theme reaches it through that
+ * child like any other control.
+ */
+const PopoverClose = PopoverPrimitive.Close
+
+export {
+  Popover,
+  PopoverClose,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+}

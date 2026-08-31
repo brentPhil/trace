@@ -1,4 +1,5 @@
 import { useId } from "react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   FieldLabelled,
   FieldRefusal,
@@ -315,21 +316,28 @@ function CurrencyField({
 
   return (
     <FieldLabelled label="Currency" htmlFor={id}>
-      <select
-        id={id}
+      <Select
         value={value}
-        aria-label="Currency"
-        aria-invalid={error !== undefined}
-        aria-describedby={error === undefined ? undefined : errorId}
-        onChange={(event) => onChange(event.target.value)}
-        className={cn(INVOICE_FIELD, fieldBorder(error !== undefined))}
+        onValueChange={onChange}
       >
-        {options.map((code) => (
-          <option key={code} value={code}>
-            {code}
-          </option>
-        ))}
-      </select>
+        {/* A currency code IS its own label, so no formatter here. */}
+        <SelectTrigger
+          id={id}
+          aria-label="Currency"
+          aria-invalid={error !== undefined}
+          aria-describedby={error === undefined ? undefined : errorId}
+          className={cn(INVOICE_FIELD, fieldBorder(error !== undefined))}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((code) => (
+            <SelectItem key={code} value={code}>
+              {code}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <FieldRefusal id={errorId} error={error} />
     </FieldLabelled>
   )

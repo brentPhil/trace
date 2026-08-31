@@ -1,4 +1,5 @@
 import { Play, Trash2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   BillableToggle,
   ProjectPicker,
@@ -6,7 +7,6 @@ import {
 } from "@/components/classifiers/classifier-pickers"
 import { NoteLine } from "@/components/entries/note-line"
 import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
-import { Button } from "@/components/ui/button"
 import { formatTimeRange } from "@/lib/format-time"
 import { formatTotal } from "@/lib/format-total"
 import { joinNotes } from "@/lib/group-sittings"
@@ -130,8 +130,8 @@ export function SittingRow({
   return (
     <div
       className={cn(
-        "group border-b border-edge-soft/60",
-        "transition-colors hover:bg-surface/60"
+        "group border-b border-border/60",
+        "transition-colors hover:bg-card/60"
       )}
     >
       {/* `px-4` and the row height token, exactly as `EntryRow` and the day
@@ -173,7 +173,7 @@ export function SittingRow({
               square, so a three-digit count still fits. */}
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="badge"
             aria-expanded={expanded}
             aria-controls={controls}
@@ -181,7 +181,7 @@ export function SittingRow({
               expanded ? "Hide grouped entries" : "Show grouped entries"
             }
             onClick={onToggle}
-            className="shrink-0 rounded-sm border-edge-soft font-mono tracking-[-0.02em] tabular-nums"
+            className="shrink-0 rounded-sm border-input font-mono tracking-[-0.02em] tabular-nums"
           >
             {sitting.entries.length}
           </Button>
@@ -326,7 +326,7 @@ function SittingAction({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="icon-row"
       aria-label={label}
       onClick={onClick}
@@ -334,7 +334,7 @@ function SittingAction({
         "opacity-100 sm:opacity-0",
         "transition-[opacity,color] sm:group-hover:opacity-100",
         "focus-visible:opacity-100 motion-reduce:transition-none",
-        destructive && "hover:text-alarm"
+        destructive && "hover:text-destructive"
       )}
     >
       {children}

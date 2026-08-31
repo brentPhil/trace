@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { RangeBar } from "@/components/timer/range-bar"
+import { chooseOption } from "@/test-utils/select"
 
 /*
  * /timer's range bar.
@@ -175,9 +176,7 @@ describe("RangeBar — what only the calendar gets", () => {
   it("changes size", () => {
     const onSizeChange = vi.fn()
     render(<RangeBar {...base} onSizeChange={onSizeChange} />)
-    fireEvent.change(screen.getByLabelText("Calendar range"), {
-      target: { value: "day" },
-    })
+    chooseOption("Calendar range", "Day view")
     expect(onSizeChange).toHaveBeenCalledWith("day")
   })
 

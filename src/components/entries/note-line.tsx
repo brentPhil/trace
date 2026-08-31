@@ -92,7 +92,7 @@ export function NoteLine({
                 // row growing with it.
                 "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
                 "-mx-1 min-w-0 max-w-full justify-start px-1 py-0.5 text-left whitespace-normal",
-                "hover:bg-surface-raised/70",
+                "hover:bg-popover/70",
                 // A STEP UP IN SIZE, and not only in room. `text-xs` is a label
                 // size — right for a line you glance past on the way to the
                 // duration, wrong for the only prose in the product once it is

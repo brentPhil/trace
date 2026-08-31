@@ -1,7 +1,7 @@
 /**
  * The app is a warm graphite room; a document is paper.
  *
- * A `bg-ground` PDF is one nobody can print and a recipient reads as broken, so
+ * A `bg-background` PDF is one nobody can print and a recipient reads as broken, so
  * the palette is re-derived at paper luminance here — once, in a table — rather
  * than inverted ad hoc at each draw call.
  *

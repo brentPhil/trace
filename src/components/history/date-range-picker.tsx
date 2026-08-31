@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Calendar } from "@/components/ui/calendar"
+import { Button } from "@/components/ui/button"
 import { CalendarRange } from "lucide-react"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { Chip } from "@/components/history/filter-controls"
-import { Button } from "@/components/ui/button"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover } from "@/components/ui/popover"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { dateToDay, dayToDate, formatDayRange } from "@/lib/date-range-picker"
 import { useForceCloseWhenClosed, usePopoverActionsRef } from "@/lib/popover-force-close"
@@ -181,8 +181,8 @@ export function DateRangePicker({
   const calendarKey = open ? `open-${from}-${to}` : "closed"
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
-      <Popover.Trigger
+    <Popover open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
+      <PopoverTrigger
         render={
           <Button
             type="button"
@@ -191,7 +191,7 @@ export function DateRangePicker({
             aria-label={`Date range — ${spokenLabel ?? label}`}
             className={cn(
               "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
-              "font-mono tabular-nums tracking-[-0.02em] gap-1.5 border-edge bg-ground px-2 font-normal"
+              "font-mono tabular-nums tracking-[-0.02em] gap-1.5 border-input bg-background px-2 font-normal"
             )}
           >
             <CalendarRange aria-hidden="true" className="size-3.5 text-muted-foreground" />
@@ -200,12 +200,12 @@ export function DateRangePicker({
         }
       />
 
-      <Popover.Popup
+      <PopoverContent
         align="start"
         className={cn(
           "gap-0 p-3",
           /*
-           * OFF `Popover.Popup`'S OWN `max-h-[min(22rem,60svh)]
+           * OFF `PopoverContent`'S OWN `max-h-[min(22rem,60svh)]
            * overflow-hidden`, which is sized for a short menu list and
            * silently amputates a calendar.
            *
@@ -235,7 +235,7 @@ export function DateRangePicker({
               // A rail, not a row: it runs down the left of the grid, which is
               // where the reference design puts it and where it stays out of
               // the way of the two-click gesture on the right.
-              className="flex flex-col items-start gap-1 self-stretch border-r border-edge-soft pr-3"
+              className="flex flex-col items-start gap-1 self-stretch border-r border-border pr-3"
             >
               {presets.items.map((preset) => (
                 <Chip
@@ -271,7 +271,7 @@ export function DateRangePicker({
                       <span
                         aria-hidden="true"
                         className={cn(
-                          "ml-1.5 rounded-md border border-edge-soft px-1",
+                          "ml-1.5 rounded-md border border-border px-1",
                           "text-[0.625rem] text-muted-foreground"
                         )}
                       >
@@ -309,8 +309,8 @@ export function DateRangePicker({
             autoFocus
           />
         </div>
-      </Popover.Popup>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   )
 }
 

@@ -1,6 +1,6 @@
 import { useState } from "react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
-import { Popover } from "@/components/ui/popover"
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
 import { TimePopoverFields } from "@/components/entries/time-popover-fields"
 import { EntryDuration } from "@/components/timer/entry-duration"
@@ -132,7 +132,7 @@ export function TimerDurationPopover({
           trigger={
             <Button
               type="button"
-              variant="quiet"
+              variant="ghost"
               size="row-trigger"
               // Says what it does, not the digits it wraps — a screen reader
               // hears "Edit start time — running", never "9:12:04, button".
@@ -145,7 +145,7 @@ export function TimerDurationPopover({
               <EntryDuration
                 startedAt={entry.startedAt}
                 endedAt={null}
-                className={cn(durationClass, "text-enlarger")}
+                className={cn(durationClass, "text-primary")}
               />
             </Button>
           }
@@ -170,11 +170,11 @@ export function TimerDurationPopover({
 /**
  * The shared button styling for the duration trigger, in both states.
  *
- * Deliberately no colour of its own — see The Cold Light Rule in DESIGN.md.
- * `--enlarger` marking the running state lives entirely in `EntryDuration`'s
- * own className, exactly as it did before this was a button; wrapping it must
- * not add a competing accent, so the hover/focus treatment here is the same
- * neutral one the row's own time trigger uses.
+ * Deliberately no colour of its own. The mark that says a duration is RUNNING
+ * lives entirely in `EntryDuration`'s own className, exactly as it did before
+ * this was a button; wrapping it must not add a competing accent, so the
+ * hover/focus treatment here is the same neutral one the row's own time trigger
+ * uses.
  */
 const triggerClass = cn(
   // WCAG 2.2 SC 2.5.8: the hit area grows by 2px above and below through a
@@ -377,12 +377,12 @@ function IdleDurationPopover({
   }
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
-      <Popover.Trigger
+    <Popover open={open} onOpenChange={setOpen} actionsRef={actionsRef}>
+      <PopoverTrigger
         render={
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="row-trigger"
             // Idle, the digits are always 0:00:00 — a name built from them
             // would say nothing. This says what clicking it does instead.
@@ -407,7 +407,7 @@ function IdleDurationPopover({
         }
       />
 
-      <Popover.Popup className="w-[19.5rem] gap-0 p-0">
+      <PopoverContent className="w-[19.5rem] gap-0 p-0">
         <TimePopoverFields
           running={false}
           startValue={start}
@@ -454,8 +454,8 @@ function IdleDurationPopover({
             </div>
           }
         />
-      </Popover.Popup>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   )
 }
 

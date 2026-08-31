@@ -343,8 +343,8 @@ describe("CalendarPanel", () => {
     })
   })
 
-  describe("the Cold Light Rule", () => {
-    it("gives a running entry's block the cold light, and only that one", () => {
+  describe("the Exposure Rule", () => {
+    it("gives a running entry's block the running accent, and only that one", () => {
       const { container } = renderPanel({
         entries: [
           entry({ _id: "done", title: "Finished" } as Partial<
@@ -361,13 +361,13 @@ describe("CalendarPanel", () => {
       })
 
       const live = blockSaying(container, "Still going")
-      expect(live.className).toContain("border-enlarger")
-      expect(live.className).toContain("bg-enlarger/15")
+      expect(live.className).toContain("border-primary")
+      expect(live.className).toContain("bg-primary/15")
       // A completed entry is the ordinary raised surface. `enlarger` on the
       // grid means a timer is running and nothing else.
       const done = blockSaying(container, "Finished")
       expect(done.className).not.toContain("enlarger")
-      expect(done.className).toContain("border-edge-raised")
+      expect(done.className).toContain("border-border")
     })
 
     it("shows the elapsed clock on a running block, not a closing time", () => {
@@ -418,7 +418,7 @@ describe("CalendarPanel", () => {
       expect(block.className).toContain("focus-visible:-outline-offset-2")
     })
 
-    it("lifts on hover without spending the cold light on it", () => {
+    it("lifts on hover without spending the running accent on it", () => {
       const { container } = renderPanel({
         entries: [
           entry({ _id: "done", title: "Finished" } as Partial<
@@ -436,20 +436,20 @@ describe("CalendarPanel", () => {
 
       /*
        * A `color-mix` toward Ink, not `hover:bg-foreground/5`. A `hover:bg-*`
-       * REPLACES the block's own `bg-surface-raised` rather than layering over
+       * REPLACES the block's own `bg-popover` rather than layering over
        * it, so 5% ivory would composite over the LANE and land DARKER than the
        * block was before the pointer arrived — a hover that dims what it is
        * pointing at.
        */
       const done = blockSaying(container, "Finished")
       expect(done.className).toContain("color-mix")
-      expect(done.className).not.toContain("hover:bg-enlarger")
+      expect(done.className).not.toContain("hover:bg-primary")
 
       // The running block spends its hover step in its own light instead:
-      // mixing ivory into it would wash the one signal the Cold Light Rule
+      // mixing ivory into it would wash the one signal the Exposure Rule
       // reserves, and cold is legal on this block because it IS running.
       const live = blockSaying(container, "Still going")
-      expect(live.className).toContain("hover:bg-enlarger/25")
+      expect(live.className).toContain("hover:bg-primary/25")
       expect(live.className).not.toContain("color-mix")
     })
   })
@@ -486,12 +486,17 @@ describe("CalendarPanel", () => {
       // from an unlayered `.hatch-empty` class, and this asserted the INVERSE
       // (that no Tailwind `border-` class was present at all) because any that
       // were would have been outranked and invisible. `HATCH_EMPTY` is
-      // utilities now, so the real property is assertable directly: the tail
-      // carries the dashed edge, and none of the hue borders a head gets.
+      // utilities now, so the real property is assertable directly.
+      //
+      // It is `border-input`, not `border-border`, and that is the boundary
+      // split in styles.css doing its job. The hatch marks an ABSENCE the user
+      // can act on, and DESIGN.md names this dashed edge as the carrier that
+      // survives colour blindness — so it has to clear 3:1, which the divider
+      // token deliberately does not. At shadcn's stock 10%-white `--border`
+      // this edge measured 1.26:1 in the dark ramp: a carrier nobody could see.
       expect(tail.className).toContain("border-dashed")
-      expect(tail.className).toContain("border-edge-soft")
-      expect(tail.className).not.toContain("border-enlarger")
-      expect(tail.className).not.toContain("border-edge-raised")
+      expect(tail.className).toContain("border-input")
+      expect(tail.className).not.toContain("border-primary")
     })
 
     it("gives the tail the same Untitled fallback the head has", () => {
@@ -554,7 +559,7 @@ describe("CalendarPanel", () => {
         ...container.querySelectorAll<HTMLElement>(
           '[role="columnheader"][data-date]'
         ),
-      ].filter((cell) => cell.className.includes("bg-surface-raised"))
+      ].filter((cell) => cell.className.includes("bg-popover"))
 
       expect(marked).toHaveLength(1)
       expect(marked[0].getAttribute("data-date")).toBe("2026-08-11")
@@ -584,7 +589,7 @@ describe("CalendarPanel", () => {
       const markedDay = () =>
         container
           .querySelector<HTMLElement>(
-            '[role="columnheader"][data-date].bg-surface-raised'
+            '[role="columnheader"][data-date].bg-popover'
           )
           ?.getAttribute("data-date")
 
@@ -632,7 +637,7 @@ describe("CalendarPanel", () => {
         ...container.querySelectorAll<HTMLElement>(
           '[role="columnheader"][data-date]'
         ),
-      ].filter((cell) => cell.className.includes("bg-surface-raised"))
+      ].filter((cell) => cell.className.includes("bg-popover"))
 
       expect(marked).toHaveLength(1)
       expect(marked[0].getAttribute("data-date")).toBe("2026-08-11")
@@ -775,9 +780,9 @@ describe("CalendarPanel", () => {
       expect(block.getAttribute("role")).toBe("button")
       // Fill means recorded, outline means scheduled. `surface-raised` is an
       // entry's fill and must NOT appear here, and `enlarger` is reserved for a
-      // running timer by the Cold Light Rule.
-      expect(block.className).toContain("border-edge-soft")
-      expect(block.className).not.toContain("bg-surface-raised")
+      // running timer by the Exposure Rule.
+      expect(block.className).toContain("border-border")
+      expect(block.className).not.toContain("bg-popover")
       expect(block.className).not.toContain("enlarger")
     })
 
@@ -860,7 +865,7 @@ describe("CalendarPanel", () => {
         // A continuation is a texture, never a hue — and a ghost stays
         // unfilled, so neither segment may pick up an entry's fill.
         expect(tail.className).toContain("border-dashed")
-        expect(tail.className).not.toContain("bg-surface-raised")
+        expect(tail.className).not.toContain("bg-popover")
         expect(tail.className).not.toContain("enlarger")
       })
 
@@ -869,7 +874,7 @@ describe("CalendarPanel", () => {
         const head = blocks(container).find(
           (block) => !block.className.includes("border-dashed")
         )
-        expect(head!.className).toContain("border-edge-soft")
+        expect(head!.className).toContain("border-border")
         expect(head!.className).not.toContain("border-dashed")
         expect(head!.textContent).toContain("Night handover")
       })

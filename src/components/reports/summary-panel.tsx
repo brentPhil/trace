@@ -106,7 +106,7 @@ export function SummaryPanel({
       </Readout>
 
       {breakdown.truncated ? (
-        <p role="alert" className="text-sm text-alarm">
+        <p role="alert" className="text-sm text-destructive">
           This period is too large to total exactly — every figure and every bar
           below is a floor, not the real total. Narrow the dates.
         </p>
@@ -181,7 +181,7 @@ export function SummaryPanel({
  */
 function Readout({ children }: { children: ReactNode }) {
   return (
-    <dl className="grid grid-cols-2 gap-x-8 gap-y-4 border-y border-edge-soft py-3 sm:grid-cols-4">
+    <dl className="grid grid-cols-2 gap-x-8 gap-y-4 border-y border-border py-3 sm:grid-cols-4">
       {children}
     </dl>
   )
@@ -204,7 +204,7 @@ function Figure({
     <div className="flex min-w-0 flex-col gap-0.5">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd
-        className={`font-mono tabular-nums tracking-[-0.02em] text-xl leading-tight ${money ? "text-brass" : "text-foreground"}`}
+        className={`font-mono tabular-nums tracking-[-0.02em] text-xl leading-tight ${money ? "text-foreground" : "text-foreground"}`}
       >
         {value}
       </dd>

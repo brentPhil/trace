@@ -1,8 +1,8 @@
 import { useState } from "react"
-import { ChevronDown } from "lucide-react"
+import { useToastManager } from "@/components/ui/toast"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
-import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu"
-import { Toast } from "@/components/ui/toast"
+import { ChevronDown } from "lucide-react"
 import { downloadBlob, exportFilename } from "@/lib/export/download"
 import { csvBlob } from "@/lib/export/to-csv"
 import { reportRows } from "@/lib/export/report-rows"
@@ -40,7 +40,7 @@ export function ExportMenu({
   disabledReason: string | null
 }) {
   const [busy, setBusy] = useState(false)
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   async function run(format: "pdf" | "csv" | "xlsx") {
     setBusy(true)
@@ -70,8 +70,8 @@ export function ExportMenu({
 
   return (
     <>
-      <Menu>
-        <MenuTrigger
+      <DropdownMenu>
+        <DropdownMenuTrigger
           render={
             <Button
               variant="outline"
@@ -84,12 +84,12 @@ export function ExportMenu({
             </Button>
           }
         />
-        <MenuContent>
-          <MenuItem onClick={() => void run("pdf")}>PDF</MenuItem>
-          <MenuItem onClick={() => void run("csv")}>CSV</MenuItem>
-          <MenuItem onClick={() => void run("xlsx")}>XLSX</MenuItem>
-        </MenuContent>
-      </Menu>
+        <DropdownMenuContent>
+          <DropdownMenuItem onClick={() => void run("pdf")}>PDF</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void run("csv")}>CSV</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void run("xlsx")}>XLSX</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       {/*
         Rendered rather than put in `title`: a tooltip on a DISABLED control is
         unreachable by keyboard and invisible to a screen reader, which is

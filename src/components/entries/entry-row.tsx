@@ -1,4 +1,5 @@
 import { Play, Trash2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   BillableToggle,
   ProjectPicker,
@@ -11,7 +12,6 @@ import {
 import { EntryTimePopover } from "@/components/entries/entry-time-popover"
 import { NoteLine } from "@/components/entries/note-line"
 import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { SelectionTarget } from "@/components/entries/selection-checkbox"
 import type { Classification } from "@/components/timer/timer-bar"
@@ -153,8 +153,8 @@ export function EntryRow({
        * with them.
        */
       className={cn(
-        "group border-b border-edge-soft/60 last:border-b-0",
-        "transition-colors hover:bg-surface/60"
+        "group border-b border-border/60 last:border-b-0",
+        "transition-colors hover:bg-card/60"
       )}
     >
       {/*
@@ -259,7 +259,7 @@ export function EntryRow({
               // without it every billable row is four pixels taller than every
               // non-billable one and the whole log develops a stutter.
               <span
-                className="flex shrink-0 items-center text-xs leading-5 text-brass sm:hidden"
+                className="flex shrink-0 items-center text-xs leading-5 text-foreground sm:hidden"
                 title="Billable"
               >
                 <span aria-hidden="true" className="font-semibold">
@@ -408,7 +408,7 @@ function RowButton({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="icon-row"
       aria-label={label}
       onClick={onClick}
@@ -416,7 +416,7 @@ function RowButton({
         "opacity-100 sm:opacity-0",
         "transition-[opacity,color] sm:group-hover:opacity-100",
         "focus-visible:opacity-100",
-        destructive && "hover:text-alarm",
+        destructive && "hover:text-destructive",
         "motion-reduce:transition-none"
       )}
     >

@@ -2,6 +2,7 @@ import { useState } from "react"
 import { afterEach, describe, expect, it } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { FilterControls } from "@/components/history/filter-controls"
+import { chooseOption } from "@/test-utils/select"
 import { matches } from "@/lib/history-filters"
 import { filterEntry as entry } from "@/test-utils/fixtures"
 import type { QuickFilters } from "@/lib/history-filters"
@@ -77,7 +78,9 @@ describe("FilterControls", () => {
   it("narrows the rendered rows by project", () => {
     render(<Harness />)
 
-    fireEvent.change(screen.getByLabelText("Project"), { target: { value: "p1" } })
+    // "p1" is the VALUE; "Website" is what the option says. A Select is
+    // driven by the label the user reads, which is the better test anyway.
+    chooseOption("Project", "Website")
 
     expect(titles()).toEqual(["Fix login bug"])
   })

@@ -30,7 +30,7 @@ export function BulkEntryActions({
     <div
       role="toolbar"
       aria-label="Selected entry actions"
-      className="flex items-center gap-3 rounded-lg border border-edge-raised bg-surface-raised px-3 py-2 shadow-lg"
+      className="flex items-center gap-3 rounded-lg border border-border bg-popover px-3 py-2 shadow-lg"
     >
       <span className="text-sm font-medium">
         {count} {count === 1 ? "record" : "records"} selected

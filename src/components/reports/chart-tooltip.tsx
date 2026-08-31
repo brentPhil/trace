@@ -35,7 +35,7 @@ export function TooltipCard({
   footnote?: string
 }) {
   return (
-    <div className="grid min-w-44 gap-1.5 rounded-md border border-edge-soft bg-surface-raised px-2.5 py-2 text-xs">
+    <div className="grid min-w-44 gap-1.5 rounded-md border border-border bg-popover px-2.5 py-2 text-xs">
       <div className="font-medium">{heading}</div>
       <div className="grid gap-1">
         {rows.map((row) => (
@@ -47,7 +47,7 @@ export function TooltipCard({
               {row.label}
             </span>
             <span
-              className={cn("font-mono tabular-nums tracking-[-0.02em] font-medium", row.money ? "text-brass" : undefined)}
+              className={cn("font-mono tabular-nums tracking-[-0.02em] font-medium", row.money ? "text-foreground" : undefined)}
             >
               {row.value}
             </span>
@@ -86,4 +86,4 @@ export function hoveredRow<T>(
 }
 
 /** The hover highlight behind a bar. `--muted` resolves to the panel's own fill. */
-export const BAR_CURSOR = { fill: "var(--surface-raised)" } as const
+export const BAR_CURSOR = { fill: "var(--popover)" } as const

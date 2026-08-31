@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "@/components/ui/toast"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { Toast, ToastViewport } from "@/components/ui/toast"
 import { Projects } from "@/routes/_authed/-projects"
 import { convexKey } from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
@@ -84,10 +84,9 @@ function renderProjects(
 
   render(
     <QueryClientProvider client={queryClient}>
-      <Toast.Provider>
+      <Toaster>
         <Projects />
-        <ToastViewport />
-      </Toast.Provider>
+      </Toaster>
     </QueryClientProvider>
   )
 }

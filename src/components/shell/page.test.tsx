@@ -136,7 +136,7 @@ describe("Page — the pinning rule", () => {
     expect(band?.className).toContain("z-20")
     // Opaque, because rows scroll under it and a transparent sticky element is
     // a window onto them.
-    expect(band?.className).toContain("bg-ground")
+    expect(band?.className).toContain("bg-background")
     // The sum is composed in CSS over two MEASURED heights — see
     // `use-height-var.ts`. A constant here is right in exactly one state.
     expect(container.innerHTML).toContain("--log-sticky-top:calc(")

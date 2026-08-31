@@ -9,15 +9,15 @@
  * the eager bundle, with a [tanstack-router] warning per route saying so.
  * Imported from a non-route file, `component:` splits as normal.
  */
+import { Button } from "@/components/ui/button"
+import { useToastManager } from "@/components/ui/toast"
+import { Empty } from "@/components/ui/empty"
 import { useRef, useState } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { Archive, ArchiveRestore, Plus, Trash2 } from "lucide-react"
 import { InlineEdit } from "@/components/entries/inline-edit"
 import { Page } from "@/components/shell/page"
-import { Button } from "@/components/ui/button"
-import { Empty } from "@/components/ui/empty"
-import { Toast } from "@/components/ui/toast"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { errorMessage } from "@/lib/error-message"
 import { formatRate, rateHelp } from "@/lib/format-money"
@@ -72,42 +72,46 @@ export function Projects() {
         the whole point of there being one place that draws it.
       */}
       <div className="flex flex-1 flex-col gap-10 px-4 pb-6">
-        <section className="flex flex-col gap-3">
+        {/* `aria-label` rather than a heading: the live list IS the page, so its
+            label is the `<h1>` above it, and a second visible "Projects" under
+            the first is the double duty this page was untangled from. The
+            sections below name themselves with their own `<h2>`. */}
+        <section className="flex flex-col gap-3" aria-label="Projects">
           {live.length === 0 ? (
             <Empty>
               No projects yet. A project is who the work is for — a client, or a
               product. You can also make one straight from the timer bar.
             </Empty>
           ) : (
-            <ul className="flex flex-col rounded-md border border-edge-soft">
+            <ProjectList>
               {live.map((project) => (
                 <ProjectRow key={project._id} project={project} currency={settings.currency} />
               ))}
-            </ul>
+            </ProjectList>
           )}
         </section>
 
         {archived.length === 0 ? null : (
           <section className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <h2 className="text-sm font-semibold">Archived</h2>
+              <SectionHeading count={archived.length}>Archived</SectionHeading>
               <p className="max-w-prose text-xs text-muted-foreground">
                 Not offered for new work. Their entries keep every hour and still
                 show the project&apos;s name, which is why archiving is the answer
                 for a finished client rather than deleting.
               </p>
             </div>
-            <ul className="flex flex-col rounded-md border border-edge-soft">
+            <ProjectList>
               {archived.map((project) => (
                 <ProjectRow key={project._id} project={project} currency={settings.currency} />
               ))}
-            </ul>
+            </ProjectList>
           </section>
         )}
 
         <section className="flex flex-col gap-3">
           <div className="flex flex-col gap-1">
-            <h2 className="text-sm font-semibold">Tags</h2>
+            <SectionHeading count={tags.length}>Tags</SectionHeading>
             <p className="max-w-prose text-xs text-muted-foreground">
               Flat by design. Tags cut across projects — “deep-work”, “meeting”,
               “rework” — which is the one thing a project cannot tell you.
@@ -132,6 +136,44 @@ export function Projects() {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The bordered box the rows live in, said once for both lists.
+ *
+ * `overflow-hidden` is the load-bearing part: the rows below fill on hover, and
+ * a square fill inside a `rounded-md` border pokes out at all four corners of
+ * the first and last row. Clipping the box is how the fill learns the radius
+ * without every row having to know which end of the list it is on.
+ */
+function ProjectList({ children }: { children: React.ReactNode }) {
+  return (
+    <ul className="flex flex-col overflow-hidden rounded-md border border-border">
+      {children}
+    </ul>
+  )
+}
+
+/**
+ * A section heading with the size of what is under it.
+ *
+ * The count is the one thing the prose beneath cannot say — "Archived" and
+ * "Tags" are the same two words whether there are three or thirty — and it is
+ * the number a person actually scans for on a page whose lists have no other
+ * summary. Mono and tabular per The Tabular Rule: it is a digit the user reads.
+ *
+ * Not an eyebrow, and not a badge: sentence-case heading, hairline figure
+ * beside it, both on the page's own ground.
+ */
+function SectionHeading({ count, children }: { count: number; children: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <h2 className="text-sm font-semibold">{children}</h2>
+      <span className="font-mono text-xs tracking-[-0.02em] text-muted-foreground tabular-nums">
+        {count}
+      </span>
+    </div>
+  )
+}
+
 function ProjectRow({
   project,
   currency,
@@ -140,7 +182,7 @@ function ProjectRow({
   currency: string
 }) {
   const { updateProject, setArchived, removeProject } = useClassifierMutations()
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   const report = (thrown: unknown) => {
     // IN_USE lands here: "3 entries use this project. Archive it instead."
@@ -151,8 +193,20 @@ function ProjectRow({
   return (
     <li
       className={cn(
-        "group flex items-center gap-3 px-3 py-2",
-        "border-b border-edge-soft last:border-b-0"
+        // `gap-2` below `sm`: a 375px row is a swatch, a name, a mark, a rate
+        // and two icons, and everything except the name is `shrink-0` — so
+        // every pixel spent on a gutter comes out of the one field that is
+        // actually words. Four gaps at 12px is a third of what the name has.
+        "group flex items-center gap-2 px-3 py-2 sm:gap-3",
+        "border-b border-border last:border-b-0",
+        /*
+          THE SAME ROW THE LOG DRAWS. An entry row is `hover:bg-card/60`,
+          and a project row is the same object — a line of fields you edit in
+          place — so it fills the same way. Before this the only response to a
+          pointer was two icons fading in at the far right of a 1600px row,
+          which asks the reader to notice a change 1400px from the cursor.
+        */
+        "transition-colors hover:bg-card/60 motion-reduce:transition-none"
       )}
     >
       <ColorPicker
@@ -163,10 +217,26 @@ function ProjectRow({
       />
 
       <InlineEdit<string>
-        display={<span className="block truncate text-sm">{project.name}</span>}
+        display={<span className="block w-full truncate text-sm">{project.name}</span>}
         initialInput={project.name}
         ariaLabel={`Project name: ${project.name}`}
-        className="-mx-1 min-w-0 flex-1 px-1 py-0.5 text-sm"
+        /*
+          `justify-start`, and it is not optional. InlineEdit's trigger is a
+          `Button`, whose base is `inline-flex … justify-center` — right for a
+          button with a word in it, wrong for one that is `flex-1` across the
+          empty middle of a row. The name was being centred in whatever width
+          was left over, so every project sat at a different left edge and the
+          column of names read as a ragged stripe down the page instead of a
+          list. `text-left` on the trigger cannot fix it: the span is a flex
+          ITEM, and `justify-center` places the box before the text inside it
+          has any say.
+
+          `w-full` on the span is the other half — a centred flex item was
+          shrink-to-fit, so `truncate` had its own content's width to measure
+          against rather than the column's, and a long name would push the row
+          rather than ellipse.
+        */
+        className="-mx-1 min-w-0 flex-1 justify-start px-1 py-0.5 text-sm"
         grow
         parse={(raw) =>
           raw.trim() === ""
@@ -183,21 +253,66 @@ function ProjectRow({
         unlike the per-entry control this one is a SETTING and needs its own
         label. It applies at creation only — changing it never rewrites work
         that has already been recorded, let alone invoiced.
+
+        THE VISIBLE LABEL IS ONE WORD. "Billable by default" is the accurate
+        name of the field and the wrong thing to print on every line of a list:
+        four words, repeated once per project, reading as a paragraph down the
+        middle of the page rather than as a column of states. The qualifier
+        moves to the ACCESSIBLE name, which is said once per row to the people
+        who cannot see that this is /projects — and it starts with the visible
+        word, which is what SC 2.5.3 asks of a control whose label is spoken.
+        The name also carries the project, so a screen reader's list of
+        checkboxes is a list of distinguishable ones.
+
+        Brass when on — the billable MARK keeps brass (§2, Secondary) — and the
+        word wears it too, so the state reads down the column at a glance. The
+        checkbox is what carries it for anyone not reading colour.
+
+        `sm:w-20` fixes the column so the rate beside it starts at the same x on
+        every row; below `sm` the word is dropped for the mark alone and the
+        column collapses to what the box needs.
       */}
-      <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <label
+        className={cn(
+          "flex shrink-0 items-center gap-1.5 rounded-sm px-0.5 py-1 text-xs sm:w-20 sm:px-1",
+          "transition-colors hover:bg-popover/70 motion-reduce:transition-none",
+          /*
+            THE INDICATOR IS ON THE LABEL, because the thing being focused is
+            the pair — a 14px box and the word that says what ticking it does —
+            and a ring around the box alone points at half of it.
+
+            An OUTLINE rather than a ring, which is the answer §5 already
+            reaches for when a wrapper carries the focus of an input inside it:
+            a ring is a box-shadow, and box-shadows are dropped entirely in
+            forced-colors mode, so the input's own outline would have been
+            suppressed here in exchange for nothing. `outline-offset-2` puts
+            the row's fill on both sides of it, which is what keeps the figure
+            clear of the 3:1 floor whether the row is hovered or not.
+          */
+          "has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-2 has-[input:focus-visible]:outline-ring",
+          project.billableByDefault ? "text-foreground" : "text-muted-foreground"
+        )}
+      >
         <input
           type="checkbox"
           checked={project.billableByDefault}
+          aria-label={`Billable by default for ${project.name}`}
           onChange={(event) => {
             void updateProject({
               projectId: project._id,
               billableByDefault: event.target.checked,
             }).catch(report)
           }}
-          className="size-3.5 accent-[var(--brass)]"
+          className="size-3.5 shrink-0 accent-foreground focus-visible:outline-none"
         />
-        <span className="hidden sm:inline">Billable by default</span>
-        <span className="sm:hidden">$</span>
+        {/* `aria-hidden`: the input above names itself, and a bare "$" — which
+            is all that is left of this label below `sm` — is not a name. */}
+        <span aria-hidden="true" className="hidden sm:inline">
+          Billable
+        </span>
+        <span aria-hidden="true" className="sm:hidden">
+          $
+        </span>
       </label>
 
       {/*
@@ -212,7 +327,17 @@ function ProjectRow({
           <span
             className={cn(
               "font-mono tabular-nums tracking-[-0.02em]",
-              project.hourlyRateCents === undefined && "italic text-muted-foreground"
+              /*
+                BRASS, because a rate is a currency amount and §2 says a brass
+                figure is exactly that. It was Ink Muted, which put the one
+                number on this page — the number the invoices are built out of
+                — at the dimness reserved for timestamps and hints. The
+                unpriced case stays muted and italic: "No rate set" is an
+                absence, not an amount, and it must not read as one.
+              */
+              project.hourlyRateCents === undefined
+                ? "italic text-muted-foreground"
+                : "text-foreground"
             )}
           >
             {formatRate(project.hourlyRateCents, currency)}
@@ -225,8 +350,28 @@ function ProjectRow({
         }
         ariaLabel={`Hourly rate for ${project.name}`}
         placeholder="No rate"
-        className="shrink-0 px-1 py-0.5 text-xs text-muted-foreground"
-        inputClassName="w-20 text-xs font-mono tabular-nums tracking-[-0.02em]"
+        /*
+          A FIXED, RIGHT-ALIGNED COLUMN — from `sm` up, where there is room for
+        one. Below it the width is released: a phone row has ~66px of name left
+        after the fixed cluster, and a column that is straight at 375px is not
+        worth a project called "Northwi…". The alignment is a wide-screen
+        affordance, and this is the width where the page stops pretending.
+
+        The Tabular Rule asks that history
+          columns align on the decimal without effort, and a rate that starts
+          wherever the previous field ended cannot: "No rate set" and
+          "$1,200.00/hr" are 30px apart, so three rows put three figures at
+          three different x positions. Width plus `justify-end` puts every
+          decimal point over the one above it.
+
+          `className` reaches BOTH branches of InlineEdit (see its editing
+          return), which is what keeps the box the same width while it is being
+          typed into — the field does not jump when it opens. Colour is left to
+          the display span above, so the text being typed is Ink rather than
+          the muted tone the figure rests at.
+        */
+        className="w-auto shrink-0 justify-end px-1 py-0.5 text-right text-xs sm:w-32"
+        inputClassName="font-mono tabular-nums tracking-[-0.02em]"
         parse={(raw) => {
           // `currency` is passed so the user's OWN sign and ISO code are
           // strippable noise rather than a parse failure — an SGD user pasting
@@ -319,7 +464,25 @@ function ColorPicker({
         style={{ "--project-color": projectColorVar(project.color) } as CSSProperties}
         className={cn(
           "size-4 rounded-full bg-(--project-color) forced-colors:bg-[currentColor]",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          /*
+            WCAG 2.2 SC 2.5.8: a 16px dot is a 16px target. The row's height is
+            not load-bearing here, but growing the dot is — it is sized to sit
+            beside 14px text without becoming the loudest thing in the row — so
+            the target grows instead of the box, with the pseudo-element the
+            rest of the product uses for the same problem. `-inset-1` is -4px a
+            side: 16 + 4 + 4 = 24 exactly.
+          */
+          "relative after:absolute after:-inset-1 after:content-['']",
+          /*
+            It is a BUTTON, and it looked like a bullet. A ring on hover and
+            while the palette is open is the whole affordance: the dot itself
+            cannot change colour to signal anything, because its colour is the
+            information.
+          */
+          "transition-[box-shadow] motion-reduce:transition-none",
+          "hover:ring-2 hover:ring-input hover:ring-offset-2 hover:ring-offset-transparent",
+          open && "ring-2 ring-input ring-offset-2 ring-offset-transparent",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-transparent focus-visible:outline-none"
         )}
       />
       {open ? (
@@ -333,8 +496,34 @@ function ColorPicker({
           />
           <div
             className={cn(
-              "absolute top-full left-0 z-50 mt-1 grid grid-cols-6 gap-1 rounded-lg",
-              "border border-edge-soft bg-surface-raised p-2 shadow-xl"
+              /*
+                `w-max` IS LOAD-BEARING, and without it this palette was
+                unusable. `grid-cols-6` is `repeat(6, minmax(0, 1fr))`, and a
+                `1fr` track needs a definite width to divide up. This element is
+                `absolute` with no width, so it shrink-to-fits — and the
+                shrink-to-fit contribution of a `minmax(0, …)` track is its
+                MINIMUM, which is zero. Every column resolved to 0px and all
+                twelve 20px swatches stacked on top of each other inside a 38px
+                box: one blob of overlapping circles, in the control whose whole
+                job is to let you tell twelve colours apart.
+                `w-max` makes the box size to its content first, so the tracks
+                have something real to divide. Nothing catches this in a test —
+                the swatches are all present, all labelled, and all clickable by
+                `aria-label`; they are simply drawn on top of one another.
+              */
+              "absolute top-full left-0 z-50 mt-1 grid w-max grid-cols-6 gap-1 rounded-lg",
+              "border border-border bg-popover p-2 shadow-xl",
+              /*
+                The same 100ms scale-and-fade `PopoverContent` gives every other
+                floating panel in the product. This one is hand-rolled — twelve
+                swatches do not need a positioner — but "hand-rolled" is not a
+                reason for it to appear differently from its neighbours, and an
+                un-animated popup beside animated ones reads as a glitch rather
+                than as restraint. `origin-top-left` because that is the corner
+                it grows from, under the swatch that opened it.
+              */
+              "origin-top-left animate-in fade-in-0 zoom-in-95 duration-100",
+              "motion-reduce:animate-none"
             )}
           >
             {PROJECT_COLORS.map((color) => (
@@ -352,7 +541,21 @@ function ColorPicker({
                 className={cn(
                   "size-5 rounded-full bg-(--project-color) forced-colors:bg-[currentColor]",
                   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                  color === project.color && "ring-2 ring-foreground ring-offset-2 ring-offset-surface-raised"
+                  /*
+                    A GRID OF TWELVE DOTS WITH NO POINTER FEEDBACK. Focus and
+                    the selected ring were both here; hover and press were not,
+                    so a mouse moving across the palette got nothing back until
+                    it had already committed to a colour.
+                    The swatch cannot indicate anything with its FILL — the fill
+                    is the information, which is the same argument the trigger
+                    above makes for its own ring. So it grows instead: a scale
+                    is the one channel a colour chip has spare. The ring below
+                    still marks the current choice, and hover never draws one,
+                    so "hovered" and "chosen" stay distinguishable.
+                  */
+                  "transition-[scale] duration-100 ease-out motion-reduce:transition-none",
+                  "hover:scale-110 active:scale-100",
+                  color === project.color && "ring-2 ring-foreground ring-offset-2 ring-offset-popover"
                 )}
               />
             ))}
@@ -408,13 +611,22 @@ function NewProject({ currency }: { currency: string }) {
   }
 
   return (
+    /*
+      A COLUMN, so the refusal has somewhere to go. The error used to be the
+      form's fourth flex child: a full sentence of it — "Try 10, 10.50, or
+      $10.50 — or leave it blank to clear the rate." — landing to the right of
+      the Add button, inside the page header's own title row, which then wrapped
+      and pushed the `<h1>` beside it around. It now sits UNDER the fields it is
+      about, right-aligned with them, where it can be as long as it needs to be.
+    */
     <form
-      className="flex items-center gap-2"
+      className="flex flex-col items-end gap-1.5"
       onSubmit={(event) => {
         event.preventDefault()
         submit()
       }}
     >
+      <div className="flex items-center gap-2">
       <input
         autoFocus
         value={name}
@@ -429,8 +641,8 @@ function NewProject({ currency }: { currency: string }) {
         aria-label="New project name"
         aria-invalid={error !== null}
         className={cn(
-          "w-48 rounded-md border bg-ground px-2 py-1 text-sm",
-          error === null ? "border-edge" : "border-alarm",
+          "w-48 rounded-md border bg-background px-2 py-1 text-sm",
+          error === null ? "border-border" : "border-destructive",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
       />
@@ -447,16 +659,17 @@ function NewProject({ currency }: { currency: string }) {
         aria-label={`Hourly rate in ${currency}, optional`}
         aria-invalid={error !== null}
         className={cn(
-          "w-32 rounded-md border bg-ground px-2 py-1 text-sm font-mono tabular-nums tracking-[-0.02em]",
-          error === null ? "border-edge" : "border-alarm",
+          "w-32 rounded-md border bg-background px-2 py-1 text-sm font-mono tabular-nums tracking-[-0.02em]",
+          error === null ? "border-border" : "border-destructive",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         )}
       />
-      <Button type="submit" size="sm">
-        Add
-      </Button>
+        <Button type="submit" size="sm">
+          Add
+        </Button>
+      </div>
       {error === null ? null : (
-        <span role="alert" className="text-xs text-alarm">
+        <span role="alert" className="max-w-xs text-right text-xs text-destructive">
           {error}
         </span>
       )}
@@ -468,13 +681,24 @@ function NewProject({ currency }: { currency: string }) {
 
 function TagRow({ tag }: { tag: Doc<"tags"> }) {
   const { renameTag, removeTag } = useClassifierMutations()
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   return (
-    // `border-edge`, not `border-edge-soft`: this pill is the boundary of an
+    // `border-border`: this pill is the boundary of an
     // editable, deletable control (an inline-edit field plus a delete
     // button), the same job a filter chip does — not a passive divider.
-    <li className="flex items-center gap-1 rounded-md border border-edge px-2 py-1">
+    //
+    // `group` and the fill: a tag cloud is a list of NAMES, and twelve of them
+    // each carrying a permanently-lit bin icon reads as a row of delete
+    // buttons that happen to have words in them. The bin now arrives with the
+    // pointer (see below), and the fill is what says the pill under the cursor
+    // is the one it would belong to.
+    <li
+      className={cn(
+        "group flex items-center gap-1 rounded-md border border-input px-2 py-1",
+        "transition-colors hover:bg-card/60 motion-reduce:transition-none"
+      )}
+    >
       <InlineEdit<string>
         display={<span className="text-xs">{tag.name}</span>}
         initialInput={tag.name}
@@ -492,7 +716,7 @@ function TagRow({ tag }: { tag: Doc<"tags"> }) {
       />
       <Button
         type="button"
-        variant="quiet"
+        variant="ghost"
         size="icon-xs"
         aria-label={`Delete tag ${tag.name}`}
         onClick={() => {
@@ -500,7 +724,14 @@ function TagRow({ tag }: { tag: Doc<"tags"> }) {
             toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
           })
         }}
-        className="hover:text-alarm"
+        className={cn(
+          // Same rule as the project row's actions: revealed by pointer or
+          // focus where there is a pointer, and permanently visible below `sm`,
+          // where hover does not exist and a hidden control is no control.
+          "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
+          "transition-opacity focus-visible:opacity-100 motion-reduce:transition-none",
+          "hover:text-destructive"
+        )}
       >
         <Trash2 className="size-3" />
       </Button>
@@ -524,14 +755,14 @@ function IconButton({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="icon-row"
       aria-label={label}
       onClick={onClick}
       className={cn(
         "opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
         "focus-visible:opacity-100 motion-reduce:transition-none",
-        destructive && "hover:text-alarm"
+        destructive && "hover:text-destructive"
       )}
     >
       {children}
@@ -541,7 +772,7 @@ function IconButton({
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="rounded border border-edge-soft px-1 py-px font-mono text-[0.7rem]">
+    <kbd className="rounded border border-border px-1 py-px font-mono text-[0.7rem]">
       {children}
     </kbd>
   )

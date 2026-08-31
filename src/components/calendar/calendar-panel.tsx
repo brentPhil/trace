@@ -182,7 +182,7 @@ function blockHeightPx(
  * A COLOUR ALONE DRAWS NOTHING. Tailwind's preflight sets `border: 0 solid` on
  * every element, `skeleton.css` only ever REMOVES borders, and the widths a
  * calendar normally gets live in `themes/`, which this file deliberately does
- * not import — so `border-edge-soft` without a width is an invisible grid.
+ * not import — so `border-border` without a width is an invisible grid.
  *
  * A full `border` on each of these is right rather than excessive, because the
  * skeleton subtracts the edges that would double up, with `!important`: the
@@ -209,12 +209,12 @@ function blockHeightPx(
  * floor: `h-12` is exactly the 48 `SLOT_MIN_HEIGHT` names, and that constant is
  * still what `slotMinHeight` is given, so the two cannot drift.
  */
-const HOUR_RULE = "h-12 border border-edge-soft"
-const COLUMN_RULE = "border border-edge-soft"
+const HOUR_RULE = "h-12 border border-border"
+const COLUMN_RULE = "border border-border"
 /** The hour rail's own boundary. No cell border can draw it — the first
  *  column's are all stripped — so this divider element is what separates the
  *  hours from the grid, in the header row and in the body alike. */
-const RAIL_RULE = "border-r border-edge-soft"
+const RAIL_RULE = "border-r border-border"
 
 /*
  * A BLOCK IS A BUTTON, AND NOW LOOKS LIKE ONE.
@@ -242,7 +242,7 @@ const RAIL_RULE = "border-r border-edge-soft"
  * harness by only the 2px `mx-0.5` below, and an overlapping block is packed
  * hard against it — so an outward outline would be drawn across the neighbour
  * it is meant to be distinguished from. Inset, it lands wholly on the block's
- * own fill: `ring` on `surface-raised` is measured in `styles.contrast.test.ts`
+ * own fill: `--ring` on `--popover` is measured in `styles.contrast.test.ts`
  * and clears the 3:1 that SC 2.4.11 asks of it. `overflow-hidden` on the block
  * does not clip this — overflow clips descendants, not an element's own
  * outline.
@@ -264,7 +264,7 @@ const BLOCK_INTERACTIVE = cn(
  * than layered.
  *
  * `hover:bg-foreground/5` is the obvious spelling and it is wrong here: a
- * `hover:bg-*` REPLACES the block's `bg-surface-raised` rather than sitting on
+ * `hover:bg-*` REPLACES the block's `bg-popover` rather than sitting on
  * top of it, so 5% ivory would composite over the LANE (`surface`, L 0.22) and
  * land at roughly L 0.24 — darker than the 0.26 it was before the pointer
  * arrived. A hover that dims the thing under the cursor is worse than none.
@@ -275,21 +275,21 @@ const BLOCK_INTERACTIVE = cn(
  * `edge-raised` border that has to keep reading as this block's boundary.
  */
 const BLOCK_HOVER =
-  "hover:bg-[color-mix(in_oklch,var(--surface-raised),var(--foreground)_8%)]"
+  "hover:bg-[color-mix(in_oklch,var(--popover),var(--foreground)_8%)]"
 
 /*
- * The same step for a RUNNING block, spent in its own light rather than in
- * ivory. Cold light is legal here and nowhere else on this grid, because this
- * block is the one thing on screen that IS running — mixing ivory into it would
- * wash the one signal the Cold Light Rule reserves.
+ * The same step for a RUNNING block, spent in its own light rather than in the
+ * neutral mix. `--primary` is legal as a HOVER here and nowhere else on this
+ * grid, because this block is the one thing on screen that IS running — mixing
+ * the neutral into it would wash the one signal that says so.
  */
-const RUNNING_HOVER = "hover:bg-enlarger/25"
+const RUNNING_HOVER = "hover:bg-primary/25"
 
 /*
  * A MEETING IS AN OUTLINE, AN ENTRY IS A FILL.
  *
  * DESIGN.md leaves exactly one axis free here and it happens to be the right
- * one. `enlarger` means *a timer is running* (the Cold Light Rule) and cannot be
+ * one. `enlarger` means *a timer is running* (the Exposure Rule) and cannot be
  * spent on a meeting. Hue means money under the Two Temperatures Rule and blocks
  * take none. A dashed border plus hatch is the Hatch Rule's midnight
  * continuation and is already spoken for.
@@ -305,7 +305,7 @@ const RUNNING_HOVER = "hover:bg-enlarger/25"
  */
 /*
  * Split in two so the midnight TAIL can take the box without the outline —
- * `HATCH_EMPTY` carries its own dashed border, and a solid `border-edge-soft`
+ * `HATCH_EMPTY` carries its own dashed border, and a solid `border-border`
  * beside it would win on source order and erase the dash. The head is
  * `MEETING_BLOCK_BOX + MEETING_BLOCK_OUTLINE`, which is what `MEETING_BLOCK`
  * used to be in one piece.
@@ -313,9 +313,9 @@ const RUNNING_HOVER = "hover:bg-enlarger/25"
 const MEETING_BLOCK_BOX = cn(
   "mx-0.5 mb-px overflow-hidden rounded-md px-1 py-0.5 text-left",
   "bg-transparent text-muted-foreground",
-  "hover:bg-[color-mix(in_oklch,var(--surface),var(--foreground)_5%)]"
+  "hover:bg-[color-mix(in_oklch,var(--card),var(--foreground)_5%)]"
 )
-const MEETING_BLOCK_OUTLINE = "border border-edge-soft"
+const MEETING_BLOCK_OUTLINE = "border border-border"
 
 /**
  * The empty meetings list, ONE allocation for the life of the module.
@@ -385,10 +385,10 @@ const EVENT_ORDER = [
  * now-line, and a minimum block height. What is ours is the mapping in
  * (`calendar-events.ts`) and the styling out (every `*Class` prop below).
  *
- * THE COLD LIGHT RULE IS THE THING TO WATCH IN HERE. A running entry's block
- * is the only `enlarger` on the grid. The now-indicator marks *now*, not
- * *running*, so it is Ink Muted — cold light on a grid where nothing is being
- * tracked is exactly the failure that rule exists to prevent.
+ * THE EXPOSURE RULE IS THE THING TO WATCH IN HERE. A running entry's block is
+ * the only `enlarger` on the grid. The now-indicator marks *now*, not
+ * *running*, so it is Ink Muted — the running accent on a grid where nothing is
+ * being tracked is exactly the failure that rule exists to prevent.
  */
 export function CalendarPanel({
   entries,
@@ -533,7 +533,7 @@ export function CalendarPanel({
    * THE BLOCK THAT IS BEING EDITED, and the element its popover hangs off.
    *
    * The element rather than only the id, because the grid draws the blocks and
-   * there is no `Popover.Trigger` of ours to anchor to — FullCalendar's
+   * there is no `PopoverTrigger` of ours to anchor to — FullCalendar's
    * `eventClick` hands over the node it built, and Base UI's positioner takes
    * it directly.
    *
@@ -811,7 +811,7 @@ export function CalendarPanel({
       /*
        * FULL-BLEED: no radius, no side or bottom border.
        *
-       * This was `rounded-lg border border-edge-soft`, which drew the grid as a
+       * This was `rounded-lg border border-border`, which drew the grid as a
        * card floating on the page — and DESIGN.md's elevation section is
        * explicit that depth here is tonal, not cast, with a card treatment
        * reserved for genuinely floating UI. The grid is not floating; it is the
@@ -824,7 +824,7 @@ export function CalendarPanel({
        *
        * No TOP border either — `FilterBand` directly above already ends in a
        * `border-b`, and a second hairline against it is a two-pixel rule nobody
-       * asked for. `bg-surface` alone is what separates the grid from the ground
+       * asked for. `bg-card` alone is what separates the grid from the ground
        * behind it, which is the tonal step DESIGN.md asks for.
        */
       /*
@@ -841,8 +841,8 @@ export function CalendarPanel({
        * It was only ever here to clip the `rounded-lg` corners, and those went
        * when the grid became full-bleed. Nothing needs clipping now.
        */
-      viewClass="bg-surface"
-      tableClass="bg-surface"
+      viewClass="bg-card"
+      tableClass="bg-card"
       /*
        * THE DAY HEADERS STAY PUT, pinned by CSS rather than by the library.
        *
@@ -860,7 +860,7 @@ export function CalendarPanel({
        * `z-20` and two under the timer bar's `z-30`, which is the ladder
        * `page.tsx` argues for: the thing higher up the screen passes over.
        *
-       * `bg-surface`, opaque, and a `border-b`: rows scroll under this, and a
+       * `bg-card`, opaque, and a `border-b`: rows scroll under this, and a
        * transparent sticky element is a window onto them.
        */
       /*
@@ -905,8 +905,8 @@ export function CalendarPanel({
        * `!` sites in this file would break at once, silently, with the class
        * lists still reading correctly.
        */
-      tableHeaderClass="sticky top-(--log-sticky-top)! z-10 border-b border-edge-soft bg-surface"
-      tableBodyClass="bg-surface"
+      tableHeaderClass="sticky top-(--log-sticky-top)! z-10 border-b border-border bg-card"
+      tableBodyClass="bg-card"
       slotLaneClass={HOUR_RULE}
       slotHeaderClass={HOUR_RULE}
       slotHeaderDividerClass={RAIL_RULE}
@@ -996,7 +996,7 @@ export function CalendarPanel({
            * would take it back out.
            */
           "items-center! justify-center px-2! py-2!",
-          dayOf(info.date.getTime(), timeZone) === today && "bg-surface-raised"
+          dayOf(info.date.getTime(), timeZone) === today && "bg-popover"
         )
       }
       dayHeaderContent={(info) => {
@@ -1047,7 +1047,7 @@ export function CalendarPanel({
                 className={cn(
                   "font-mono tabular-nums tracking-[-0.02em] flex size-6 items-center justify-center text-sm",
                   isToday
-                    ? "rounded-full bg-foreground font-medium text-ground"
+                    ? "rounded-full bg-foreground font-medium text-background"
                     : "text-foreground"
                 )}
               >
@@ -1067,7 +1067,7 @@ export function CalendarPanel({
         )
       }}
       // The now-indicator marks NOW, not RUNNING. Ink Muted, never
-      // `enlarger` — see the Cold Light Rule.
+      // `enlarger` — see the Exposure Rule.
       nowIndicatorLineClass="border-t border-muted-foreground"
       // A filled dot, sized. The element FullCalendar hands us is empty and has
       // no intrinsic size, so a background colour alone paints a 0×0 box. The
@@ -1087,8 +1087,8 @@ export function CalendarPanel({
            * two identical-looking meetings on consecutive days.
            *
            * `HATCH_EMPTY` REPLACES the outline rather than joining it: it
-           * carries its own `border border-dashed border-edge-soft`, and a
-           * second solid `border-edge-soft` from `MEETING_BLOCK` would win on
+           * carries its own `border border-dashed border-border`, and a
+           * second solid `border-border` from `MEETING_BLOCK` would win on
            * source order and erase the dash. So the tail takes the block's
            * box (margins, padding, radius, the transparent fill that makes a
            * ghost a ghost) and the hatch's edge — a continuation is a texture,
@@ -1129,9 +1129,9 @@ export function CalendarPanel({
           // `role="button"` block neither of.
           BLOCK_INTERACTIVE,
           running
-            ? // Cold light, and only here: something IS running.
-              cn("bg-enlarger/15 text-foreground", RUNNING_HOVER)
-            : cn("bg-surface-raised text-foreground", BLOCK_HOVER),
+            ? // The running accent, and only here: something IS running.
+              cn("bg-primary/15 text-foreground", RUNNING_HOVER)
+            : cn("bg-popover text-foreground", BLOCK_HOVER),
           /*
            * The tail of an entry that crossed midnight. FullCalendar segments
            * it across both columns and `isStart` says which half this is. A
@@ -1141,17 +1141,17 @@ export function CalendarPanel({
            * three branches are mutually exclusive so nothing competes. This
            * used to be load-bearing for a different reason: `.hatch-empty` was
            * an unlayered CSS class carrying its own `1px dashed`, so it
-           * outranked every Tailwind utility and a `border-enlarger` beside it
+           * outranked every Tailwind utility and a `border-primary` beside it
            * would be in the class list and absent from the screen. `HATCH_EMPTY`
            * is utilities now and competes normally — the class list says what
            * renders either way.
            */
           info.isStart
             ? running
-              ? "border border-enlarger"
+              ? "border border-primary"
               : // A block sits on a panel, not on ground, so Edge Raised is
                 // the token that clears 3:1 there — the Adjacent Colour Rule.
-                "border border-edge-raised"
+                "border border-border"
             : HATCH_EMPTY
         )
       }}
@@ -1243,7 +1243,7 @@ export function CalendarPanel({
                           event.currentTarget.checked
                         )
                       }}
-                      className="mt-0.5 size-3 shrink-0 rounded-[3px] border border-edge-raised bg-ground accent-current focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                      className="mt-0.5 size-3 shrink-0 rounded-[3px] border border-input bg-background accent-current focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     />
                   ) : null}
                   <span

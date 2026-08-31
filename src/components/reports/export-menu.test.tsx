@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { Toaster } from "@/components/ui/toast"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { ExportMenu } from "@/components/reports/export-menu"
-import { Toast, ToastViewport } from "@/components/ui/toast"
 import type { Breakdown } from "@/lib/report-series"
 import type { ComponentProps } from "react"
 
@@ -58,16 +58,15 @@ const PROPS = {
   currency: "USD",
 }
 
-// `ExportMenu` reads `Toast.useToastManager()`, which throws with no
-// ancestor `Toast.Provider` — the same wrapper `RootComponent` supplies app
+// `ExportMenu` reads `useToastManager()`, which throws with no
+// ancestor `ToastProvider` — the same wrapper `RootComponent` supplies app
 // wide (see routes/__root.tsx) and `copy-entries-button.test.tsx` copies for the same
 // reason.
 function renderMenu(props: ComponentProps<typeof ExportMenu>) {
   return render(
-    <Toast.Provider>
+    <Toaster>
       <ExportMenu {...props} />
-      <ToastViewport />
-    </Toast.Provider>
+    </Toaster>
   )
 }
 

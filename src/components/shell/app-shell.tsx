@@ -1,6 +1,6 @@
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
-import { TooltipProvider } from "@/components/ui/tooltip"
 import { AppSidebar } from "@/components/shell/app-sidebar"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { useHeightVar } from "@/hooks/use-height-var"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
@@ -103,7 +103,7 @@ export function AppShell({
             same reasoning, opposite edge. The bar is the one control that
             belongs to no page, and the log is what scrolls; pinning it means
             a timer can be started or read from anywhere in a two-thousand-row
-            log. It keeps `bg-ground` there (the base class no longer drops it
+            log. It keeps `bg-background` there (the base class no longer drops it
             at `md`) because a transparent sticky element is a window onto the
             rows sliding under it. No bottom border: on /timer the band
             directly beneath supplies that hairline, and drawing both would be
@@ -113,7 +113,7 @@ export function AppShell({
             ref={measuredRef}
             className={cn(
               "fixed inset-x-0 bottom-0 z-30 flex items-center gap-2",
-              "border-t border-edge-soft bg-ground px-3 pt-2",
+              "border-t border-border bg-background px-3 pt-2",
               "pb-[max(0.5rem,env(safe-area-inset-bottom))]",
               "md:sticky md:inset-x-auto md:top-0 md:bottom-auto md:border-t-0",
               "md:gap-3 md:px-4 md:pt-3 md:pb-3"

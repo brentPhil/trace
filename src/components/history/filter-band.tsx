@@ -13,18 +13,17 @@ import type { ReactNode } from "react"
  * declaration now, and both pages render it, so the next change lands on both
  * or on neither.
  *
- * THE TOKENS. `bg-surface` steps the ramp and `border-y border-edge-soft` adds
+ * THE TOKENS. `bg-card` steps the ramp and `border-y border-border` adds
  * an edge — the Tonal Depth Rule asks for either, and this band deliberately
  * does both, which is what /timer's version already did. The step from ground
  * to surface is one warm rung and is meant to be quiet; the hairlines are what
  * keep the strip's two boundaries unambiguous while rows scroll UNDER it, where
- * the fill below the band is an entry row's rather than ground. `edge-soft` is
+ * the fill below the band is an entry row's rather than the page. `--border` is
  * correct for those hairlines because they separate passive content and carry
  * no contrast minimum. The CONTROLS inside are a different question and the
- * Adjacent Colour Rule is theirs to answer: on this fill `--edge` measures
- * 2.90:1, so anything fill-less in here needs `--edge-raised` — see
- * `filter-controls.tsx`, which uses it for the chips and keeps `--edge` only on
- * the two controls that carry their own `bg-ground`.
+ * Adjacent Colour Rule is theirs to answer: on this fill the divider tone
+ * measures lower than it does on the page, so anything fill-less in here needs
+ * `--input` — see `filter-controls.tsx`, which uses it for the chips.
  *
  * THE GUTTER, against DESIGN.md's "never inside a reusable component". That
  * rule is about a component carrying its CALLER's gutter and forcing the next
@@ -38,7 +37,7 @@ import type { ReactNode } from "react"
  */
 export function FilterBand({ children }: { children: ReactNode }) {
   return (
-    <div className="border-y border-edge-soft bg-surface py-2.5">
+    <div className="border-y border-border bg-card py-2.5">
       <div className="w-full px-4">{children}</div>
     </div>
   )

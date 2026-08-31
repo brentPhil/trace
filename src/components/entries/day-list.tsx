@@ -1,8 +1,8 @@
 import { useState } from "react"
+import { Skeleton } from "@/components/ui/skeleton"
 import { EntryRow } from "@/components/entries/entry-row"
 import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
 import { SittingRow } from "@/components/entries/sitting-row"
-import { Skeleton } from "@/components/ui/skeleton"
 import { selectionState } from "@/lib/entry-selection"
 import { formatTotal } from "@/lib/format-total"
 import { toLogItems } from "@/lib/group-sittings"
@@ -189,7 +189,7 @@ export function DayList({
           aria-label={group.label}
           className={cn(
             "flex flex-col",
-            groupIndex > 0 && "border-t-2 border-edge"
+            groupIndex > 0 && "border-t-2 border-border"
           )}
         >
           {/*
@@ -204,7 +204,7 @@ export function DayList({
           */}
           <header
             className={cn(
-              "sticky top-(--log-sticky-top) z-10 border-b border-edge-soft bg-ground/95",
+              "sticky top-(--log-sticky-top) z-10 border-b border-border bg-background/95",
               "py-2 backdrop-blur-sm"
             )}
           >
@@ -273,7 +273,7 @@ export function DayList({
             NO GAP BEFORE THE NEXT DAY. This used to carry a 12px
             `--day-group-gap`, on the argument that a day break has to be
             visible before the heading is read rather than after it. The
-            `border-t-2 border-edge` on the section itself (above) already does
+            `border-t-2 border-border` on the section itself (above) already does
             that job, and does it with a rule the eye reads as a boundary
             rather than as absence — so the space underneath was paying twice
             for one separation and left the log looking airy where it wants to
@@ -337,7 +337,7 @@ export function DayList({
                     // comment and `entry-row.tsx`'s `showNote` prop.
                     <div
                       id={panelId}
-                      className="flex flex-col border-l-2 border-edge-soft pl-4"
+                      className="flex flex-col border-l-2 border-border pl-4"
                     >
                       {item.entries.map((entry) => row(entry, false))}
                     </div>
@@ -423,7 +423,7 @@ export function LogSkeleton() {
       <div aria-hidden="true" className="flex flex-col">
         {[0, 1].map((group) => (
           <div key={group} className="flex flex-col">
-            <div className="border-b border-edge-soft py-2">
+            <div className="border-b border-border py-2">
               {/* Same `w-full px-4` as the header it stands in for, so the
                   page does not shift sideways when the real rows arrive. */}
               <div className={cn(LOG_GRID, "w-full px-4")}>
@@ -441,7 +441,7 @@ export function LogSkeleton() {
                 mirror any more; see the real group above. */}
             <div className="flex flex-col">
               {[0, 1, 2].map((row) => (
-                <div key={row} className="border-b border-edge-soft">
+                <div key={row} className="border-b border-border">
                   <div
                     className={cn(LOG_GRID, "h-(--entry-row-height) w-full px-4")}
                   >

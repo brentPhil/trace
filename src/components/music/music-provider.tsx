@@ -400,7 +400,7 @@ export function MusicProvider({
       // the music stops without anyone having asked it to, which is precisely
       // this branch: every candidate the queue could reach failed. Firing per
       // skip would also mean a library of ten dead uploads produces ten
-      // stacked toasts for one silence, which is how "quiet" was specified
+      // stacked toasts for one silence, which is how "ghost" was specified
       // against in the first place.
       onErrorRef.current?.("Music stopped — those tracks could not be played.")
       return

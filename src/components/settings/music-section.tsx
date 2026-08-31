@@ -1,4 +1,4 @@
-import { cn } from "@/lib/utils"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 /*
  * The Music settings block.
@@ -56,39 +56,46 @@ export function MusicSection({
           onChange={(event) =>
             onChange({ musicAutoplay: event.target.checked })
           }
-          // The neutral `--ink` accent every other checkbox on the settings
-          // page uses. NOT `--enlarger`: a checked setting is not a timer
-          // running, and the Cold Light Rule reads the two differently.
-          // `--brass` is money and is not used here either.
-          className="size-4 accent-[var(--ink)]"
+          // `--foreground`, the same accent every other checkbox on the
+          // settings page uses. A checked setting is not a timer running, and
+          // the two should not look alike — which mattered more when the
+          // running state had a hue of its own, and is still why this does not
+          // reach for `--primary`.
+          className="size-4 accent-foreground"
         />
         Play music when tracking starts
       </label>
 
-      <label className="flex flex-col gap-1 text-sm">
-        When tracking stops
-        <select
-          aria-label="When tracking stops"
+      {/*
+        A `<div>`, not a `<label>`, now that the control is a Select: a Base UI
+        trigger is a button, and wrapping a button in a label makes the label's
+        click handler and the button's own fight over the same press. The
+        trigger carries its own `aria-label`, which is what named it before.
+
+        The hand-mirrored `fieldClass` utilities are gone with the native
+        control — `SelectTrigger` IS that vocabulary now, stated once in
+        `ui/select.tsx` instead of copied into every file that needed a field.
+      */}
+      <div className="flex flex-col gap-1 text-sm">
+        <span>When tracking stops</span>
+        <Select
           value={musicOnStop}
-          onChange={(event) =>
-            onChange({
-              musicOnStop: event.target.value as "stop" | "continue",
-            })
-          }
-          // `fieldClass` on the settings page is a private, un-exported
-          // constant (`rounded-md border border-edge bg-ground px-2 py-1.5
-          // text-sm`, plus a focus ring), so this mirrors those utilities
-          // inline rather than importing something that does not exist
-          // outside that file.
-          className={cn(
-            "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          )}
+          onValueChange={(next) => onChange({ musicOnStop: next })}
         >
-          <option value="stop">Stop the music</option>
-          <option value="continue">Keep playing</option>
-        </select>
-      </label>
+          <SelectTrigger aria-label="When tracking stops" className="w-52">
+            {/* The values are `stop`/`continue`; the labels are prose. */}
+            <SelectValue>
+              {(value) =>
+                value === "continue" ? "Keep playing" : "Stop the music"
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="stop">Stop the music</SelectItem>
+            <SelectItem value="continue">Keep playing</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   )
 }

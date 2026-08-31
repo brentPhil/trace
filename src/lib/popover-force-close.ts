@@ -7,14 +7,16 @@ export type PopoverActionsRef = React.RefObject<BasePopover.Root.Actions | null>
 const SAFETY_MS = 200
 
 /**
- * Forces a closed `Popover.Popup` to actually leave the DOM.
+ * Forces a closed `PopoverContent` to actually leave the DOM.
  *
  * WHY IT CAN GET STUCK. Base UI keeps the popup mounted until it OBSERVES the
  * exit animation finish. `useOpenChangeComplete` delegates to
  * `useAnimationsFinished`, which awaits
  * `Promise.all(element.getAnimations().map(a => a.finished))` — and our popup
- * carries `transition-[opacity,transform] duration-100` (see
- * `components/ui/popover.tsx`). A CSS TRANSITION does not progress in a tab
+ * carries `transition-[opacity,scale] duration-100` (see
+ * `components/ui/popover.tsx`; it named `transform` until 2026-08-29, which
+ * animated nothing, because Tailwind v4 compiles `scale-*` to the standalone
+ * `scale:` property). A CSS TRANSITION does not progress in a tab
  * that is not being painted, so in a hidden tab those promises simply never
  * settle, `onOpenChangeComplete` never fires, and the popup stays mounted
  * indefinitely while the component's own state is already correct (`open` is
@@ -79,7 +81,7 @@ export function useForceCloseWhenClosed(
   }, [open, actionsRef])
 }
 
-/** A ref shaped for `Popover.Root`'s `actionsRef` prop. */
+/** A ref shaped for `Popover`'s `actionsRef` prop. */
 export function usePopoverActionsRef(): PopoverActionsRef {
   return useRef<BasePopover.Root.Actions | null>(null)
 }

@@ -1,10 +1,7 @@
-"use client"
-
 import * as React from "react"
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
-import { cva } from "class-variance-authority"
-import type { VariantProps } from "class-variance-authority"
+import { cva, type VariantProps } from "class-variance-authority"
 
 import { useIsMobile } from "@/hooks/use-mobile"
 import { cn } from "@/lib/utils"
@@ -30,16 +27,7 @@ const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
-/*
- * 3.5rem, not the 3rem this shipped with.
- *
- * A 48px rail cannot hold a 44px target and a gutter, so the collapsed icons
- * ran flush to the rail's own edge with a dead strip of Surface between them
- * and the page. 56px buys a 44x44 button (the touch-target floor) with 6px of
- * air on each side — see `AppSidebar`, which is the only caller and where the
- * matching gutter is set.
- */
-const SIDEBAR_WIDTH_ICON = "3.5rem"
+const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContextProps = {
@@ -100,9 +88,7 @@ function SidebarProvider({
 
   // Helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() => {
-    return isMobile
-      ? setOpenMobile((current) => !current)
-      : setOpen((current) => !current)
+    return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen, setOpenMobile])
 
   // Adds a keyboard shortcut to toggle the sidebar.
@@ -219,8 +205,6 @@ function Sidebar({
 
   return (
     <div
-      // `md:` MUST equal MOBILE_BREAKPOINT in src/hooks/use-mobile.ts. See
-      // the comment there.
       className="group peer hidden text-sidebar-foreground md:block"
       data-state={state}
       data-collapsible={state === "collapsed" ? collapsible : ""}
@@ -303,66 +287,10 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onClick={toggleSidebar}
       title="Toggle Sidebar"
       className={cn(
-        /*
-         * CONFINED TO THE SIDEBAR'S OWN EDGE, where upstream straddled it.
-         *
-         * Upstream centres a 16px rail ON the divider (`-right-4` plus
-         * `-translate-x-1/2`), which leaves half of it — 8px — lying over the
-         * page. Measured at 256px expanded: the rail occupied x 247→263 with
-         * the divider at 255, so the left 8px of every entry row in the log
-         * showed an `e-resize` cursor and swallowed the click, over content
-         * that does not resize. A control that toggles one region may not take
-         * clicks from another, however narrow the strip.
-         *
-         * `-right-px` reaches the sidebar's OUTER edge and stops: the extra
-         * pixel is the sidebar's own border, which is sidebar, not page. The
-         * width is then whatever the gutter that is already there can hold —
-         *   expanded   256px rail, `w-2`   -> x 248→256; nav buttons end at 247
-         *   collapsed   56px rail, `w-1.5` -> x  50→56;  nav buttons end at 50
-         * — so nothing is overlapped on either side in either state. The
-         * collapsed width is 6px rather than 8 because that is the whole of
-         * the gutter a collapsed rail has: the derivation is stated once, on
-         * `RAIL_GUTTER_COLLAPSED` in app-sidebar.tsx, and taking 8 here would
-         * eat into the nav button's target, which is the same defect one level
-         * in.
-         *
-         * THE AFFORDANCE STAYS. `SidebarTrigger` is `md:hidden`
-         * (app-shell.tsx), so on desktop this rail is the only mouse path back
-         * from a collapsed sidebar — ⌘B is a shortcut people hit reaching for
-         * bold. So the 2px hover line moves with the rail, from its centre to
-         * its outer edge, and still lands on the divider: that line is the
-         * only thing that makes any of this discoverable. Narrower, yes; a
-         * resize-handle's width is a target people already use. Gone, no.
-         *
-         * AND 6px IS WELL UNDER THE 44px FLOOR the nav buttons above are sized
-         * to, which the gutter arithmetic on its own does not say out loud.
-         * That is a KNOWN, ACCEPTED trade rather than an oversight: widening
-         * it takes the pixels back off the nav buttons (the defect one level
-         * in), and the only other answer is a permanent desktop expand
-         * control, which is a design decision and not a width. The accessible
-         * path is the keyboard one — ⌘B/Ctrl+B toggles from anywhere, and it
-         * is why this element is `tabIndex={-1}`: a 6px target is a mouse
-         * shortcut for a command that already has a real one, not the only way
-         * to issue it. Revisit the width only together with that control.
-         */
-        "absolute inset-y-0 z-20 hidden w-2 transition-all ease-linear sm:flex",
-        "group-data-[side=left]:-right-px group-data-[side=right]:-left-px",
-        "group-data-[collapsible=icon]:w-1.5",
-        "after:absolute after:inset-y-0 after:w-[2px] hover:after:bg-sidebar-border",
-        "group-data-[side=left]:after:right-0 group-data-[side=right]:after:left-0",
+        "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",
         "[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize",
-        /*
-         * OFFCANVAS KEEPS ITS OVERHANG, and that is not a hole in the rule
-         * above: that mode takes the entire sidebar off screen, so a rail
-         * confined to its edge would leave with it and there would be no
-         * affordance left to overlap anything with. Nothing in this product
-         * mounts it — `AppSidebar` is `collapsible="icon"` — and it is kept
-         * only so the primitive stays whole for a future caller.
-         * `translate-x-0` and `after:left-full` are gone along with the
-         * translate they existed to undo.
-         */
-        "hover:group-data-[collapsible=offcanvas]:bg-sidebar",
+        "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
         className
@@ -432,21 +360,7 @@ function SidebarSeparator({
     <Separator
       data-slot="sidebar-separator"
       data-sidebar="separator"
-      /*
-       * `data-[orientation=horizontal]:w-auto`, not a bare `w-auto`.
-       *
-       * The base's width rule is `data-[orientation=horizontal]:w-full`, and an
-       * attribute selector outranks a plain class however the two are ordered —
-       * so an unprefixed `w-auto` loses and the `mx-2` beside it overflows its
-       * parent by 16px. It read as correct only while the base's rules were
-       * inert (they were written against a `data-horizontal:` variant Base UI
-       * does not emit); fixing the base is what made this reachable, and this
-       * component has no consumer yet to have shown it.
-       */
-      className={cn(
-        "mx-2 data-[orientation=horizontal]:w-auto bg-sidebar-border",
-        className
-      )}
+      className={cn("mx-2 w-auto bg-sidebar-border", className)}
       {...props}
     />
   )
@@ -487,7 +401,7 @@ function SidebarGroupLabel({
     props: mergeProps<"div">(
       {
         className: cn(
-          "flex h-8 shrink-0 items-center rounded-md px-3 text-xs font-medium text-sidebar-foreground/70 ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+          "flex h-8 shrink-0 items-center rounded-xl px-3 text-xs font-medium text-sidebar-foreground/70 ring-sidebar-ring outline-hidden transition-[margin,opacity] duration-200 ease-linear group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0 focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
           className
         ),
       },
@@ -511,7 +425,7 @@ function SidebarGroupAction({
     props: mergeProps<"button">(
       {
         className: cn(
-          "absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 md:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
+          "absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-xl p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 md:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
           className
         ),
       },
@@ -561,25 +475,8 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
   )
 }
 
-/*
- * COLLAPSED SIZING, changed from upstream's `size-8! p-2!`.
- *
- * Three things, all forced by the icon rail being a target rather than a
- * decoration:
- *   - `size-11!` (44x44) instead of `size-8!` (32x32), which is the touch
- *     target floor. It fits because SIDEBAR_WIDTH_ICON above grew to 56px.
- *   - `justify-center`, so the icon sits on the rail's centre line instead of
- *     against its left edge. Upstream leaves it start-aligned and lets
- *     `overflow-hidden` clip the label, which parks every icon 8px left of
- *     centre and leaves a dead strip against the page.
- *   - the label goes `sr-only` rather than being clipped, which is what makes
- *     `justify-center` land: an out-of-flow label leaves the icon as the only
- *     thing to centre. It also KEEPS the accessible name, which clipping only
- *     preserved by accident and `display:none` would have destroyed — the
- *     tooltip is a sighted-user affordance, not a substitute for a name.
- */
 const sidebarMenuButtonVariants = cva(
-  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-md px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-11! group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:[&>span:last-child]:sr-only hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
+  "peer/menu-button group/menu-button flex w-full items-center gap-2 overflow-hidden rounded-xl px-3 py-2 text-left text-sm ring-sidebar-ring outline-hidden transition-[width,height,padding] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-open:hover:bg-sidebar-accent data-open:hover:text-sidebar-accent-foreground data-active:bg-sidebar-accent data-active:font-medium data-active:text-sidebar-accent-foreground [&_svg]:size-4 [&_svg]:shrink-0 [&>span:last-child]:truncate",
   {
     variants: {
       variant: {
@@ -590,13 +487,7 @@ const sidebarMenuButtonVariants = cva(
       size: {
         default: "h-9 text-sm",
         sm: "h-8 text-xs",
-        // The collapsed `p-0!` this used to repeat now lives in the base above,
-        // where it applies to every size rather than only this one. The height
-        // is upstream's: `size="lg"` has exactly one consumer in this product
-        // and it states the height it wants at its own call site (ProfileMenu,
-        // app-sidebar.tsx), rather than this shared variant carrying an
-        // unargued 48 that a re-vendor would silently put back to 56.
-        lg: "h-14 px-3 text-sm",
+        lg: "h-14 px-3 text-sm group-data-[collapsible=icon]:p-0!",
       },
     },
     defaultVariants: {
@@ -674,7 +565,7 @@ function SidebarMenuAction({
     props: mergeProps<"button">(
       {
         className: cn(
-          "absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-md p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-2 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 md:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
+          "absolute top-1.5 right-1 flex aspect-square w-5 items-center justify-center rounded-xl p-0 text-sidebar-foreground ring-sidebar-ring outline-hidden transition-transform group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-2 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 after:absolute after:-inset-2 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 md:after:hidden [&>svg]:size-4 [&>svg]:shrink-0",
           showOnHover &&
             "group-focus-within/menu-item:opacity-100 group-hover/menu-item:opacity-100 peer-data-active/menu-button:text-sidebar-accent-foreground aria-expanded:opacity-100 md:opacity-0",
           className
@@ -699,7 +590,7 @@ function SidebarMenuBadge({
       data-slot="sidebar-menu-badge"
       data-sidebar="menu-badge"
       className={cn(
-        "pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-md px-1 text-xs font-medium text-sidebar-foreground tabular-nums select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 peer-data-active/menu-button:text-sidebar-accent-foreground",
+        "pointer-events-none absolute right-1 flex h-5 min-w-5 items-center justify-center rounded-xl px-1 text-xs font-medium text-sidebar-foreground tabular-nums select-none group-data-[collapsible=icon]:hidden peer-hover/menu-button:text-sidebar-accent-foreground peer-data-[size=default]/menu-button:top-1.5 peer-data-[size=lg]/menu-button:top-2.5 peer-data-[size=sm]/menu-button:top-1 peer-data-active/menu-button:text-sidebar-accent-foreground",
         className
       )}
       {...props}
@@ -723,12 +614,12 @@ function SidebarMenuSkeleton({
     <div
       data-slot="sidebar-menu-skeleton"
       data-sidebar="menu-skeleton"
-      className={cn("flex h-8 items-center gap-2 rounded-md px-2", className)}
+      className={cn("flex h-8 items-center gap-2 rounded-xl px-2", className)}
       {...props}
     >
       {showIcon && (
         <Skeleton
-          className="size-4 rounded-md"
+          className="size-4 rounded-xl"
           data-sidebar="menu-skeleton-icon"
         />
       )}
@@ -789,7 +680,7 @@ function SidebarMenuSubButton({
     props: mergeProps<"a">(
       {
         className: cn(
-          "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-md px-3 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-sm data-[size=sm]:text-xs data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
+          "flex h-7 min-w-0 -translate-x-px items-center gap-2 overflow-hidden rounded-xl px-3 text-sidebar-foreground ring-sidebar-ring outline-hidden group-data-[collapsible=icon]:hidden hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[size=md]:text-sm data-[size=sm]:text-xs data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-sidebar-accent-foreground",
           className
         ),
       },
@@ -806,6 +697,7 @@ function SidebarMenuSubButton({
 }
 
 export {
+  sidebarMenuButtonVariants,
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -829,9 +721,5 @@ export {
   SidebarRail,
   SidebarSeparator,
   SidebarTrigger,
-  // Exported so a control that is NOT a menu button but must share its
-  // geometry — the wordmark in `AppSidebar` — can take it from here rather
-  // than measuring the same rail twice.
-  sidebarMenuButtonVariants,
   useSidebar,
 }

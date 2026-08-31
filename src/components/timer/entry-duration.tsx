@@ -45,7 +45,14 @@ export function EntryDuration({
       // A clock is time-dependent text by definition; the server's value and
       // the client's are allowed to differ by a second.
       suppressHydrationWarning
-      className={cn("font-mono tabular-nums tracking-[-0.02em] tracking-tight", className)}
+      // `tracking-tight` used to sit after `tracking-[-0.02em]` here, and
+      // tailwind-merge resolves two utilities for one property by keeping the
+      // last — so every duration in the product, including the running one in
+      // the timer bar, was set at -0.025em and the token DESIGN.md records for
+      // it had no effect anywhere. Tracking is a size-specific decision, not a
+      // default: the duration face is IBM Plex Mono at -0.02em, measured for
+      // digits that have to stay countable while they tick.
+      className={cn("font-mono tracking-[-0.02em] tabular-nums", className)}
       {...rest}
     >
       {formatClock(ms)}

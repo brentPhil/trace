@@ -1,73 +1,158 @@
-import { Dialog as BaseDialog } from "@base-ui/react/dialog"
+import * as React from "react"
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
+
 import { cn } from "@/lib/utils"
-import type { ComponentProps } from "react"
+import { Button } from "@/components/ui/button"
+import { XIcon } from "lucide-react"
 
-/**
- * Thin styled wrappers over Base UI's dialog.
- *
- * Base UI keeps the focus trap, the initial-focus target, scroll locking, the
- * Escape handler and `aria-labelledby` wiring. Only the surface is ours.
- */
-const Root = BaseDialog.Root
-const Close = BaseDialog.Close
-const Trigger = BaseDialog.Trigger
+function Dialog({ ...props }: DialogPrimitive.Root.Props) {
+  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+}
 
-function Popup({ className, children, ...props }: ComponentProps<typeof BaseDialog.Popup>) {
+function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
+  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
+}
+
+function DialogPortal({ ...props }: DialogPrimitive.Portal.Props) {
+  return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
+}
+
+function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
+  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />
+}
+
+function DialogOverlay({
+  className,
+  ...props
+}: DialogPrimitive.Backdrop.Props) {
   return (
-    <BaseDialog.Portal>
-      <BaseDialog.Backdrop
+    <DialogPrimitive.Backdrop
+      data-slot="dialog-overlay"
+      className={cn(
+        "fixed inset-0 isolate z-50 bg-black/30 duration-100 supports-backdrop-filter:backdrop-blur-sm data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function DialogContent({
+  className,
+  children,
+  showCloseButton = true,
+  ...props
+}: DialogPrimitive.Popup.Props & {
+  showCloseButton?: boolean
+}) {
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Popup
+        data-slot="dialog-content"
         className={cn(
-          "fixed inset-0 z-40 bg-black/50",
-          "transition-opacity duration-150 ease-out",
-          "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
-          "motion-reduce:transition-none"
-        )}
-      />
-      <BaseDialog.Popup
-        className={cn(
-          "fixed z-50 flex flex-col gap-4 border border-edge-soft bg-surface-raised",
-          "p-5 shadow-xl focus-visible:outline-none",
-          // A bottom sheet on a phone, a centred card on a desktop. Same
-          // component, because a dialog pinned to the vertical centre of a
-          // small screen puts its input under the keyboard.
-          "inset-x-0 bottom-0 rounded-t-xl",
-          "sm:inset-x-auto sm:bottom-auto sm:top-1/2 sm:left-1/2 sm:w-[28rem]",
-          "sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl",
-          "transition-[opacity,transform] duration-150 ease-out",
-          "data-[starting-style]:translate-y-3 data-[starting-style]:opacity-0",
-          "data-[ending-style]:translate-y-2 data-[ending-style]:opacity-0",
-          "sm:data-[starting-style]:translate-y-[calc(-50%+0.5rem)]",
-          "sm:data-[ending-style]:translate-y-[calc(-50%+0.25rem)]",
-          "motion-reduce:transition-none",
+          "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-6 rounded-4xl bg-popover p-6 text-sm text-popover-foreground shadow-xl ring-1 ring-foreground/5 duration-100 outline-none sm:max-w-md dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
         {...props}
       >
         {children}
-      </BaseDialog.Popup>
-    </BaseDialog.Portal>
+        {showCloseButton && (
+          <DialogPrimitive.Close
+            data-slot="dialog-close"
+            render={
+              <Button
+                variant="ghost"
+                className="absolute top-4 right-4 bg-secondary"
+                size="icon-sm"
+              />
+            }
+          >
+            <XIcon
+            />
+            <span className="sr-only">Close</span>
+          </DialogPrimitive.Close>
+        )}
+      </DialogPrimitive.Popup>
+    </DialogPortal>
   )
 }
 
-function Title({ className, ...props }: ComponentProps<typeof BaseDialog.Title>) {
+function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <BaseDialog.Title
-      className={cn("text-sm font-semibold tracking-tight", className)}
+    <div
+      data-slot="dialog-header"
+      className={cn("flex flex-col gap-1.5", className)}
       {...props}
     />
   )
 }
 
-function Description({
+function DialogFooter({
+  className,
+  showCloseButton = false,
+  children,
+  ...props
+}: React.ComponentProps<"div"> & {
+  showCloseButton?: boolean
+}) {
+  return (
+    <div
+      data-slot="dialog-footer"
+      className={cn(
+        "flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        className
+      )}
+      {...props}
+    >
+      {children}
+      {showCloseButton && (
+        <DialogPrimitive.Close render={<Button variant="outline" />}>
+          Close
+        </DialogPrimitive.Close>
+      )}
+    </div>
+  )
+}
+
+function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
+  return (
+    <DialogPrimitive.Title
+      data-slot="dialog-title"
+      className={cn(
+        "text-base leading-none font-medium",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+function DialogDescription({
   className,
   ...props
-}: ComponentProps<typeof BaseDialog.Description>) {
+}: DialogPrimitive.Description.Props) {
   return (
-    <BaseDialog.Description
-      className={cn("text-xs text-muted-foreground", className)}
+    <DialogPrimitive.Description
+      data-slot="dialog-description"
+      className={cn(
+        "text-sm text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+        className
+      )}
       {...props}
     />
   )
 }
 
-export const Dialog = { Root, Trigger, Popup, Title, Description, Close }
+export {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
+}

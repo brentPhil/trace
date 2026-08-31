@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { Toaster } from "@/components/ui/toast"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { EntryLog } from "@/components/entries/entry-log"
-import { Toast, ToastViewport } from "@/components/ui/toast"
 import { makeEntry, noEntryActions } from "@/test-utils/fixtures"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DayGroup, Entry } from "@/lib/group-entries"
@@ -72,7 +72,7 @@ const renderEntryLog = ({
   actions?: EntryActions
 } = {}) =>
   render(
-    <Toast.Provider>
+    <Toaster>
       <EntryLog
         groups={shownGroups}
         timeZone="UTC"
@@ -81,8 +81,7 @@ const renderEntryLog = ({
         actions={actions}
         grouped
       />
-      <ToastViewport />
-    </Toast.Provider>
+    </Toaster>
   )
 
 describe("EntryLog — a sitting-wide write that fails", () => {
@@ -202,7 +201,7 @@ describe("EntryLog — selection lifecycle", () => {
       { ...groups[0], entries: [twice[0]], totalMs: 3_600_000 },
     ]
     rerender(
-      <Toast.Provider>
+      <Toaster>
         <EntryLog
           groups={shrunk}
           timeZone="UTC"
@@ -211,8 +210,7 @@ describe("EntryLog — selection lifecycle", () => {
           actions={{ ...noEntryActions, onRemoveMany }}
           grouped
         />
-        <ToastViewport />
-      </Toast.Provider>
+      </Toaster>
     )
 
     expect(screen.getByText("1 record selected")).toBeTruthy()

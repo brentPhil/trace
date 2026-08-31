@@ -17,5 +17,5 @@ import { isProjectColor } from "@shared/palette"
  * written before a hue was retired must still paint as something.
  */
 export function projectColorVar(color: string): string {
-  return isProjectColor(color) ? `var(--project-${color})` : "var(--ink-muted)"
+  return isProjectColor(color) ? `var(--project-${color})` : "var(--muted-foreground)"
 }

@@ -12,7 +12,7 @@ import type { ReactNode } from "react"
  * worse artefact than a fifteen-line panel that is right by construction, so
  * the card was removed rather than fought.
  *
- * Depth here is the ramp: `bg-surface` on the page's ground, with one
+ * Depth here is the ramp: `bg-card` on the page's ground, with one
  * `edge-soft` line where the boundary has to be unambiguous. No shadow.
  */
 export function ChartFrame({
@@ -33,7 +33,7 @@ export function ChartFrame({
   return (
     <section
       className={cn(
-        "flex min-w-0 flex-col gap-3 rounded-lg border border-edge-soft bg-surface p-4",
+        "flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4",
         className
       )}
     >
@@ -77,9 +77,9 @@ export function ChartFrame({
  * shadcn's chart wrapper tries to undo that with a descendant selector
  * (`[&_.recharts-cartesian-axis-tick_text]:fill-muted-foreground`), and it did
  * not take here — the ticks measured `rgb(102, 102, 102)` in the browser, which
- * is about 2.4:1 on `--surface`. DESIGN.md puts the floor for ANY text at
- * `--ink-muted`, and an axis a reader has to lean in for is not a scale, it is
- * a decoration pretending to be one.
+ * is far under the floor on a card. DESIGN.md puts the floor for ANY text at
+ * `--muted-foreground`, and an axis a reader has to lean in for is not a scale,
+ * it is a decoration pretending to be one.
  *
  * Passed as props because that is the version that cannot silently stop
  * working: a selector aimed at a vendored library's internal class names is one
@@ -89,11 +89,11 @@ export function ChartFrame({
 export const AXIS = {
   tickLine: false,
   axisLine: false,
-  tick: { fill: "var(--ink-muted)", fontSize: 12 },
+  tick: { fill: "var(--muted-foreground)", fontSize: 12 },
 } as const
 
 /** The gridlines. Passive content between passive content — no floor applies. */
-export const GRID_STROKE = "var(--edge-soft)"
+export const GRID_STROKE = "var(--border)"
 
 /**
  * The X axis for a chart plotting `Bucket[]`.
@@ -138,7 +138,7 @@ export function HatchDefs({ id }: { id: string }) {
           y1="0"
           x2="0"
           y2="6"
-          stroke="var(--edge-soft)"
+          stroke="var(--border)"
           strokeWidth="2"
         />
       </pattern>

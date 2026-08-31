@@ -1,6 +1,6 @@
 import { useId } from "react"
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip } from "@/components/ui/chart"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import {
   AXIS,
   ChartKey,
@@ -75,7 +75,12 @@ export function DailyChart({
 
   return (
     <>
-      <ChartContainer className="aspect-auto h-64 w-full">
+      <ChartContainer
+      /* Empty on purpose: `config` exists so shadcn can emit a `--color-<key>`
+         variable per series, and every series here already names its own
+         colour (a `--chart-*` token, or the projects `--project-*` data hue).
+         There is nothing for the container to declare. */
+      config={{}} className="aspect-auto h-64 w-full">
         <BarChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: -12 }}>
           <HatchDefs id={hatchId} />
           {/* Horizontal only. Vertical rules on a category axis add a grid
@@ -97,13 +102,13 @@ export function DailyChart({
           <Bar
             dataKey="billableMs"
             stackId="tracked"
-            fill="var(--ink)"
+            fill="var(--foreground)"
             isAnimationActive={false}
           />
           <Bar
             dataKey="nonBillableMs"
             stackId="tracked"
-            fill="var(--ink-muted)"
+            fill="var(--muted-foreground)"
             isAnimationActive={false}
           />
           <Bar
@@ -116,8 +121,8 @@ export function DailyChart({
       </ChartContainer>
       <ChartKey
         items={[
-          { label: "Billable", swatch: <Swatch color="var(--ink)" /> },
-          { label: "Non-billable", swatch: <Swatch color="var(--ink-muted)" /> },
+          { label: "Billable", swatch: <Swatch color="var(--foreground)" /> },
+          { label: "Non-billable", swatch: <Swatch color="var(--muted-foreground)" /> },
           { label: `Nothing tracked`, swatch: <HatchSwatch /> },
         ]}
       />
@@ -154,12 +159,12 @@ function DailyTooltip({
         {
           label: "Billable",
           value: formatTotal(row.billableMs, display),
-          swatch: "var(--ink)",
+          swatch: "var(--foreground)",
         },
         {
           label: "Non-billable",
           value: formatTotal(row.nonBillableMs, display),
-          swatch: "var(--ink-muted)",
+          swatch: "var(--muted-foreground)",
         },
         {
           label: row.count === 1 ? "Entry" : "Entries",

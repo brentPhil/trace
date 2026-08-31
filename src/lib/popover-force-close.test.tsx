@@ -10,7 +10,7 @@ import type { PopoverActionsRef } from "@/lib/popover-force-close"
  * fixed or not — confirmed by running `timer-bar.test.tsx`'s "closes the
  * popover" case against the ORIGINAL, unfixed component: it already passed.
  * The bug that prompted this file is real only in a browser, where the popup's
- * `transition-[opacity,transform] duration-100` never progresses in an
+ * `transition-[opacity,scale] duration-100` never progresses in an
  * unpainted tab, so the `animation.finished` promises Base UI awaits never
  * settle. What IS unit-testable is the guarantee this hook adds on top: given
  * enough time a closed popup gets force-unmounted no matter what Base UI's own
@@ -109,7 +109,7 @@ describe("useForceCloseWhenClosed", () => {
   })
 
   it("does nothing if the popover has already unmounted on its own", () => {
-    // Base UI clears the ref to `null` when the underlying `Popover.Root`
+    // Base UI clears the ref to `null` when the underlying `Popover`
     // itself unmounts — its own animation-driven close already succeeded,
     // so there is nothing left to force.
     const ref: PopoverActionsRef = { current: null }

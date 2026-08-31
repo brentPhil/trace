@@ -94,14 +94,14 @@ export function UploadQueuePanel({
   return (
     <section
       aria-label="Uploads"
-      className="flex flex-col rounded-md border border-edge-soft"
+      className="flex flex-col rounded-md border border-border"
     >
-      <header className="flex items-center justify-between gap-3 border-b border-edge-soft px-3 py-2">
+      <header className="flex items-center justify-between gap-3 border-b border-border px-3 py-2">
         <p aria-live="polite" className="text-sm text-muted-foreground">
           {summarise(items)}
         </p>
         {settled ? (
-          <Button type="button" variant="quiet" size="xs" onClick={onDismiss}>
+          <Button type="button" variant="ghost" size="xs" onClick={onDismiss}>
             Dismiss
           </Button>
         ) : null}
@@ -111,7 +111,7 @@ export function UploadQueuePanel({
         {items.map((item) => (
           <li
             key={item.id}
-            className="flex items-center gap-3 border-b border-edge-soft px-3 py-2 last:border-b-0"
+            className="flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
           >
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <div className="flex items-center gap-2">
@@ -119,7 +119,7 @@ export function UploadQueuePanel({
                   <Check className="size-3.5 shrink-0 text-muted-foreground" />
                 ) : null}
                 {item.status === "failed" ? (
-                  <TriangleAlert className="size-3.5 shrink-0 text-alarm" />
+                  <TriangleAlert className="size-3.5 shrink-0 text-destructive" />
                 ) : null}
                 <span
                   className={cn(
@@ -134,10 +134,10 @@ export function UploadQueuePanel({
               {item.status === "uploading" ? (
                 <div
                   aria-hidden="true"
-                  className="h-1 overflow-hidden rounded-full bg-surface-raised"
+                  className="h-1 overflow-hidden rounded-full bg-popover"
                 >
                   <div
-                    className="h-full rounded-full bg-ink-muted transition-[width]"
+                    className="h-full rounded-full bg-muted-foreground transition-[width]"
                     style={{
                       width: `${((item.sent / Math.max(1, item.bytes)) * 100).toFixed(1)}%`,
                     }}
@@ -146,7 +146,7 @@ export function UploadQueuePanel({
               ) : null}
 
               {item.status === "failed" ? (
-                <p className="text-xs text-alarm">{item.reason}</p>
+                <p className="text-xs text-destructive">{item.reason}</p>
               ) : null}
 
               {item.status === "cancelled" ? (
@@ -169,7 +169,7 @@ export function UploadQueuePanel({
             {item.status === "queued" || item.status === "uploading" ? (
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
                 size="icon-row"
                 aria-label={`Cancel ${item.name}`}
                 onClick={() => onCancel(item.id)}
@@ -181,7 +181,7 @@ export function UploadQueuePanel({
             {item.status === "failed" || item.status === "cancelled" ? (
               <Button
                 type="button"
-                variant="quiet"
+                variant="ghost"
                 size="icon-row"
                 aria-label={`Retry ${item.name}`}
                 onClick={() => onRetry(item.id)}

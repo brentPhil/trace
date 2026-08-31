@@ -1,9 +1,9 @@
 import { useEffect } from "react"
+import { Toaster } from "@/components/ui/toast"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { Timer } from "@/routes/_authed/-timer"
-import { Toast, ToastViewport } from "@/components/ui/toast"
 import {
   convexKey,
   paginatedKey,
@@ -314,10 +314,9 @@ function renderTimer({
       {/* Timer raises one toast of its own — a calendar block whose row is not
           in the list. The provider is in the app shell in production; here it
           has to be spelt, and the viewport with it or nothing renders. */}
-      <Toast.Provider>
+      <Toaster>
         <Timer />
-        <ToastViewport />
-      </Toast.Provider>
+      </Toaster>
     </QueryClientProvider>
   )
 }

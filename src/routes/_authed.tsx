@@ -1,3 +1,5 @@
+import { useToastManager } from "@/components/ui/toast"
+import { buttonVariants } from "@/components/ui/button"
 import {
   Link,
   Outlet,
@@ -8,8 +10,6 @@ import {
 import { ConvexError } from "convex/values"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
-import { buttonVariants } from "@/components/ui/button"
-import { Toast } from "@/components/ui/toast"
 import { AuthShell } from "@/components/auth-shell"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { AppShell } from "@/components/shell/app-shell"
@@ -99,7 +99,7 @@ export const Route = createFileRoute("/_authed")({
  *
  * The toast manager is read HERE rather than reused from `AuthedShell`'s
  * `report` for the same positional reason: `report` is defined inside the
- * child, and a parent cannot reach into a component it renders. `Toast.Provider`
+ * child, and a parent cannot reach into a component it renders. `ToastProvider`
  * lives in `__root.tsx`, above both, so `useToastManager` is legal at this
  * level — and the provider gets the app's ordinary error channel instead of
  * growing a toast import of its own.
@@ -112,7 +112,7 @@ export const Route = createFileRoute("/_authed")({
  * page has no player to feed.
  */
 function AuthedLayout() {
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
   // Not `useSuspenseQuery`, and deliberately absent from the route `loader`
   // above: the library is not worth blocking the authed shell on, and
   // `undefined` is a correct first render — the provider plays the compiled-in
@@ -166,7 +166,7 @@ function AuthedShell() {
   useTabTitleClock(running, settings.tabTitleClock)
   useReplayPendingStart(running)
 
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   const music = useMusic()
   useMusicTracking(running, {
@@ -224,7 +224,7 @@ function AuthedShell() {
    * Discarding says so, and says it AFTER the write lands.
    *
    * Discarding a timer changes almost nothing on screen — the banner and the
-   * bar's cold light simply stop being there — so for anyone not watching the
+   * bar's accent simply stop being there — so for anyone not watching the
    * pixels the single most consequential action in the product happened in
    * silence. The bar's own Discard button used to say this sentence and went
    * with the control on 2026-08-12; `RunawayBanner`'s is the one that remains,

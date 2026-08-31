@@ -20,7 +20,7 @@ import { screen } from "@testing-library/react"
  */
 export function expectFilterControlsInBand() {
   const search = screen.getByPlaceholderText("Search titles, notes and projects")
-  const band = search.closest(".bg-surface")
+  const band = search.closest(".bg-card")
   /*
    * The fallback string is the failure MESSAGE. `expect(band).not.toBe(null)`
    * reports "expected null not to be null", which says nothing about what
@@ -28,8 +28,8 @@ export function expectFilterControlsInBand() {
    * assertion print the defect.
    */
   const chrome = band?.className ?? "the filter controls are not in a band at all"
-  expect(chrome).toContain("bg-surface")
+  expect(chrome).toContain("bg-card")
   expect(chrome).toContain("border-y")
-  expect(chrome).toContain("border-edge-soft")
+  expect(chrome).toContain("border-border")
   return band
 }

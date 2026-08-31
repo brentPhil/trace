@@ -10,17 +10,17 @@ import { cn } from "@/lib/utils"
  * rather than in `invoice-form.tsx` so `party-block.tsx` can share it without
  * importing its own parent.
  *
- * `bg-ground` with an Edge border, NOT the `bg-surface` fill `ui/input.tsx`
+ * `bg-background` with an Edge border, NOT the `bg-card` fill `ui/input.tsx`
  * carries. The Adjacent Colour Rule is the reason and it is worth stating: a
- * border has TWO adjacent colours, and Edge measures 3.15:1 against ground but
- * only 2.90:1 against surface. A ground-filled control clears the 3:1 floor on
+ * border has TWO adjacent colours, and a token that clears 3:1 against the
+ * page can fall under it against a panel. A background-filled control clears the 3:1 floor on
  * both sides of its border; a surface-filled control on a ground page does not
  * clear on the inside. DESIGN.md names this case — "a control that carries its
- * own `bg-ground` fill may keep Edge instead" — and this is a whole form's
+ * own `bg-background` fill may keep Edge instead" — and this is a whole form's
  * worth of controls that would otherwise inherit the weaker half.
  */
 export const INVOICE_FIELD = cn(
-  "w-full rounded-md border bg-ground px-2 py-1.5 text-sm",
+  "w-full rounded-md border bg-background px-2 py-1.5 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
 
@@ -28,7 +28,7 @@ export const INVOICE_FIELD = cn(
  *  Alarm is never the only carrier — every caller pairs it with `aria-invalid`
  *  and a `role="alert"` sentence. */
 export function fieldBorder(refused: boolean): string {
-  return refused ? "border-alarm" : "border-edge"
+  return refused ? "border-destructive" : "border-input"
 }
 
 /**
@@ -74,7 +74,7 @@ export function FieldLabelled({
 export function FieldRefusal({ id, error }: { id: string; error?: string | null }) {
   if (error === null || error === undefined) return null
   return (
-    <p id={id} role="alert" className="text-xs text-alarm">
+    <p id={id} role="alert" className="text-xs text-destructive">
       {error}
     </p>
   )

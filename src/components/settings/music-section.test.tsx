@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MusicSection } from "@/components/settings/music-section"
+import { chooseOption, optionLabels, selectedLabel } from "@/test-utils/select"
 
 afterEach(cleanup)
 
@@ -26,10 +27,10 @@ describe("MusicSection", () => {
     })
     expect(checkbox.checked).toBe(true)
 
-    const select = screen.getByRole<HTMLSelectElement>("combobox", {
-      name: /when tracking stops/i,
-    })
-    expect(select.value).toBe("stop")
+    // The selection is text on the trigger now, not a `value`: a Base UI
+    // Select is a button, and "stop" is the stored value while "Stop the
+    // music" is what a reader actually sees.
+    expect(selectedLabel(/when tracking stops/i)).toBe("Stop the music")
   })
 
   it("toggling the checkbox calls back with false", () => {
@@ -56,10 +57,7 @@ describe("MusicSection", () => {
         onChange={onChange}
       />
     )
-    fireEvent.change(
-      screen.getByRole("combobox", { name: /when tracking stops/i }),
-      { target: { value: "continue" } }
-    )
+    chooseOption(/when tracking stops/i, "Keep playing")
     expect(onChange).toHaveBeenCalledWith({ musicOnStop: "continue" })
   })
 
@@ -81,13 +79,11 @@ describe("MusicSection", () => {
         onChange={vi.fn()}
       />
     )
-    expect(screen.getByText("Stop the music")).toBeTruthy()
-    expect(screen.getByText("Keep playing")).toBeTruthy()
-    expect(screen.queryByText("Pause the music")).toBe(null)
-    expect(
-      screen.getByRole<HTMLSelectElement>("combobox", {
-        name: /when tracking stops/i,
-      }).options
-    ).toHaveLength(2)
+    // Read off the open listbox: the options only exist in the DOM while the
+    // Select is open, so this both opens it and asserts what it offers.
+    expect(optionLabels(/when tracking stops/i)).toEqual([
+      "Stop the music",
+      "Keep playing",
+    ])
   })
 })

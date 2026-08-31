@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "@/components/ui/toast"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   cleanup,
@@ -7,7 +8,6 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
-import { Toast, ToastViewport } from "@/components/ui/toast"
 import {
   InvoicePage,
   InvoiceUnreachable,
@@ -139,10 +139,9 @@ function renderRecord(over: Record<string, unknown> = {}, settings = SETTINGS) {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <Toast.Provider>
+      <Toaster>
         <InvoicePage invoiceId={INVOICE_ID} />
-        <ToastViewport />
-      </Toast.Provider>
+      </Toaster>
     </QueryClientProvider>
   )
 }

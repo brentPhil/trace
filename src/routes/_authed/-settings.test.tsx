@@ -1,4 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "@/components/ui/toast"
+import { ThemeProvider } from "@/components/theme-provider"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   cleanup,
@@ -7,10 +9,10 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react"
-import { Toast, ToastViewport } from "@/components/ui/toast"
 import { Settings } from "@/routes/_authed/-settings"
 import { convexKey } from "@/test-utils/convex-query"
 import { SETTINGS } from "@/test-utils/fixtures"
+import { chooseOption, selectedLabel } from "@/test-utils/select"
 import { api } from "../../../convex/_generated/api"
 import { getFunctionName } from "convex/server"
 import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
@@ -150,6 +152,15 @@ function renderSettings(
   })
   client.setQueryData(convexKey(api.google.listCalendars, {}), [])
   client.setQueryData(convexKey(api.projects.list, {}), [])
+  // The music LIBRARY moved onto this page from /music on 2026-08-29 and
+  // brought two more `useSuspenseQuery` reads with it — same story as Google
+  // Calendar's above, and it failed the same way the moment it landed: an
+  // unseeded suspense read renders an empty <body> and every assertion in this
+  // file goes red at once, which is a suspended page rather than a broken one.
+  // The library's own behaviour is covered next door, in
+  // `-music-library.test.tsx`.
+  client.setQueryData(convexKey(api.music.listTracks, {}), [])
+  client.setQueryData(convexKey(api.music.usage, {}), { bytes: 0, count: 0 })
   // The client is returned so a test can push a new `google.connection` the way
   // the real Convex subscription does after `disconnect` invalidates it — which
   // is the exact moment the re-connect defect used to fire.
@@ -157,10 +168,16 @@ function renderSettings(
     client,
     ...render(
       <QueryClientProvider client={client}>
-        <Toast.Provider>
-          <Settings />
-          <ToastViewport />
-        </Toast.Provider>
+        {/* The Theme section reads `useTheme()` through the page, and that hook
+            throws outside a provider by design — a silent default would be a
+            control that renders, responds to clicks and changes nothing. So the
+            harness supplies the real provider rather than a stub: it is pure
+            client state over localStorage, with no backend to fake. */}
+        <ThemeProvider>
+          <Toaster>
+            <Settings />
+          </Toaster>
+        </ThemeProvider>
       </QueryClientProvider>
     ),
   }
@@ -220,7 +237,9 @@ describe("/settings — notes in the PDF report", () => {
    * export formats. It changes neither. */
   it("says which artefacts it does and does not change", () => {
     renderSettings()
-    const hint = screen.getByText(/A note is what you wrote/)
+    // The hint is one line now rather than a paragraph; what it must still
+    // carry is the claim about the OTHER two export formats.
+    const hint = screen.getByText(/Changes the exported PDF only/)
     expect(hint.textContent).toContain("CSV and XLSX exports never carry notes")
   })
 })
@@ -279,7 +298,7 @@ describe("/settings — repeated entries", () => {
    * is billed for; nothing is merged and no total moves. */
   it("says nothing is merged and no total moves", () => {
     renderSettings()
-    const hint = screen.getByText(/When you start and stop the same task/)
+    const hint = screen.getByText(/Nothing is merged/)
     expect(hint.textContent).toContain("Nothing is merged")
     expect(hint.textContent).toContain(
       "exports, invoices and totals are unaffected"
@@ -305,6 +324,50 @@ describe("/settings — invoice lines", () => {
   it("reflects an account that prefers project lines", () => {
     renderSettings({ mergeInvoiceLines: false })
     expect(mergeBox().checked).toBe(false)
+  })
+})
+
+describe("/settings — the four Select fields", () => {
+  /*
+   * These were native `<select>`s until 2026-08-29 and had NO coverage at all,
+   * which is why the swap to `ui/select.tsx` could not be made safely without
+   * adding some first. Every one of them writes a stored setting, so the
+   * failure mode of a mis-wired `value` is not a visual glitch — it is the
+   * page showing a week start, a currency or a timezone that is not the one in
+   * force, which then gets saved over the real one on the next change.
+   *
+   * The assertion is on the TRIGGER's rendered text rather than on opening the
+   * listbox: a Base UI Select renders its options into a portal only while
+   * open, and what has to be true on load is that the control is displaying the
+   * stored value. That is the half a wiring mistake breaks.
+   */
+  it("shows the stored value on each trigger", () => {
+    renderSettings({
+      timezone: "Asia/Singapore",
+      weekStartDay: 1,
+      runawayThresholdMs: 8 * 60 * 60 * 1000,
+      currency: "USD",
+    })
+
+    expect(screen.getByLabelText("Week starts on").textContent).toContain(
+      "Monday"
+    )
+    expect(screen.getByLabelText("Warn after").textContent).toContain(
+      "After 8 hours"
+    )
+    expect(screen.getByLabelText("Time zone").textContent).toContain(
+      "Asia/Singapore"
+    )
+    expect(screen.getByLabelText("Currency").textContent).toContain("USD")
+  })
+
+  it("reflects a different stored week start rather than a default", () => {
+    // Sunday is index 0, and 0 is also what a `value ?? fallback` mistake
+    // produces — so this is the case that separates "wired" from "coincidence".
+    renderSettings({ weekStartDay: 0 })
+    expect(screen.getByLabelText("Week starts on").textContent).toContain(
+      "Sunday"
+    )
   })
 })
 
@@ -563,13 +626,15 @@ describe("/settings — Google disconnect", () => {
 describe("/settings — music", () => {
   const autoplayBox = () =>
     screen.getByLabelText<HTMLInputElement>("Play music when tracking starts")
-  const onStop = () =>
-    screen.getByLabelText<HTMLSelectElement>("When tracking stops")
+  // `onStop` was a `getByLabelText<HTMLSelectElement>` helper. The control is a
+  // Select now, so it is reached through `test-utils/select` instead — a
+  // trigger plus a portalled listbox has no `HTMLSelectElement` to hand back.
 
   it("shows the account's stored preferences", () => {
     renderSettings({ musicAutoplay: false, musicOnStop: "continue" })
     expect(autoplayBox().checked).toBe(false)
-    expect(onStop().value).toBe("continue")
+    // The trigger shows the LABEL; "continue" is the stored value behind it.
+    expect(selectedLabel(/when tracking stops/i)).toBe("Keep playing")
   })
 
   it("saves autoplay the moment it is switched off", async () => {
@@ -582,7 +647,7 @@ describe("/settings — music", () => {
 
   it("saves what happens when tracking stops", async () => {
     renderSettings({ musicOnStop: "stop" })
-    fireEvent.change(onStop(), { target: { value: "continue" } })
+    chooseOption(/when tracking stops/i, "Keep playing")
     await waitFor(() =>
       expect(update).toHaveBeenCalledWith({ musicOnStop: "continue" })
     )

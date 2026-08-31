@@ -1,6 +1,6 @@
 import { useId } from "react"
-import { Bar, BarChart, Cell, XAxis, YAxis } from "recharts"
 import { ChartContainer, ChartTooltip } from "@/components/ui/chart"
+import { Bar, BarChart, Cell, XAxis, YAxis } from "recharts"
 import { AXIS, HatchDefs } from "@/components/reports/chart-frame"
 import { BAR_CURSOR, TooltipCard, hoveredRow } from "@/components/reports/chart-tooltip"
 import { formatTotal } from "@/lib/format-total"
@@ -23,7 +23,7 @@ import type { ProjectTotal } from "@/lib/report-series"
  * This is the one chart on the page that carries hue, and it is the one place
  * DESIGN.md already permits it: the project palette exists, it is capped at
  * twelve legible values, and it is never the sole carrier — every bar sits
- * beside its own name. The two reserved hues (cold light, brass) are absent
+ * beside its own name. The two reserved hues (the running accent, brass) are absent
  * from that palette by construction, so no project can be mistaken for a
  * running timer or for money.
  */
@@ -53,6 +53,11 @@ export function ProjectChart({
 
   return (
     <ChartContainer
+      /* Empty on purpose: `config` exists so shadcn can emit a `--color-<key>`
+         variable per series, and every series here already names its own
+         colour (a `--chart-*` token, or the projects `--project-*` data hue).
+         There is nothing for the container to declare. */
+      config={{}}
       // Height per bar rather than an aspect ratio: three projects in a
       // 16:9 box are three stripes with a field of empty beneath them.
       className="aspect-auto w-full"
@@ -140,7 +145,7 @@ function rollUp(projects: Array<ProjectTotal>, hatchId: string): Array<Row> {
       projectId: null,
       name: `${tail.length} more`,
       color: "",
-      fill: "var(--edge-raised)",
+      fill: "var(--border)",
       rolled: tail.length,
     },
   ]
@@ -173,7 +178,7 @@ function ProjectTick({ x = 0, y = 0, payload }: TickProps) {
       // Not `currentColor`: recharts writes `fill="#666"` onto its own ticks as
       // a presentation attribute, and this is the axis that no longer goes
       // through it. See `AXIS` in chart-frame.tsx.
-      fill="var(--ink-muted)"
+      fill="var(--muted-foreground)"
     >
       {truncate(name)}
     </text>

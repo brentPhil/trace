@@ -1,8 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react"
+import { useToastManager } from "@/components/ui/toast"
+import { Button } from "@/components/ui/button"
 import { Check, Copy } from "lucide-react"
 import { useAnnounce } from "@/components/a11y/announcer"
-import { Button } from "@/components/ui/button"
-import { Toast } from "@/components/ui/toast"
 import { copyToClipboard } from "@/lib/copy-to-clipboard"
 
 /** How long the button stays on "Copied", in ms. Long enough to be seen after
@@ -65,7 +65,7 @@ export function CopyEntriesButton({
 }) {
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
   const announce = useAnnounce()
   const reasonId = useId()
 

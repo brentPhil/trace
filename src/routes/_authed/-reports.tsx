@@ -11,6 +11,8 @@
  * `breakdownArgs`, which the loader shares with the panels here, is in
  * @/lib/breakdown-args for the same reason — see its header.
  */
+import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
@@ -26,8 +28,6 @@ import { CreateInvoiceLink } from "@/components/reports/create-invoice-link"
 import { ExportMenu } from "@/components/reports/export-menu"
 import { SummaryPanel } from "@/components/reports/summary-panel"
 import { Page } from "@/components/shell/page"
-import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryActions } from "@/hooks/use-entry-actions"
 import { breakdownArgs } from "@/lib/breakdown-args"
@@ -276,7 +276,7 @@ export function Reports() {
                 `w-fit` so the group is as wide as its two cells. A segmented
                 control stretched across a row is a nav bar, not a switch.
               */}
-              <TabsList variant="segmented" className="w-fit">
+              <TabsList className="w-fit">
                 {VIEWS.map((item) => (
                   <TabsTrigger key={item.value} value={item.value}>
                     {item.label}
@@ -689,7 +689,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                 <>
                   , of which{" "}
                   {/*
-                    NOT `text-brass` — the Two Temperatures Rule reserves brass
+                    NOT `text-foreground` — the Two Temperatures Rule reserves brass
                     for money, and this is a duration. `text-foreground`
                     matches the total above it; the strong/font-mono tabular-nums tracking-[-0.02em] weight is
                     what marks it as a figure, not the colour.
@@ -722,7 +722,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                         total rounded to the nearest cent exactly once, so this
                         figure is reproducible by hand from the entries below.
                       */}
-                      <strong className="font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
+                      <strong className="font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
                         {formatMoney(shownSummary.billableCents, settings.currency)}
                       </strong>
                       )
@@ -784,7 +784,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
                 <> One entry is still running and is not counted.</>
               ) : null}
               {shownSummary.truncated ? (
-                <span className="text-alarm">
+                <span className="text-destructive">
                   {" "}
                   This period is too large to total exactly — the time and the
                   billable amount above are both a floor, not the real total.
@@ -875,7 +875,7 @@ function DetailedTab({ filters, settings }: { filters: Filters; settings: Settin
         by opacity alone, which is nothing at all to a screen-reader user
         changing the range.
       */}
-      <div {...staleProps(logIsStale, "flex-1 border-t border-edge-soft")}>
+      <div {...staleProps(logIsStale, "flex-1 border-t border-border")}>
         {/*
           An onboarding-empty-state flash is the bug this guards against: while
           `logLoading` is true, `groups` is `[]` for reasons that have nothing

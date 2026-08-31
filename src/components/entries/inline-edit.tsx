@@ -215,14 +215,14 @@ export function InlineEdit<T>({
       <Button
         ref={triggerRef}
         type="button"
-        variant="quiet"
+        variant="ghost"
         size="row-trigger"
         disabled={disabled}
         onClick={open}
         aria-label={ariaLabel}
         className={cn(
           "px-0 py-0 text-left text-[length:inherit] text-inherit",
-          !disabled && "hover:bg-surface-raised/70",
+          !disabled && "hover:bg-popover/70",
           className
         )}
       >
@@ -304,11 +304,11 @@ export function InlineEdit<T>({
             if (error !== null) setError(null)
           }}
           className={cn(
-            "block w-full resize-none rounded-sm border bg-ground px-1.5 py-1",
+            "block w-full resize-none rounded-sm border bg-background px-1.5 py-1",
             "max-h-[24rem] min-h-24 text-sm leading-relaxed",
             "placeholder:text-muted-foreground",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-            error === null ? "border-edge" : "border-alarm",
+            error === null ? "border-input" : "border-destructive",
             inputClassName
           )}
         />
@@ -318,7 +318,7 @@ export function InlineEdit<T>({
             role="alert"
             className={cn(
               "absolute top-full left-0 z-20 mt-1 w-max max-w-[16rem] rounded-md",
-              "border border-edge-soft bg-surface-raised px-2 py-1",
+              "border border-border bg-popover px-2 py-1",
               "text-xs text-foreground shadow-lg"
             )}
           >
@@ -339,9 +339,9 @@ export function InlineEdit<T>({
           if (error !== null) setError(null)
         }}
         className={cn(
-          "w-full rounded-sm border bg-ground px-1.5 py-0.5",
+          "w-full rounded-sm border bg-background px-1.5 py-0.5",
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          error === null ? "border-edge" : "border-alarm",
+          error === null ? "border-input" : "border-destructive",
           inputClassName,
           className
         )}
@@ -352,7 +352,7 @@ export function InlineEdit<T>({
           role="alert"
           className={cn(
             "absolute top-full left-0 z-20 mt-1 w-max max-w-[16rem] rounded-md",
-            "border border-edge-soft bg-surface-raised px-2 py-1",
+            "border border-border bg-popover px-2 py-1",
             "text-xs text-foreground shadow-lg"
           )}
         >

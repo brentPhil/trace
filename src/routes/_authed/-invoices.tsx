@@ -9,11 +9,11 @@
  * the eager bundle, with a [tanstack-router] warning per route saying so.
  * Imported from a non-route file, `component:` splits as normal.
  */
+import { Empty } from "@/components/ui/empty"
 import { Link } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { Page } from "@/components/shell/page"
-import { Empty } from "@/components/ui/empty"
 import { format } from "@/lib/report-series"
 import { cn } from "@/lib/utils"
 import { dayOf } from "@shared/day"
@@ -95,7 +95,7 @@ export function Invoices() {
               the calendars in this product already earn their `columnheader`
               roles — there is no ARIA here that markup did not give.
             */}
-            <div className="overflow-x-auto rounded-md border border-edge-soft">
+            <div className="overflow-x-auto rounded-md border border-border">
               {/* `table-fixed` so the widths on the header cells are what the
                   browser lays out from, rather than the widest cell in each
                   column — which is what makes a long client name truncate
@@ -107,7 +107,7 @@ export function Invoices() {
                   Invoices, most recently issued first
                 </caption>
                 <thead>
-                  <tr className="border-b border-edge-soft text-[0.8125rem] font-medium text-muted-foreground">
+                  <tr className="border-b border-border text-[0.8125rem] font-medium text-muted-foreground">
                     {/* Sentence case, no tracked-out eyebrow — The Sentence
                         Case Rule. Widths live on the header cells only; the
                         body inherits them from the column, so a header and its
@@ -155,7 +155,7 @@ export function Invoices() {
                          separates one row from the next; this one separates the
                          rows from what they add up to, and reads as the heavier
                          boundary it is. */
-                      className="border-t border-edge"
+                      className="border-t border-border"
                     >
                       <th
                         scope="row"
@@ -168,7 +168,7 @@ export function Invoices() {
                           disappears with the column it sits under, rather than
                           shunting the total one place left on a phone. */}
                       <td className={DATE_COL} />
-                      <td className="px-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
+                      <td className="px-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
                         {formatMoney(totalCents, currency)}
                       </td>
                     </tr>
@@ -292,8 +292,8 @@ function InvoiceRowItem({
      */
     <tr
       className={cn(
-        "relative border-b border-edge-soft last:border-b-0",
-        "transition-colors hover:bg-surface has-[a:focus-visible]:bg-surface",
+        "relative border-b border-border last:border-b-0",
+        "transition-colors hover:bg-card has-[a:focus-visible]:bg-card",
         "motion-reduce:transition-none"
       )}
     >
@@ -325,7 +325,7 @@ function InvoiceRowItem({
             // interface to be learnable, and a link that only admits to being
             // one under the pointer is not. Edge at rest, Ink on hover: the
             // affordance is always present and still has somewhere to go.
-            "rounded-sm underline decoration-edge underline-offset-4",
+            "rounded-sm underline decoration-border underline-offset-4",
             "hover:decoration-foreground",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
             "after:absolute after:inset-0 after:content-['']"
@@ -367,7 +367,7 @@ function InvoiceRowItem({
         is set to today. `formatMoney` because there is exactly one money
         formatter in the product.
       */}
-      <td className="px-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
+      <td className="px-3 py-2 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
         {formatMoney(invoice.totalCents, invoice.currency)}
       </td>
     </tr>

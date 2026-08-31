@@ -68,8 +68,20 @@ export type GoogleCalendarActions = {
   createProject: (name: string) => Promise<{ projectId: Id<"projects"> }>
 }
 
-const connectButtonClass =
-  "justify-self-start rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-ground"
+/*
+ * `connectButtonClass` WAS HERE, and it was a primary button drawn by hand:
+ * `rounded-md bg-foreground px-3 py-1.5 text-sm font-medium text-background`.
+ *
+ * It carried NO hover, NO active, and — the part that made this a defect rather
+ * than a polish item — no `focus-visible` at all, so the only control on a
+ * disconnected Settings page was invisible to a keyboard. It also wore
+ * `bg-foreground`, which is the high-contrast neutral this system used as its
+ * primary BEFORE the safelight existed; DESIGN.md §5 records that swap and the
+ * reason for it, and this call site had been left behind. Two spellings of the
+ * affirmative action, one of them unreachable.
+ *
+ * `Button` is the answer to all of it and was already imported in this file.
+ */
 
 export function GoogleCalendarSection({
   connection,
@@ -101,13 +113,13 @@ export function GoogleCalendarSection({
           leaving this tab. Chroneli only ever reads — nothing is written back to
           Google.
         </p>
-        <button
+        <Button
           type="button"
           onClick={actions.connect}
-          className={connectButtonClass}
+          className="justify-self-start"
         >
           Connect Google Calendar
-        </button>
+        </Button>
       </div>
     )
   }
@@ -123,18 +135,18 @@ export function GoogleCalendarSection({
         alone, and this is the case that rule exists for.
       */}
       {connection.status === "reauth" ? (
-        <div className="grid gap-2 rounded-md border border-edge-raised p-3">
+        <div className="grid gap-2 rounded-md border border-border p-3">
           <p className="text-sm text-foreground">
             Chroneli has lost access to your Google Calendar, so meetings have
             stopped updating. Reconnect to start syncing again.
           </p>
-          <button
+          <Button
             type="button"
             onClick={actions.connect}
-            className={connectButtonClass}
+            className="justify-self-start"
           >
             Reconnect
-          </button>
+          </Button>
         </div>
       ) : null}
 
@@ -200,7 +212,7 @@ export function GoogleCalendarSection({
               ) : (
                 <Button
                   type="button"
-                  variant="quiet"
+                  variant="ghost"
                   size="row-trigger"
                   disabled
                   aria-label="Project"
@@ -278,14 +290,14 @@ function CalendarShowSwitch({
         // removing the tween costs the control nothing it was using to speak.
         "motion-reduce:transition-none",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        checked ? "border-foreground bg-foreground" : "border-edge bg-ground"
+        checked ? "border-foreground bg-foreground" : "border-input bg-background"
       )}
     >
       <span
         className={cn(
           "inline-block size-3.5 rounded-full shadow transition-transform",
           "motion-reduce:transition-none",
-          checked ? "translate-x-4 bg-ground" : "translate-x-0.5 bg-foreground"
+          checked ? "translate-x-4 bg-background" : "translate-x-0.5 bg-foreground"
         )}
       />
     </button>

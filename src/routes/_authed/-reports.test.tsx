@@ -1,4 +1,5 @@
 import { Suspense } from "react"
+import { Toaster } from "@/components/ui/toast"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { defaultParseSearch } from "@tanstack/react-router"
 import { getFunctionName } from "convex/server"
@@ -6,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Reports } from "@/routes/_authed/-reports"
 import { breakdownArgs } from "@/lib/breakdown-args"
-import { Toast, ToastViewport } from "@/components/ui/toast"
 import { rangeOf, stepPeriod } from "@/lib/history-filters"
 import { reportsDefaultFilters } from "@/lib/date-range-picker"
 import { parseInvoiceSearch } from "@/lib/invoice-search"
@@ -307,11 +307,11 @@ function renderReports(
   render(
     <QueryClientProvider client={queryClient}>
       {/*
-        `Toast.Provider`, matching `RootComponent` in routes/__root.tsx — this
+        `ToastProvider`, matching `RootComponent` in routes/__root.tsx — this
         route is not mounted under it here, and `ExportMenu` calls
-        `Toast.useToastManager()` unconditionally.
+        `useToastManager()` unconditionally.
       */}
-      <Toast.Provider>
+      <Toaster>
         {/*
           The router itself wraps every routed component in a Suspense boundary
           with no fallback of its own configured for /reports — this stand-in
@@ -322,8 +322,7 @@ function renderReports(
         <Suspense fallback={<div data-testid="suspense-fallback">Loading…</div>}>
           <Reports />
         </Suspense>
-        <ToastViewport />
-      </Toast.Provider>
+      </Toaster>
     </QueryClientProvider>
   )
   if (view === "detailed") {

@@ -236,19 +236,21 @@ describe("LogSkeleton", () => {
     expect(screen.getByRole("status").closest('[aria-hidden="true"]')).toBeNull()
   })
 
-  it("draws bars that are visible on the ground, and not pill-shaped", () => {
-    // `bg-muted` resolves to `--surface`, which is 1.09:1 against the log's
-    // ground — invisible, and halved again at the trough of `animate-pulse`.
-    // `rounded-2xl` on an `h-4` bar is a full pill, the "rounded-everything"
-    // look DESIGN.md rejects by name. Both are properties of the shared
-    // primitive, so this is where they get pinned.
-    const { container } = render(<LogSkeleton />)
-    for (const bar of container.querySelectorAll('[data-slot="skeleton"]')) {
-      expect(bar.className).toContain("bg-skeleton")
-      expect(bar.className).not.toContain("bg-muted")
-      expect(bar.className).not.toContain("rounded-2xl")
-    }
-  })
+  /*
+   * REMOVED: "draws bars that are visible on the ground, and not pill-shaped".
+   *
+   * It pinned two hand-corrections to the vendored `ui/skeleton.tsx` — a
+   * `--skeleton` token measured to stay legible against the log ground, and
+   * `rounded-md` in place of the registry's `rounded-2xl` pill. Both went
+   * with the reset to shadcn's defaults, so the assertion had nothing left to
+   * defend: it would have failed for saying the primitive is not what the
+   * registry ships.
+   *
+   * What it was guarding is real and is now a THEME question rather than a
+   * component one — a skeleton is `bg-accent` in shadcn's own file and takes
+   * whatever contrast the picked theme gives it. The place to catch an
+   * invisible loading state is the theme picker, not here.
+   */
 })
 
 /*
@@ -583,7 +585,7 @@ describe("grouped entries", () => {
     )
     const sections = container.querySelectorAll("section[data-day-group]")
     expect(sections[1].className).toContain("border-t")
-    expect(sections[1].className).toContain("border-edge")
+    expect(sections[1].className).toContain("border-border")
   })
 
   it("draws the flat log by default, with no badge and no disclosure", () => {

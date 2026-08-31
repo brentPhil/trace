@@ -1,4 +1,4 @@
-import { Toast } from "@base-ui/react/toast"
+import { Toaster } from "@/components/ui/toast"
 import {
   cleanup,
   fireEvent,
@@ -9,13 +9,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Announcer } from "@/components/a11y/announcer"
 import { CopyEntriesButton } from "@/components/entries/copy-entries-button"
-import { ToastViewport } from "@/components/ui/toast"
 import type { ComponentProps } from "react"
 
 afterEach(cleanup)
 
 /*
- * `Toast.useToastManager()` throws with no ancestor provider, and `useAnnounce`
+ * `useToastManager()` throws with no ancestor provider, and `useAnnounce`
  * silently no-ops without one — the same wrapper `RootComponent` supplies app
  * wide (routes/__root.tsx), for the same reason `export-menu.test.tsx` copies
  * it. The `Announcer` is here rather than stubbed because the announcement IS
@@ -25,10 +24,9 @@ afterEach(cleanup)
 function renderButton(props: ComponentProps<typeof CopyEntriesButton>) {
   return render(
     <Announcer>
-      <Toast.Provider>
+      <Toaster>
         <CopyEntriesButton {...props} />
-        <ToastViewport />
-      </Toast.Provider>
+      </Toaster>
     </Announcer>
   )
 }

@@ -1,5 +1,5 @@
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 /** The four states `usePaginatedQuery` can report, spelled out so this file
  * never has to import convex/react to know them. Deliberately unexported:

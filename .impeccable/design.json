@@ -1,0 +1,492 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-28T18:23:21.259Z",
+  "title": "Design System: Chroneli",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Darkroom Ground",
+        "canonical": "oklch(0.18 0.008 75)",
+        "purpose": "The page itself, and the lit end of the room wash.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Darkroom Surface",
+        "canonical": "oklch(0.22 0.008 75)",
+        "purpose": "Panels, bands, the timer bar, the sidebar rail.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Raised Surface",
+        "canonical": "oklch(0.26 0.008 75)",
+        "purpose": "Popovers, dialogs, selected segments. One step in front.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "ground-deep": {
+        "role": "neutral",
+        "displayName": "Room Falloff",
+        "canonical": "oklch(0.145 0.008 75)",
+        "purpose": "Far end of the room wash. Never painted flat.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "surface-deep": {
+        "role": "neutral",
+        "displayName": "Rail Falloff",
+        "canonical": "oklch(0.19 0.008 75)",
+        "purpose": "Far end of the rail wash. Never painted flat.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "raised-deep": {
+        "role": "neutral",
+        "displayName": "Floating Falloff",
+        "canonical": "oklch(0.238 0.008 75)",
+        "purpose": "Far end of the floating-surface wash. Never painted flat.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "edge": {
+        "role": "neutral",
+        "displayName": "Ground Edge",
+        "canonical": "oklch(0.5 0.01 75)",
+        "purpose": "Boundary of an interactive control sitting on the GROUND. 3.15:1 there and only there.",
+        "tonalRamp": [
+          "oklch(0.15 0.01 75)",
+          "oklch(0.264 0.01 75)",
+          "oklch(0.379 0.01 75)",
+          "oklch(0.493 0.01 75)",
+          "oklch(0.607 0.01 75)",
+          "oklch(0.721 0.01 75)",
+          "oklch(0.836 0.01 75)",
+          "oklch(0.95 0.01 75)"
+        ]
+      },
+      "edge-raised": {
+        "role": "neutral",
+        "displayName": "Panel Edge",
+        "canonical": "oklch(0.56 0.01 75)",
+        "purpose": "Boundary of a control on a panel, band or popover. Clears 3:1 on all three layers.",
+        "tonalRamp": [
+          "oklch(0.15 0.01 75)",
+          "oklch(0.264 0.01 75)",
+          "oklch(0.379 0.01 75)",
+          "oklch(0.493 0.01 75)",
+          "oklch(0.607 0.01 75)",
+          "oklch(0.721 0.01 75)",
+          "oklch(0.836 0.01 75)",
+          "oklch(0.95 0.01 75)"
+        ]
+      },
+      "edge-soft": {
+        "role": "neutral",
+        "displayName": "Soft Divider",
+        "canonical": "oklch(0.3 0.008 75)",
+        "purpose": "Dividers between passive content. No WCAG floor applies.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "skeleton": {
+        "role": "neutral",
+        "displayName": "Skeleton Grey",
+        "canonical": "oklch(0.34 0.008 75)",
+        "purpose": "Loading placeholders, and nothing else.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 75)",
+          "oklch(0.264 0.008 75)",
+          "oklch(0.379 0.008 75)",
+          "oklch(0.493 0.008 75)",
+          "oklch(0.607 0.008 75)",
+          "oklch(0.721 0.008 75)",
+          "oklch(0.836 0.008 75)",
+          "oklch(0.95 0.008 75)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Warm Ink",
+        "canonical": "oklch(0.93 0.008 80)",
+        "purpose": "Primary text.",
+        "tonalRamp": [
+          "oklch(0.15 0.008 80)",
+          "oklch(0.264 0.008 80)",
+          "oklch(0.379 0.008 80)",
+          "oklch(0.493 0.008 80)",
+          "oklch(0.607 0.008 80)",
+          "oklch(0.721 0.008 80)",
+          "oklch(0.836 0.008 80)",
+          "oklch(0.95 0.008 80)"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Muted Ink",
+        "canonical": "oklch(0.68 0.01 75)",
+        "purpose": "Secondary text. The dimmest permitted anywhere.",
+        "tonalRamp": [
+          "oklch(0.15 0.01 75)",
+          "oklch(0.264 0.01 75)",
+          "oklch(0.379 0.01 75)",
+          "oklch(0.493 0.01 75)",
+          "oklch(0.607 0.01 75)",
+          "oklch(0.721 0.01 75)",
+          "oklch(0.836 0.01 75)",
+          "oklch(0.95 0.01 75)"
+        ]
+      },
+      "enlarger": {
+        "role": "primary",
+        "displayName": "Enlarger Cold Light",
+        "canonical": "oklch(0.8 0.1 230)",
+        "purpose": "RUNNING, and nothing else. The Cold Light Rule.",
+        "tonalRamp": [
+          "oklch(0.15 0.1 230)",
+          "oklch(0.264 0.1 230)",
+          "oklch(0.379 0.1 230)",
+          "oklch(0.493 0.1 230)",
+          "oklch(0.607 0.1 230)",
+          "oklch(0.721 0.1 230)",
+          "oklch(0.836 0.1 230)",
+          "oklch(0.95 0.1 230)"
+        ]
+      },
+      "brass": {
+        "role": "tertiary",
+        "displayName": "Brass",
+        "canonical": "oklch(0.76 0.1 85)",
+        "purpose": "Money. The Two Temperatures Rule.",
+        "tonalRamp": [
+          "oklch(0.15 0.1 85)",
+          "oklch(0.264 0.1 85)",
+          "oklch(0.379 0.1 85)",
+          "oklch(0.493 0.1 85)",
+          "oklch(0.607 0.1 85)",
+          "oklch(0.721 0.1 85)",
+          "oklch(0.836 0.1 85)",
+          "oklch(0.95 0.1 85)"
+        ]
+      },
+      "alarm": {
+        "role": "tertiary",
+        "displayName": "Alarm Red",
+        "canonical": "oklch(0.68 0.17 25)",
+        "purpose": "Errors and destructive actions.",
+        "tonalRamp": [
+          "oklch(0.15 0.17 25)",
+          "oklch(0.264 0.17 25)",
+          "oklch(0.379 0.17 25)",
+          "oklch(0.493 0.17 25)",
+          "oklch(0.607 0.17 25)",
+          "oklch(0.721 0.17 25)",
+          "oklch(0.836 0.17 25)",
+          "oklch(0.95 0.17 25)"
+        ]
+      },
+      "safelight": {
+        "role": "secondary",
+        "displayName": "The Safelight",
+        "canonical": "oklch(0.74 0.16 45)",
+        "purpose": "Act here: affirmative action, current selection, focus ring.",
+        "tonalRamp": [
+          "oklch(0.15 0.16 45)",
+          "oklch(0.264 0.16 45)",
+          "oklch(0.379 0.16 45)",
+          "oklch(0.493 0.16 45)",
+          "oklch(0.607 0.16 45)",
+          "oklch(0.721 0.16 45)",
+          "oklch(0.836 0.16 45)",
+          "oklch(0.95 0.16 45)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Title",
+        "purpose": "Page and section headings. DM Sans 500 at -0.01em."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text and note prose at 1.6 leading. Prose is capped in its own column, never by narrowing a page."
+      },
+      "duration": {
+        "displayName": "Duration",
+        "purpose": "Every duration, timestamp and total. IBM Plex Mono, tabular, -0.02em. The Tabular Rule."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Control labels and column headers. Sentence case, never uppercase tracked-out eyebrows."
+      }
+    },
+    "shadows": [
+      {
+        "name": "floating",
+        "value": "0 20px 25px -5px rgb(0 0 0/.35), 0 8px 10px -6px rgb(0 0 0/.35)",
+        "purpose": "The only shadow in the system. Popovers, dialogs and menus, because tonal separation alone is insufficient when content scrolls behind them. Never coloured, per The No Glow Rule."
+      }
+    ],
+    "washes": [
+      {
+        "name": "wash-room",
+        "value": "linear-gradient(to bottom, var(--ground), var(--ground-deep))",
+        "purpose": "The page ground, with background-attachment: fixed so the falloff is one screen tall and anchored to the viewport."
+      },
+      {
+        "name": "wash-rail",
+        "value": "linear-gradient(to bottom, var(--surface), var(--surface-deep))",
+        "purpose": "The sidebar rail, the longest surface in the app and the one that reads flattest without it."
+      },
+      {
+        "name": "wash-raised",
+        "value": "linear-gradient(to bottom, var(--surface-raised), var(--raised-deep))",
+        "purpose": "Popovers and dialogs. A real material catches more light at its top edge than at its bottom."
+      }
+    ],
+    "motion": [
+      {
+        "name": "press",
+        "value": "100ms cubic-bezier(0, 0, 0.2, 1)",
+        "purpose": "A control answering a press or a state change. Shared across the timer toggle, the bar's boundary and a popover's entrance so one state change reads as one event."
+      },
+      {
+        "name": "dialog",
+        "value": "150ms cubic-bezier(0, 0, 0.2, 1)",
+        "purpose": "Dialog enter and exit."
+      },
+      {
+        "name": "toast",
+        "value": "200ms cubic-bezier(0, 0, 0.2, 1)",
+        "purpose": "Toast enter and exit, the longest throw in the system."
+      },
+      {
+        "name": "rise",
+        "value": "380ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The auth panel's one entrance. No fill-mode, so if it never runs the element is already in its visible state."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The affirmative action. Safelight, never cold light, because cold means running.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;justify-content:center;height:2.25rem;padding:0 .75rem;border:1px solid transparent;border-radius:.36rem;background:var(--safelight);color:var(--ground);font:500 .875rem/1 \"DM Sans Variable\",system-ui,sans-serif;cursor:pointer;transition:background-color .1s cubic-bezier(0,0,.2,1),translate .1s cubic-bezier(0,0,.2,1)}.ds-btn-primary:hover{background:color-mix(in oklch,var(--safelight),black 10%)}.ds-btn-primary:active{translate:0 1px}.ds-btn-primary:focus-visible{outline:none;border-color:var(--safelight);box-shadow:0 0 0 3px color-mix(in oklch,var(--safelight),transparent 70%)}"
+    },
+    {
+      "name": "Quiet Button",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "The log's own button language and the most common in the app: a muted mark that warms to full ink, with no plate behind it.",
+      "html": "<button class=\"ds-btn-quiet\">Duplicate</button>",
+      "css": ".ds-btn-quiet{display:inline-flex;align-items:center;justify-content:center;height:2.25rem;padding:0 .75rem;border:1px solid transparent;border-radius:.36rem;background:none;color:var(--ink-muted);font:500 .875rem/1 \"DM Sans Variable\",system-ui,sans-serif;cursor:pointer;transition:color .1s cubic-bezier(0,0,.2,1)}.ds-btn-quiet:hover{color:var(--ink)}.ds-btn-quiet:active{translate:0 1px}.ds-btn-quiet:focus-visible{outline:none;border-color:var(--safelight);box-shadow:0 0 0 3px color-mix(in oklch,var(--safelight),transparent 70%)}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input-field",
+      "description": "Outlined on a Surface fill. base-luma ships border-transparent over a tint, which identifies the control by fill alone at 1.69:1.",
+      "html": "<input class=\"ds-input\" placeholder=\"What are you working on?\" />",
+      "css": ".ds-input{width:100%;box-sizing:border-box;padding:.5rem .75rem;border:1px solid var(--edge);border-radius:.36rem;background:var(--surface);color:var(--ink);font:400 .875rem/1.6 \"DM Sans Variable\",system-ui,sans-serif}.ds-input::placeholder{color:var(--ink-muted)}.ds-input:focus-visible{outline:none;border-color:var(--safelight);box-shadow:0 0 0 3px color-mix(in oklch,var(--safelight),transparent 70%)}"
+    },
+    {
+      "name": "Timer Toggle (idle)",
+      "kind": "custom",
+      "refersTo": "timer-toggle",
+      "description": "The signature control. A 42px disc that both starts and stops, never disabled. Safelight while idle: nothing is running yet.",
+      "html": "<button class=\"ds-timer-toggle\" aria-label=\"Start timer\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M8 5v14l11-7z\"/></svg></button>",
+      "css": ".ds-timer-toggle{display:flex;align-items:center;justify-content:center;width:42px;height:42px;flex:0 0 auto;border:none;border-radius:9999px;background:var(--safelight);color:var(--ground);cursor:pointer;transition:background-color .1s cubic-bezier(0,0,.2,1),scale .1s cubic-bezier(0,0,.2,1)}.ds-timer-toggle:hover{background:color-mix(in oklch,var(--safelight),black 10%)}.ds-timer-toggle:active{scale:.96}.ds-timer-toggle:focus-visible{outline:none;box-shadow:0 0 0 3px color-mix(in oklch,var(--safelight),transparent 70%)}"
+    },
+    {
+      "name": "Timer Toggle (running)",
+      "kind": "custom",
+      "refersTo": "timer-toggle-running",
+      "description": "Cold light, and only here. Running is carried four ways: this fill, the icon, the accessible name, and the ticking duration.",
+      "html": "<button class=\"ds-timer-toggle-running\" aria-label=\"Stop timer\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"currentColor\" aria-hidden=\"true\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1\"/></svg></button>",
+      "css": ".ds-timer-toggle-running{display:flex;align-items:center;justify-content:center;width:42px;height:42px;flex:0 0 auto;border:none;border-radius:9999px;background:var(--enlarger);color:var(--ground);cursor:pointer;transition:background-color .1s cubic-bezier(0,0,.2,1),scale .1s cubic-bezier(0,0,.2,1)}.ds-timer-toggle-running:hover{background:color-mix(in oklch,var(--enlarger),black 10%)}.ds-timer-toggle-running:active{scale:.96}.ds-timer-toggle-running:focus-visible{outline:none;box-shadow:0 0 0 3px color-mix(in oklch,var(--safelight),transparent 70%)}"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Sits on a band or a panel, so its border is edge-raised. --edge only clears 3:1 against the ground.",
+      "html": "<button class=\"ds-chip\" aria-pressed=\"false\">Billable</button>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;gap:.375rem;padding:.25rem .625rem;border:1px solid var(--edge-raised);border-radius:9999px;background:var(--ground);color:var(--ink-muted);font:500 .75rem/1 \"DM Sans Variable\",system-ui,sans-serif;cursor:pointer;transition:background-color .1s cubic-bezier(0,0,.2,1),color .1s cubic-bezier(0,0,.2,1)}.ds-chip:hover{color:var(--ink)}.ds-chip[aria-pressed=true]{background:var(--surface-raised);color:var(--ink)}.ds-chip:active{translate:0 1px}"
+    },
+    {
+      "name": "Entry Row",
+      "kind": "custom",
+      "refersTo": "entry-row",
+      "description": "A table row, not a card. 54px, full-bleed, every field editing in place. The duration is mono and tabular, per The Tabular Rule.",
+      "html": "<div class=\"ds-entry-row\"><span class=\"ds-entry-title\">Reviewing the billing migration</span><span class=\"ds-entry-dur\">1:24:06</span></div>",
+      "css": ".ds-entry-row{display:flex;align-items:center;gap:.75rem;height:54px;box-sizing:border-box;padding:0 1rem;background:var(--ground);color:var(--ink);border-top:2px solid var(--edge);font:400 .875rem/1.6 \"DM Sans Variable\",system-ui,sans-serif}.ds-entry-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-entry-dur{flex:0 0 auto;font-family:\"IBM Plex Mono\",ui-monospace,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}"
+    },
+    {
+      "name": "Rail Item",
+      "kind": "nav",
+      "refersTo": "sidebar-rail",
+      "description": "The rail is the only persistent chrome, and carries the rail wash. Current state is a fill plus font-weight plus aria-current, never the fill alone.",
+      "html": "<nav class=\"ds-rail\"><a class=\"ds-rail-item\" aria-current=\"page\">Timer</a><a class=\"ds-rail-item\">Reports</a><a class=\"ds-rail-item\">Invoices</a></nav>",
+      "css": ".ds-rail{display:flex;flex-direction:column;gap:.25rem;width:12rem;padding:.5rem;box-sizing:border-box;background:var(--surface);background-image:linear-gradient(to bottom,var(--surface),var(--surface-deep));border-right:1px solid var(--edge-soft)}.ds-rail-item{padding:.5rem .75rem;border-radius:.36rem;color:var(--ink-muted);font:400 .875rem/1.6 \"DM Sans Variable\",system-ui,sans-serif;text-decoration:none;cursor:pointer}.ds-rail-item:hover{background:var(--surface-raised);color:var(--ink)}.ds-rail-item[aria-current=page]{background:var(--surface-raised);color:var(--ink);font-weight:500}"
+    },
+    {
+      "name": "Popover Surface",
+      "kind": "card",
+      "refersTo": "popover-surface",
+      "description": "The one element allowed a shadow, and one of three allowed a wash. Scales from its trigger, not its centre.",
+      "html": "<div class=\"ds-popover\"><p class=\"ds-popover-body\">Genuinely floating UI. Tonal separation alone is insufficient when content scrolls behind it.</p></div>",
+      "css": ".ds-popover{width:17rem;box-sizing:border-box;padding:1.25rem;border:1px solid var(--edge-soft);border-radius:.45rem;background:var(--surface-raised);background-image:linear-gradient(to bottom,var(--surface-raised),var(--raised-deep));box-shadow:0 20px 25px -5px rgb(0 0 0/.35),0 8px 10px -6px rgb(0 0 0/.35);color:var(--ink)}.ds-popover-body{margin:0;color:var(--ink-muted);font:400 .875rem/1.6 \"DM Sans Variable\",system-ui,sans-serif}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Darkroom",
+    "overview": "A darkroom is a space you work in for hours without eye strain, lit by an ambient safelight that never demands attention. It is also where you find out what you actually captured, which is precisely this product's premise. Hours alone don't tell a freelancer what they did on Tuesday; the notes do.\n\nThe room is warm and dark. The one cold light is the enlarger, and it is on only during a timed exposure. That is the whole colour system in one sentence: warm graphite is the room, and cold light means running right now. Because the running state is the only cold thing on the surface, it needs no legend and survives peripheral vision, where hue is the first thing the eye loses.\n\nThis system explicitly rejects the two directions the category runs in, the enterprise timesheet grid and the cheerful habit tracker, plus the currently most-copied look in product design, the near-black-with-purple-glow aesthetic. What is left is an instrument: quiet, warm, exact.",
+    "keyCharacteristics": [
+      "Warm dark ground, never blue-black and never pure black",
+      "Cold light reserved exclusively for the running state",
+      "Depth by tonal layering, not shadow",
+      "Three structural washes (room, rail, floating surface), darken-only and hue-locked",
+      "Numbers always monospaced and tabular",
+      "Meaning never carried by colour alone"
+    ],
+    "rules": [
+      {
+        "name": "The Cold Light Rule",
+        "section": "colors",
+        "body": "Enlarger marks a running timer and nothing else. It is deliberately not wired to --primary or --ring, because primary buttons and focus rings would spend it on things that are not running."
+      },
+      {
+        "name": "The Two Temperatures Rule",
+        "section": "colors",
+        "body": "Cold means happening now; warm means money. The third meaning, act here, is the safelight."
+      },
+      {
+        "name": "The Tabular Rule",
+        "section": "typography",
+        "body": "Every duration, timestamp and total is IBM Plex Mono with tabular numerals at -0.02em, at any size."
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "section": "typography",
+        "body": "Labels are sentence case. No uppercase tracked-out eyebrows."
+      },
+      {
+        "name": "The Tonal Depth Rule",
+        "section": "elevation",
+        "body": "If two surfaces need separating, step the ramp or add an edge. Reach for a shadow only when the element genuinely floats above scrolling content."
+      },
+      {
+        "name": "The No Glow Rule",
+        "section": "elevation",
+        "body": "Coloured shadows, glows and halos are prohibited throughout, including on the running state. Cold light marks the running entry; it does not bloom."
+      },
+      {
+        "name": "The Falloff Rule",
+        "section": "elevation",
+        "body": "A wash may only ever darken away from its token, and the token is the lit end. Every contrast ratio is measured against the token, so darkening leaves the measured figure as the worst case and every point along the wash is better than it. Lightening inverts that silently: --edge is 3.15:1 on ground, and a ground lifted to L 0.205 puts it at exactly 3.00, on the floor of SC 1.4.11."
+      },
+      {
+        "name": "The Three Surfaces Rule",
+        "section": "elevation",
+        "body": "Room, rail, floating surface. A wash marks structure, never content. No gradient on a band, a card, an entry row, a chart panel, a button or a toolbar."
+      }
+    ],
+    "dos": [
+      "Do reserve Enlarger (oklch(0.80 0.10 230)) exclusively for the running state.",
+      "Do set every duration, timestamp and total in IBM Plex Mono with font-variant-numeric: tnum.",
+      "Do keep body and note text at or above oklch(0.68 0.010 75) on ground, roughly 5.9:1.",
+      "Do pair every colour-carried meaning with text, icon or hatch.",
+      "Do express depth by stepping ground to surface to surface-raised.",
+      "Do confine gradients to the three structural washes, darken-only, same hue, same chroma.",
+      "Do name the property a transition actually animates: scale-* compiles to scale:, translate-* to translate:. Only hand-written transition-[…] lists are at risk; transition and transition-transform already cover all four.",
+      "Do give everything that MOVES a prefers-reduced-motion alternative: translate, scale, rotate, position, box dimensions. Drop the tween, keep the end state. Colour and opacity transitions may stay, because an instant colour change is still a colour change."
+    ],
+    "donts": [
+      "Don't build the near-black-with-purple-glow aesthetic. This is a ban on hue gradients; the three structural washes move lightness only.",
+      "Don't drift to terminal-native dark mode: pure black, neon, monospace body text, scanlines.",
+      "Don't build gamified productivity: no streaks, badges, confetti, mascots or productivity scores.",
+      "Don't build enterprise timesheet software: no approval grids or submit-at-end-of-week ceremony.",
+      "Don't build generic SaaS startup: no purple-to-blue gradients, 3D blobs, glassmorphic cards or the hero-metric template.",
+      "Don't build a playful consumer app: no rounded-everything, bright illustration or emoji-forward copy.",
+      "Don't use uppercase tracked-out eyebrow labels above sections.",
+      "Don't use border-left or border-right above 1px as a coloured accent stripe.",
+      "Don't apply gradient text, anywhere, for any reason."
+    ]
+  }
+}

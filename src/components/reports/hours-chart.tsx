@@ -34,7 +34,12 @@ export function HoursChart({
   const yAxis = hourAxis(Math.max(...rows.map((row) => row.totalMs)))
 
   return (
-    <ChartContainer className="aspect-auto h-56 w-full">
+    <ChartContainer
+      /* Empty on purpose: `config` exists so shadcn can emit a `--color-<key>`
+         variable per series, and every series here already names its own
+         colour (a `--chart-*` token, or the projects `--project-*` data hue).
+         There is nothing for the container to declare. */
+      config={{}} className="aspect-auto h-56 w-full">
       <BarChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
         <CartesianGrid vertical={false} stroke={GRID_STROKE} />
         <XAxis
@@ -52,7 +57,7 @@ export function HoursChart({
             question they are asking.
 
             `isAnimationActive={false}`: see the note in chart-frame.tsx. */}
-        <Bar dataKey="totalMs" fill="var(--ink-muted)" isAnimationActive={false} />
+        <Bar dataKey="totalMs" fill="var(--muted-foreground)" isAnimationActive={false} />
       </BarChart>
     </ChartContainer>
   )

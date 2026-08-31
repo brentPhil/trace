@@ -1,7 +1,7 @@
 import { useState } from "react"
-import { Download } from "lucide-react"
+import { useToastManager } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
-import { Toast } from "@/components/ui/toast"
+import { Download } from "lucide-react"
 import { downloadBlob, invoiceFilename } from "@/lib/export/download"
 import { dayOf } from "@shared/day"
 import type { InvoiceDocLine } from "@/lib/export/pdf/invoice-doc"
@@ -77,7 +77,7 @@ export function ExportPdfButton({
   beforeExport?: () => Promise<boolean>
 }) {
   const [busy, setBusy] = useState(false)
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   async function run() {
     setBusy(true)

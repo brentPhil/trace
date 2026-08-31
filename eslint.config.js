@@ -69,6 +69,33 @@ export default [
     },
   },
   {
+    /*
+     * VENDORED shadcn COMPONENTS, held to the registry's style rather than to
+     * this repo's.
+     *
+     * Everything under `src/components/ui` is written out by
+     * `npx shadcn@latest add` and is meant to be re-runnable: the theme picker
+     * in settings is going to make re-adding a component an ordinary thing to
+     * do, not a once-a-year event. The registry's own house style trips four
+     * of this config's rules — inline `type` specifiers, shadowed `className`
+     * and `props` in nested render helpers, and defensive optional chaining
+     * TypeScript can prove unnecessary — none of which is a defect and all of
+     * which comes back the next time the file is overwritten.
+     *
+     * Hand-fixing them after every `add` is how a vendored file quietly stops
+     * being vendored. The rules that catch actual BUGS stay on here; only the
+     * stylistic ones are lifted, and the layering rule above still applies —
+     * a ui component may no more import the Convex API than any other.
+     */
+    files: ["src/components/ui/**"],
+    rules: {
+      "import/consistent-type-specifier-style": "off",
+      "no-shadow": "off",
+      "@typescript-eslint/no-unnecessary-condition": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+    },
+  },
+  {
     // Convex *functions* are excluded from the root tsconfig because they
     // target the Convex runtime, so the typed-lint project service cannot
     // resolve them. `npx convex dev` typechecks them against

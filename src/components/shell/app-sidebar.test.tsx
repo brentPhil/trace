@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { SidebarProvider } from "@/components/ui/sidebar"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { ThemeProvider } from "@/components/theme-provider"
 import { AppSidebar, NAV_ITEMS } from "./app-sidebar"
 import { renderWithRouter } from "@/test-utils/router"
 
@@ -16,9 +17,16 @@ function mount(
 ) {
   render(
     renderWithRouter(
-      <SidebarProvider defaultOpen>
-        <AppSidebar email={email} name={name} onSignOut={onSignOut} />
-      </SidebarProvider>,
+      // `ThemeProvider` is not optional scaffolding here: the account popup
+      // holds the theme control, and `useTheme` THROWS outside a provider by
+      // design — a silent default would render a toggle that responds to
+      // clicks and changes nothing. The harness therefore has to supply what
+      // the tree actually needs, exactly as it already does for the sidebar.
+      <ThemeProvider>
+        <SidebarProvider defaultOpen>
+          <AppSidebar email={email} name={name} onSignOut={onSignOut} />
+        </SidebarProvider>
+      </ThemeProvider>,
       { path }
     )
   )
@@ -26,17 +34,22 @@ function mount(
 }
 
 describe("AppSidebar", () => {
-  it("lists exactly the six destinations, in the order of the work", () => {
+  it("lists exactly the four destinations, in the order of the work", () => {
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Timer",
       "Reports",
       "Invoices",
       "Projects",
-      // Music sits with the settings-shaped half rather than in the
-      // track-review-bill sequence — see NAV_ITEMS' docblock for the argument.
-      "Music",
-      "Settings",
     ])
+  })
+
+  /* Neither Settings nor Music is in the rail, and both left for the same
+   * reason: a permanent slot at the tracker's own weight for a destination a
+   * user sets up once. Settings went to the account menu and Music to
+   * /settings. A regression that puts either back would show up here first —
+   * the rail is for places the work IS. */
+  it.each(["Settings", "Music"])("keeps %s out of the rail", (label) => {
+    expect(NAV_ITEMS.map((item) => item.label)).not.toContain(label)
   })
 
   /**

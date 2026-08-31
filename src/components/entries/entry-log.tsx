@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { useToastManager } from "@/components/ui/toast"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { BulkEntryActions } from "@/components/entries/bulk-entry-actions"
 import { DayList } from "@/components/entries/day-list"
-import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { pruneSelection, toggleSelection } from "@/lib/entry-selection"
@@ -85,7 +85,7 @@ export function EntryLog({
 }) {
   const { updateMany } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
 
   const [selectedIds, setSelectedIds] = useState<Set<Id<"timeEntries">>>(
     new Set()

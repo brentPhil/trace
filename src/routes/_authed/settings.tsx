@@ -17,6 +17,13 @@ export const Route = createFileRoute("/_authed/settings")({
       context.queryClient.ensureQueryData(convexQuery(api.settings.get, {})),
       context.queryClient.ensureQueryData(convexQuery(api.google.connection, {})),
       context.queryClient.ensureQueryData(convexQuery(api.google.listCalendars, {})),
+      // The library moved onto this page from /music and brought its two
+      // `useSuspenseQuery` reads with it. Without prefetching them here the
+      // page suspends on a round trip AFTER this loader has already resolved —
+      // the same reason /music's own loader warmed them, and the reason every
+      // other read on this page is in this list.
+      context.queryClient.ensureQueryData(convexQuery(api.music.listTracks, {})),
+      context.queryClient.ensureQueryData(convexQuery(api.music.usage, {})),
     ])
   },
 })

@@ -123,7 +123,7 @@ export function EditableDuration({
 }) {
   const durationClass = cn(
     "w-[4.5rem] shrink-0 text-right text-sm font-medium",
-    entry.endedAt === null && "text-enlarger"
+    entry.endedAt === null && "text-primary"
   )
 
   // Tested inline rather than through a `running` boolean, so the narrowing

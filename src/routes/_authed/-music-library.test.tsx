@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { Toaster } from "@/components/ui/toast"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   cleanup,
@@ -8,12 +9,12 @@ import {
   waitFor,
 } from "@testing-library/react"
 import { MAX_LIBRARY_BYTES, MAX_TRACK_BYTES, formatBytes } from "@shared/audio"
-import { Toast, ToastViewport } from "@/components/ui/toast"
-import { Music } from "@/routes/_authed/-music"
+import { MusicLibrarySection } from "@/routes/_authed/-music-library"
 import { convexKey } from "@/test-utils/convex-query"
 import { api } from "../../../convex/_generated/api"
 import { getFunctionName } from "convex/server"
 import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
+import { chooseOption } from "@/test-utils/select"
 
 type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
 
@@ -173,10 +174,9 @@ function renderMusic(
   client.setQueryData(convexKey(api.music.usage, {}), usage)
   return render(
     <QueryClientProvider client={client}>
-      <Toast.Provider>
-        <Music />
-        <ToastViewport />
-      </Toast.Provider>
+      <Toaster>
+        <MusicLibrarySection />
+      </Toaster>
     </QueryClientProvider>
   )
 }
@@ -253,18 +253,14 @@ describe("the library", () => {
 
   it("sorts by recently added", () => {
     renderMusic()
-    fireEvent.change(screen.getByRole("combobox", { name: /sort/i }), {
-      target: { value: "recent" },
-    })
+    chooseOption(/sort/i, "Recently added")
     const rows = screen.getAllByRole("listitem")
     expect(rows[0].textContent).toContain("Beta")
   })
 
   it("sorts by largest", () => {
     renderMusic()
-    fireEvent.change(screen.getByRole("combobox", { name: /sort/i }), {
-      target: { value: "largest" },
-    })
+    chooseOption(/sort/i, "Largest")
     // Alpha is 2 MB, Beta is 1 MB.
     expect(screen.getAllByRole("listitem")[0].textContent).toContain("Alpha")
   })
@@ -290,9 +286,7 @@ describe("the library", () => {
         url: "u",
       },
     ])
-    fireEvent.change(screen.getByRole("combobox", { name: /sort/i }), {
-      target: { value: "longest" },
-    })
+    chooseOption(/sort/i, "Longest")
     const rows = screen.getAllByRole("listitem")
     expect(rows[0].textContent).toContain("HasDuration")
     expect(rows[1].textContent).toContain("NoDuration")

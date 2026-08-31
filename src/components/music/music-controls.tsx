@@ -1,3 +1,5 @@
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   Disc3,
   Repeat,
@@ -8,8 +10,6 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react"
-import { Button, buttonVariants } from "@/components/ui/button"
-import { Popover } from "@/components/ui/popover"
 import { trackRefEquals, trackRefKey } from "@/lib/music/track-ref"
 import { cn } from "@/lib/utils"
 import type { MusicContextValue, PlayableTrack } from "./music-provider"
@@ -21,12 +21,14 @@ import type { MusicContextValue, PlayableTrack } from "./music-provider"
  * number and a media player is the opposite kind of object. Everything else is
  * behind the popover.
  *
- * NO SIGNAL COLOUR, IN ANY STATE. `--enlarger` is the running timer and only
- * the running timer: the moment a second thing on the surface is cold-lit, the
- * running state stops being findable in half a second, which is the property
- * the whole palette is built to buy. `--brass` is money. So playing-vs-muted is
- * carried by ICON SHAPE and by the track name — never by hue, which also
- * satisfies DESIGN.md's rule that meaning never rides on colour alone.
+ * NO SIGNAL COLOUR, IN ANY STATE. Playing-vs-muted is carried by ICON SHAPE
+ * and by the track name, never by hue.
+ *
+ * This used to be an argument about not spending the running accent on a second
+ * thing. The palette is monochrome now, so there is no accent to misspend — and
+ * the rule survives the loss of its reason: DESIGN.md's Over-Determined State
+ * Rule says meaning never rides on colour alone, which is stricter than the
+ * argument it replaced, not weaker.
  *
  * Takes the context as a PROP rather than calling `useMusic()`, so it renders in
  * a test without a provider, an audio element, or a Convex client.
@@ -58,8 +60,8 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
         )}
       </IconButton>
 
-      <Popover.Root>
-        <Popover.Trigger aria-label="Music library" className={triggerClass}>
+      <Popover>
+        <PopoverTrigger aria-label="Music library" className={triggerClass}>
           {/*
             THE DISC TURNS WHILE SOMETHING IS PLAYING.
 
@@ -85,11 +87,11 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
                 "animate-spin [animation-duration:3s] motion-reduce:animate-none"
             )}
           />
-        </Popover.Trigger>
-        <Popover.Popup className="w-72 p-0">
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-0">
           <Panel value={value} />
-        </Popover.Popup>
-      </Popover.Root>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
@@ -101,7 +103,7 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
  * Edge or brighter — and the rule is about a control sitting ALONE on a
  * surface, where a bare glyph is indistinguishable from an ornament. These do
  * not sit alone: they sit in the timer bar's footer beside the project, tag
- * and billable triggers, which are `variant="quiet"` over the button base's
+ * and billable triggers, which are `variant="ghost"` over the button base's
  * transparent border and have never carried a box. Boxing two of five controls
  * in one strip is the inconsistency the rule exists to prevent, not an
  * instance of it.
@@ -127,11 +129,11 @@ export function MusicControls({ value }: { value: MusicContextValue }) {
  */
 const TRIGGER_BOX = "size-6 rounded-md p-0"
 
-/** For `Popover.Trigger`, which brings its own element and takes a className —
+/** For `PopoverTrigger`, which brings its own element and takes a className —
  *  the same reason `classifier-pickers.tsx` reaches for `buttonVariants`
  *  instead of `<Button>` on two of its three controls. */
 const triggerClass = cn(
-  buttonVariants({ variant: "quiet", size: "row-trigger" }),
+  buttonVariants({ variant: "ghost", size: "row-trigger" }),
   TRIGGER_BOX
 )
 
@@ -149,7 +151,7 @@ function IconButton({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="row-trigger"
       aria-label={label}
       {...(pressed === undefined ? {} : { "aria-pressed": pressed })}
@@ -167,7 +169,7 @@ function Panel({ value }: { value: MusicContextValue }) {
 
   return (
     <div className="flex flex-col">
-      <div className="flex flex-col gap-3 border-b border-edge-soft p-3">
+      <div className="flex flex-col gap-3 border-b border-border p-3">
         <p className="truncate text-sm">
           {value.current?.name ?? "Nothing playing"}
         </p>
@@ -221,7 +223,7 @@ function Panel({ value }: { value: MusicContextValue }) {
             step={0.01}
             value={value.volume}
             onChange={(event) => value.setVolume(Number(event.target.value))}
-            className="h-1 w-full accent-[var(--ink)]"
+            className="h-1 w-full accent-foreground"
           />
         </label>
       </div>
@@ -278,7 +280,26 @@ function TrackGroup({
               aria-current={isCurrent ? "true" : undefined}
               onClick={() => value.playRef(track.ref)}
               className={cn(
-                "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-surface-raised",
+                "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                /*
+                 * HOVER WAS THE ONLY STATE THIS ROW HAD, and unlike the option
+                 * rows in `picker-list.tsx` it is a real focusable button in
+                 * the tab order — those are `tabIndex={-1}` and driven by
+                 * `aria-activedescendant`, which is why they legitimately carry
+                 * no ring. Here, tabbing through the track list moved DOM focus
+                 * with nothing on screen following it.
+                 *
+                 * `focus-visible` uses the same fill as hover rather than a
+                 * ring: the row is full-width inside a popover, so a ring would
+                 * be drawn hard against the popover's own padding. The fill is
+                 * the affordance the list already speaks in.
+                 */
+                "hover:bg-popover focus-visible:bg-popover",
+                "focus-visible:outline-none",
+                // Press, on the row that starts audio. 100ms `ease-out`, the
+                // system's press pair — see DESIGN.md §5 Motion vocabulary.
+                "transition-[background-color,translate] duration-100 ease-out",
+                "active:translate-y-px motion-reduce:transition-none",
                 isCurrent && "font-medium"
               )}
             >

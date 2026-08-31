@@ -74,7 +74,7 @@ export function InvoiceLines({
           same as `COL` in pdf/invoice-doc.ts.
         */}
         <thead>
-          <tr className="border-b border-edge-soft text-sm font-medium text-muted-foreground">
+          <tr className="border-b border-border text-sm font-medium text-muted-foreground">
             <th scope="col" className="pr-4 py-2.5 text-left">
               Description
             </th>
@@ -120,7 +120,7 @@ export function InvoiceLines({
               // one — and the row's position in a print order IS its identity
               // here: this table is read-only, so nothing reorders under it.
               key={`${index}-${line.description}`}
-              className="border-b border-edge-soft last:border-b-0"
+              className="border-b border-border last:border-b-0"
             >
               <th scope="row" className="truncate pr-4 py-3 text-left font-normal">
                 {line.description}
@@ -140,7 +140,7 @@ export function InvoiceLines({
               </td>
               {/* The one brass column: a currency amount, in this invoice's own
                   snapshotted currency. */}
-              <td className="pl-4 py-3 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass">
+              <td className="pl-4 py-3 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground">
                 {formatMoney(line.amountCents, currency)}
               </td>
             </tr>
@@ -162,7 +162,7 @@ export function InvoiceLines({
               /* Edge above the block, Edge Soft between its rows: the heavier
                  rule separates the lines from what they add up to, the lighter
                  one separates a subtotal from a tax. */
-              className={row.label === "Subtotal" ? "border-t border-edge" : undefined}
+              className={row.label === "Subtotal" ? "border-t border-border" : undefined}
             >
               {/*
                 THE TOTAL IS A STEP LARGER, not merely bolder — the eye has to
@@ -190,8 +190,8 @@ export function InvoiceLines({
               <td
                 className={
                   row.strong
-                    ? "pl-4 pt-4 pb-2.5 text-right text-xl font-semibold font-mono tabular-nums tracking-[-0.02em] text-brass"
-                    : "pl-4 py-2.5 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-brass"
+                    ? "pl-4 pt-4 pb-2.5 text-right text-xl font-semibold font-mono tabular-nums tracking-[-0.02em] text-foreground"
+                    : "pl-4 py-2.5 text-right font-medium font-mono tabular-nums tracking-[-0.02em] text-foreground"
                 }
               >
                 {formatMoney(row.cents, currency)}

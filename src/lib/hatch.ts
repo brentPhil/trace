@@ -17,12 +17,12 @@
  *
  * A NOTE ON WHAT CHANGED WITH THE MOVE. The old class was UNLAYERED, so it
  * outranked every Tailwind utility — `calendar-panel.tsx` had to state its
- * borders per branch because a `border-enlarger` beside `.hatch-empty` would be
+ * borders per branch because a `border-primary` beside `.hatch-empty` would be
  * in the class list and absent from the screen. As utilities it now competes
  * normally, so the class list finally says what renders.
  */
 export const HATCH_EMPTY = [
-  "border border-dashed border-edge-soft",
-  "bg-[image:repeating-linear-gradient(-45deg,color-mix(in_oklch,var(--edge-soft)_55%,transparent)_0_1px,transparent_1px_6px)]",
+  "border border-dashed border-input",
+  "bg-[image:repeating-linear-gradient(-45deg,color-mix(in_oklch,var(--input)_55%,transparent)_0_1px,transparent_1px_6px)]",
   "forced-colors:border-current forced-colors:bg-none",
 ].join(" ")

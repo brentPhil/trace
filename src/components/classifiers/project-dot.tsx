@@ -39,7 +39,7 @@ export function ProjectDot({
         // The project's own hue as text, not a generic muted grey: at this size
         // a 6px dot alone is easy to miss, and the tint is what makes the name
         // scannable down a column.
-        "text-[color-mix(in_oklch,var(--project-color)_82%,var(--ink))]",
+        "text-[color-mix(in_oklch,var(--project-color)_82%,var(--foreground))]",
         // Forced colours drop the hue entirely and the NAME carries it alone —
         // which was always the contract this component's doc comment states.
         "forced-colors:text-[currentColor]",
@@ -82,7 +82,7 @@ export function TagChips({
         <span
           key={tag._id}
           className={cn(
-            "truncate rounded-sm border border-edge-soft px-1 py-px",
+            "truncate rounded-sm border border-border px-1 py-px",
             "text-[0.65rem] leading-4 text-muted-foreground"
           )}
         >

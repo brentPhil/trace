@@ -9,6 +9,9 @@
  * the eager bundle, with a [tanstack-router] warning per route saying so.
  * Imported from a non-route file, `component:` splits as normal.
  */
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
+import { useToastManager } from "@/components/ui/toast"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
@@ -23,9 +26,6 @@ import { TotalsRow } from "@/components/entries/totals-row"
 import { FilterBand } from "@/components/history/filter-band"
 import { RangeBar } from "@/components/timer/range-bar"
 import { Page } from "@/components/shell/page"
-import { Button } from "@/components/ui/button"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Toast } from "@/components/ui/toast"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
 import { useEntryActions } from "@/hooks/use-entry-actions"
@@ -354,7 +354,7 @@ export function Timer() {
    * user gets is this line. /settings raises its Google failures the same way,
    * through the same two functions.
    */
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
   const reportWrite = useLatest((thrown: unknown) => {
     toasts.add({ title: errorMessage(thrown), priority: "high" })
   })
@@ -654,8 +654,8 @@ export function Timer() {
                 className={cn(
                   // The fill the segmented tab beside it uses for "on", so two
                   // adjacent controls do not spell the same state two ways.
-                  "shrink-0 aria-pressed:border-edge-raised",
-                  "aria-pressed:bg-surface-raised aria-pressed:text-foreground"
+                  "shrink-0 aria-pressed:border-input",
+                  "aria-pressed:bg-popover aria-pressed:text-foreground"
                 )}
               >
                 <WrapText className="size-4" />
@@ -690,7 +690,7 @@ export function Timer() {
               value={view}
               onValueChange={(next) => changeView(next as TimerView)}
             >
-              <TabsList variant="segmented">
+              <TabsList>
                 <TabsTrigger value="calendar">Calendar</TabsTrigger>
                 <TabsTrigger value="list">List</TabsTrigger>
               </TabsList>
@@ -934,7 +934,7 @@ function RangeError({
         // element carries its own alignment with the bar above rather than
         // inheriting one.
         "mx-4 mb-3 flex flex-wrap items-center gap-3 rounded-md",
-        "border border-alarm px-3 py-2 text-sm text-alarm"
+        "border border-destructive px-3 py-2 text-sm text-destructive"
       )}
     >
       This range could not be loaded, so the {what} below is empty for that

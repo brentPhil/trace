@@ -68,7 +68,7 @@ export function AuthShell({
         The form was previously bare on `ground`, which on a 1300px window left
         it a small island in a large void with nothing anchoring the eye.
       */}
-      <div className="flex flex-col gap-6 rounded-lg border border-edge-soft bg-surface p-6">
+      <div className="flex flex-col gap-6 rounded-lg border border-border bg-card p-6">
         <h1
           ref={headingRef}
           tabIndex={focusHeading ? -1 : undefined}

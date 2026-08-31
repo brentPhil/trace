@@ -1,6 +1,7 @@
 import { Search } from "lucide-react"
-import { NO_PROJECT_FILTER } from "@shared/entryFilter"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
+import { NO_PROJECT_FILTER } from "@shared/entryFilter"
 import { cn } from "@/lib/utils"
 import { NO_PROJECT_LABEL } from "@/lib/report-series"
 import type { QuickFilters } from "@/lib/history-filters"
@@ -45,39 +46,47 @@ export function FilterControls<T extends QuickFilters>({
           }}
           placeholder="Search titles, notes and projects"
           className={cn(
-            "w-full rounded-md border border-edge bg-ground py-1.5 pr-2 pl-7",
+            "w-full rounded-md border border-input bg-background py-1.5 pr-2 pl-7",
             "text-sm placeholder:text-muted-foreground",
             "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           )}
         />
       </label>
 
-      <select
+      <Select
         value={filters.projectId ?? "all"}
-        aria-label="Project"
-        onChange={(event) => {
-          const value = event.target.value
-          onChange((f) => ({ ...f, projectId: value === "all" ? null : value }))
+        onValueChange={(next) => {
+          onChange((f) => ({ ...f, projectId: next === "all" ? null : next }))
         }}
-        className={cn(
-          "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
-          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        )}
       >
-        <option value="all">All projects</option>
-        {/* A real, findable state rather than the absence of a choice.
-            The sentinel is named in convex/lib/entryFilter.ts, which is where
-            the predicate reads it back; the text is the SAME label the
-            export pipeline prints (report-series.ts), so a reader never sees
-            "No project" here and something else on the document. */}
-        <option value={NO_PROJECT_FILTER}>{NO_PROJECT_LABEL}</option>
-        {projects.map((project) => (
-          <option key={project._id} value={project._id}>
-            {project.name}
-            {project.archived ? " (archived)" : ""}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger aria-label="Project" className="w-48">
+          {/* The value is a project id; the label is its name. */}
+          <SelectValue>
+            {(value) => {
+              if (value === "all") return "All projects"
+              if (value === NO_PROJECT_FILTER) return NO_PROJECT_LABEL
+              const project = projects.find((p) => p._id === value)
+              if (project === undefined) return String(value)
+              return `${project.name}${project.archived ? " (archived)" : ""}`
+            }}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All projects</SelectItem>
+          {/* A real, findable state rather than the absence of a choice.
+              The sentinel is named in convex/lib/entryFilter.ts, which is where
+              the predicate reads it back; the text is the SAME label the
+              export pipeline prints (report-series.ts), so a reader never sees
+              "No project" here and something else on the document. */}
+          <SelectItem value={NO_PROJECT_FILTER}>{NO_PROJECT_LABEL}</SelectItem>
+          {projects.map((project) => (
+            <SelectItem key={project._id} value={project._id}>
+              {project.name}
+              {project.archived ? " (archived)" : ""}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       <BillableChip
         active={filters.billableOnly}
@@ -89,18 +98,21 @@ export function FilterControls<T extends QuickFilters>({
 
 /** What "on" looks like for every chip that is not about money. */
 const CHIP_ACTIVE_NEUTRAL =
-  "border-edge-raised bg-surface-raised font-medium text-foreground"
+  "border-input bg-popover font-medium text-foreground"
 
 /**
  * State carried by weight and a border, never hue alone — and `aria-pressed`
  * is what actually says "on" to anyone reading neither.
  *
- * `border-edge-raised`, not `border-edge`, in BOTH states. A chip carries no
- * fill of its own when inactive, and on /timer it sits inside a `bg-surface`
- * band where `--edge` measures 2.90:1 — under SC 1.4.11's 3:1. The active
- * state is worse, not better: a `bg-surface-raised` fill puts `--edge` at
- * 2.60:1 on the inside and 2.90:1 on the outside, failing on both. See
- * styles.css for the token and styles.contrast.test.ts for the numbers.
+ * `border-input` in BOTH states — the control half of The Boundary Split
+ * (DESIGN.md §2), which exists for exactly this case. A chip carries no fill of
+ * its own when inactive, and on /timer it lands inside a band one step up from
+ * the page, so the divider tone measures under SC 1.4.11's 3:1 there. The
+ * active state was worse rather than better: its own fill put the same edge
+ * under the floor on both sides of itself.
+ *
+ * 3.08:1 at the worst surface in the light ramp and 3.15:1 in the dark,
+ * measured composited in `styles.contrast.test.ts` rather than asserted here.
  */
 export function Chip({
   active,
@@ -123,7 +135,7 @@ export function Chip({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="chip"
       aria-pressed={active}
       onClick={onClick}
@@ -132,7 +144,7 @@ export function Chip({
         // sits in is measured, so the target grows through a pseudo-element
         // rather than through padding. Exactly -2px vertically: 22 + 2 + 2.
         "relative after:absolute after:inset-x-0 after:-inset-y-0.5 after:content-['']",
-        "border-edge-raised motion-reduce:transition-none",
+        "border-input motion-reduce:transition-none",
         active ? activeClassName : null
       )}
     >
@@ -148,15 +160,13 @@ export function Chip({
  * the inconsistency; every other chip on either page (period, no-project,
  * no-note, under-a-minute) stays neutral because none of them are.
  *
- * 3.84:1 on ground, 3.73:1 on surface — measured composited the way a browser
- * does it, in gamma-encoded sRGB. Clears 3:1 in both bands this bar appears
- * in, so it keeps brass.
+ * That state is gone with brass; this is a plain `Chip` now.
  */
 function BillableChip({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
     <Chip
       active={active}
-      activeClassName="border-brass/60 font-medium text-brass"
+      activeClassName="border-foreground/60 font-medium text-foreground"
       onClick={onClick}
     >
       Billable

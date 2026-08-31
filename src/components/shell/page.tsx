@@ -9,7 +9,7 @@ import type { ReactNode } from "react"
  *
  * WHY THIS EXISTS AT ALL. There used to be two. /timer and /reports each spelt
  * out a sticky band of their own — the measured custom property, the host and
- * measured refs paired by hand, `sticky top-… z-20 bg-ground`, and the calc
+ * measured refs paired by hand, `sticky top-… z-20 bg-background`, and the calc
  * that adds the two heights — and neither had an `<h1>` at all; /projects,
  * /invoices, /settings and both invoice routes rendered no header at all and a
  * bare `<h1 className="text-sm font-semibold">` somewhere inside their own
@@ -185,10 +185,10 @@ export function Page({
            * `z-30`, this header is `z-20`, a day header inside the log is
            * `z-10` — the same order as their positions down the screen, so the
            * thing that is higher up is also the thing that passes over.
-           * `bg-ground`, opaque: rows scroll UNDER this, and a transparent
+           * `bg-background`, opaque: rows scroll UNDER this, and a transparent
            * sticky element is a window onto them.
            */
-          sticky && "sticky top-(--shell-sticky-top) z-20 bg-ground"
+          sticky && "sticky top-(--shell-sticky-top) z-20 bg-background"
         )}
       >
         {showRow ? (

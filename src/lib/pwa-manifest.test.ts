@@ -20,8 +20,17 @@ describe("PWA manifest", () => {
     expect(manifest.short_name).toBe("Chroneli")
     expect(manifest.display).toBe("standalone")
     expect(manifest.start_url).toBe("/")
-    expect(manifest.theme_color).toBe("#14110e")
-    expect(manifest.background_color).toBe("#14110e")
+    // `--background` in the dark ramp, matching the dark `theme-color` meta in
+    // routes/__root.tsx. It was #14110e — the Darkroom's `--ground`, a token
+    // that no longer exists — so an installed PWA painted its splash a colour
+    // found nowhere else in the product.
+    //
+    // NOT derived from scripts/make-icons.mjs, which still carries the old
+    // constant: that value is BAKED into the three committed PNGs, so the
+    // script and its artefacts agree with each other and changing one without
+    // regenerating the others is worse than leaving both.
+    expect(manifest.theme_color).toBe("#0a0a0a")
+    expect(manifest.background_color).toBe("#0a0a0a")
   })
 
   it("lists a 192, a 512 and a maskable icon", () => {

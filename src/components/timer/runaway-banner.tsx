@@ -1,5 +1,5 @@
-import { Button } from "@/components/ui/button"
 import { useElapsedMs } from "@/hooks/use-clock"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { formatCompactDuration } from "@shared/duration"
 import type { Doc } from "../../../convex/_generated/dataModel"
@@ -54,8 +54,8 @@ export function RunawayBanner({
       // `status`, not `alert`: this is not urgent and must not interrupt.
       role="status"
       className={cn(
-        "flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-edge-soft",
-        "bg-surface px-4 py-2 text-sm"
+        "flex flex-wrap items-center gap-x-3 gap-y-1 border-y border-border",
+        "bg-card px-4 py-2 text-sm"
       )}
     >
       <span>
@@ -101,10 +101,10 @@ function BannerAction({
       className={cn(
         "text-sm underline",
         destructive
-          ? "text-muted-foreground hover:text-alarm"
-          : // NOT `--enlarger`. The banner is genuinely ABOUT a running timer,
-            // but that does not license spending cold light on a hover state:
-            // the Cold Light Rule reserves it for the signal that something
+          ? "text-muted-foreground hover:text-destructive"
+          : // NOT the running treatment. The banner is genuinely ABOUT a running
+            // timer, but that does not license spending the running mark on a
+            // hover state: it belongs to the signal that something
             // IS running (the bar's border, icon, "Recording", the tab
             // clock) precisely so it stays a singular, unambiguous marker in
             // peripheral vision. A button's :hover feedback is decoration —

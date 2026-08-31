@@ -34,7 +34,12 @@ export function EarningsChart({
   currency: string
 }) {
   return (
-    <ChartContainer className="aspect-auto h-56 w-full">
+    <ChartContainer
+      /* Empty on purpose: `config` exists so shadcn can emit a `--color-<key>`
+         variable per series, and every series here already names its own
+         colour (a `--chart-*` token, or the projects `--project-*` data hue).
+         There is nothing for the container to declare. */
+      config={{}} className="aspect-auto h-56 w-full">
       <AreaChart data={buckets} margin={{ top: 4, right: 4, bottom: 0, left: -4 }}>
         <defs>
           {/*
@@ -45,8 +50,8 @@ export function EarningsChart({
             fill merely its footprint.
           */}
           <linearGradient id="earned-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--brass)" stopOpacity={0.28} />
-            <stop offset="100%" stopColor="var(--brass)" stopOpacity={0.02} />
+            <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0.02} />
           </linearGradient>
         </defs>
         <CartesianGrid vertical={false} stroke={GRID_STROKE} />
@@ -57,7 +62,7 @@ export function EarningsChart({
           tickFormatter={(cents: number) => formatMoney(cents, currency)}
         />
         <ChartTooltip
-          cursor={{ stroke: "var(--edge)", strokeWidth: 1 }}
+          cursor={{ stroke: "var(--border)", strokeWidth: 1 }}
           content={<EarningsTooltip currency={currency} />}
         />
         {/*
@@ -70,13 +75,13 @@ export function EarningsChart({
         <Area
           type="stepAfter"
           dataKey="earnedCents"
-          stroke="var(--brass)"
+          stroke="var(--chart-1)"
           strokeWidth={2}
           fill="url(#earned-fill)"
           // A dot per day is noise at 45 points; one on hover is the affordance
           // that matters.
           dot={false}
-          activeDot={{ r: 3, fill: "var(--brass)", stroke: "var(--surface)" }}
+          activeDot={{ r: 3, fill: "var(--chart-1)", stroke: "var(--card)" }}
           // See the note in chart-frame.tsx.
           isAnimationActive={false}
         />

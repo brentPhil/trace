@@ -267,12 +267,15 @@ describe("DateRangePicker calendar", () => {
     open({ from: "2026-08-03", to: "2026-08-03" })
 
     const day = dayButton(3)
-    expect(day).toHaveAttribute("data-range", "single")
+    // Both endpoint flags on ONE cell is exactly how react-day-picker marks a
+    // one-day range, and how shadcn own DayButton reads it back out.
+    expect(day).toHaveAttribute("data-range-start", "true")
+    expect(day).toHaveAttribute("data-range-end", "true")
     expect(day.getAttribute("aria-label")).toContain(", selected")
     expect(day.getAttribute("aria-label")).not.toContain("of range")
-    // Nothing is left half-open: no lone start, no lone end.
-    expect(document.querySelectorAll('[data-range="start"]')).toHaveLength(0)
-    expect(document.querySelectorAll('[data-range="end"]')).toHaveLength(0)
+    // Nothing is left half-open: the start and the end are the same one cell.
+    expect(document.querySelectorAll('[data-range-start="true"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-range-end="true"]')).toHaveLength(1)
   })
 })
 
@@ -282,7 +285,7 @@ describe("DateRangePicker today", () => {
 
     expect(dayButton(6)).toHaveAttribute("aria-current", "date")
     // …and nothing else claims to be today.
-    expect(document.querySelectorAll('[data-range][aria-current="date"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-day][aria-current="date"]')).toHaveLength(1)
   })
 })
 
@@ -333,7 +336,7 @@ describe("DateRangePicker keyboard", () => {
     // grid. Scoped to `[data-range]` — the day cells' own marker this
     // component adds — so the trigger's and the month-nav buttons' own,
     // legitimate tabindexes aren't mistaken for a second roving-tabindex stop.
-    const tabbable = document.querySelectorAll('[data-range][tabindex="0"]')
+    const tabbable = document.querySelectorAll('[data-day][tabindex="0"]')
     expect(tabbable).toHaveLength(1)
   })
 

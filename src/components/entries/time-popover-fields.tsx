@@ -61,7 +61,7 @@ export function TimePopoverFields({
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-2 border-b border-edge-soft p-3">
+      <div className="grid grid-cols-2 gap-2 border-b border-border p-3">
         <Field label="Start">
           <input
             aria-label="Start time"
@@ -102,7 +102,7 @@ export function TimePopoverFields({
         </Field>
 
         {error === null ? null : (
-          <p role="alert" className="col-span-2 text-xs text-alarm">
+          <p role="alert" className="col-span-2 text-xs text-destructive">
             {error}
           </p>
         )}
@@ -172,7 +172,7 @@ export function TimePopoverFields({
 }
 
 const inputClass = cn(
-  "font-mono tabular-nums tracking-[-0.02em] h-8 w-full rounded-md border border-edge bg-ground px-2 text-sm",
+  "font-mono tabular-nums tracking-[-0.02em] h-8 w-full rounded-md border border-input bg-background px-2 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )
 
@@ -199,16 +199,16 @@ function MonthButton({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="icon-xs"
       aria-label={label}
       onClick={onClick}
-      // `border-edge-raised`: no fill of its own, inside a `surface-raised`
-      // popover, where `--edge` is 2.60:1 — under SC 1.4.11. The inputs above
-      // keep `--edge` because their `bg-ground` fill puts the border next to
-      // ground on its inner side, where it clears at 3.15:1. The base variant
-      // ships `border border-transparent`, so this only sets the colour.
-      className="border-edge-raised"
+      // `border-input`: this is a control, so it takes the control half of The
+      // Boundary Split rather than the divider. It carries no fill of its own
+      // and sits inside a popover, which is exactly the case the split exists
+      // for. The base variant ships `border border-transparent`, so this only
+      // sets the colour.
+      className="border-input"
     >
       {children}
     </Button>
@@ -230,26 +230,26 @@ function DayCell({
   const label = formatDayName(year, month, date)
 
   return (
-    // `default` when selected is NOT cold light: this marks which DAY is
+    // `default` when selected is NOT the running accent: this marks which DAY is
     // selected in a date picker, not whether anything is running — a popover
-    // opened on a completed entry would otherwise show cold light next to a
+    // opened on a completed entry would otherwise show the running accent beside a
     // dash where the end time goes. The variant's `bg-primary` /
     // `text-primary-foreground` is the same "affirmative action, deliberately
     // not enlarger" treatment the start/stop button itself uses when idle.
     //
     // `quiet` when not, rather than `ghost`: ghost carries a
     // `dark:hover:bg-muted/50` that outranks a plain `hover:bg-*` override,
-    // and this grid wants `--surface-raised` under the cursor.
+    // and this grid wants the popover's own tone under the cursor.
     <Button
       type="button"
-      variant={selected ? "default" : "quiet"}
+      variant={selected ? "default" : "ghost"}
       size="icon-sm"
       aria-pressed={selected}
       aria-label={label}
       onClick={onPick}
       className={cn(
         "font-mono tabular-nums tracking-[-0.02em]",
-        selected ? "font-medium" : "text-foreground hover:bg-surface-raised"
+        selected ? "font-medium" : "text-foreground hover:bg-popover"
       )}
     >
       {date}

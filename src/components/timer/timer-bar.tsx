@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { Clock, Play, Square } from "lucide-react"
 import {
   BillableToggle,
@@ -9,7 +10,6 @@ import { ProjectDot } from "@/components/classifiers/project-dot"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { ManualEntryDialog } from "@/components/entries/manual-entry-dialog"
 import { TimerDurationPopover } from "@/components/timer/timer-duration-popover"
-import { Button } from "@/components/ui/button"
 import { withInheritedBillable } from "@/lib/inherit-billable"
 import { isOptimisticId } from "@/lib/optimistic-id"
 import { describeStagedStart, resolveStagedStart } from "@/lib/staged-start"
@@ -34,8 +34,8 @@ const TITLE_DEBOUNCE_MS = 400
  *   control is never disabled. Anything that can refuse a start is a reason
  *   someone stops tracking.
  *
- *   Running is never carried by colour alone. Cold light marks it (The Cold
- *   Light Rule), and so do the icon changing from play to stop, the boundary
+ *   Running is never carried by colour alone. The accent marks it (The
+ *   Exposure Rule), and so do the icon changing from play to stop, the boundary
  *   brightening, and the control's accessible name changing from "Start timer"
  *   to "Stop timer".
  *
@@ -617,30 +617,30 @@ export function TimerBar({
     <section
       aria-label="Timer"
       className={cn(
-        "flex flex-col rounded-md border bg-surface",
+        "flex flex-col rounded-md border bg-card",
         /*
          * The visible focus indicator lives HERE, not on the input — see the
          * input's own `outline-none` below for why.
          *
          * An OUTLINE at full `--ring`, offset clear of the border, in BOTH
-         * states. Measured from the tokens in styles.css: `--ring`
-         * oklch(0.72 0.012 75) against `--ground` oklch(0.18 0.008 75) is
-         * 7.58:1, and the 2px offset means ground is what sits on either side
-         * of it, so that is the number on both edges. 2px thick clears SC
-         * 2.4.11's minimum area as well as SC 1.4.11's 3:1.
+         * states. Measured from the tokens in styles.css: `--ring` against
+         * `--background` is 3.95:1 in the light ramp and 4.18:1 in the dark,
+         * and the 2px offset means the page's own background is what sits on
+         * either side of it, so that is the number on both edges. 2px thick
+         * clears SC 2.4.11's minimum area as well as SC 1.4.11's 3:1.
          *
          * WHAT THIS REPLACED, AND WHY. It was `focus-within:ring-3
          * focus-within:ring-ring/30`, with a comment claiming that vocabulary
-         * measured 7.60:1 because `button.tsx` uses it. It does not: the
+         * cleared the floor because `button.tsx` uses it. It does not: the
          * button pairs that halo with `focus-visible:border-ring`, and the
-         * 7.58:1 figure is the BORDER at full `--ring`, never the 30% halo.
-         * The halo alone is 1.75:1 over ground and 1.77:1 over the bar's own
-         * `bg-surface` — no indicator at all. Idle got away with it because
-         * `focus-within:border-ring` was carrying the real 7.58:1; while
+         * figure quoted for it is the BORDER at full `--ring`, never the 30%
+         * halo. The halo alone is 1.41:1 over the light page and 1.38:1 over
+         * the dark one — no indicator at all. Idle got away with it because
+         * `focus-within:border-ring` was carrying the real figure; while
          * running that border is deliberately withheld (below), so the most-
          * used control in the app, in its most common state, had nothing.
          *
-         * The Cold Light Rule and a visible indicator were never actually in
+         * The Exposure Rule and a visible indicator were never actually in
          * tension — only the shared BORDER pixel was. An outline sits outside
          * the border entirely, so the cold boundary keeps saying "recording"
          * untouched, and focus gets its own, identical treatment either way.
@@ -658,12 +658,34 @@ export function TimerBar({
         "has-[input:focus-visible]:outline-2",
         "has-[input:focus-visible]:outline-offset-2",
         "has-[input:focus-visible]:outline-ring",
-        // `border-edge`, not `border-edge-soft`: the bar's own doc comment
+        /*
+         * THE BOUNDARY CROSS-FADES, and this is about harmony rather than
+         * decoration. Pressing Play changes three things at once — the icon,
+         * the control's fill, and this border — and the fill was the only one
+         * of them with a transition on it. The disc took 100ms to warm to cold
+         * light while the border it sits inside arrived instantly, so one state
+         * change read as two events a tenth of a second apart.
+         *
+         * The same 100ms `ease-out` as the button, deliberately, because the
+         * point is that they land together. It is short enough that the
+         * response is still the press and not the fade — a longer boundary
+         * would put lag on the one gesture that must never have any.
+         */
+        "transition-colors duration-100 ease-out motion-reduce:transition-none",
+        // `border-border`: the bar's own doc comment
         // above says the section IS the primary input's boundary, which
         // makes it an interactive control boundary under WCAG 2.2 SC
         // 1.4.11 (3:1), not a decorative divider (no minimum). Idle only —
-        // while running the cold border already carries the signal.
-        isRunning ? "border-enlarger/50" : "border-edge"
+        // while running the accent border already carries the signal.
+        //
+        // SOLID, and it was `/50` and then `/70` first. The alpha existed to
+        // soften a light cold blue at L 0.8; it fell under the floor the
+        // moment the running state became the accent, and again when the two
+        // accents merged. The smallest alpha that clears 3:1 on the
+        // light ramp's Surface is now 0.9 — within a tenth of solid and
+        // indistinguishable from it — so the number was buying nothing and
+        // failing twice. `styles.contrast.test.ts` caught both.
+        isRunning ? "border-primary" : "border-input"
       )}
     >
       {/*
@@ -811,11 +833,51 @@ export function TimerBar({
           aria-label={isRunning ? "Stop timer" : "Start timer"}
           className={cn(
             "flex size-[42px] shrink-0 items-center justify-center rounded-full",
-            "transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none",
+            /*
+             * FEEDBACK ON POINTER-DOWN, which this control had none of.
+             *
+             * It carried `hover:` and `focus-visible:` and nothing for the
+             * press itself, so the most-pressed button in the app acknowledged
+             * a click only once the optimistic update had flipped the bar
+             * around it. That is late by exactly the interval that decides
+             * whether a control feels connected to the finger: on touch there
+             * is no hover at all, so until the write landed a tap produced
+             * nothing whatsoever.
+             *
+             * A SCALE, not `Button`'s `active:translate-y-px`. The house press
+             * is a 1px nudge downward, which reads on a rectangle sitting in a
+             * row of rectangles; on a 42px disc standing alone it is invisible,
+             * and a disc pressing INTO the surface is the shape's own idiom.
+             * The `+` beside it keeps the nudge and the two do not conflict,
+             * because they are not the same kind of control — this is the
+             * affirmative action, those are quiet marks.
+             *
+             * 100ms `ease-out`, the pair `ui/popover.tsx` already uses, so the
+             * two kinds of motion this bar can produce are spelt one way.
+             *
+             * `scale`, NOT `transform`, in the transition list — and the
+             * difference is invisible until you press the thing. Tailwind v4
+             * compiles `scale-[0.96]` to the standalone `scale:` property
+             * rather than to a `transform: scale(…)`, so
+             * `transition-[…,transform]` names a property this control never
+             * animates: the press snapped in and snapped out while the fill
+             * cross-faded between them. Verified against the emitted rule
+             * (`.active\:scale-\[0\.96\]:active { scale: 0.96 }`), not assumed.
+             * The same trap is waiting for anything reaching for
+             * `translate-y-*`, which compiles to `translate:`.
+             *
+             * The transform survives `motion-reduce`; only its transition is
+             * dropped, which is `Button`'s own arrangement for the nudge. A 4%
+             * press on a 42px control is not vestibular motion, and DESIGN.md
+             * asks for a gentler alternative rather than for silence.
+             */
+            "transition-[background-color,scale] duration-100 ease-out",
+            "active:scale-[0.96] motion-reduce:transition-none",
+            "focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:outline-none",
             isRunning
-              ? // Cold light, and only here: something IS running.
-                "bg-enlarger text-ground hover:bg-enlarger/90"
-              : // Deliberately NOT cold light. On a page where nothing is
+              ? // The running accent, and only here: something IS running.
+                "bg-primary text-background hover:bg-primary/90"
+              : // Deliberately NOT the running accent. On a page where nothing is
                 // running, the affirmative action is a high-contrast neutral.
                 "bg-primary text-primary-foreground hover:bg-primary/90"
           )}
@@ -834,7 +896,7 @@ export function TimerBar({
             aria-label="Previous entries"
             className={cn(
               "absolute top-full right-4 left-4 z-40 mt-1 overflow-hidden rounded-lg",
-              "border border-edge-soft bg-surface-raised py-1 shadow-xl"
+              "border border-border bg-popover py-1 shadow-xl"
             )}
           >
             {matches.map((s, index) => (
@@ -857,7 +919,7 @@ export function TimerBar({
                   }}
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm",
-                    "focus-visible:outline-none data-[active=true]:bg-surface"
+                    "focus-visible:outline-none data-[active=true]:bg-card"
                   )}
                 >
                   <span className="min-w-0 flex-1 truncate">{s.title}</span>
@@ -872,7 +934,7 @@ export function TimerBar({
                   {s.billable ? (
                     <span
                       aria-hidden="true"
-                      className="shrink-0 text-xs text-brass"
+                      className="shrink-0 text-xs text-foreground"
                     >
                       $
                     </span>
@@ -899,7 +961,7 @@ export function TimerBar({
         are unrelated jobs and reading them as one cluster is the confusion
         this avoids.
 
-        SAME SHAPE AS THE STAGED-START ROW BELOW — `border-t border-edge-soft
+        SAME SHAPE AS THE STAGED-START ROW BELOW — `border-t border-border
         px-4 py-1.5` — because they are peers: two secondary strips under one
         bar. A second spelling here would be visible the moment both are on
         screen at once.
@@ -907,7 +969,7 @@ export function TimerBar({
         `flex-wrap` and `gap-y-1` so that a long Now Playing name on a narrow
         phone drops under the classifiers rather than squeezing them.
       */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-edge-soft px-4 py-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border px-4 py-1.5">
         <div className="flex shrink-0 items-center gap-0.5">
           <ProjectPicker
             projects={projects}
@@ -960,7 +1022,7 @@ export function TimerBar({
         What it was carrying is not lost. Running state is still on screen
         three ways that are not colour: the control's icon changes from play to
         stop, its accessible name changes from "Start timer" to "Stop timer",
-        and the bar's own boundary brightens to cold light. The doc comment at
+        and the bar's own boundary brightens to the accent. The doc comment at
         the top of this file lists those, and no longer claims the word.
 
         DISCARD WENT WITH IT, and that is the real cost of this change: killing
@@ -978,7 +1040,7 @@ export function TimerBar({
          * see is worse than no feature at all — see the doc comment on
          * `resolveStagedStart` above.
          *
-         * Deliberately NOT `text-enlarger`/`bg-enlarger`: The Cold Light Rule
+         * Deliberately NOT `text-primary`/`bg-primary`: The Exposure Rule
          * reserves that colour for a timer that IS running, and nothing is
          * running yet — this is only a promise about what Play will do next.
          * Using it here would make "is something running?" require reading
@@ -987,7 +1049,7 @@ export function TimerBar({
          * DESIGN.md asks anything that is not running or money to: a neutral
          * tone, plus an icon, plus words — never colour alone.
          */
-        <div className="flex items-center justify-between gap-3 border-t border-edge-soft px-4 py-1.5">
+        <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-1.5">
           <span className="flex items-center gap-2 text-xs text-muted-foreground">
             <Clock aria-hidden="true" className="size-3.5" />
             {/* The Tabular Rule: every timestamp, at any size. The date and
@@ -1005,7 +1067,7 @@ export function TimerBar({
           </span>
           <Button
             type="button"
-            variant="quiet"
+            variant="ghost"
             size="row-trigger"
             onClick={() => clearStagedStart()}
             className={cn(

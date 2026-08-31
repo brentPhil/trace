@@ -21,6 +21,7 @@ import { api } from "../../../convex/_generated/api"
 import type { InvoiceSearch } from "@/lib/invoice-search"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as RouterModuleType from "@tanstack/react-router"
+import { chooseOption } from "@/test-utils/select"
 
 type RouterModule = typeof RouterModuleType
 
@@ -516,9 +517,7 @@ describe("/invoices/new — the preview is what will be billed", () => {
   it("re-denominates the preview when the currency picker changes", async () => {
     const { dateSpy } = renderNew()
 
-    fireEvent.change(screen.getByLabelText("Currency"), {
-      target: { value: "EUR" },
-    })
+    chooseOption("Currency", "EUR")
 
     await waitFor(() => expect(lineRows()[0]?.[3]).toBe("€305.00"))
 

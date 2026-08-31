@@ -52,7 +52,7 @@ type Invoice = {
  * medium rather than of the document:
  *
  *   - The screen is a warm dark ground and the paper is white. Nothing about
- *     the document changes; `PAPER` (pdf/paper.ts) exists because a `bg-ground`
+ *     the document changes; `PAPER` (pdf/paper.ts) exists because a `bg-background`
  *     PDF is one nobody can print.
  *   - The paper's column headers are set in caps because at 10pt on paper caps
  *     are what separates a header from a figure. On screen they are sentence
@@ -109,7 +109,7 @@ export function InvoiceRecord({
      * grew with the type: 24px of margin around 12pt-equivalent text reads as a
      * document, around 16px-equivalent text it reads as a cramped panel.
      */
-    <article className="flex flex-col gap-10 rounded-lg border border-edge-soft bg-surface p-8">
+    <article className="flex flex-col gap-10 rounded-lg border border-border bg-card p-8">
       <div className="flex flex-col gap-4">
         {/*
           THE MASTHEAD, and it is inside the document rather than above it.

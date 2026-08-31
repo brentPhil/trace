@@ -1,3 +1,5 @@
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar"
 import {
   ClockIcon,
   ExternalLinkIcon,
@@ -5,10 +7,9 @@ import {
   UserIcon,
   VideoIcon,
 } from "lucide-react"
-import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar"
-import { Popover } from "@/components/ui/popover"
 import { formatTimeRange } from "@/lib/format-time"
 import { linkify, safeHref } from "@/lib/linkify"
+import { cn } from "@/lib/utils"
 import type { Meeting } from "@/lib/calendar-meetings"
 
 /** How Google's RSVP strings read to a human. Google's own vocabulary is
@@ -110,7 +111,7 @@ function AttendeeAvatar({
           : undefined
       }
     >
-      <AvatarFallback className="bg-ground text-[11px] font-medium text-muted-foreground">
+      <AvatarFallback className="bg-background text-[11px] font-medium text-muted-foreground">
         {letters ?? <UserIcon className="size-3.5" aria-hidden />}
         {/* An attendee with no name and no email is either a resource room or
             a guest hidden by the organiser's "guests cannot see each other"
@@ -238,7 +239,7 @@ export function CalendarMeetingPopover({
   ].filter((part) => part !== null)
 
   return (
-    <Popover.Root
+    <Popover
       open
       onOpenChange={(next) => {
         // Escape, an outside press and the × below all arrive here. The panel
@@ -247,7 +248,7 @@ export function CalendarMeetingPopover({
         if (!next) onClose()
       }}
     >
-      <Popover.Popup
+      <PopoverContent
         anchor={anchor}
         side="right"
         align="start"
@@ -274,7 +275,7 @@ export function CalendarMeetingPopover({
           `edge-soft` throughout: these divide passive content, where no contrast
           floor applies.
         */}
-        <div className="min-h-0 divide-y divide-edge-soft overflow-y-auto">
+        <div className="min-h-0 divide-y divide-border overflow-y-auto">
           <header className="grid gap-1 p-3">
             <h2 className="text-sm leading-snug font-medium text-balance text-foreground">
               {title}
@@ -316,7 +317,7 @@ export function CalendarMeetingPopover({
                         event.currentTarget.checked
                       )
                     }
-                    className="mt-0.5 size-3.5 shrink-0 rounded-[3px] border border-edge-raised bg-ground accent-current focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    className="mt-0.5 size-3.5 shrink-0 rounded-[3px] border border-input bg-background accent-current focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                   />
                   <span>
                     Track this when it starts
@@ -336,7 +337,19 @@ export function CalendarMeetingPopover({
                   onClick={() =>
                     onTrackNow?.(meeting.calendarId, meeting.eventId)
                   }
-                  className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-edge-raised text-xs font-medium text-foreground transition-colors hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className={cn(
+                    "flex h-8 w-full items-center justify-center gap-1.5 rounded-md",
+                    "border border-input text-xs font-medium text-foreground",
+                    "hover:bg-popover",
+                    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    // This button STARTS A TIMER, which is the one action in
+                    // the product that must never feel unacknowledged — and it
+                    // had hover and focus but nothing for the press. Same
+                    // 100ms `ease-out` and the same nudge the rest of the app
+                    // answers a press with.
+                    "transition-[background-color,translate] duration-100 ease-out",
+                    "active:translate-y-px motion-reduce:transition-none"
+                  )}
                 >
                   <ClockIcon className="size-3.5" aria-hidden />
                   Track this
@@ -363,7 +376,7 @@ export function CalendarMeetingPopover({
                   href={conferenceHref}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-edge-raised text-xs font-medium text-foreground transition-colors hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-input text-xs font-medium text-foreground transition-colors hover:bg-popover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
                   <VideoIcon className="size-3.5" aria-hidden />
                   Join the call
@@ -419,7 +432,7 @@ export function CalendarMeetingPopover({
                   reordered or filtered, and is re-rendered fresh from a query
                   result.
                 */
-                <AvatarGroup className="*:data-[slot=avatar]:ring-surface-raised">
+                <AvatarGroup className="*:data-[slot=avatar]:ring-popover">
                   {shown.map((attendee, index) => (
                     <AttendeeAvatar key={index} attendee={attendee} />
                   ))}
@@ -431,14 +444,14 @@ export function CalendarMeetingPopover({
                       the rest of the roster rather than making the popover
                       taller than the meeting is important.
                     */
-                    <Popover.Root>
-                      <Popover.Trigger
+                    <Popover>
+                      <PopoverTrigger
                         title={`Show ${overflow} more`}
-                        className="relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-edge-raised bg-ground text-[11px] font-medium text-muted-foreground ring-2 ring-surface-raised transition-colors hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        className="relative flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-input bg-background text-[11px] font-medium text-muted-foreground ring-2 ring-popover transition-colors hover:bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                       >
                         +{overflow}
-                      </Popover.Trigger>
-                      <Popover.Popup
+                      </PopoverTrigger>
+                      <PopoverContent
                         side="bottom"
                         align="start"
                         aria-label={`${overflow} more ${overflow === 1 ? "guest" : "guests"}`}
@@ -477,8 +490,8 @@ export function CalendarMeetingPopover({
                             and {unlisted} more not listed
                           </p>
                         )}
-                      </Popover.Popup>
-                    </Popover.Root>
+                      </PopoverContent>
+                    </Popover>
                   )}
                 </AvatarGroup>
               )}
@@ -505,7 +518,7 @@ export function CalendarMeetingPopover({
             </div>
           )}
         </div>
-      </Popover.Popup>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   )
 }

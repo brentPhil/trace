@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
-import { Plus } from "lucide-react"
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { Dialog } from "@/components/ui/dialog"
+import { Plus } from "lucide-react"
 import { errorMessage } from "@/lib/error-message"
 import { instantOfDayTime, localMinutesOf } from "@/lib/format-time"
 import { resolveInterval, timeFieldHelp } from "@shared/timeOfDay"
@@ -125,7 +125,7 @@ export function ManualEntryDialog({
   }
 
   return (
-    <Dialog.Root
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         setOpen(next)
@@ -142,7 +142,7 @@ export function ManualEntryDialog({
         two round controls of similar weight side by side is how the one button
         that must never be mis-clicked gets mis-clicked.
       */}
-      <Dialog.Trigger
+      <DialogTrigger
         render={
           <Button
             variant="ghost"
@@ -155,12 +155,12 @@ export function ManualEntryDialog({
         }
       />
 
-      <Dialog.Popup>
+      <DialogContent>
         <div className="flex flex-col gap-1">
-          <Dialog.Title>Add an entry</Dialog.Title>
-          <Dialog.Description>
+          <DialogTitle>Add an entry</DialogTitle>
+          <DialogDescription>
             For work you did without the timer running.
-          </Dialog.Description>
+          </DialogDescription>
         </div>
 
         <form
@@ -227,13 +227,13 @@ export function ManualEntryDialog({
           </Labelled>
 
           {error === null ? null : (
-            <p role="alert" className="text-xs text-alarm">
+            <p role="alert" className="text-xs text-destructive">
               {error}
             </p>
           )}
 
           <div className="flex items-center justify-end gap-2">
-            <Dialog.Close
+            <DialogClose
               render={
                 <Button type="button" variant="ghost" size="sm">
                   Cancel
@@ -245,13 +245,13 @@ export function ManualEntryDialog({
             </Button>
           </div>
         </form>
-      </Dialog.Popup>
-    </Dialog.Root>
+      </DialogContent>
+    </Dialog>
   )
 }
 
 const fieldClass = cn(
-  "w-full rounded-md border border-edge bg-ground px-3 py-2 text-sm",
+  "w-full rounded-md border border-input bg-background px-3 py-2 text-sm",
   "placeholder:text-muted-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )

@@ -9,6 +9,8 @@
  * the eager bundle, with a [tanstack-router] warning per route saying so.
  * Imported from a non-route file, `component:` splits as normal.
  */
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useToastManager } from "@/components/ui/toast"
 import { useEffect, useState } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import {
@@ -17,10 +19,12 @@ import {
   useConvexMutation,
 } from "@convex-dev/react-query"
 import { GoogleCalendarSection } from "@/components/settings/google-calendar-section"
+import { InvoiceLogoSection } from "@/components/settings/invoice-logo-section"
+import { MusicLibrarySection } from "./-music-library"
 import { MusicSection } from "@/components/settings/music-section"
+import { ThemeSection } from "@/components/settings/theme-section"
+import { useTheme } from "@/components/theme-provider"
 import { Page } from "@/components/shell/page"
-import { Button } from "@/components/ui/button"
-import { Toast } from "@/components/ui/toast"
 import { authClient } from "@/lib/auth-client"
 import { useLatest } from "@/hooks/use-latest"
 import { errorMessage } from "@/lib/error-message"
@@ -28,11 +32,7 @@ import { formatTotal } from "@/lib/format-total"
 import { rateHelp } from "@/lib/format-money"
 import { cn } from "@/lib/utils"
 import { formatMoney, parseMoney, supportedCurrencies } from "@shared/money"
-import {
-  LOGO_INPUT_ACCEPT,
-  MAX_LOGO_BYTES,
-  isAcceptedLogoContentType,
-} from "@shared/logo"
+import { MAX_LOGO_BYTES, isAcceptedLogoContentType } from "@shared/logo"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
 
@@ -113,8 +113,16 @@ export function Settings() {
   )
   const clearLogo = useLatest(useConvexMutation(api.settings.clearLogo))
   const setLogo = useLatest(useConvexAction(api.settings.setLogo))
-  const toasts = Toast.useToastManager()
+  const toasts = useToastManager()
   const [logoBusy, setLogoBusy] = useState(false)
+  /* The page reads the theme context ONCE and hands the pieces down, so
+     `ThemeSection` stays presentational like every other section here. */
+  const theme = useTheme()
+  const themeActions = {
+    setTheme: theme.setTheme,
+    setPreset: theme.setPreset,
+    setRadius: theme.setRadius,
+  }
 
   const save = (patch: Parameters<typeof update>[0]) => {
     void update(patch).catch((thrown: unknown) => {
@@ -382,7 +390,7 @@ export function Settings() {
       <div className="flex flex-1 flex-col gap-8 px-4 pb-6">
         <Section
           title="Time zone"
-          hint="Every day boundary in the app comes from this — which entries fall on which day, and what the week totals cover. Changing it re-files history rather than rewriting it, so nothing is lost, but old days may shift."
+          hint="Re-files history rather than rewriting it — nothing is lost, but old days may shift."
         >
           <TimezoneField
             value={settings.timezone}
@@ -391,26 +399,28 @@ export function Settings() {
         </Section>
 
         <Section title="Week starts on">
-          <select
-            aria-label="Week starts on"
-            value={settings.weekStartDay}
-            onChange={(event) =>
-              save({ weekStartDay: Number(event.target.value) })
-            }
-            className={fieldClass}
+          <Select
+            value={String(settings.weekStartDay)}
+            onValueChange={(value) => save({ weekStartDay: Number(value) })}
           >
-            {WEEKDAYS.map((name, index) => (
-              <option key={name} value={index}>
-                {name}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="Week starts on" className="w-52">
+              {/* The value is the day INDEX, so the trigger has to be told the
+                  name — see `SelectValue` in ui/select.tsx. */}
+              <SelectValue>{(day) => WEEKDAYS[Number(day)]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {WEEKDAYS.map((name, index) => (
+                <SelectItem key={name} value={String(index)}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Section>
 
         <Section
           title="Durations"
-          hint="Decimal hours are floored to two places, so no figure ever shows more time than was recorded and the parts never sum above the whole. It applies to totals and exports — never to a single entry's own row, where a span reads better as a span."
-        >
+                  >
           <div className="flex flex-col gap-2">
             <Radio
               name="durationDisplay"
@@ -452,45 +462,65 @@ export function Settings() {
           </div>
         </Section>
 
+        {/* WITH THE DISPLAY GROUP, after Clock and before the behavioural
+            settings below — a palette is a formatting choice, not an account
+            or integration one. Ordering here is plain JSX order; there is no
+            registry. */}
+        <Section title="Theme">
+          <ThemeSection
+            theme={theme.theme}
+            resolved={theme.resolved}
+            hydrated={theme.hydrated}
+            preset={theme.preset}
+            radius={theme.radius}
+            actions={themeActions}
+          />
+        </Section>
+
         <Section
           title="Runaway timers"
-          hint="A banner appears once a timer has been running longer than this. It never stops anything on your behalf — a long session might be real work, and a tracker that ends it for you is a tracker that loses time."
+          hint="Never stops anything on your behalf."
         >
-          <select
-            aria-label="Warn after"
-            value={Math.round(settings.runawayThresholdMs / 3_600_000)}
-            onChange={(event) =>
-              save({
-                runawayThresholdMs: Number(event.target.value) * 3_600_000,
-              })
+          <Select
+            value={String(Math.round(settings.runawayThresholdMs / 3_600_000))}
+            onValueChange={(value) =>
+              save({ runawayThresholdMs: Number(value) * 3_600_000 })
             }
-            className={fieldClass}
           >
-            {RUNAWAY_CHOICES.map((hours) => (
-              <option key={hours} value={hours}>
-                After {hours} hours
-              </option>
-            ))}
-          </select>
+            <SelectTrigger aria-label="Warn after" className="w-52">
+              {/* The value is a bare hour count; the option reads "After 8
+                  hours" and the trigger has to say the same thing. */}
+              <SelectValue>{(hours) => `After ${String(hours)} hours`}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {RUNAWAY_CHOICES.map((hours) => (
+                <SelectItem key={hours} value={String(hours)}>
+                  After {hours} hours
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Section>
 
         <Section
           title="Currency"
           /*
-           * The second sentence is the one that matters, and it was missing.
-           * Rates are stored per PROJECT as a plain number of hundredths;
-           * currency is a single per-USER label applied to all of them. So
-           * switching from USD to EUR re-labels a $10.00/hr project as
-           * €10.00/hr — no conversion, no rate touched, and every historical
-           * figure on /reports re-labelled with it. Saying only "symbol,
-           * placement and decimal count" made that sound cosmetic.
+           * THE ONE SENTENCE THAT SURVIVED THE CUT, and it is the one that
+           * costs money if it is missing.
            *
-           * Deliberately a permanent sentence rather than a confirm dialog:
-           * every other control on this page saves the instant you change it,
-           * and a modal that appears only when some project happens to have a
-           * rate is a warning most users would never see at all.
+           * Rates are stored per PROJECT as a plain number of hundredths;
+           * currency is a single per-USER label over all of them. Switching
+           * USD→EUR re-labels a $10.00/hr project as €10.00/hr — no
+           * conversion, no rate touched, every historical figure on /reports
+           * re-labelled with it. Nothing on screen shows that until it has
+           * already happened, which is the test every remaining hint on this
+           * page has to pass.
+           *
+           * The four sentences around it did not pass it: they explained that
+           * the field formats money and that only hundredth-based currencies
+           * are offered, both of which the control demonstrates by existing.
            */
-          hint="Formats every rate and billable amount — on /projects and /reports — with this currency's own symbol and placement, rather than assuming a symbol that is wrong for you. Changing it RE-LABELS the rates you have already set; it does not convert them. A project at 10.00 stays the number 10.00 and simply starts reading as 10.00 of the new currency, on past reports as well as future ones. Only currencies divided into hundredths are offered, because that is what a rate is stored as."
+          hint="Re-labels the rates you have already set; it does not convert them."
         >
           <CurrencyField
             value={settings.currency}
@@ -509,7 +539,7 @@ export function Settings() {
         */}
         <Section
           title="Default hourly rate"
-          hint="Used for billable time that no project rate covers — including entries with no project, like a standup. A project with its own rate always overrides this, and a project set to 0.00 really does mean unpaid rather than falling back here. Leave it blank and that time stays unpriced, and /reports says so rather than counting it as nothing."
+          hint="Used for billable time no project rate covers. Leave it blank and that time stays unpriced."
         >
           <RateField
             cents={settings.defaultHourlyRateCents}
@@ -522,7 +552,7 @@ export function Settings() {
 
         <Section
           title="Invoice lines"
-          hint="New invoices combine project rows when one hourly rate can still explain the arithmetic. You can override this while composing an invoice without changing the account default. Projects with different rates always stay separate."
+          hint="You can override this while composing an invoice."
         >
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -531,7 +561,7 @@ export function Settings() {
               onChange={(event) =>
                 save({ mergeInvoiceLines: event.target.checked })
               }
-              className="size-4 accent-[var(--ink)]"
+              className="size-4 accent-foreground"
             />
             Merge same-rate projects into one invoice line
           </label>
@@ -547,7 +577,7 @@ export function Settings() {
         */}
         <Section
           title="Notes in the PDF report"
-          hint="A note is what you wrote about how the work actually went, and the PDF is the copy that goes to a client — so this is off unless you say otherwise. It changes the exported PDF only: the CSV and XLSX exports never carry notes, and nothing on this page changes what you see on /reports."
+          hint="Changes the exported PDF only — CSV and XLSX exports never carry notes."
         >
           <div className="flex flex-col gap-2">
             <Radio
@@ -577,17 +607,18 @@ export function Settings() {
         */}
         <Section
           title="Repeated entries"
-          hint="When you start and stop the same task several times in a day, the log can show them as one row with a count, expandable to the individual entries. Nothing is merged: every entry keeps its own times, note and controls, one click away. This changes only what you see — exports, invoices and totals are unaffected."
+          hint="Nothing is merged: exports, invoices and totals are unaffected."
         >
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={settings.groupEntries}
               onChange={(event) => save({ groupEntries: event.target.checked })}
-              // The neutral `--ink` accent every other control on this page
-              // uses. NOT `--enlarger`: a checked setting is not a timer
-              // running, and the Cold Light Rule reads the two differently.
-              className="size-4 accent-[var(--ink)]"
+              // `--foreground`, the same accent every other control on this
+              // page uses. A checked setting is not a timer running, and the
+              // two should not look alike — which is also why this does not
+              // reach for `--primary`.
+              className="size-4 accent-foreground"
             />
             Group a day&apos;s repeats of the same entry
           </label>
@@ -595,8 +626,7 @@ export function Settings() {
 
         <Section
           title="Tab title"
-          hint="Announced by screen readers whenever it changes, which is why it can be switched off. It updates once a minute rather than once a second for the same reason."
-        >
+                  >
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -604,13 +634,18 @@ export function Settings() {
               onChange={(event) =>
                 save({ tabTitleClock: event.target.checked })
               }
-              // NOT `--enlarger`: this checkbox's own CHECKED state is a
-              // setting being toggled, not a timer running — the Cold Light
-              // Rule reads it the same way it reads a checked box anywhere
-              // else in Settings, and this was the only unconditional
-              // `--enlarger` in the codebase. Matches the neutral `--ink`
-              // accent the `Radio` controls in this file already use.
-              className="size-4 accent-[var(--ink)]"
+              // This checkbox's own CHECKED state is a setting being toggled,
+              // not a timer running, so it takes `--foreground` like every
+              // other checkbox and `Radio` in this file rather than the
+              // treatment the running state wears.
+              //
+              // The distinction OUTLIVED the colour it was made of, twice: once
+              // when the running accent merged with the affirmative one, and
+              // again when the palette went monochrome and neither has a hue at
+              // all. It stays because the rule was never about the value — what
+              // may be spent here is a setting's accent, not the running
+              // state's.
+              className="size-4 accent-foreground"
             />
             Show the running timer in the browser tab
           </label>
@@ -618,68 +653,29 @@ export function Settings() {
 
         <Section
           title="Invoice logo"
-          hint="This logo is snapshotted when an invoice is raised. Replacing or removing it here does not change invoices that already carry it."
+          hint="Invoices already raised keep the logo they were made with."
         >
-          <div className="flex flex-col items-start gap-3">
-            {settings.logoUrl === null ? (
-              <p className="text-sm text-muted-foreground">No logo selected.</p>
-            ) : (
-              <div className="flex h-24 w-full items-center justify-start overflow-hidden rounded-md border border-edge-soft bg-ground p-3">
-                <img
-                  src={settings.logoUrl}
-                  alt=""
-                  className="max-h-full max-w-full object-contain object-left"
-                />
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm">
-                <span className="sr-only">Invoice logo file</span>
-                <input
-                  type="file"
-                  accept={LOGO_INPUT_ACCEPT}
-                  disabled={logoBusy}
-                  aria-label="Invoice logo file"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    if (file !== undefined) void uploadLogo(file)
-                    event.target.value = ""
-                  }}
-                  className="max-w-full text-sm file:mr-3 file:rounded-md file:border file:border-edge file:bg-ground file:px-2 file:py-1.5 file:text-sm"
-                />
-              </label>
-              {settings.logoUrl === null ? null : (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={logoBusy}
-                  onClick={() => {
-                    setLogoBusy(true)
-                    void clearLogo({})
-                      .catch((thrown: unknown) => {
-                        toasts.add({
-                          title: errorMessage(thrown),
-                          priority: "high",
-                        })
-                      })
-                      .finally(() => setLogoBusy(false))
-                  }}
-                >
-                  Remove logo
-                </Button>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              PNG or JPEG, up to {MAX_LOGO_BYTES / (1024 * 1024)} MB.
-            </p>
-          </div>
+          <InvoiceLogoSection
+            logoUrl={settings.logoUrl}
+            busy={logoBusy}
+            onFile={(file) => void uploadLogo(file)}
+            onRemove={() => {
+              setLogoBusy(true)
+              void clearLogo({})
+                .catch((thrown: unknown) => {
+                  toasts.add({
+                    title: errorMessage(thrown),
+                    priority: "high",
+                  })
+                })
+                .finally(() => setLogoBusy(false))
+            }}
+          />
         </Section>
 
         <Section
           title="Google Calendar"
-          hint="Draw your meetings on the calendar view and read their attendees and agenda without leaving this tab. Chroneli only ever reads from Google — nothing here is written back, and no meeting starts a timer on its own."
+          hint="Chroneli only ever reads. Nothing is written back, and no meeting starts a timer on its own."
         >
           <GoogleCalendarSection
             connection={connection}
@@ -711,13 +707,31 @@ export function Settings() {
 
         <Section
           title="Music"
-          hint="Music plays from your library while a timer runs. Chroneli remembers the track you chose for a piece of work and starts it again the next time you track the same thing."
+          hint="Remembers the track you chose for a piece of work and starts it again next time."
         >
           <MusicSection
             musicAutoplay={settings.musicAutoplay}
             musicOnStop={settings.musicOnStop}
             onChange={save}
           />
+        </Section>
+
+        {/* ITS OWN SECTION RATHER THAN THE ONE ABOVE, because `Section` is a
+            label column beside a CONTROL column and a library is not a control:
+            a queue, a usage bar, a search, a sort and a list of rows do not fit
+            the 1fr half of a two-column grid at any width worth having. Two
+            headings also say the true thing — the switches above are
+            preferences about playback, and this is the files themselves.
+
+            It is LAST on the page on purpose. It is the tallest block here and
+            the one a user visits least; putting it above the account-shaped
+            settings would push those below a fold for a library that is set up
+            once. */}
+        <Section
+          title="Music library"
+          hint="Tracks you upload become selectable from the tracker's music control."
+        >
+          <MusicLibrarySection />
         </Section>
       </div>
     </Page>
@@ -756,18 +770,25 @@ function TimezoneField({
   const options = zones.includes(value) ? zones : [value, ...zones]
 
   return (
-    <select
-      aria-label="Time zone"
+    <Select
       value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className={cn(fieldClass, "max-w-full")}
+      onValueChange={onChange}
     >
-      {options.map((zone) => (
-        <option key={zone} value={zone}>
-          {zone}
-        </option>
-      ))}
-    </select>
+      {/* Widest field on the page, because a zone name is the longest value it
+          holds. `max-w-full` so a narrow phone clips the trigger rather than
+          the column. Base UI's Select carries type-ahead, which is what the
+          native control was buying on a list this long. */}
+      <SelectTrigger aria-label="Time zone" className="w-72 max-w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((zone) => (
+          <SelectItem key={zone} value={zone}>
+            {zone}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -865,7 +886,7 @@ function RateField({
           className={cn(
             fieldClass,
             "w-32 font-mono tracking-[-0.02em] tabular-nums",
-            error !== null && "border-alarm"
+            error !== null && "border-destructive"
           )}
         />
         <span className="text-sm text-muted-foreground">
@@ -875,7 +896,7 @@ function RateField({
       </div>
       {/* The colour is never the only carrier — see DESIGN.md on error states. */}
       {error === null ? null : (
-        <p id="default-rate-error" role="alert" className="text-xs text-alarm">
+        <p id="default-rate-error" role="alert" className="text-xs text-destructive">
           {error}
         </p>
       )}
@@ -899,18 +920,21 @@ function CurrencyField({
   const options = codes.includes(value) ? codes : [value, ...codes]
 
   return (
-    <select
-      aria-label="Currency"
+    <Select
       value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className={cn(fieldClass, "max-w-full")}
+      onValueChange={onChange}
     >
-      {options.map((code) => (
-        <option key={code} value={code}>
-          {code}
-        </option>
-      ))}
-    </select>
+      <SelectTrigger aria-label="Currency" className="w-52 max-w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((code) => (
+          <SelectItem key={code} value={code}>
+            {code}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -935,7 +959,7 @@ function Section({
 
       One column below `lg`, where a phone has no width to give a second one.
     */
-    <section className="grid gap-2 border-b border-edge-soft pb-6 last:border-b-0 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:gap-x-12">
+    <section className="grid gap-2 border-b border-border pb-6 last:border-b-0 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] lg:gap-x-12">
       <div className="flex flex-col gap-2">
         <h2 className="text-sm font-medium">{title}</h2>
         {hint === undefined ? null : (
@@ -967,7 +991,7 @@ function Radio({
         name={name}
         checked={checked}
         onChange={onChange}
-        className="size-4 accent-[var(--ink)]"
+        className="size-4 accent-foreground"
       />
       {children}
     </label>
@@ -977,13 +1001,13 @@ function Radio({
 /** What the choice actually looks like, rather than a description of it. */
 function Sample({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded-sm border border-edge-soft px-1.5 py-0.5 font-mono text-xs tracking-[-0.02em] text-muted-foreground tabular-nums">
+    <span className="rounded-sm border border-border px-1.5 py-0.5 font-mono text-xs tracking-[-0.02em] text-muted-foreground tabular-nums">
       {children}
     </span>
   )
 }
 
 const fieldClass = cn(
-  "rounded-md border border-edge bg-ground px-2 py-1.5 text-sm",
+  "rounded-md border border-input bg-background px-2 py-1.5 text-sm",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 )

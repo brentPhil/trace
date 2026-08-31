@@ -1,14 +1,9 @@
 import { useEffect, useState } from "react"
+import { Input } from "@/components/ui/input"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Button } from "@/components/ui/button"
 import { Link } from "@tanstack/react-router"
 import { EyeIcon, EyeOffIcon } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field"
-import { Input } from "@/components/ui/input"
 import { authClient } from "@/lib/auth-client"
 import { AUTH_ERROR_ID, AuthError, AuthShell } from "@/components/auth-shell"
 import {
@@ -333,9 +328,9 @@ export function AuthForm({
         what they each do.
       */}
       <div aria-hidden className="flex items-center gap-3">
-        <span className="h-px flex-1 bg-edge-soft" />
+        <span className="h-px flex-1 bg-border" />
         <span className="text-xs text-muted-foreground">or</span>
-        <span className="h-px flex-1 bg-edge-soft" />
+        <span className="h-px flex-1 bg-border" />
       </div>
 
       <form onSubmit={handleSubmit} noValidate={false}>

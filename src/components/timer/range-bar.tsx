@@ -1,4 +1,5 @@
 import { RangeStepper } from "@/components/history/range-stepper"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatTotal } from "@/lib/format-total"
 import { staleProps } from "@/lib/stale"
 import {
@@ -8,7 +9,6 @@ import {
   rangePillLabel,
   rangeSpokenLabel,
 } from "@/lib/timer-range"
-import { cn } from "@/lib/utils"
 import type { CalendarSize } from "@/lib/calendar-label"
 import type { DurationDisplay } from "@/lib/format-total"
 import type { DayRange, TimerPreset, TimerRange } from "@/lib/timer-range"
@@ -162,24 +162,32 @@ export function RangeBar({
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
             {/* Sentence case, per The Sentence Case Rule. */}
             <span className="sr-only">Calendar range</span>
-            <select
-              aria-label="Calendar range"
+            <Select
               value={size}
-              onChange={(event) =>
-                onSizeChange(event.target.value as CalendarSize)
-              }
-              className={cn(
-                "rounded-md border border-edge-raised bg-ground px-2 py-1.5",
-                "text-sm text-foreground",
-                "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              )}
+              onValueChange={onSizeChange}
             >
-              {SIZES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
+              {/* `edge-raised`, not `edge`: this control sits in the range
+                  bar, which is a BAND rather than the page's own ground — the
+                  distinction the two tokens exist for. */}
+              <SelectTrigger
+                aria-label="Calendar range"
+                className="border-input"
+              >
+                {/* Values are `week`/`5day`/`day`; the labels are prose. */}
+                <SelectValue>
+                  {(value) =>
+                    SIZES.find((s) => s.value === value)?.label ?? String(value)
+                  }
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {SIZES.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
 
           <span

@@ -1,9 +1,9 @@
 import { useState } from "react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { DollarSign, FolderClosed, Tag } from "lucide-react"
 import { PickerList } from "@/components/classifiers/picker-list"
 import { ProjectDot } from "@/components/classifiers/project-dot"
-import { Button, buttonVariants } from "@/components/ui/button"
-import { Popover } from "@/components/ui/popover"
 import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
 import type { PickerOption } from "@/components/classifiers/picker-list"
@@ -23,11 +23,11 @@ import type { Doc, Id } from "../../../convex/_generated/dataModel"
  */
 
 /* `buttonVariants`, not a `<Button>`: two of the three controls wearing this
- * are `Popover.Trigger`s, which bring their own element and take a className.
+ * are `PopoverTrigger`s, which bring their own element and take a className.
  * `text-[length:inherit]` because a classifier sits inline in a row that has
  * already chosen a size — the base variant's `text-sm` would override it. */
 const triggerClass = cn(
-  buttonVariants({ variant: "quiet", size: "row-trigger" }),
+  buttonVariants({ variant: "ghost", size: "row-trigger" }),
   "rounded-md px-2 py-0 text-[length:inherit]"
 )
 
@@ -93,8 +93,8 @@ export function ProjectPicker({
   const close = () => setOpen(false)
 
   return (
-    <Popover.Root open={isOpen} onOpenChange={setOpen}>
-      <Popover.Trigger
+    <Popover open={isOpen} onOpenChange={setOpen}>
+      <PopoverTrigger
         aria-label={selected === null ? "Project" : `Project: ${selected.name}`}
         className={cn(
           triggerClass,
@@ -111,9 +111,9 @@ export function ProjectPicker({
             nameClassName={nameClassName}
           />
         )}
-      </Popover.Trigger>
+      </PopoverTrigger>
 
-      <Popover.Popup>
+      <PopoverContent>
         <PickerList
           options={options}
           query={query}
@@ -136,20 +136,20 @@ export function ProjectPicker({
           footer={
             <div className="flex flex-col gap-1">
               {error === null ? null : (
-                <p role="alert" className="px-2 py-1 text-xs text-alarm">
+                <p role="alert" className="px-2 py-1 text-xs text-destructive">
                   {error}
                 </p>
               )}
               {value === null ? null : (
                 <Button
                   type="button"
-                  variant="quiet"
+                  variant="ghost"
                   size="sm"
                   onClick={() => {
                     onChange(null)
                     close()
                   }}
-                  className="w-full justify-start px-2 font-normal hover:bg-surface"
+                  className="w-full justify-start px-2 font-normal hover:bg-card"
                 >
                   Clear project
                 </Button>
@@ -157,8 +157,8 @@ export function ProjectPicker({
             </div>
           }
         />
-      </Popover.Popup>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -218,8 +218,8 @@ export function TagPicker({
   }
 
   return (
-    <Popover.Root open={isOpen} onOpenChange={setOpen}>
-      <Popover.Trigger
+    <Popover open={isOpen} onOpenChange={setOpen}>
+      <PopoverTrigger
         aria-label={value.length === 0 ? "Tags" : `Tags: ${value.length} selected`}
         className={cn(
           triggerClass,
@@ -234,9 +234,9 @@ export function TagPicker({
             <span className="text-xs font-mono tabular-nums tracking-[-0.02em]">{value.length}</span>
           ) : null}
         </span>
-      </Popover.Trigger>
+      </PopoverTrigger>
 
-      <Popover.Popup>
+      <PopoverContent>
         <PickerList
           options={options}
           query={query}
@@ -257,14 +257,14 @@ export function TagPicker({
           }}
           footer={
             error === null ? undefined : (
-              <p role="alert" className="px-2 py-1 text-xs text-alarm">
+              <p role="alert" className="px-2 py-1 text-xs text-destructive">
                 {error}
               </p>
             )
           }
         />
-      </Popover.Popup>
-    </Popover.Root>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -290,14 +290,14 @@ export function BillableToggle({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="row-trigger"
       aria-pressed={value}
       aria-label={value ? "Billable" : "Not billable"}
       onClick={() => onChange(!value)}
       className={cn(
         "rounded-md px-2 py-0 text-[length:inherit]",
-        value && "text-brass",
+        value && "text-foreground",
         className
       )}
     >

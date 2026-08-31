@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DateRangePicker } from "@/components/history/date-range-picker"
 import { Button } from "@/components/ui/button"
+import { DateRangePicker } from "@/components/history/date-range-picker"
 import type { DayString } from "@shared/day"
 
 /**
@@ -9,7 +9,7 @@ import type { DayString } from "@shared/day"
  * /timer and /reports each grew their own, and they had already converged on
  * the same three parts in the same order: a back arrow, the picker's pill, a
  * forward arrow. What had NOT converged was everything around them — /reports
- * drew `quiet`/`icon-row` buttons with `border-edge`, /timer drew `ghost`/`icon`
+ * drew `quiet`/`icon-row` buttons with `border-border`, /timer drew `ghost`/`icon`
  * ones sized `size-7`, and the pill between them printed prose on one page and
  * US digits on the other. One control, two appearances, depending on which tab
  * you were looking at.
@@ -113,16 +113,16 @@ function StepButton({
   return (
     <Button
       type="button"
-      variant="quiet"
+      variant="ghost"
       size="icon-row"
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      // `border-edge`, and this is the row that makes the distinction worth
-      // keeping: it sits on the page's own GROUND, above any band, where
-      // --edge measures 3.15:1. A fill-less control that could land on either
-      // layer hard-codes --edge-raised instead.
-      className="border-edge motion-reduce:transition-none"
+      // `border-input`, and this is the row that makes The Boundary Split worth
+      // keeping: a stepper is a control, so its edge has to clear 3:1 wherever
+      // it lands — on the page here, on a band in `filter-controls.tsx` — while
+      // the divider tone beside it stays deliberately under the floor.
+      className="border-input motion-reduce:transition-none"
     >
       {children}
     </Button>

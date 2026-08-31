@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { BillPreview } from "@/components/invoices/bill-preview"
 import { InvoiceForm } from "@/components/invoices/invoice-form"
 import { Page, PageBreadcrumb } from "@/components/shell/page"
-import { Button } from "@/components/ui/button"
 import { useCreateInvoice } from "@/hooks/use-invoice-mutations"
 import { errorMessage } from "@/lib/error-message"
 import { invoiceDisabledReason } from "@/lib/export/export-disabled-reason"
@@ -444,7 +444,7 @@ export function NewInvoicePage({
             {settings.logoUrl === null ? (
               <Link
                 to="/settings"
-                className="hover:border-edge-strong flex h-20 items-center justify-center rounded-md border border-dashed border-edge px-4 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                className="hover:border-foreground flex h-20 items-center justify-center rounded-md border border-dashed border-input px-4 text-sm text-muted-foreground transition-colors hover:text-foreground"
               >
                 No logo — add one in Settings
               </Link>
@@ -485,7 +485,7 @@ export function NewInvoicePage({
           the heavier boundary the totals block uses, applied to the same kind
           of transition.
         */}
-        <div className="flex flex-col gap-3 border-t border-edge-soft pt-5">
+        <div className="flex flex-col gap-3 border-t border-border pt-5">
           <div className="flex flex-wrap items-start gap-4">
             <Button
               disabled={disabledReason !== null || busy}
@@ -541,7 +541,7 @@ export function NewInvoicePage({
           )}
 
           {refusal === null ? null : (
-            <p role="alert" className="max-w-prose text-xs text-alarm">
+            <p role="alert" className="max-w-prose text-xs text-destructive">
               {refusal}
             </p>
           )}

@@ -11,13 +11,13 @@
  * warning saying so. Imported from a non-route file, `component:` and
  * `errorComponent:` split as normal.
  */
+import { Empty } from "@/components/ui/empty"
 import { Link } from "@tanstack/react-router"
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
 import { ExportPdfButton } from "@/components/invoices/export-pdf-button"
 import { InvoiceRecord } from "@/components/invoices/invoice-record"
 import { Page, PageBreadcrumb } from "@/components/shell/page"
-import { Empty } from "@/components/ui/empty"
 import { traceErrorCode } from "@shared/codes"
 import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"

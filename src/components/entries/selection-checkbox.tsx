@@ -36,7 +36,7 @@ export function SelectionCheckbox({
       checked={state === "checked"}
       onChange={(event) => onToggle(event.currentTarget)}
       className={cn(
-        "size-4 shrink-0 rounded-sm border border-edge-raised bg-ground accent-current",
+        "size-4 shrink-0 rounded-sm border border-input bg-background accent-current",
         "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         "transition-opacity motion-reduce:transition-none",
         /*
