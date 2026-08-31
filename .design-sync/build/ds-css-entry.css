@@ -1,0 +1,80 @@
+/* CSS entry for design-sync. Compiled by .design-sync/build-css.mjs.
+ *
+ * It imports the app's REAL stylesheet - the palette, the four measured
+ * repairs, the fourteen `data-theme` presets and the `.dark` ramp all come
+ * through unchanged, so a design built in Claude Design answers the theme
+ * attribute exactly the way the app does. Nothing is redeclared here; a token
+ * defined in this file would be a token the theme picker cannot reach.
+ *
+ * What IS added is coverage. Tailwind only emits the classes it can see, and
+ * the design agent writes layout glue this repo has never written. The
+ * @source lines widen the scan past the components themselves, and the
+ * @source inline block safelists the structural utilities a generated layout
+ * reaches for first. Colour utilities are deliberately safelisted only against
+ * the shadcn token names - the same closed set styles.css defines.
+ */
+@import "../../src/styles.css";
+
+@source "../../src/components";
+@source "../../.design-sync/previews";
+
+/* Spacing, in the steps the ramp actually uses. */
+@source inline("{p,px,py,pt,pr,pb,pl,m,mx,my,mt,mr,mb,ml,gap,gap-x,gap-y,space-x,space-y}-{0,0.5,1,1.5,2,2.5,3,3.5,4,5,6,8,10,12,16}");
+
+/* Flex and grid. */
+@source inline("{flex,inline-flex,grid,inline-grid,block,inline-block,hidden,contents}");
+@source inline("flex-{row,row-reverse,col,col-reverse,wrap,nowrap,1,auto,initial,none}");
+@source inline("{shrink,grow}-{0,}");
+@source inline("grid-cols-{1,2,3,4,5,6,12}");
+@source inline("col-span-{1,2,3,4,full}");
+@source inline("items-{start,center,end,baseline,stretch}");
+@source inline("justify-{start,center,end,between,around,evenly}");
+@source inline("self-{start,center,end,stretch,auto}");
+@source inline("place-{items,content}-center");
+
+/* Sizing. */
+@source inline("{w,h}-{0,1,2,3,4,5,6,8,10,12,16,20,24,32,40,48,64,px,auto,full,screen,fit,min,max}");
+@source inline("{min-w,max-w}-{0,none,full,fit,min,max,xs,sm,md,lg,xl,2xl,3xl,4xl}");
+@source inline("{min-h,max-h}-{0,none,full,screen,fit}");
+@source inline("size-{3,4,5,6,8,10,12,16}");
+
+/* Type. font-sans is the body default (styles.css @applies it); font-mono
+   opts into IBM Plex Mono for durations and other tabular figures. */
+@source inline("{font-sans,font-mono}");
+@source inline("text-{xs,sm,base,lg,xl,2xl,3xl,4xl,5xl}");
+@source inline("font-{thin,light,normal,medium,semibold,bold,extrabold}");
+@source inline("text-{left,center,right,justify}");
+@source inline("{truncate,italic,underline,uppercase,lowercase,capitalize,tabular-nums,antialiased}");
+@source inline("leading-{none,tight,snug,normal,relaxed,loose}");
+@source inline("tracking-{tighter,tight,normal,wide,wider}");
+@source inline("line-clamp-{1,2,3,4,none}");
+@source inline("whitespace-{normal,nowrap,pre,pre-wrap}");
+
+/* Colour - the closed shadcn token set only, never an invented name. */
+@source inline("{bg,text,border,ring,fill,stroke,divide,outline}-{background,foreground,card,card-foreground,popover,popover-foreground,primary,primary-foreground,secondary,secondary-foreground,muted,muted-foreground,accent,accent-foreground,destructive,border,input,ring,sidebar,sidebar-foreground,sidebar-primary,sidebar-accent,sidebar-border,sidebar-ring,chart-1,chart-2,chart-3,chart-4,chart-5,transparent,current,inherit}");
+@source inline("{bg,text,border}-{primary,secondary,muted,accent,destructive,foreground}/{5,10,15,20,25,30,40,50,60,70,75,80,90}");
+
+/* Borders, radius, elevation. */
+@source inline("border{,-0,-2,-4,-t,-r,-b,-l,-x,-y}");
+@source inline("rounded{,-none,-sm,-md,-lg,-xl,-2xl,-3xl,-full}");
+@source inline("shadow{,-xs,-sm,-md,-lg,-xl,-2xl,-none,-inner}");
+@source inline("{ring,ring-offset}-{0,1,2,4}");
+@source inline("divide-{x,y}");
+
+/* Position, overflow, layering. */
+@source inline("{static,relative,absolute,fixed,sticky}");
+@source inline("{inset,top,right,bottom,left}-{0,1,2,4,auto,full}");
+@source inline("z-{0,10,20,30,40,50,auto}");
+@source inline("overflow-{auto,hidden,visible,scroll,x-auto,y-auto,x-hidden,y-hidden}");
+@source inline("{opacity,scale}-{0,50,75,90,95,100}");
+
+/* Interaction affordances. */
+@source inline("cursor-{pointer,default,not-allowed,text,grab}");
+@source inline("{pointer-events-none,pointer-events-auto,select-none,sr-only,not-sr-only}");
+@source inline("transition{,-all,-colors,-opacity,-transform,-shadow}");
+@source inline("duration-{75,100,150,200,300,500,700}");
+@source inline("ease-{linear,in,out,in-out}");
+
+/* The variants those utilities are reached through. */
+@source inline("{hover,focus,focus-visible,active,disabled,group-hover,peer-focus,first,last,odd,even,dark,sm,md,lg,xl}:{bg,text,border,ring}-{primary,secondary,muted,accent,destructive,foreground,background,border,ring}");
+@source inline("{hover,focus,focus-visible,active,disabled}:{opacity-50,opacity-75,opacity-100,underline,shadow-md,scale-95,scale-100}");

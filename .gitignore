@@ -19,3 +19,13 @@ todos.json
 # Generated import payloads — they embed an account id and are reproducible
 # from scripts/toggl-import/payload.mjs.
 scripts/toggl-import/batches/
+
+# design-sync (claude.ai/design import) — staged scripts, build output, machine state.
+# The durable inputs under .design-sync/ (config.json, NOTES.md, conventions.md,
+# scaffold.mjs, build-css.mjs, ds-entry.ts, docs/, previews/) ARE committed.
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+.design-sync/build/compiled.css
