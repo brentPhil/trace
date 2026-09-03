@@ -95,11 +95,7 @@ export function useEntryEditMutations() {
       projectId?: Id<"projects">
       tagIds?: Array<Id<"tags">>
       billable?: boolean
-    }) =>
-      // `entries.create` always defines `immediate` — `entries.editTime` is
-      // the only kind whose result is genuinely absent — so this is never
-      // undefined; `onDuplicate` needs the minted id back.
-      (await createOp({ clientKey: newClientKey(), ...args })).result!,
+    }) => (await createOp({ clientKey: newClientKey(), ...args })).result,
     [createOp]
   )
 

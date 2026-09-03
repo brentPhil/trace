@@ -33,12 +33,22 @@ export function createOutbox(convexClient: ConvexReactClient, queryClient: Query
       )
     },
     applyLocal: (op) => {
-      const def = kinds[op.kind]
+      // Cast to the honest type: `kinds` is narrowed to `Record<string,
+      // OpKind<any, any>>` above for `send`'s sake (every op passed to
+      // `send` was validated by `enqueue`), but a replayed op can name a
+      // kind this build has since removed, and indexing then genuinely
+      // returns `undefined` at runtime regardless of what the narrowed type
+      // claims.
+      const def = kinds[op.kind] as OpKind<any, any> | undefined
       try {
-        def.optimistic?.(adapter, op.args, op.local)
+        def?.optimistic?.(adapter, op.args, op.local)
       } catch {
-        // A patch against a cache shape that has since changed must never
-        // stop the boot. The server's answer is on its way regardless.
+        // The LIVE path, not the boot: `Outbox.load` already guards its own
+        // replay loop, so what this catches is a patch made at enqueue time
+        // against a cache shape that has since changed. The cost is that the
+        // edit does not appear until the server answers, which is bad but
+        // survivable; letting it throw would reject the caller's write for a
+        // rendering problem.
       }
     },
     retryable: isRetryableRejection,

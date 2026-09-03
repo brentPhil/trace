@@ -73,8 +73,21 @@ export const OP_KINDS = {
     ref: api.entries.stop,
     label: "Stopping the timer",
     optimistic: entries.optimisticStop,
-    // Skew-adjusted for the same reason start's is — see there.
-    immediate: (_args, now) => ({ stoppedEntryIds: [], serverNow: now + getSkewMs() }),
+    /*
+     * `stoppedEntryIds` names the timer this stop is FOR, when it names one.
+     *
+     * Not `[]`. Callers branch on this list — `timer-bar.tsx` announces
+     * "Stopped X. 1h 5m recorded." only when it is non-empty — so a
+     * permanently empty answer silently kills the announcement for every
+     * stop. An empty list is the honest answer only when the caller did not
+     * say which timer it meant.
+     *
+     * Skew-adjusted for the same reason `start`'s is — see there.
+     */
+    immediate: (args, now) => ({
+      stoppedEntryIds: args.entryId === undefined ? [] : [args.entryId],
+      serverNow: now + getSkewMs(),
+    }),
   }),
   "entries.discardRunning": kind({
     ref: api.entries.discardRunning,

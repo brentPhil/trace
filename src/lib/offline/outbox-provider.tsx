@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { createOutbox } from "./create-outbox"
 import type { ReactNode } from "react"
 import type { Outbox, OutboxEvent } from "./outbox"
-import type { ArgsOf, OpKindName, ResultOf } from "./op-kinds"
+import type { ArgsOf, OP_KINDS, OpKindName, ResultOf } from "./op-kinds"
 import type { OpLocal } from "./op-types"
 
 const OutboxContext = createContext<Outbox | null>(null)
@@ -54,19 +54,30 @@ export function useOutbox(): Outbox {
  * `settled` is the server's eventual answer for the callers that need it
  * (`start` records `serverNow` from it).
  */
+/**
+ * What `result` is for a given kind — the kind's own result, or `undefined`
+ * when it declares no `immediate`.
+ *
+ * Conditional rather than a blanket `| undefined`, and that is the whole
+ * point: `kind()` deliberately keeps `immediate` out of its widening `Pick`,
+ * so a kind that omits it genuinely lacks the key on its literal type and
+ * this discriminates. A blanket union would push every caller to a `!`, and
+ * a `!` is a lie waiting to happen — removing an `immediate` (which is
+ * exactly what `entries.editTime` did) would leave four call sites compiling
+ * and one of them throwing inside a click handler. This way that same
+ * removal is four compile errors.
+ */
+type ImmediateOf<TKind extends OpKindName> = "immediate" extends keyof (typeof OP_KINDS)[TKind]
+  ? ResultOf<TKind>
+  : undefined
+
 export function useOutboxMutation<TKind extends OpKindName>(kind: TKind) {
   const outbox = useOutbox()
   return useCallback(
-    async (
-      args: ArgsOf<TKind>,
-      local?: OpLocal
-    ): Promise<{ result: ResultOf<TKind> | undefined; settled: Promise<ResultOf<TKind>> }> => {
+    async (args: ArgsOf<TKind>, local?: OpLocal) => {
       const { result, settled } = await outbox.enqueue(kind, args, local)
-      // `result` is `undefined` for a kind with no honest synchronous answer
-      // — `entries.editTime` is the only one. `settled` always carries the
-      // server's real result.
       return {
-        result: result as ResultOf<TKind> | undefined,
+        result: result as ImmediateOf<TKind>,
         settled: settled as Promise<ResultOf<TKind>>,
       }
     },

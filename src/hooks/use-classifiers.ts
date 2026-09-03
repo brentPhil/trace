@@ -64,10 +64,7 @@ export function useClassifierMutations() {
 
   const createProject = useCallback(
     async (input: { name: string; color?: string; billableByDefault?: boolean; hourlyRateCents?: number }) =>
-      // `projects.create` always defines `immediate` — `entries.editTime` is
-      // the only kind whose result is genuinely absent — so this is never
-      // undefined; callers like the project picker need the minted id back.
-      (await createProjectOp({ clientKey: newClientKey(), ...input })).result!,
+      (await createProjectOp({ clientKey: newClientKey(), ...input })).result,
     [createProjectOp]
   )
 
@@ -96,9 +93,7 @@ export function useClassifierMutations() {
 
   /** Get-or-create. The picker's flow is "type a word, press Enter". */
   const ensureTag = useCallback(
-    // `tags.ensure` always defines `immediate`, so the result is never
-    // undefined — see the comment on `createProject` above.
-    async (name: string) => (await ensureTagOp({ name })).result!,
+    async (name: string) => (await ensureTagOp({ name })).result,
     [ensureTagOp]
   )
 

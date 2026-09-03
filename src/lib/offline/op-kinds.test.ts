@@ -99,6 +99,14 @@ describe("OP_KINDS", () => {
     expect(r.stoppedEntryIds).toEqual([])
     expect(r.replayed).toBe(false)
   })
+
+  it("stop's immediate result names the timer it stopped, when the caller named one", () => {
+    const named = OP_KINDS["entries.stop"].immediate({ entryId: "e1" }, 0)
+    expect(named.stoppedEntryIds).toEqual(["e1"])
+
+    const unnamed = OP_KINDS["entries.stop"].immediate({}, 0)
+    expect(unnamed.stoppedEntryIds).toEqual([])
+  })
 })
 
 describe("OP_KINDS coalescing", () => {

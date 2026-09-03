@@ -20,12 +20,12 @@ export type Entry = Doc<"timeEntries">
  * there is exactly one optimistic mechanism in the app rather than two that
  * could disagree.
  *
- * This hook only ever touches `getRunning`, a plain reactive query, so that
- * part is simple. The paginated `listPage` the log itself renders from is a
- * different cache shape — `page` arrays inside pagination results rather than
- * a bare array — which is why `use-entry-edit-mutations.ts`'s `patchEverywhere`
- * and friends walk `getAllQueries(api.entries.listPage)` explicitly instead of
- * relying on this same trick.
+ * `optimisticEntry` only ever touches `getRunning`, a plain reactive query, so
+ * that part is simple. The paginated `listPage` the log itself renders from is
+ * a different cache shape — `page` arrays inside pagination results rather
+ * than a bare array — which is why `patchEverywhere` and friends, below in
+ * this same file, walk `getAllQueries(api.entries.listPage)` explicitly
+ * instead of relying on this same trick.
  */
 export function optimisticEntry(args: {
   clientKey: string

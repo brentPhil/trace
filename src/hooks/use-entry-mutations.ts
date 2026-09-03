@@ -71,9 +71,7 @@ export function useEntryMutations() {
     async (entryId?: Id<"timeEntries">) => {
       const { result, settled } = await stopOp({ entryId, endedAt: Date.now() })
       void settled.then((r) => recordServerNow(r.serverNow)).catch(() => undefined)
-      // `entries.stop` always defines `immediate` — `entries.editTime` is the
-      // only kind whose result is genuinely absent — so this is never undefined.
-      return result!
+      return result
     },
     [stopOp]
   )

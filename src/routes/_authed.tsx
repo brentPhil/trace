@@ -229,12 +229,12 @@ function AuthedShell() {
    * with the control on 2026-08-12; `RunawayBanner`'s is the one that remains,
    * and it inherited the silence rather than the announcement.
    *
-   * THE ORDER IS THE POINT. Announcing first would claim a discard that the
-   * server may still refuse — a screen-reader user told the timer was gone
-   * while it is in fact still running, which is the exact bug
-   * `timer-bar.test.tsx` records having fixed once already. The rejection path
-   * announces nothing and reports through `report`, so the user hears the
-   * error rather than a contradiction.
+   * The announcement is optimistic by construction now: `discard` resolves as
+   * soon as the outbox journals the write, before any round trip, so "after
+   * the write lands" means after the local journal accepts it, not after the
+   * server does. A refusal is no longer this function's problem to report —
+   * the outbox surfaces it through its own `dropped` event, not through
+   * `.catch` here.
    */
   const discardRunning = () => {
     void entryMutations

@@ -44,11 +44,11 @@ vi.mock("@/lib/offline/outbox-provider", async () => {
     useOutboxMutation: (kind: keyof typeof OP_KINDS) => async (args: unknown, local?: unknown) => {
       const def = OP_KINDS[kind] as unknown as {
         optimistic?: (store: OptimisticLocalStore, args: unknown, local: unknown) => void
-        immediate: (args: unknown, now: number) => unknown
+        immediate?: (args: unknown, now: number) => unknown
       }
       const store = getActiveStore()
       if (store !== undefined) def.optimistic?.(store, args, local)
-      const result = def.immediate(args, Date.now())
+      const result = def.immediate?.(args, Date.now())
       return { result, settled: Promise.resolve(result) }
     },
   }

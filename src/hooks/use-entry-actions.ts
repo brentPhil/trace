@@ -125,14 +125,12 @@ export function useEntryActions(timeZone: string): EntryActions {
    * the offset and could land an hour out across a DST boundary — putting the
    * entry back somewhere it never was.
    *
-   * The write is caught here rather than left to propagate, unlike the other
-   * row edits. Those commit into a control that is still on screen and can
-   * reopen with the rejected value in it; this one closes its popover as it
-   * fires, so a rejection had nowhere to land at all — the optimistic update
-   * moved the row, Convex rolled it back, the row jumped home with no
-   * explanation, and the failure surfaced only as an unhandled promise
-   * rejection in the console. Same treatment `onRemove` above already gives a
-   * delete that fails.
+   * The write is still caught here rather than left to propagate, unlike the
+   * other row edits — historically because this one closes its popover as it
+   * fires, so a control-less rejection had nowhere to land. `editTime` is
+   * optimistic by construction now: it resolves as soon as the outbox
+   * journals it, so a refusal is reported by the outbox itself, not by this
+   * catch.
    */
   const onDayChange = useCallback(
     async (entry: Entry, day: string) => {
@@ -231,8 +229,9 @@ export function useEntryActions(timeZone: string): EntryActions {
         await editTime(entry._id, "duration", ms)
       },
       // Classifier changes are fire-and-forget with an optimistic update behind
-      // them, so the row reflects the choice immediately. A failure surfaces as a
-      // toast rather than reverting silently.
+      // them, so the row reflects the choice immediately. The write is optimistic
+      // by construction now — it resolves as soon as the outbox journals it — so
+      // a refusal is reported by the outbox itself, not by this catch.
       onClassify: (entry, rawChange) => {
         // Assigning a billable client's project ticks the `$` in the same
         // write — promotion only, and an explicit `billable` always wins.
