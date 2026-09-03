@@ -1,6 +1,14 @@
 import { clear, createStore, del, entries, get, set } from "idb-keyval"
 import type { QueryCache, QueryFunction, QueryKey } from "@tanstack/react-query"
 
+/**
+ * `updatedAt` is when this snapshot was last WRITTEN, not when its data was
+ * last fetched from the server. Serving a snapshot offline is recorded by
+ * TanStack as an ordinary success, so the writer stores it back with a fresh
+ * stamp — meaning a snapshot in active use never ages out. That is the
+ * intended behaviour (what is being read is what should be kept), but it does
+ * mean the prune below bounds the store by disuse rather than by age of data.
+ */
 export type Snapshot = { data: unknown; updatedAt: number }
 
 export interface SnapshotStore {
@@ -74,6 +82,11 @@ export function isConvexQueryKey(key: readonly unknown[]): boolean {
  * query with a snapshot resolves from it at once; Convex marks its queries
  * never-stale so nothing refetches; and the subscription the cache opened
  * replaces the snapshot the moment the socket delivers.
+ *
+ * A debounced write is lost if the page unloads inside the debounce window
+ * (bounded by `debounceMs`, no `pagehide` flush), so it is not rediscovered
+ * later as a bug — it simply means a snapshot may lag reality by the
+ * debounce interval, which is acceptable.
  */
 export function snapshotQueryFn(
   inner: QueryFunction,
@@ -108,6 +121,9 @@ export function attachSnapshotWriter(
       setTimeout(() => {
         timers.delete(queryHash)
         const { data, dataUpdatedAt } = event.query.state
+        // Disambiguating "no data yet" from "success with a falsy value" —
+        // not an assumption about shape. A Convex query answers `null`, not
+        // `undefined`, when it has nothing.
         if (data === undefined) return
         void store.write(queryHash, { data, updatedAt: dataUpdatedAt }).catch(() => undefined)
       }, debounceMs)

@@ -46,7 +46,9 @@ export function getRouter() {
   convexQueryClient.connect(queryClient)
   if (typeof document !== "undefined") {
     attachSnapshotWriter(queryClient.getQueryCache(), snapshots)
-    void snapshots.prune(Date.now() - SNAPSHOT_MAX_AGE_MS)
+    // Swallowed like every other store write in this layer: a refusing
+    // IndexedDB must cost the app its durability, never its boot.
+    void snapshots.prune(Date.now() - SNAPSHOT_MAX_AGE_MS).catch(() => undefined)
   }
 
   const router = createTanStackRouter({

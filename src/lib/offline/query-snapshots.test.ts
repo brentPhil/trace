@@ -9,6 +9,7 @@ import {
   snapshotQueryFn,
 } from "./query-snapshots"
 import type { QueryFunction, QueryFunctionContext } from "@tanstack/react-query"
+import type { SnapshotStore } from "./query-snapshots"
 
 const KEY = ["convexQuery", "settings:get", {}]
 const ctx = (queryKey: readonly unknown[]) =>
@@ -47,11 +48,28 @@ describe("attachSnapshotWriter", () => {
   it("writes successful convex results, debounced, and ignores other keys", async () => {
     const client = new QueryClient()
     const store = new MemorySnapshotStore()
-    const detach = attachSnapshotWriter(client.getQueryCache(), store, 10)
+    // Counting writes, not just checking the final value: two rapid changes
+    // leave `{a:2}` stored whether the writer debounces or fires on every
+    // event, so the value alone would pass with the debounce deleted.
+    let writes = 0
+    const counting: SnapshotStore = {
+      ...store,
+      read: (hash) => store.read(hash),
+      write: (hash, snapshot) => {
+        writes += 1
+        return store.write(hash, snapshot)
+      },
+      prune: (olderThanMs) => store.prune(olderThanMs),
+      clear: () => store.clear(),
+    }
+    const detach = attachSnapshotWriter(client.getQueryCache(), counting, 10)
     client.setQueryData(KEY, { a: 1 })
     client.setQueryData(KEY, { a: 2 })
     client.setQueryData(["other"], 1)
+    // Nothing yet: the window has not elapsed.
+    expect(writes).toBe(0)
     await wait(30)
+    expect(writes).toBe(1)
     expect((await store.read(hashKey(KEY)))?.data).toEqual({ a: 2 })
     expect(await store.read(hashKey(["other"]))).toBeUndefined()
     detach()
