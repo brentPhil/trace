@@ -81,9 +81,8 @@ vi.mock("@convex-dev/react-query", async (importOriginal) => {
 // flipping it offline means and why.
 vi.mock("convex/react", async (importOriginal) => {
   const actual = await importOriginal<ConvexReactModule>()
-  const { useConvexConnectionStateDouble } = await import(
-    "@/test-utils/convex-query"
-  )
+  const { useConvexConnectionStateDouble } =
+    await import("@/test-utils/convex-query")
   return { ...actual, useConvexConnectionState: useConvexConnectionStateDouble }
 })
 
@@ -670,5 +669,25 @@ describe("the library", () => {
     expect(
       screen.queryByText("You're offline. Uploads need a connection.")
     ).toBeNull()
+  })
+
+  /*
+   * The picker's own `disabled` is what stops an upload starting offline, but
+   * a drop bypasses that element entirely — this file's own comment on the
+   * drop handler says the guard "has to be repeated here". The list itself is
+   * the drop target (see the component's docblock on why there is no
+   * separate dashed zone), so its parent is where `onDrop` is wired.
+   */
+  it("ignores a drop on the list while offline", () => {
+    setConnectionOnline(false)
+    renderMusic()
+
+    const dropTarget = screen.getByRole("list").parentElement as HTMLElement
+    const file = new File([new Uint8Array([1, 2, 3])], "track.mp3", {
+      type: "audio/mpeg",
+    })
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [file] } })
+
+    expect(generateUploadUrl).not.toHaveBeenCalled()
   })
 })

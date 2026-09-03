@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { SidebarProvider } from "@/components/ui/sidebar"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AppSidebar, NAV_ITEMS } from "./app-sidebar"
 import { renderWithRouter } from "@/test-utils/router"
@@ -14,11 +20,13 @@ function mount(
     name,
     onSignOut = vi.fn(),
     signOutDisabledReason = null,
+    signOutWarning = null,
   }: {
     email?: string
     name?: string
     onSignOut?: () => void
     signOutDisabledReason?: string | null
+    signOutWarning?: string | null
   } = {}
 ) {
   render(
@@ -35,6 +43,7 @@ function mount(
             name={name}
             onSignOut={onSignOut}
             signOutDisabledReason={signOutDisabledReason}
+            signOutWarning={signOutWarning}
           />
         </SidebarProvider>
       </ThemeProvider>,
@@ -104,7 +113,9 @@ describe("AppSidebar", () => {
    */
   it("prefers a display name over the email on the trigger", async () => {
     mount("/timer", { name: "Brent Ortega" })
-    expect(await screen.findByRole("button", { name: /Brent Ortega/ })).toBeTruthy()
+    expect(
+      await screen.findByRole("button", { name: /Brent Ortega/ })
+    ).toBeTruthy()
   })
 
   it("opens a profile popover holding the account's identity and Sign out", async () => {
@@ -129,14 +140,18 @@ describe("AppSidebar", () => {
   /**
    * A control that cannot work is disabled and SAYS WHY — never hidden. This
    * is the shell's half of that rule: `_authed.tsx` decides which sentence
-   * applies (offline, or a non-empty outbox) and hands it down as a single
-   * prop, so this only has to prove the prop reaches the control and its text.
+   * applies and hands it down, so this only has to prove the prop reaches the
+   * control and its text.
+   *
+   * OFFLINE IS THE ONLY REFUSAL — see `signOutWarning` below for the other
+   * sentence this same slot can carry, which does NOT disable the control.
    */
-  it("disables Sign out and shows the reason when one is given", async () => {
+  it("disables Sign out and shows the reason when offline", async () => {
     const onSignOut = vi.fn()
     mount("/timer", {
       onSignOut,
-      signOutDisabledReason: "You're offline. Sign out once you're back online.",
+      signOutDisabledReason:
+        "You're offline. Sign out once you're back online.",
     })
     fireEvent.click(await screen.findByRole("button", { name: /a@b\.com/ }))
 
@@ -149,6 +164,34 @@ describe("AppSidebar", () => {
 
     fireEvent.click(signOut)
     expect(onSignOut).not.toHaveBeenCalled()
+  })
+
+  /**
+   * A non-empty outbox WARNS beside a still-live control rather than
+   * disabling it — refusing sign-out on it was a trap (see
+   * `pendingSignOutWarning`'s own docblock): an op the server keeps refusing,
+   * or a drain that has thrown, leaves the count above zero permanently, and
+   * a refusal tied to it would make sign-out unreachable on that machine
+   * forever. So the sentence is shown, the button stays enabled, and pressing
+   * it still calls through.
+   */
+  it("warns about a pending queue without disabling Sign out", async () => {
+    const onSignOut = vi.fn()
+    mount("/timer", {
+      onSignOut,
+      signOutWarning: "2 changes have not synced yet and will be lost.",
+    })
+    fireEvent.click(await screen.findByRole("button", { name: /a@b\.com/ }))
+
+    const signOut = await screen.findByRole("button", { name: "Sign out" })
+    expect((signOut as HTMLButtonElement).disabled).toBe(false)
+    const popup = signOut.closest('[role="dialog"]')
+    expect(popup?.textContent).toContain(
+      "2 changes have not synced yet and will be lost."
+    )
+
+    fireEvent.click(signOut)
+    expect(onSignOut).toHaveBeenCalledTimes(1)
   })
 
   it("renders no reason, and an enabled control, when nothing is stopping sign-out", async () => {

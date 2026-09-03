@@ -30,13 +30,17 @@ import { useSwitchUndo } from "@/lib/use-switch-undo"
 import { MusicProvider, useMusic } from "@/components/music/music-provider"
 import {
   OutboxProvider,
+  useOutbox,
   usePendingCount,
   useOutboxEvents,
 } from "@/lib/offline/outbox-provider"
 import { useOnlineStatus } from "@/lib/offline/use-online-status"
 import { OP_KINDS } from "@/lib/offline/op-kinds"
 import { clearLocalData } from "@/lib/offline/clear-local-data"
-import { OFFLINE_SIGN_OUT_REASON, pendingSignOutReason } from "@/lib/offline/offline-copy"
+import {
+  OFFLINE_SIGN_OUT_REASON,
+  pendingSignOutWarning,
+} from "@/lib/offline/offline-copy"
 import { SyncStatus } from "@/components/shell/sync-status"
 import { OfflinePending } from "@/components/shell/offline-pending"
 import { MusicControls } from "@/components/music/music-controls"
@@ -223,15 +227,17 @@ function AuthedShell() {
 
   const online = useOnlineStatus()
   const pending = usePendingCount()
-  // Two different reasons a control has to say, not one collapsed into the
-  // other: offline is a connection problem, a full outbox is a "your changes
-  // would be stranded" problem, and the sentences in offline-copy.ts are
-  // written for each separately.
-  const signOutDisabledReason = !online
-    ? OFFLINE_SIGN_OUT_REASON
-    : pending > 0
-      ? pendingSignOutReason(pending)
-      : null
+  const outbox = useOutbox()
+  // Offline is the only REFUSAL: a session cannot be ended without the
+  // network. A queue that has not drained is a WARNING, not a refusal —
+  // refusing on it was a trap (see `pendingSignOutWarning`'s own docblock):
+  // an op the server keeps refusing, or a drain that has thrown, leaves
+  // `pending` above zero permanently, and a refusal tied to that count would
+  // make sign-out — and the device clear that comes with it — unreachable on
+  // that machine forever.
+  const signOutDisabledReason = online ? null : OFFLINE_SIGN_OUT_REASON
+  const signOutWarning =
+    online && pending > 0 ? pendingSignOutWarning(pending) : null
   useOutboxEvents(
     useCallback(
       (event) => {
@@ -240,7 +246,8 @@ function AuthedShell() {
           // the status line's count would otherwise sit there implying it is
           // merely waiting for the network.
           toasts.add({
-            title: "Syncing stopped unexpectedly. Your changes are saved on this device.",
+            title:
+              "Syncing stopped unexpectedly. Your changes are saved on this device.",
             priority: "high",
             timeout: 8_000,
           })
@@ -252,8 +259,9 @@ function AuthedShell() {
         // undefined>`), so a kind this build no longer recognises is a real
         // runtime case, not one the type system can rule out.
         const label =
-          (OP_KINDS as Record<string, { label: string } | undefined>)[event.op.kind]?.label ??
-          "A change"
+          (OP_KINDS as Record<string, { label: string } | undefined>)[
+            event.op.kind
+          ]?.label ?? "A change"
         // Each reads as a sentence after the kind's label, which is a gerund
         // phrase: "Starting the timer was skipped: …". The stale wording in
         // particular cannot be "was started more than a day ago" — the only
@@ -265,7 +273,11 @@ function AuthedShell() {
             : event.reason === "orphaned"
               ? "was skipped: something it depended on didn't save."
               : `didn't save: ${errorMessage(event.error)}`
-        toasts.add({ title: `${label} ${why}`, priority: "high", timeout: 8_000 })
+        toasts.add({
+          title: `${label} ${why}`,
+          priority: "high",
+          timeout: 8_000,
+        })
       },
       [toasts]
     )
@@ -282,7 +294,10 @@ function AuthedShell() {
   // No `report` passed: `start`/`stop` are optimistic by construction now —
   // they resolve as soon as the outbox journals the write — so a refusal is
   // the outbox's own `dropped` event to report, not this bridge's.
-  useDesktopBridge(running, { start: entryMutations.start, stop: entryMutations.stop })
+  useDesktopBridge(running, {
+    start: entryMutations.start,
+    stop: entryMutations.stop,
+  })
 
   const announce = useAnnounce()
 
@@ -349,8 +364,11 @@ function AuthedShell() {
       // with an email and a password and never edited, so `undefined` rather
       // than `""` is what the sidebar has to branch on.
       name={user.name === "" ? undefined : user.name}
-      onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots))}
+      onSignOut={() =>
+        void signOutAndLeave(() => clearLocalData(snapshots, outbox.store))
+      }
       signOutDisabledReason={signOutDisabledReason}
+      signOutWarning={signOutWarning}
       sidebarDefaultOpen={sidebarOpen}
       timer={
         <>

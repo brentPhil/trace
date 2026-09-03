@@ -43,7 +43,13 @@
  */
 import { Empty } from "@/components/ui/empty"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { useToastManager } from "@/components/ui/toast"
 import { useEffect, useRef, useState } from "react"
@@ -390,10 +396,7 @@ export function MusicLibrarySection() {
               onChange={(event) => setSearch(event.target.value)}
               className="h-8 w-48 text-sm"
             />
-            <Select
-              value={sort}
-              onValueChange={setSort}
-            >
+            <Select value={sort} onValueChange={setSort}>
               <SelectTrigger aria-label="Sort" size="sm" className="w-44">
                 {/* Values are keys; the labels are prose. */}
                 <SelectValue>
@@ -496,17 +499,20 @@ export function MusicLibrarySection() {
         onDrop={(event) => {
           event.preventDefault()
           setDragging(false)
-          // Ignored, not queued, while `busy`: the file picker above is
-          // already `disabled` for the same reason, but a drop bypasses that
-          // element entirely, so the guard has to be repeated here. Letting a
-          // second drop through would start a concurrent `upload()`, and
-          // `upload`'s own comment explains uploads are SEQUENTIAL precisely
-          // so the account-cap check inside `acceptTrack` cannot be raced by
-          // parallel batches each reading the same pre-upload total — two
-          // concurrent runs from two drops reintroduce exactly that race. The
-          // first run's `finally` would also flip `busy` back to false while
-          // the second run is still going, re-enabling the picker mid-upload.
-          if (busy) return
+          // Ignored, not queued, while `busy` OR `!online`: the file picker
+          // above is already `disabled` for both reasons, but a drop bypasses
+          // that element entirely, so the guard has to be repeated here.
+          // Letting a second drop through while `busy` would start a
+          // concurrent `upload()`, and `upload`'s own comment explains
+          // uploads are SEQUENTIAL precisely so the account-cap check inside
+          // `acceptTrack` cannot be raced by parallel batches each reading
+          // the same pre-upload total — two concurrent runs from two drops
+          // reintroduce exactly that race. The first run's `finally` would
+          // also flip `busy` back to false while the second run is still
+          // going, re-enabling the picker mid-upload. Offline, an upload
+          // that starts cannot finish, and the picker's own `disabled` is
+          // meant to make that impossible — a drop is the other door in.
+          if (busy || !online) return
           void upload(Array.from(event.dataTransfer.files))
         }}
         className={cn(

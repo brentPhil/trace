@@ -9,7 +9,13 @@
  * the eager bundle, with a [tanstack-router] warning per route saying so.
  * Imported from a non-route file, `component:` splits as normal.
  */
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useToastManager } from "@/components/ui/toast"
 import { useEffect, useState } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query"
@@ -30,7 +36,10 @@ import { useLatest } from "@/hooks/use-latest"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { useOutboxMutation } from "@/lib/offline/outbox-provider"
 import { useOnlineStatus } from "@/lib/offline/use-online-status"
-import { OFFLINE_GOOGLE_REASON, OFFLINE_UPLOAD_REASON } from "@/lib/offline/offline-copy"
+import {
+  OFFLINE_GOOGLE_REASON,
+  OFFLINE_UPLOAD_REASON,
+} from "@/lib/offline/offline-copy"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
 import { rateHelp } from "@/lib/format-money"
@@ -420,9 +429,7 @@ export function Settings() {
           </Select>
         </Section>
 
-        <Section
-          title="Durations"
-                  >
+        <Section title="Durations">
           <div className="flex flex-col gap-2">
             <Radio
               name="durationDisplay"
@@ -492,7 +499,9 @@ export function Settings() {
             <SelectTrigger aria-label="Warn after" className="w-52">
               {/* The value is a bare hour count; the option reads "After 8
                   hours" and the trigger has to say the same thing. */}
-              <SelectValue>{(hours) => `After ${String(hours)} hours`}</SelectValue>
+              <SelectValue>
+                {(hours) => `After ${String(hours)} hours`}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {RUNAWAY_CHOICES.map((hours) => (
@@ -626,9 +635,7 @@ export function Settings() {
           </label>
         </Section>
 
-        <Section
-          title="Tab title"
-                  >
+        <Section title="Tab title">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -673,6 +680,7 @@ export function Settings() {
             <InvoiceLogoSection
               logoUrl={settings.logoUrl}
               busy={logoBusy}
+              online={online}
               onFile={(file) => void uploadLogo(file)}
               onRemove={() => {
                 setLogoBusy(true)
@@ -792,10 +800,7 @@ function TimezoneField({
   const options = zones.includes(value) ? zones : [value, ...zones]
 
   return (
-    <Select
-      value={value}
-      onValueChange={onChange}
-    >
+    <Select value={value} onValueChange={onChange}>
       {/* Widest field on the page, because a zone name is the longest value it
           holds. `max-w-full` so a narrow phone clips the trigger rather than
           the column. Base UI's Select carries type-ahead, which is what the
@@ -918,7 +923,11 @@ function RateField({
       </div>
       {/* The colour is never the only carrier — see DESIGN.md on error states. */}
       {error === null ? null : (
-        <p id="default-rate-error" role="alert" className="text-xs text-destructive">
+        <p
+          id="default-rate-error"
+          role="alert"
+          className="text-xs text-destructive"
+        >
           {error}
         </p>
       )}
@@ -942,10 +951,7 @@ function CurrencyField({
   const options = codes.includes(value) ? codes : [value, ...codes]
 
   return (
-    <Select
-      value={value}
-      onValueChange={onChange}
-    >
+    <Select value={value} onValueChange={onChange}>
       <SelectTrigger aria-label="Currency" className="w-52 max-w-full">
         <SelectValue />
       </SelectTrigger>

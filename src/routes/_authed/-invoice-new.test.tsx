@@ -96,9 +96,8 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
 // flipping it offline means and why.
 vi.mock("convex/react", async (importOriginal) => {
   const actual = await importOriginal<ConvexReactModule>()
-  const { useConvexConnectionStateDouble } = await import(
-    "@/test-utils/convex-query"
-  )
+  const { useConvexConnectionStateDouble } =
+    await import("@/test-utils/convex-query")
   return { ...actual, useConvexConnectionState: useConvexConnectionStateDouble }
 })
 
@@ -1084,7 +1083,9 @@ describe("/invoices/new — offline", () => {
     expect(
       document.getElementById(button.getAttribute("aria-describedby") ?? "")
         ?.textContent
-    ).toBe("You're offline. Raising an invoice needs a connection, so its number is unique.")
+    ).toBe(
+      "You're offline. Raising an invoice needs a connection, so its number is unique."
+    )
 
     fireEvent.click(button)
     expect(createInvoice).not.toHaveBeenCalled()
@@ -1095,7 +1096,9 @@ describe("/invoices/new — offline", () => {
   it("leaves Create invoice exactly as priced once back online", () => {
     const { dateSpy } = renderNew()
     expect(
-      screen.getByRole("button", { name: "Create invoice" }).hasAttribute("disabled")
+      screen
+        .getByRole("button", { name: "Create invoice" })
+        .hasAttribute("disabled")
     ).toBe(false)
     dateSpy.mockRestore()
   })

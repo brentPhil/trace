@@ -174,11 +174,13 @@ export function AppSidebar({
   name,
   onSignOut,
   signOutDisabledReason,
+  signOutWarning,
 }: {
   email?: string
   name?: string
   onSignOut: () => void
   signOutDisabledReason: string | null
+  signOutWarning: string | null
 }) {
   return (
     /*
@@ -331,6 +333,7 @@ export function AppSidebar({
           name={name}
           onSignOut={onSignOut}
           signOutDisabledReason={signOutDisabledReason}
+          signOutWarning={signOutWarning}
         />
       </SidebarFooter>
     </Sidebar>
@@ -372,11 +375,13 @@ function ProfileMenu({
   name,
   onSignOut,
   signOutDisabledReason,
+  signOutWarning,
 }: {
   email?: string
   name?: string
   onSignOut: () => void
   signOutDisabledReason: string | null
+  signOutWarning: string | null
 }) {
   /*
    * WHO YOU ARE, resolved once for both places that show it.
@@ -586,14 +591,20 @@ function ProfileMenu({
           }
         />
 
-        {/* Why the control above is inert, said beneath it rather than
-            leaving the button to vanish or to silently do nothing — the same
-            rule every other online-only control in this product follows (see
-            offline-copy.ts). Two different sentences share this one slot: a
-            connection problem and a non-empty outbox are different reasons,
-            and `_authed.tsx` is the one place that decides which applies. */}
-        {signOutDisabledReason !== null ? (
-          <p className="px-2 pb-1 text-xs text-muted-foreground">{signOutDisabledReason}</p>
+        {/* Why the control above is inert, or what pressing it anyway would
+            cost, said beneath it rather than leaving the button to vanish or
+            to silently do nothing — the same rule every other online-only
+            control in this product follows (see offline-copy.ts). Two
+            different sentences share this one slot: a connection problem
+            DISABLES the button (there is no session to end without the
+            network); a non-empty outbox only WARNS beside a control that
+            still works — refusing on it was a trap a pending op or a broken
+            drain could hold shut forever (see `pendingSignOutWarning`).
+            `_authed.tsx` is the one place that decides which applies. */}
+        {(signOutDisabledReason ?? signOutWarning) !== null ? (
+          <p className="px-2 pb-1 text-xs text-muted-foreground">
+            {signOutDisabledReason ?? signOutWarning}
+          </p>
         ) : null}
       </PopoverContent>
     </Popover>

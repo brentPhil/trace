@@ -40,7 +40,15 @@ describe("signOutAndLeave", () => {
     signOut.mockImplementation(async () => {
       order.push("signOut")
     })
+    // Resolves on a LATER tick, not synchronously up to its first `await`.
+    // A `before` that just does `order.push("before")` before its first
+    // `await` would pass this test even if `signOutAndLeave` never awaited
+    // it at all — `void before(); await signOut()` starts `before` running
+    // synchronously and it would still push in time. Only a `before` whose
+    // completion is genuinely awaited can land its push ahead of `signOut`'s
+    // here, since `signOut` itself never yields before pushing.
     const before = async () => {
+      await Promise.resolve()
       order.push("before")
     }
 

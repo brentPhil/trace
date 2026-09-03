@@ -1,11 +1,22 @@
 import { newClientKey } from "@/lib/client-key"
 import { rewritePlaceholders, unresolvedPlaceholders } from "./placeholders"
-import type { Op, OpKind, OpLocal, OutboxSnapshot, OutboxStore } from "./op-types"
+import type {
+  Op,
+  OpKind,
+  OpLocal,
+  OutboxSnapshot,
+  OutboxStore,
+} from "./op-types"
 import type { Lock } from "./web-lock"
 
 export type OutboxEvent =
   | { type: "changed"; pending: number }
-  | { type: "dropped"; op: Op; reason: "rejected" | "stale" | "orphaned"; error?: unknown }
+  | {
+      type: "dropped"
+      op: Op
+      reason: "rejected" | "stale" | "orphaned"
+      error?: unknown
+    }
   /** The drain itself threw. The queue has stopped for a reason that is NOT
    *  being offline, and saying so is the whole point: a frozen pending count
    *  reads as "waiting for the network", which is exactly wrong here.
@@ -35,7 +46,10 @@ export type OutboxOptions = {
   newId?: () => string
 }
 
-type Deferred = { resolve: (value: unknown) => void; reject: (error: unknown) => void }
+type Deferred = {
+  resolve: (value: unknown) => void
+  reject: (error: unknown) => void
+}
 
 /**
  * The persistent outbox.
@@ -50,7 +64,19 @@ type Deferred = { resolve: (value: unknown) => void; reject: (error: unknown) =>
  * "stuck" is exactly a drain that is offline. It resumes when the socket does.
  */
 export class Outbox {
-  private readonly store: OutboxStore
+  /**
+   * The journal itself, exposed so sign-out can empty it.
+   *
+   * `clearLocalData` runs at sign-out, which is now refused ONLY while
+   * offline (see `pendingSignOutWarning`) — a non-empty queue is a warning,
+   * not a refusal — so this can run with ops still in the journal, and
+   * leaving them would mean the next person to sign in on this machine
+   * replays the previous user's writes under their own session. Public
+   * rather than reached around: every other piece of state this class holds
+   * stays private because nothing outside `Outbox` needs it, and this is the
+   * one exception with a real caller.
+   */
+  readonly store: OutboxStore
   // `| undefined`: an op's `kind` is a plain string read back from the
   // journal, so a lookup by an unknown one is a real runtime case (see
   // `drain`'s "Unknown op kind" drop) — not something the type can rule out.
@@ -223,7 +249,11 @@ export class Outbox {
       const def = this.kinds[op.kind]
 
       if (def === undefined) {
-        await this.drop(op, "rejected", new Error(`Unknown op kind: ${op.kind}`))
+        await this.drop(
+          op,
+          "rejected",
+          new Error(`Unknown op kind: ${op.kind}`)
+        )
         continue
       }
 
@@ -252,7 +282,9 @@ export class Outbox {
         if (this.retryable(error)) {
           await this.store.update((s) => ({
             ...s,
-            ops: s.ops.map((o) => (o.id === op.id ? { ...o, inFlight: false } : o)),
+            ops: s.ops.map((o) =>
+              o.id === op.id ? { ...o, inFlight: false } : o
+            ),
           }))
           return
         }
@@ -275,21 +307,34 @@ export class Outbox {
   }
 
   /** Only ever asked about the head of the queue, so "later ops" is the tail. */
-  private isStale(op: Op, def: OpKind<any, any>, snap: OutboxSnapshot): boolean {
+  private isStale(
+    op: Op,
+    def: OpKind<any, any>,
+    snap: OutboxSnapshot
+  ): boolean {
     if (def.staleAfterMs === undefined) return false
     if (this.now() - op.enqueuedAt <= def.staleAfterMs) return false
     const closers = def.closedBy ?? []
     return !snap.ops.slice(1).some((o) => closers.includes(o.kind))
   }
 
-  private async drop(op: Op, reason: "rejected" | "stale" | "orphaned", error?: unknown): Promise<void> {
+  private async drop(
+    op: Op,
+    reason: "rejected" | "stale" | "orphaned",
+    error?: unknown
+  ): Promise<void> {
     const next = await this.store.update((s) => {
       const ops = s.ops.filter((o) => o.id !== op.id)
       return { ops, resolved: s.resolved }
     })
     this.settlers.get(op.id)?.reject(error ?? new Error(reason))
     this.settlers.delete(op.id)
-    this.emit({ type: "dropped", op, reason, ...(error !== undefined ? { error } : {}) })
+    this.emit({
+      type: "dropped",
+      op,
+      reason,
+      ...(error !== undefined ? { error } : {}),
+    })
     this.setPending(next.ops.length)
   }
 
@@ -373,11 +418,19 @@ const RESOLVED_LIMIT = 100
  * `unresolvedPlaceholders(args, {})` with an empty map enumerates every
  * placeholder the queue names, which is precisely the set that must survive.
  */
-function capResolved(resolved: Record<string, string>, ops: Op[]): Record<string, string> {
+function capResolved(
+  resolved: Record<string, string>,
+  ops: Op[]
+): Record<string, string> {
   const keys = Object.keys(resolved)
   if (keys.length <= RESOLVED_LIMIT) return resolved
 
-  const needed = new Set(unresolvedPlaceholders(ops.map((o) => o.args), {}))
+  const needed = new Set(
+    unresolvedPlaceholders(
+      ops.map((o) => o.args),
+      {}
+    )
+  )
   const newest = new Set(keys.slice(keys.length - RESOLVED_LIMIT))
   const kept: Record<string, string> = {}
   // One pass over `keys`, so insertion order — which is the age order the
