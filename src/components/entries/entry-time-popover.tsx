@@ -62,9 +62,12 @@ export function EntryTimePopover({
    * MUST REPORT ITS OWN FAILURE. Unlike `onCommitTime`, which commits into a
    * popover that is still on screen and can show the error inline, a day pick
    * closes this popover as it fires — there is no surface left here by the
-   * time the write can reject. Both implementations raise a toast; the
-   * `.catch` at the call site is only the backstop that keeps a third one from
-   * producing an unhandled rejection.
+   * time the write can reject. The write itself is outbox-backed and
+   * optimistic by construction now, so a refusal is reported by the outbox's
+   * own `dropped` toast in `_authed.tsx`, not by this handler. The `.catch`
+   * at the call site is only a backstop that keeps a throw — before anything
+   * reaches the outbox, not a refusal from it — from becoming an unhandled
+   * rejection.
    */
   onCommitDay: (day: DayString) => Promise<void>
   className?: string
@@ -199,7 +202,10 @@ export function EntryTimePopover({
             if (day === entryDay) return
             void onCommitDay(day).catch(() => {
               // The popup is already gone, so there is nowhere in HERE to put
-              // this. `onCommitDay` owns reporting it; see its prop docs.
+              // this. A refusal is already reported by the outbox's own
+              // `dropped` toast; this backstop only keeps a throw that never
+              // reached the outbox from becoming an unhandled rejection. See
+              // `onCommitDay`'s prop docs.
             })
           }}
         />

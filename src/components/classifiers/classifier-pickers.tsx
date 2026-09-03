@@ -121,10 +121,10 @@ export function ProjectPicker({
           }}
           createLabel={(name) => `Create project “${name}”`}
           onCreate={(name) => {
-            // `onCreate` is `createProject`/`ensureTag`, optimistic by
-            // construction now — it resolves as soon as the outbox journals
-            // the write, so a refusal is the outbox's own `dropped` event to
-            // report, not this picker's.
+            // `onCreate` is `createProject`, optimistic by construction now —
+            // it resolves as soon as the outbox journals the write, so a
+            // refusal is the outbox's own `dropped` event to report, not
+            // this picker's.
             void onCreate(name).then((result) => {
               onChange(result.projectId)
               close()

@@ -235,11 +235,16 @@ function AuthedShell() {
         const label =
           (OP_KINDS as Record<string, { label: string } | undefined>)[event.op.kind]?.label ??
           "A change"
+        // Each reads as a sentence after the kind's label, which is a gerund
+        // phrase: "Starting the timer was skipped: …". The stale wording in
+        // particular cannot be "was started more than a day ago" — the only
+        // kind that can go stale is the start, so that composes to "Starting
+        // the timer was started…".
         const why =
           event.reason === "stale"
-            ? "was started more than a day ago while offline, so it wasn't resumed."
+            ? "was skipped: it had been waiting more than a day."
             : event.reason === "orphaned"
-              ? "depended on something that didn't save."
+              ? "was skipped: something it depended on didn't save."
               : `didn't save: ${errorMessage(event.error)}`
         toasts.add({ title: `${label} ${why}`, priority: "high", timeout: 8_000 })
       },

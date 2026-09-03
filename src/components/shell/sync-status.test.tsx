@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { SyncStatus } from "./sync-status"
 
 afterEach(cleanup)
+afterEach(() => vi.useRealTimers())
 
 describe("SyncStatus", () => {
   it("renders nothing when online with nothing pending", () => {
@@ -29,6 +30,20 @@ describe("SyncStatus", () => {
       vi.advanceTimersByTime(2_100)
     })
     expect(container.innerHTML).toBe("")
-    vi.useRealTimers()
+  })
+
+  it("does not pin the confirmation when the socket blips mid-window", () => {
+    // The timer used to be armed inside the effect that watches `offline`,
+    // so an offline flip cleared it and the re-run never re-armed —
+    // "All changes saved." then stayed on the shell indefinitely.
+    vi.useFakeTimers()
+    const { rerender, container } = render(<SyncStatus offline={false} pending={2} />)
+    rerender(<SyncStatus offline={false} pending={0} />)
+    rerender(<SyncStatus offline pending={0} />)
+    rerender(<SyncStatus offline={false} pending={0} />)
+    act(() => {
+      vi.advanceTimersByTime(2_100)
+    })
+    expect(container.innerHTML).toBe("")
   })
 })

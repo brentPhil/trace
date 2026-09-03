@@ -16,15 +16,28 @@ export function SyncStatus({ offline, pending }: { offline: boolean; pending: nu
   const [justSaved, setJustSaved] = useState(false)
   const previous = useRef(pending)
 
+  /*
+   * Arming and clearing are separate effects, deliberately.
+   *
+   * With the timer armed inside this effect, a change to `offline` runs the
+   * cleanup and clears it — and the re-run then sees `previous.current === 0`
+   * and never re-arms. `justSaved` would stay true forever. That is not a
+   * corner case: `isOffline` flips on the FIRST failed retry of a socket that
+   * was connected, so a blip within the two-second window is ordinary, and
+   * the result is "All changes saved." pinned to the shell until the next
+   * time something syncs.
+   */
   useEffect(() => {
-    if (previous.current > 0 && pending === 0 && !offline) {
-      setJustSaved(true)
-      const timer = setTimeout(() => setJustSaved(false), SAVED_FOR_MS)
-      previous.current = pending
-      return () => clearTimeout(timer)
-    }
+    const settled = previous.current > 0 && pending === 0 && !offline
     previous.current = pending
+    if (settled) setJustSaved(true)
   }, [pending, offline])
+
+  useEffect(() => {
+    if (!justSaved) return
+    const timer = setTimeout(() => setJustSaved(false), SAVED_FOR_MS)
+    return () => clearTimeout(timer)
+  }, [justSaved])
 
   const changes = `${pending} ${pending === 1 ? "change" : "changes"}`
 
@@ -46,8 +59,7 @@ export function SyncStatus({ offline, pending }: { offline: boolean; pending: nu
     <div
       role="status"
       className={cn(
-        "flex items-center gap-2 border-b border-border bg-card px-4 py-1.5 text-sm",
-        "text-muted-foreground"
+        "flex items-center gap-2 border-b border-border bg-card px-4 py-1.5 text-sm text-muted-foreground"
       )}
     >
       <Icon aria-hidden="true" className={cn("size-4", spin && "animate-spin motion-reduce:animate-none")} />

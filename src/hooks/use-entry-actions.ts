@@ -135,7 +135,16 @@ export function useEntryActions(timeZone: string): EntryActions {
   const onDayChange = useCallback(
     async (entry: Entry, day: string) => {
       const from = entry.startedAt
-      await editTime(entry._id, "day", instantMovedToDay(from, day, timeZone))
+      let moved: number
+      try {
+        moved = instantMovedToDay(from, day, timeZone)
+      } catch (thrown) {
+        // Not an outbox refusal — an arithmetic failure before anything is
+        // enqueued, so nothing downstream will report it.
+        toasts.add({ title: errorMessage(thrown), priority: "high" })
+        return
+      }
+      await editTime(entry._id, "day", moved)
 
       // The same label the day headers use, so the toast names the heading the
       // row has just gone to rather than a raw date string.
