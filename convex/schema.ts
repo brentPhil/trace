@@ -66,6 +66,10 @@ export const timeEntryFields = {
 
 export const projectFields = {
   userId: v.string(),
+  /** UUIDv7 minted by the client before the mutation is sent, so a create
+   *  replayed from the offline outbox returns the existing row instead of a
+   *  second project. Optional: rows created before the outbox have none. */
+  clientKey: v.optional(v.string()),
   name: v.string(),
   /** A key into a fixed palette, not a free-form colour. Legibility, never
    *  the sole carrier of meaning. */
@@ -489,11 +493,9 @@ export default defineSchema({
     .index("by_user_clientKey", ["userId", "clientKey"])
     .index("by_user_project", ["userId", "projectId"]),
 
-  projects: defineTable(projectFields).index("by_user_archived_name", [
-    "userId",
-    "archived",
-    "name",
-  ]),
+  projects: defineTable(projectFields)
+    .index("by_user_archived_name", ["userId", "archived", "name"])
+    .index("by_user_clientKey", ["userId", "clientKey"]),
 
   clients: defineTable(clientFields).index("by_user_archived_name", [
     "userId",
