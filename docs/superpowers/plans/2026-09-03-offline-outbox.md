@@ -501,8 +501,18 @@ export type OpKind<Args extends Record<string, unknown>, Result> = {
   mints?: (args: Args) => string
   /** Where the real id for that placeholder lands in the result. */
   minted?: (result: Result) => string
-  /** What the caller is handed straight away. */
-  immediate: (args: Args, now: number) => Result
+  /**
+   * What the caller is handed straight away.
+   *
+   * OPTIONAL, because not every mutation has an honest synchronous answer.
+   * `entries.editTime` returns the RECONCILED times, which cannot be derived
+   * from the args alone — the rule needs the entry's current times, and this
+   * function is not given them. Fabricating a shape there would hand callers
+   * numbers that are simply wrong; omitting it hands them `undefined`, which
+   * is true. The optimistic function still writes the real values to the
+   * cache, and the server's answer arrives through `settled`.
+   */
+  immediate?: (args: Args, now: number) => Result
   /** Two consecutive unsent ops with equal keys collapse into one. */
   coalesceKey?: (args: Args) => string
   /**
@@ -1847,7 +1857,7 @@ export class Outbox {
     this.applyLocal(stored)
     this.setPending(snap.ops.length)
     this.kick()
-    return { op: stored, result: def.immediate(args, this.now()), settled }
+    return { op: stored, result: def.immediate?.(args, this.now()), settled }
   }
 
   pending(): number {
@@ -2916,31 +2926,36 @@ export const OP_KINDS = {
     ref: api.entries.editTime,
     label: "Editing an entry's time",
     optimistic: entries.optimisticEditTime,
-    immediate: nothing,
+    // NO `immediate`. The server returns the RECONCILED times, which cannot
+    // be derived from the args alone — the rule needs the entry's current
+    // times, and `immediate` is not given them. Every call site discards the
+    // result anyway; the optimistic function writes the true values to the
+    // cache, which is what the screen renders.
   }),
   "entries.remove": kind({
     ref: api.entries.remove,
     label: "Deleting an entry",
     optimistic: entries.optimisticRemove,
-    immediate: nothing,
+    // Empty is honest: nothing has been removed on the server yet.
+    immediate: () => ({ removedEntryIds: [] }),
   }),
   "entries.removeMany": kind({
     ref: api.entries.removeMany,
     label: "Deleting entries",
     optimistic: entries.optimisticRemoveMany,
-    immediate: nothing,
+    immediate: () => ({ removedEntryIds: [] }),
   }),
   "entries.restore": kind({
     ref: api.entries.restore,
     label: "Restoring an entry",
     optimistic: entries.optimisticRestore,
-    immediate: nothing,
+    immediate: () => ({ restoredEntryIds: [] }),
   }),
   "entries.restoreMany": kind({
     ref: api.entries.restoreMany,
     label: "Restoring entries",
     optimistic: entries.optimisticRestoreMany,
-    immediate: nothing,
+    immediate: () => ({ restoredEntryIds: [] }),
   }),
   "entries.create": kind({
     ref: api.entries.create,
@@ -3022,7 +3037,9 @@ export type ArgsOf<K extends OpKindName> = FunctionArgs<(typeof OP_KINDS)[K]["re
 export type ResultOf<K extends OpKindName> = FunctionReturnType<(typeof OP_KINDS)[K]["ref"]>
 ```
 
-Return types are already resolved, so do not re-derive them: `projects.update`, `projects.setArchived`, `projects.remove`, `tags.rename`, `tags.remove` and `settings.update` all declare `returns: v.null()`, so `nothing` is right for each. `entries.discardRunning` is the exception and is handled above. `projects.create`'s `clientKey` is optional, so the `as string` casts stay.
+**Before writing the registry, widen `OpKind.immediate` to optional** in `src/lib/offline/op-types.ts` (the doc comment above says why), and change the engine's one call site in `src/lib/offline/outbox.ts` from `def.immediate(args, this.now())` to `def.immediate?.(args, this.now())`. `Outbox.enqueue` already types `result` as `unknown`, so nothing else in the engine moves. Re-run `pnpm vitest run src/lib/offline` afterwards — every existing engine test must stay green.
+
+Return types are already resolved, so do not re-derive them. Declaring `returns: v.null()`, where `nothing` is right: `entries.setTitle`, `entries.update`, `entries.updateMany`, `projects.update`, `projects.setArchived`, `projects.remove`, `tags.rename`, `tags.remove`, `settings.update`. Returning a real shape, handled in the code above: `entries.start`, `entries.stop`, `entries.discardRunning`, `entries.create`, `entries.remove`, `entries.removeMany`, `entries.restore`, `entries.restoreMany`, `projects.create`, `tags.ensure`. With no honest synchronous answer, so no `immediate` at all: `entries.editTime`. `projects.create`'s `clientKey` is optional, so the `as string` casts stay.
 
 `settings.update` carries `coalesceMerge: true` above, and that is load-bearing rather than decorative: the default collapse replaces the earlier op's args, which would lose the currency when the timezone is typed second. The engine and its test for both behaviours land in Task 6; here you only set the flag.
 
@@ -3168,7 +3185,13 @@ export function useOutboxMutation<K extends OpKindName>(kind: K) {
   return useCallback(
     async (args: ArgsOf<K>, local?: OpLocal) => {
       const { result, settled } = await outbox.enqueue(kind, args as Record<string, unknown>, local)
-      return { result: result as ResultOf<K>, settled: settled as Promise<ResultOf<K>> }
+      // `result` is `undefined` for a kind with no honest synchronous answer
+      // — `entries.editTime` is the only one. `settled` always carries the
+      // server's real result.
+      return {
+        result: result as ResultOf<K> | undefined,
+        settled: settled as Promise<ResultOf<K>>,
+      }
     },
     [outbox, kind]
   )
@@ -3345,9 +3368,12 @@ export function useEntryEditMutations() {
     [updateManyOp]
   )
 
+  /** Returns nothing: the reconciled times are not knowable synchronously,
+   *  and every call site discards them. See the `entries.editTime` kind. */
   const editTime = useCallback(
-    async (entryId: Id<"timeEntries">, field: TimeEdit["field"], value: number) =>
-      (await editTimeOp({ entryId, field, value })).result,
+    async (entryId: Id<"timeEntries">, field: TimeEdit["field"], value: number) => {
+      await editTimeOp({ entryId, field, value })
+    },
     [editTimeOp]
   )
 
