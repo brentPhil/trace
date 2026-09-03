@@ -2958,8 +2958,21 @@ export const OP_KINDS = {
     ref: api.entries.stop,
     label: "Stopping the timer",
     optimistic: entries.optimisticStop,
-    // Skew-adjusted for the same reason `start`'s is — see there.
-    immediate: (_args, now) => ({ stoppedEntryIds: [], serverNow: now + getSkewMs() }),
+    /*
+     * `stoppedEntryIds` names the timer this stop is FOR, when it names one.
+     *
+     * Not `[]`. Callers branch on this list — `timer-bar.tsx` announces
+     * "Stopped X. 1h 5m recorded." only when it is non-empty — so a
+     * permanently empty answer silently kills the announcement for every
+     * stop. An empty list is the honest answer only when the caller did not
+     * say which timer it meant.
+     *
+     * Skew-adjusted for the same reason `start`'s is — see there.
+     */
+    immediate: (args, now) => ({
+      stoppedEntryIds: args.entryId === undefined ? [] : [args.entryId],
+      serverNow: now + getSkewMs(),
+    }),
   }),
   "entries.discardRunning": kind({
     ref: api.entries.discardRunning,
@@ -3193,10 +3206,14 @@ export function createOutbox(convexClient: ConvexReactClient, queryClient: Query
     applyLocal: (op) => {
       const def = kinds[op.kind]
       try {
-        def.optimistic?.(adapter, op.args, op.local)
+        def?.optimistic?.(adapter, op.args, op.local)
       } catch {
-        // A patch against a cache shape that has since changed must never
-        // stop the boot. The server's answer is on its way regardless.
+        // The LIVE path, not the boot: `Outbox.load` already guards its own
+        // replay loop, so what this catches is a patch made at enqueue time
+        // against a cache shape that has since changed. The cost is that the
+        // edit does not appear until the server answers, which is bad but
+        // survivable; letting it throw would reject the caller's write for a
+        // rendering problem.
       }
     },
     retryable: isRetryableRejection,
@@ -3266,16 +3283,30 @@ export function useOutbox(): Outbox {
  * `settled` is the server's eventual answer for the callers that need it
  * (`start` records `serverNow` from it).
  */
+/**
+ * What `result` is for a given kind — the kind's own result, or `undefined`
+ * when it declares no `immediate`.
+ *
+ * Conditional rather than a blanket `| undefined`, and that is the whole
+ * point: `kind()` deliberately keeps `immediate` out of its widening `Pick`,
+ * so a kind that omits it genuinely lacks the key on its literal type and
+ * this discriminates. A blanket union would push every caller to a `!`, and
+ * a `!` is a lie waiting to happen — removing an `immediate` (which is
+ * exactly what `entries.editTime` did) would leave four call sites compiling
+ * and one of them throwing inside a click handler. This way that same
+ * removal is four compile errors.
+ */
+type ImmediateOf<K extends OpKindName> = "immediate" extends keyof (typeof OP_KINDS)[K]
+  ? ResultOf<K>
+  : undefined
+
 export function useOutboxMutation<K extends OpKindName>(kind: K) {
   const outbox = useOutbox()
   return useCallback(
     async (args: ArgsOf<K>, local?: OpLocal) => {
       const { result, settled } = await outbox.enqueue(kind, args as Record<string, unknown>, local)
-      // `result` is `undefined` for a kind with no honest synchronous answer
-      // — `entries.editTime` is the only one. `settled` always carries the
-      // server's real result.
       return {
-        result: result as ResultOf<K> | undefined,
+        result: result as ImmediateOf<K>,
         settled: settled as Promise<ResultOf<K>>,
       }
     },
@@ -3897,6 +3928,26 @@ In `src/routes/_authed.tsx`'s `AuthedShell`, after `const report = …`, add:
 Imports: `useCallback` from react, `useOnlineStatus` from `@/lib/offline/use-online-status`, `usePendingCount, useOutboxEvents` from `@/lib/offline/outbox-provider`, `OP_KINDS` and `type OpKindName` from `@/lib/offline/op-kinds`.
 
 Render `<SyncStatus offline={!online} pending={pending} />` inside the `timer` fragment, after `<RunawayBanner … />`. Import it from `@/components/shell/sync-status`.
+
+- [ ] **Step 3b: Retire the error paths the outbox made unreachable**
+
+Task 9 changed every write wrapper to resolve as soon as the op is journaled, so a `.catch(report)` on one of them can no longer fire — a refusal now arrives as the `dropped` event Step 3 just wired up. Until this step those `.catch` calls are dead code that *reads* as live error handling, which is worse than none: the next person to touch one will believe failures are covered there.
+
+Find them with:
+
+```bash
+pnpm eslint --no-eslintrc --rule '{}' /dev/null >/dev/null 2>&1; grep -rn "catch(report)\|catch((thrown" src/routes src/hooks src/components --include=*.tsx --include=*.ts | grep -v "\.test\."
+```
+
+For each hit, decide which of three it is and act:
+
+1. **Wrapping an outbox write** (`start`, `stop`, `discard`, `setTitle`, `update`, `updateMany`, `editTime`, `remove`, `removeMany`, `restore`, `restoreMany`, `create`, `createProject`, `updateProject`, `setArchived`, `removeProject`, `ensureTag`, `renameTag`, `removeTag`, settings `update`) — remove the `.catch` and the now-unused `report`/`toasts` plumbing if nothing else uses it. Where a comment explains the catch, replace it with one naming the outbox as the reporter, so the reasoning is transferred rather than deleted. Two comments are already wrong and must be corrected here rather than left:
+   - `src/routes/_authed.tsx`'s `discardRunning` — its "THE ORDER IS THE POINT. Announcing first would claim a discard that the server may still refuse" no longer describes anything, because the write resolves before any round trip. Say instead that the announcement is now optimistic by construction and the outbox reports a refusal.
+   - `src/hooks/use-entry-actions.ts`'s `onDayChange` — "A failure surfaces as a toast rather than reverting silently", and the longer note explaining why this one catches "unlike the other row edits". Both describe a path that no longer exists.
+2. **Wrapping something still online-only** (`generateLogoUploadUrl`, `setLogo`, `clearLogo`, `music.*`, `google.*`, `invoices.*`) — leave exactly as it is. These still reject.
+3. **Wrapping a non-mutation** (a parse, an export, a clipboard write) — leave as it is.
+
+Do not remove a `try`/`catch` whose `try` also contains something that can still throw. When in doubt about a specific site, leave it and list it in your report rather than guessing.
 
 - [ ] **Step 4: Verify in the browser, commit**
 
