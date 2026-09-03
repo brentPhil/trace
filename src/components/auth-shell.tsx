@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
+import { Logo } from "@/components/logo"
 import { APP_NAME } from "@shared/brand"
 
 /** Stable id so inputs can point at the error via aria-describedby. */
@@ -39,7 +40,7 @@ export function AuthShell({
         // ABSOLUTE sibling, and a positioned element paints above a static one
         // whatever the source order — so without this the ruled ground is drawn
         // over the panel and the form is unreachable.
-        "animate-rise motion-reduce:animate-none relative flex flex-col gap-6",
+        "relative flex animate-rise flex-col gap-6 motion-reduce:animate-none",
         className
       )}
       {...props}
@@ -54,7 +55,8 @@ export function AuthShell({
         between them is what makes the panel read as an object rather than as
         the page.
       */}
-      <span className="self-start text-base font-medium tracking-tight text-foreground">
+      <span className="flex items-center gap-2 self-start text-base font-medium tracking-tight text-foreground">
+        <Logo className="size-5 shrink-0" />
         {APP_NAME}
       </span>
 

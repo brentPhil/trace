@@ -25,10 +25,8 @@ describe("PWA manifest", () => {
     // that no longer exists — so an installed PWA painted its splash a colour
     // found nowhere else in the product.
     //
-    // NOT derived from scripts/make-icons.mjs, which still carries the old
-    // constant: that value is BAKED into the three committed PNGs, so the
-    // script and its artefacts agree with each other and changing one without
-    // regenerating the others is worse than leaving both.
+    // The icons themselves are the mark on its white tile (see
+    // scripts/make-icons.mjs), so this is the splash and title bar only.
     expect(manifest.theme_color).toBe("#0a0a0a")
     expect(manifest.background_color).toBe("#0a0a0a")
   })

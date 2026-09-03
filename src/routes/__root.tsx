@@ -61,6 +61,27 @@ export const Route = createRootRouteWithContext<{
         rel: "manifest",
         href: "/manifest.json",
       },
+      /* The mark, three ways, all rendered from public/logo.svg by
+       * scripts/make-icons.mjs. The SVG is what a modern tab shows — crisp at
+       * any pixel density — and the ICO sits beside it for the browsers and
+       * the Windows pinned-site path that still want one; `sizes="any"` on
+       * the SVG is what makes Chrome prefer it over the ICO listed first.
+       * iOS Safari reads neither and only ever the apple-touch-icon. */
+      {
+        rel: "icon",
+        href: "/favicon.ico",
+        sizes: "48x48",
+      },
+      {
+        rel: "icon",
+        type: "image/svg+xml",
+        href: "/logo.svg",
+        sizes: "any",
+      },
+      {
+        rel: "apple-touch-icon",
+        href: "/apple-touch-icon.png",
+      },
     ],
   }),
   beforeLoad: async (ctx) => {
@@ -169,9 +190,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
           because a palette that arrives on mount is a full repaint rather than
           a polarity swap.
         */}
-        <script
-          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
-        />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         {/*
           The browser chrome around the page — Android's address bar, iOS
           Safari's, a PWA's title bar. TWO tags, one per scheme, because a

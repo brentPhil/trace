@@ -267,8 +267,8 @@ cookies for an origin the window is not on.
 
 ## Regenerating icons
 
-Icons are derived from `src/logo.svg`, the same source the PWA icons come
-from:
+Icons are derived from `public/logo.svg`, the same source the PWA icons, the
+favicon and the in-app `<Logo />` come from:
 
 ```bash
 pnpm icons                              # writes src-tauri/app-icon.png, among others
