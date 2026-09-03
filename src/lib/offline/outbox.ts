@@ -32,6 +32,10 @@ export type OutboxEvent =
  *  See `reconcileSettlers`. */
 export const SENT_BY_ANOTHER_TAB = "This change was sent by another tab."
 
+/** Rejection given to a `settled` promise whose op was discarded by `clear`.
+ *  Distinct from the one above: nothing sent it, it is gone. */
+export const DISCARDED = "This change was discarded."
+
 export type Sender = (op: Op, args: Record<string, unknown>) => Promise<unknown>
 
 export type OutboxOptions = {
@@ -222,7 +226,8 @@ export class Outbox {
    */
   async clear(): Promise<void> {
     const next = await this.store.update(() => EMPTY_SNAPSHOT)
-    this.reconcileSettlers(next)
+    // DISCARDED, not the default: nothing sent these, they were thrown away.
+    this.reconcileSettlers(next, DISCARDED)
     this.setPending(next.ops.length)
   }
 
@@ -378,12 +383,15 @@ export class Outbox {
    * reject one for an op that is merely about to be written. An added `await`
    * in that window would break it silently.
    */
-  private reconcileSettlers(snap: OutboxSnapshot): void {
+  private reconcileSettlers(
+    snap: OutboxSnapshot,
+    reason = SENT_BY_ANOTHER_TAB
+  ): void {
     if (this.settlers.size === 0) return
     const live = new Set(snap.ops.map((o) => o.id))
     for (const [id, deferred] of this.settlers) {
       if (live.has(id)) continue
-      deferred.reject(new Error(SENT_BY_ANOTHER_TAB))
+      deferred.reject(new Error(reason))
       this.settlers.delete(id)
     }
   }
