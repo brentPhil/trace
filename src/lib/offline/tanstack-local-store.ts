@@ -51,9 +51,10 @@ export class TanStackLocalStore implements OptimisticLocalStore {
     //
     // Convex's own store documents `undefined` as "remove the query, to show
     // a loading state while it recomputes". That is NOT reproducible here —
-    // clearing a TanStack entry needs `removeQueries`, which would drop the
-    // subscription too — so an optimistic function must never rely on it.
-    // None does: they write `null` for "nothing is running", never undefined.
+    // clearing a TanStack entry needs `removeQueries`, which resets it to a
+    // loading state for everyone watching it — so an optimistic function must
+    // never rely on it. None does: they write `null` for "nothing is
+    // running", never undefined.
     if (value === undefined) return
     this.queryClient.setQueryData(["convexQuery", getFunctionName(query), args], value)
   }
