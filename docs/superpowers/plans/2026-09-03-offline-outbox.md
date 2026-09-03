@@ -228,76 +228,205 @@ git commit -m "feat(projects): an idempotent create, keyed like entries, for the
 
 ---
 
-### Task 2: `stop` never closes an entry started after its `endedAt`
+### Task 2: `stop` closes only the entry it names
 
 **Files:**
-- Modify: `convex/entries.ts:1474-1520` (`stopImpl`)
+- Modify: `convex/entries.ts` — `stopImpl` and the `stop` / `stopAs` declarations beneath it
 - Modify: `convex/entries.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+**Interfaces:**
+- Produces: `api.entries.stop` and `internal.entries.stopAs` accept an optional `entryId: v.id("timeEntries")`. Given one, only that entry is closed, and only while it is still running. Omitted, behaviour is exactly as it is today — every running entry closes at `endedAt ?? now`.
 
-Append to the top-level `describe` in `convex/entries.test.ts` (the file already has `setup`, `ALICE`, and uses `internal.entries.startAs` / `stopAs`):
+**Why an id rather than a timestamp guard.** The outbox replays a stop carrying the instant the user pressed it, which can land after another device has started something new. From the timestamps alone that is indistinguishable from a backwards clock — the case `convex/entries.test.ts`'s "never produces an end at or before the start" pins, because a timer that can never be stopped is the worst failure in the product. The name is what tells them apart: it says which timer the user was actually looking at. This was found during implementation; an earlier version of this task used a `entry.startedAt >= endedAt` guard and broke that test.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append both inside the existing top-level `describe` in `convex/entries.test.ts`, which already has `setup`, `ALICE`, `key()`, and uses `internal.entries.startAs` / `stopAs` / `getRunningAs`:
 
 ```ts
-  it("a stop replayed with an old endedAt leaves a timer started after it alone", async () => {
+  it("closes only the entry it names, so a replayed stop cannot end a later timer", async () => {
     const t = setup()
-    const base = 1_700_000_000_000
-    // Device A pressed stop at base+1h while offline. Meanwhile device B
-    // started a new timer at base+2h. A's stop arrives at base+3h.
-    await t.mutation(internal.entries.startAs, {
+    const { entryId: earlier } = await t.mutation(internal.entries.startAs, {
       userId: ALICE,
-      clientKey: "b-start",
-      startedAt: base + 2 * 3_600_000,
+      clientKey: key(1),
     })
+    // A second start closes the first and becomes the running one — which is
+    // what another device starting something else looks like from here.
+    await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(2) })
+
+    // The stop the first device queued while offline, naming the entry it was
+    // looking at, arriving now.
     const result = await t.mutation(internal.entries.stopAs, {
       userId: ALICE,
-      endedAt: base + 3_600_000,
+      entryId: earlier,
+      endedAt: Date.now(),
     })
+
     expect(result.stoppedEntryIds).toEqual([])
-    const running = await t.query(internal.entries.getRunningAs, { userId: ALICE })
-    expect(running).not.toBeNull()
+    expect(
+      await t.query(internal.entries.getRunningAs, { userId: ALICE })
+    ).not.toBeNull()
+  })
+
+  it("stops the entry it names when that entry is the running one", async () => {
+    const t = setup()
+    const { entryId } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+
+    const result = await t.mutation(internal.entries.stopAs, { userId: ALICE, entryId })
+
+    expect(result.stoppedEntryIds).toEqual([entryId])
+    expect(await t.query(internal.entries.getRunningAs, { userId: ALICE })).toBeNull()
+  })
+
+  it("discards only the entry it names, so a replayed discard cannot delete a later timer", async () => {
+    const t = setup()
+    const { entryId: earlier } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+    await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(2) })
+
+    await t.mutation(internal.entries.discardRunningAs, { userId: ALICE, entryId: earlier })
+
+    expect(
+      await t.query(internal.entries.getRunningAs, { userId: ALICE })
+    ).not.toBeNull()
   })
 ```
 
-If `getRunningAs` does not exist, use whichever internal query the file already uses to read the running entry (search the file for `getRunning`).
-
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 2: Run them to verify they fail**
 
 ```bash
-pnpm vitest run convex/entries.test.ts -t "replayed with an old endedAt"
+pnpm vitest run convex/entries.test.ts -t "only the entry it names"
 ```
 
-Expected: FAIL — `stoppedEntryIds` has one id (the clamp closed B's entry at its own start + 1ms).
+Expected: FAIL on argument validation — `entryId` is not in `stopAs`'s args.
 
-- [ ] **Step 3: Skip later-started entries in `stopImpl`**
+- [ ] **Step 3: Take the name in `stopImpl`**
 
-In `convex/entries.ts`, change the loop in `stopImpl` to:
+In `convex/entries.ts`, replace `stopImpl` and the two declarations under it with:
 
 ```ts
-  for (const entry of running) {
-    // An explicit endedAt is a fact about when the user pressed stop. A
-    // timer that started AFTER that instant — on another device, while this
-    // stop sat in an offline outbox — was never the thing being stopped.
-    if (endedAt !== undefined && entry.startedAt >= endedAt) continue
+async function stopImpl(
+  ctx: MutationCtx,
+  userId: string,
+  endedAt: number | undefined,
+  entryId: Id<"timeEntries"> | undefined
+) {
+  const now = Date.now()
+  const running = await runningEntries(ctx, userId)
+
+  /*
+   * A stop that NAMES an entry closes that entry and nothing else.
+   *
+   * The offline outbox replays a stop carrying the instant the user pressed
+   * it, which can arrive after another device has started something new.
+   * Against the timestamps alone that is the same shape as a backwards clock
+   * — the case the test above insists must still stop the timer, because a
+   * timer that can never be stopped is the worst failure this product has.
+   * There is no telling them apart from the numbers. The name does it: it
+   * says which timer the user was looking at.
+   *
+   * Filtering `running` rather than fetching by id is what keeps ownership
+   * intact for free — `runningEntries` is already scoped to `userId`, so a
+   * name belonging to somebody else matches nothing rather than needing its
+   * own check that a later edit could drop.
+   */
+  const targets =
+    entryId === undefined ? running : running.filter((entry) => entry._id === entryId)
+
+  const stoppedEntryIds: Array<Id<"timeEntries">> = []
+  for (const entry of targets) {
     if (await closeEntry(ctx, entry, endedAt ?? now, now)) {
       stoppedEntryIds.push(entry._id)
     }
   }
+  return { stoppedEntryIds, serverNow: now }
+}
+
+const stopArgs = {
+  endedAt: v.optional(v.number()),
+  /** Which timer this stop is for. Absent means "whatever is running", which
+   *  is every caller that is looking at the live server state. */
+  entryId: v.optional(v.id("timeEntries")),
+}
+
+export const stop = mutation({
+  args: stopArgs,
+  returns: stopReturns,
+  handler: async (ctx, args) =>
+    await stopImpl(ctx, await requireUserId(ctx), args.endedAt, args.entryId),
+})
+
+export const stopAs = internalMutation({
+  args: { ...stopArgs, userId: v.string() },
+  returns: stopReturns,
+  handler: async (ctx, args) => await stopImpl(ctx, args.userId, args.endedAt, args.entryId),
+})
 ```
 
-- [ ] **Step 4: Run the file**
+Leave `stopImpl`'s existing doc comment above it in place — its "never refuses, and is a no-op when nothing is" argument still holds, and a named stop that matches nothing is exactly such a no-op.
+
+- [ ] **Step 3b: The same name on `discardRunning`**
+
+`discardRunning` carries the identical hazard and is worse when it bites: it DELETES rather than closes, so a discard replayed after another device started something takes a live timer with it. Give it the same optional name. Find `discardRunningImpl` in `convex/entries.ts`, add the parameter, and filter the running entries it acts on exactly as `stopImpl` now does:
+
+```ts
+async function discardRunningImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryId: Id<"timeEntries"> | undefined
+) {
+  // … whatever the existing body reads the running entries into, then the
+  // same one-line narrowing stopImpl uses, for the same reason and with the
+  // same ownership argument — `runningEntries` is already scoped to userId:
+  //
+  //   const targets =
+  //     entryId === undefined ? running : running.filter((e) => e._id === entryId)
+  //
+  // and the existing delete loop runs over `targets`.
+}
+```
+
+Read the existing `discardRunningImpl` and adapt it in place rather than rewriting it — keep its current doc comment, its return shape, and whatever it does per entry. Then thread the argument through both declarations:
+
+```ts
+const discardArgs = {
+  /** Which timer to discard. Absent means "whatever is running" — see the
+   *  note in `stopImpl` for why a replayed discard has to say. */
+  entryId: v.optional(v.id("timeEntries")),
+}
+
+export const discardRunning = mutation({
+  args: discardArgs,
+  returns: discardReturns,
+  handler: async (ctx, args) =>
+    await discardRunningImpl(ctx, await requireUserId(ctx), args.entryId),
+})
+
+export const discardRunningAs = internalMutation({
+  args: { ...discardArgs, userId: v.string() },
+  returns: discardReturns,
+  handler: async (ctx, args) => await discardRunningImpl(ctx, args.userId, args.entryId),
+})
+```
+
+- [ ] **Step 4: Run the whole file**
 
 ```bash
 pnpm vitest run convex/entries.test.ts
 ```
 
-Expected: all pass.
+Expected: every test passes, including "never produces an end at or before the start, even with a backwards clock" and "is a no-op the second time", both of which call `stopAs` with no `entryId` and must be untouched by this change.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add convex/entries.ts convex/entries.test.ts
-git commit -m "fix(entries): a stale stop cannot close a timer another device started later"
+git commit -m "feat(entries): a stop or discard names the timer it is for, so a replayed one cannot take a later entry"
 ```
 
 ---
@@ -2405,15 +2534,27 @@ export function useEntryMutations() {
     [start]
   )
 
-  /** `endedAt` is recorded NOW: a stop replayed hours later must close the
-   *  entry at the moment the user pressed it, not at the moment it synced. */
-  const stop = useCallback(async () => {
-    const { result, settled } = await stopOp({ endedAt: Date.now() })
-    void settled.then((r) => recordServerNow(r.serverNow)).catch(() => undefined)
-    return result
-  }, [stopOp])
+  /**
+   * `endedAt` is recorded NOW: a stop replayed hours later must close the
+   * entry at the moment the user pressed it, not at the moment it synced.
+   *
+   * `entryId` is what makes that safe — see `stopImpl` in convex/entries.ts.
+   * It may be an `optimistic:` placeholder when the start has not landed yet,
+   * which is exactly what the outbox rewrites once that start resolves.
+   */
+  const stop = useCallback(
+    async (entryId?: Id<"timeEntries">) => {
+      const { result, settled } = await stopOp({ entryId, endedAt: Date.now() })
+      void settled.then((r) => recordServerNow(r.serverNow)).catch(() => undefined)
+      return result
+    },
+    [stopOp]
+  )
 
-  const discard = useCallback(async () => (await discardOp({})).result, [discardOp])
+  const discard = useCallback(
+    async (entryId?: Id<"timeEntries">) => (await discardOp({ entryId })).result,
+    [discardOp]
+  )
 
   const setTitle = useCallback(
     async (entryId: Id<"timeEntries">, title: string) => {
@@ -2425,6 +2566,20 @@ export function useEntryMutations() {
   return { start, resume, stop, discard, setTitle }
 }
 ```
+
+**The callers must supply the name.** `TimerBarActions.stop` is typed `() => Promise<…>` and the bar calls it with no argument, so the id is supplied where the running entry is in scope rather than by widening the component's contract. In `src/routes/_authed.tsx`, inside `AuthedShell`, change the two call sites to close over `running`:
+
+```tsx
+      stop: () => entryMutations.stop(running?._id),
+```
+
+in the `timerActions` memo (add `running` to its dependency array), and in the `RunawayBanner` props:
+
+```tsx
+            onStop={() => void entryMutations.stop(running?._id).catch(report)}
+```
+
+`discardRunning` in the same file becomes `entryMutations.discard(running?._id)`. A `running` of `null` leaves the id undefined, which is the old "stop whatever is running" behaviour — correct, because a user can only press stop when the bar is showing them a timer.
 
 Keep the moved `optimisticEntry` import out of this file (it no longer needs it). Delete `src/lib/pending-start.ts` and its test if one exists. In `src/hooks/use-timer-effects.ts` delete `useReplayPendingStart` and its imports (`useEntryMutations`, `readPendingStart`, `shouldReplay`). In `src/routes/_authed.tsx` delete `useReplayPendingStart(running)` and its import.
 
