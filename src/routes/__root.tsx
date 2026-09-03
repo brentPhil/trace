@@ -7,6 +7,7 @@ import {
   createRootRouteWithContext,
   useRouteContext,
 } from "@tanstack/react-router"
+import { useEffect } from "react"
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
 import { TanStackDevtools } from "@tanstack/react-devtools"
 import { createServerFn } from "@tanstack/react-start"
@@ -22,6 +23,8 @@ import { ShortcutsOverlay } from "@/components/a11y/shortcuts-overlay"
 import { authClient } from "@/lib/auth-client"
 import { THEME_INIT_SCRIPT } from "@/lib/theme"
 import { getToken } from "@/lib/auth-server"
+import { registerServiceWorker } from "@/lib/offline/register-sw"
+import { readRememberedAuth, writeRememberedAuth } from "@/lib/offline/remembered-auth"
 import { pageTitle } from "@shared/brand"
 import appCss from "../styles.css?url"
 
@@ -87,7 +90,17 @@ export const Route = createRootRouteWithContext<{
     ],
   }),
   beforeLoad: async (ctx) => {
-    const token = await getAuth()
+    let token: string | undefined
+    try {
+      token = await getAuth()
+    } catch (error) {
+      // On the server there is no "unreachable": rethrow. In the browser a
+      // thrown server function means the fetch itself failed — offline, or
+      // the site is down — and the last answer stands. A server that answers
+      // "no token" never lands here; that is a null below, not a throw.
+      if (typeof window === "undefined") throw error
+      return { isAuthenticated: readRememberedAuth(), token: null, bootedOffline: true }
+    }
 
     // serverHttpClient only exists during SSR. Setting the token here is what
     // lets queries, mutations and actions run authenticated on the server, so
@@ -95,10 +108,12 @@ export const Route = createRootRouteWithContext<{
     if (token) {
       ctx.context.convexQueryClient.serverHttpClient?.setAuth(token)
     }
+    if (typeof window !== "undefined") writeRememberedAuth(!!token)
 
     return {
       isAuthenticated: !!token,
       token,
+      bootedOffline: false,
     }
   },
   notFoundComponent: () => (
@@ -113,6 +128,20 @@ export const Route = createRootRouteWithContext<{
 
 function RootComponent() {
   const context = useRouteContext({ from: Route.id })
+
+  useEffect(() => {
+    registerServiceWorker()
+  }, [])
+
+  // An offline boot has no session (the auth fetch failed too), so the socket
+  // stays paused. Once the network is back, a reload is the shortest path to
+  // a real session; the outbox and the snapshots both survive it.
+  useEffect(() => {
+    if (!context.bootedOffline) return
+    const reload = () => window.location.reload()
+    window.addEventListener("online", reload)
+    return () => window.removeEventListener("online", reload)
+  }, [context.bootedOffline])
 
   return (
     <ConvexBetterAuthProvider

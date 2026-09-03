@@ -36,6 +36,7 @@ import {
 import { useOnlineStatus } from "@/lib/offline/use-online-status"
 import { OP_KINDS } from "@/lib/offline/op-kinds"
 import { SyncStatus } from "@/components/shell/sync-status"
+import { OfflinePending } from "@/components/shell/offline-pending"
 import { MusicControls } from "@/components/music/music-controls"
 import { cn } from "@/lib/utils"
 import { api } from "../../convex/_generated/api"
@@ -82,8 +83,15 @@ export const Route = createFileRoute("/_authed")({
     ])
   },
   errorComponent: AuthedErrorBoundary,
+  pendingComponent: AuthedPending,
   component: AuthedLayout,
 })
+
+/** A route file may read connection state; components take it as a prop. */
+function AuthedPending() {
+  const online = useOnlineStatus()
+  return <OfflinePending offline={!online} />
+}
 
 /**
  * Just the provider boundary. `AuthedShell` below is the one that calls
