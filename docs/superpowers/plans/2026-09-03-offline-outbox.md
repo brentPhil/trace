@@ -1981,6 +1981,23 @@ export class Outbox {
   }
 
   /**
+   * Empties the journal, and tells everything that watches it.
+   *
+   * A method rather than letting a caller reach for `store` directly: the
+   * queue is not the only state: `pendingCount` drives the status line, the
+   * settlers hold promises for ops that would otherwise never be answered,
+   * and a `changed` event is what the shell re-renders from. Clearing the
+   * store behind the engine's back leaves all three describing a queue that
+   * no longer exists — invisible when the page is about to be torn down, and
+   * exactly wrong when the sign-out that triggered it then fails.
+   */
+  async clear(): Promise<void> {
+    const next = await this.store.update(() => EMPTY_SNAPSHOT)
+    this.reconcileSettlers(next)
+    this.setPending(next.ops.length)
+  }
+
+  /**
    * Settles anything that left the journal without THIS instance sending it.
    *
    * With the Web Lock in place another tab may hold the sender and drain an
@@ -4996,9 +5013,8 @@ Create `src/lib/offline/clear-local-data.ts`:
 ```ts
 import { clearRememberedAuth } from "./remembered-auth"
 import { clearServiceWorkerCaches } from "./register-sw"
-import { EMPTY_SNAPSHOT } from "./op-types"
 import type { SnapshotStore } from "./query-snapshots"
-import type { OutboxStore } from "./op-types"
+import type { Outbox } from "./outbox"
 
 /**
  * Everything offline support keeps on the device, gone at sign-out.
@@ -5015,12 +5031,12 @@ import type { OutboxStore } from "./op-types"
  */
 export async function clearLocalData(
   snapshots: SnapshotStore,
-  outbox: OutboxStore
+  outbox: Outbox
 ): Promise<void> {
   clearRememberedAuth()
   await Promise.all([
     snapshots.clear().catch(() => undefined),
-    outbox.update(() => EMPTY_SNAPSHOT).catch(() => undefined),
+    outbox.clear().catch(() => undefined),
     clearServiceWorkerCaches().catch(() => undefined),
   ])
 }
@@ -5062,7 +5078,7 @@ In `AuthedShell`, compute:
     online && pending > 0 ? pendingSignOutWarning(pending) : null
 ```
 
-and pass both to `<AppShell signOutDisabledReason={signOutDisabledReason} signOutWarning={signOutWarning} …>`, with `onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots, outbox.store))}`.
+and pass both to `<AppShell signOutDisabledReason={signOutDisabledReason} signOutWarning={signOutWarning} …>`, with `onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots, outbox))}`.
 
 - [ ] **Step 3: Invoices, uploads, Google**
 
@@ -5109,6 +5125,8 @@ Import `useOnlineStatus` from `@/lib/offline/use-online-status` and the sentence
 **The drop targets need the same gate as the pickers.** `-music-library.tsx`'s drop handler and `invoice-logo-section.tsx`'s both guard on `busy` alone, and `-music-library.tsx`'s own comment already says the picker's guard "has to be repeated here" because "a drop bypasses that element entirely". Disabling the picker without repeating it leaves a section that renders "You're offline. Uploads need a connection." beside a tile that still accepts a file and starts an upload it cannot finish. Both become `if (busy || !online) return`. `InvoiceLogoSection` takes `online` as a prop, like every other piece of state a component in this repo renders from.
 
 Dim the logo picker's `<label>` on `!online` as well as `busy`, matching what the music one already does — a control that is inert must look it, not merely be it.
+
+Test each drop handler: offline, a drop starts no upload. **Assert on a SYNCHRONOUS signal in the music one.** `generateUploadUrl` is only reached after `await decodeDurationMs(file)`, which returns a promise on every path — including jsdom's missing-`URL.createObjectURL` early return — so asserting "not called" straight after `fireEvent.drop` passes whether or not the guard exists. `upload` calls `setQueue` before any `await`, so assert the dropped file's name never appears instead: `expect(screen.queryByText("track.mp3")).toBeNull()`. The logo one needs no such care — `generateLogoUploadUrl({})` is evaluated before that handler's first `await`. Prove each discriminates by deleting `|| !online` from the handler, watching the test fail, and restoring.
 
 - [ ] **Step 3b: Assert the gate on the controls, not on the wrapper**
 
