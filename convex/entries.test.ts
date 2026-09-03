@@ -494,6 +494,43 @@ describe("stop", () => {
     )
     expect(stillRunning).toEqual([])
   })
+
+  it("closes only the entry it names, so a replayed stop cannot end a later timer", async () => {
+    const t = setup()
+    const { entryId: earlier } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+    // A second start closes the first and becomes the running one — which is
+    // what another device starting something else looks like from here.
+    await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(2) })
+
+    // The stop the first device queued while offline, naming the entry it was
+    // looking at, arriving now.
+    const result = await t.mutation(internal.entries.stopAs, {
+      userId: ALICE,
+      entryId: earlier,
+      endedAt: Date.now(),
+    })
+
+    expect(result.stoppedEntryIds).toEqual([])
+    expect(
+      await t.query(internal.entries.getRunningAs, { userId: ALICE })
+    ).not.toBeNull()
+  })
+
+  it("stops the entry it names when that entry is the running one", async () => {
+    const t = setup()
+    const { entryId } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+
+    const result = await t.mutation(internal.entries.stopAs, { userId: ALICE, entryId })
+
+    expect(result.stoppedEntryIds).toEqual([entryId])
+    expect(await t.query(internal.entries.getRunningAs, { userId: ALICE })).toBeNull()
+  })
 })
 
 describe("discardRunning", () => {
@@ -520,6 +557,21 @@ describe("discardRunning", () => {
     await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(1) })
     await t.mutation(internal.entries.discardRunningAs, { userId: ALICE })
     expect(await t.query(internal.entries.getRunningAs, { userId: ALICE })).toBeNull()
+  })
+
+  it("discards only the entry it names, so a replayed discard cannot delete a later timer", async () => {
+    const t = setup()
+    const { entryId: earlier } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+    await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(2) })
+
+    await t.mutation(internal.entries.discardRunningAs, { userId: ALICE, entryId: earlier })
+
+    expect(
+      await t.query(internal.entries.getRunningAs, { userId: ALICE })
+    ).not.toBeNull()
   })
 })
 
