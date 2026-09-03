@@ -28,12 +28,19 @@ import { useDesktopBridge } from "@/hooks/use-desktop-bridge"
 import { useLatest } from "@/hooks/use-latest"
 import { useSwitchUndo } from "@/lib/use-switch-undo"
 import { MusicProvider, useMusic } from "@/components/music/music-provider"
-import { OutboxProvider } from "@/lib/offline/outbox-provider"
+import {
+  OutboxProvider,
+  usePendingCount,
+  useOutboxEvents,
+} from "@/lib/offline/outbox-provider"
+import { useOnlineStatus } from "@/lib/offline/use-online-status"
+import { OP_KINDS } from "@/lib/offline/op-kinds"
+import { SyncStatus } from "@/components/shell/sync-status"
 import { MusicControls } from "@/components/music/music-controls"
 import { cn } from "@/lib/utils"
 import { api } from "../../convex/_generated/api"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 
 /**
  * Pathless layout route. Anything nested under `_authed/` requires a session.
@@ -204,18 +211,54 @@ function AuthedShell() {
     })
   }
 
+  const online = useOnlineStatus()
+  const pending = usePendingCount()
+  useOutboxEvents(
+    useCallback(
+      (event) => {
+        if (event.type === "failed") {
+          // Not "offline": the queue stopped for a reason of its own, and
+          // the status line's count would otherwise sit there implying it is
+          // merely waiting for the network.
+          toasts.add({
+            title: "Syncing stopped unexpectedly. Your changes are saved on this device.",
+            priority: "high",
+            timeout: 8_000,
+          })
+          return
+        }
+        if (event.type !== "dropped") return
+        // Not `as OpKindName`: `event.op.kind` is a plain string read back
+        // from the journal (see `outbox.ts`'s own `Record<string, … |
+        // undefined>`), so a kind this build no longer recognises is a real
+        // runtime case, not one the type system can rule out.
+        const label =
+          (OP_KINDS as Record<string, { label: string } | undefined>)[event.op.kind]?.label ??
+          "A change"
+        const why =
+          event.reason === "stale"
+            ? "was started more than a day ago while offline, so it wasn't resumed."
+            : event.reason === "orphaned"
+              ? "depended on something that didn't save."
+              : `didn't save: ${errorMessage(event.error)}`
+        toasts.add({ title: `${label} ${why}`, priority: "high", timeout: 8_000 })
+      },
+      [toasts]
+    )
+  )
+
   // Mounted here rather than up with `useTabTitleClock` and the other
-  // `running` watchers: it needs `entryMutations` and `report`, both declared
-  // below that block, and React only requires hooks to run unconditionally in
-  // the same order every render — it does not care what plain declarations
-  // sit between them. Same survives-navigation reasoning as `useSwitchUndo`
+  // `running` watchers: it needs `entryMutations`, declared below that
+  // block, and React only requires hooks to run unconditionally in the same
+  // order every render — it does not care what plain declarations sit
+  // between them. Same survives-navigation reasoning as `useSwitchUndo`
   // above: this is the one mount that outlives every page, so the tray never
   // goes stale because the user changed pages.
-  useDesktopBridge(
-    running,
-    { start: entryMutations.start, stop: entryMutations.stop },
-    report
-  )
+  //
+  // No `report` passed: `start`/`stop` are optimistic by construction now —
+  // they resolve as soon as the outbox journals the write — so a refusal is
+  // the outbox's own `dropped` event to report, not this bridge's.
+  useDesktopBridge(running, { start: entryMutations.start, stop: entryMutations.stop })
 
   const announce = useAnnounce()
 
@@ -233,14 +276,12 @@ function AuthedShell() {
    * soon as the outbox journals the write, before any round trip, so "after
    * the write lands" means after the local journal accepts it, not after the
    * server does. A refusal is no longer this function's problem to report —
-   * the outbox surfaces it through its own `dropped` event, not through
-   * `.catch` here.
+   * the outbox surfaces it through its own `dropped` event.
    */
   const discardRunning = () => {
     void entryMutations
       .discard(running?._id)
       .then(() => announce("Timer discarded. Nothing was recorded."))
-      .catch(report)
   }
 
   const timerActions: TimerBarActions = useMemo(
@@ -304,9 +345,12 @@ function AuthedShell() {
           <RunawayBanner
             running={running}
             thresholdMs={settings.runawayThresholdMs}
-            onStop={() => void entryMutations.stop(running?._id).catch(report)}
+            // No `.catch`: `stop` is optimistic by construction now, so a
+            // refusal is the outbox's own `dropped` event to report.
+            onStop={() => void entryMutations.stop(running?._id)}
             onDiscard={discardRunning}
           />
+          <SyncStatus offline={!online} pending={pending} />
         </>
       }
     >

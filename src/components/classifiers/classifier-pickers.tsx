@@ -4,7 +4,6 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { DollarSign, FolderClosed, Tag } from "lucide-react"
 import { PickerList } from "@/components/classifiers/picker-list"
 import { ProjectDot } from "@/components/classifiers/project-dot"
-import { errorMessage } from "@/lib/error-message"
 import { cn } from "@/lib/utils"
 import type { PickerOption } from "@/components/classifiers/picker-list"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
@@ -55,7 +54,6 @@ export function ProjectPicker({
   nameClassName?: string
 }) {
   const [query, setQuery] = useState("")
-  const [error, setError] = useState<string | null>(null)
 
   /*
    * Open state is held here even when the caller controls it.
@@ -71,10 +69,7 @@ export function ProjectPicker({
   const setOpen = (next: boolean) => {
     setSelfOpen(next)
     onOpenChange?.(next)
-    if (!next) {
-      setQuery("")
-      setError(null)
-    }
+    if (!next) setQuery("")
   }
 
   const selected = projects.find((p) => p._id === value) ?? null
@@ -126,35 +121,30 @@ export function ProjectPicker({
           }}
           createLabel={(name) => `Create project “${name}”`}
           onCreate={(name) => {
-            void onCreate(name)
-              .then((result) => {
-                onChange(result.projectId)
-                close()
-              })
-              .catch((thrown: unknown) => setError(errorMessage(thrown)))
+            // `onCreate` is `createProject`/`ensureTag`, optimistic by
+            // construction now — it resolves as soon as the outbox journals
+            // the write, so a refusal is the outbox's own `dropped` event to
+            // report, not this picker's.
+            void onCreate(name).then((result) => {
+              onChange(result.projectId)
+              close()
+            })
           }}
           footer={
-            <div className="flex flex-col gap-1">
-              {error === null ? null : (
-                <p role="alert" className="px-2 py-1 text-xs text-destructive">
-                  {error}
-                </p>
-              )}
-              {value === null ? null : (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    onChange(null)
-                    close()
-                  }}
-                  className="w-full justify-start px-2 font-normal hover:bg-card"
-                >
-                  Clear project
-                </Button>
-              )}
-            </div>
+            value === null ? undefined : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  onChange(null)
+                  close()
+                }}
+                className="w-full justify-start px-2 font-normal hover:bg-card"
+              >
+                Clear project
+              </Button>
+            )
           }
         />
       </PopoverContent>
@@ -183,7 +173,6 @@ export function TagPicker({
   className?: string
 }) {
   const [query, setQuery] = useState("")
-  const [error, setError] = useState<string | null>(null)
 
   // Same controlled/uncontrolled handling as ProjectPicker. Tags differ in one
   // respect only: choosing does NOT close, because picking three tags should
@@ -194,10 +183,7 @@ export function TagPicker({
   const setOpen = (next: boolean) => {
     setSelfOpen(next)
     onOpenChange?.(next)
-    if (!next) {
-      setQuery("")
-      setError(null)
-    }
+    if (!next) setQuery("")
   }
 
   const selectedSet = new Set<string>(value)
@@ -246,22 +232,16 @@ export function TagPicker({
           onChoose={toggle}
           createLabel={(name) => `Add tag “${name}”`}
           onCreate={(name) => {
-            void onCreate(name)
-              .then((result) => {
-                if (!selectedSet.has(result.tagId)) {
-                  onChange([...value, result.tagId])
-                }
-                setQuery("")
-              })
-              .catch((thrown: unknown) => setError(errorMessage(thrown)))
+            // `onCreate` is `ensureTag`, optimistic by construction now — it
+            // resolves as soon as the outbox journals the write, so a
+            // refusal is the outbox's own `dropped` event to report.
+            void onCreate(name).then((result) => {
+              if (!selectedSet.has(result.tagId)) {
+                onChange([...value, result.tagId])
+              }
+              setQuery("")
+            })
           }}
-          footer={
-            error === null ? undefined : (
-              <p role="alert" className="px-2 py-1 text-xs text-destructive">
-                {error}
-              </p>
-            )
-          }
         />
       </PopoverContent>
     </Popover>

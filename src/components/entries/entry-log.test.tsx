@@ -1,20 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { Toaster } from "@/components/ui/toast"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { EntryLog } from "@/components/entries/entry-log"
 import { makeEntry, noEntryActions } from "@/test-utils/fixtures"
 import type { EntryActions } from "@/hooks/use-entry-actions"
 import type { DayGroup, Entry } from "@/lib/group-entries"
 import type { Doc } from "../../../convex/_generated/dataModel"
-
-/*
- * THE REGRESSION THIS PINS: a sitting-wide write used to fail behind a
- * `.catch(() => {})` that said nothing — the optimistic patch to every
- * member (including `billable`, which reaches invoices) reverted with no
- * explanation. `EntryLog.onSittingClassify` now reports that refusal the
- * same way the row's own classify does (`use-entry-actions.ts`): a
- * high-priority toast carrying `errorMessage(thrown)`.
- */
 
 const updateMany = vi.fn()
 
@@ -84,24 +75,23 @@ const renderEntryLog = ({
     </Toaster>
   )
 
-describe("EntryLog — a sitting-wide write that fails", () => {
-  it("raises a high-priority toast instead of reverting silently", async () => {
-    updateMany.mockRejectedValueOnce(new Error("refused"))
-
+/**
+ * `updateMany` is the outbox-wrapped mutation now — optimistic by
+ * construction, so `onSittingClassify` has nothing left to catch and a
+ * refusal is the outbox's own `dropped` event to report (see `_authed.tsx`).
+ * This just pins that the write still fires with the sitting's classification.
+ */
+describe("EntryLog — a sitting-wide classify", () => {
+  it("writes the change to every member without waiting on a result", () => {
     renderEntryLog({ actions: noEntryActions })
 
     // The sitting's own billable toggle — collapsed, so it is the only "Not
     // billable" control on screen.
     fireEvent.click(screen.getByLabelText("Not billable"))
 
-    // A plain `Error` is not a trace error, so `errorMessage` falls back to
-    // its generic sentence — see `src/lib/error-message.ts`. Scoped to the
-    // "Notifications" region, not a bare `findByText`: a "high" priority
-    // toast is also announced through a second, visually-hidden `role="alert"`
-    // live region Base UI renders elsewhere in the portal for screen readers,
-    // carrying the same text — an unscoped query would be ambiguous.
-    const notifications = await screen.findByRole("region", { name: "Notifications" })
-    expect(within(notifications).getByText("That didn't save. Try again.")).toBeTruthy()
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ entryIds: ["b", "a"], billable: true })
+    )
   })
 })
 

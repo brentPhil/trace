@@ -10,7 +10,6 @@
  * Imported from a non-route file, `component:` splits as normal.
  */
 import { Button } from "@/components/ui/button"
-import { useToastManager } from "@/components/ui/toast"
 import { Empty } from "@/components/ui/empty"
 import { useRef, useState } from "react"
 import { useSuspenseQuery } from "@tanstack/react-query"
@@ -19,7 +18,6 @@ import { Archive, ArchiveRestore, Plus, Trash2 } from "lucide-react"
 import { InlineEdit } from "@/components/entries/inline-edit"
 import { Page } from "@/components/shell/page"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
-import { errorMessage } from "@/lib/error-message"
 import { formatRate, rateHelp } from "@/lib/format-money"
 import { projectColorVar } from "@/lib/project-color"
 import { cn } from "@/lib/utils"
@@ -182,13 +180,11 @@ function ProjectRow({
   currency: string
 }) {
   const { updateProject, setArchived, removeProject } = useClassifierMutations()
-  const toasts = useToastManager()
 
-  const report = (thrown: unknown) => {
-    // IN_USE lands here: "3 entries use this project. Archive it instead."
-    // The message already says what to do, so the toast is the whole response.
-    toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
-  }
+  // No local `report`: every write below is outbox-wrapped and optimistic by
+  // construction now, so a refusal — IN_USE included: "3 entries use this
+  // project. Archive it instead." — is the outbox's own `dropped` event to
+  // report (see `_authed.tsx`), not a catch here.
 
   return (
     <li
@@ -212,7 +208,7 @@ function ProjectRow({
       <ColorPicker
         project={project}
         onPick={(color) => {
-          void updateProject({ projectId: project._id, color }).catch(report)
+          void updateProject({ projectId: project._id, color })
         }}
       />
 
@@ -301,7 +297,7 @@ function ProjectRow({
             void updateProject({
               projectId: project._id,
               billableByDefault: event.target.checked,
-            }).catch(report)
+            })
           }}
           className="size-3.5 shrink-0 accent-foreground focus-visible:outline-none"
         />
@@ -390,7 +386,7 @@ function ProjectRow({
         <IconButton
           label={project.archived ? `Unarchive ${project.name}` : `Archive ${project.name}`}
           onClick={() => {
-            void setArchived(project._id, !project.archived).catch(report)
+            void setArchived(project._id, !project.archived)
           }}
         >
           {project.archived ? (
@@ -403,7 +399,7 @@ function ProjectRow({
           label={`Delete ${project.name}`}
           destructive
           onClick={() => {
-            void removeProject(project._id).catch(report)
+            void removeProject(project._id)
           }}
         >
           <Trash2 className="size-4" />
@@ -602,12 +598,13 @@ function NewProject({ currency }: { currency: string }) {
       setError(rateHelp(currency))
       return
     }
+    // `createProject` is optimistic by construction now: it resolves as
+    // soon as the outbox journals the write, so a refusal is the outbox's
+    // own `dropped` event to report, not this form's.
     void createProject({
       name: name.trim(),
       hourlyRateCents: parsedRate.cents ?? undefined,
-    })
-      .then(reset)
-      .catch((thrown: unknown) => setError(errorMessage(thrown)))
+    }).then(reset)
   }
 
   return (
@@ -681,7 +678,6 @@ function NewProject({ currency }: { currency: string }) {
 
 function TagRow({ tag }: { tag: Doc<"tags"> }) {
   const { renameTag, removeTag } = useClassifierMutations()
-  const toasts = useToastManager()
 
   return (
     // `border-border`: this pill is the boundary of an
@@ -719,11 +715,10 @@ function TagRow({ tag }: { tag: Doc<"tags"> }) {
         variant="ghost"
         size="icon-xs"
         aria-label={`Delete tag ${tag.name}`}
-        onClick={() => {
-          void removeTag(tag._id).catch((thrown: unknown) => {
-            toasts.add({ title: errorMessage(thrown), priority: "high", timeout: 8_000 })
-          })
-        }}
+        // `removeTag` is optimistic by construction now: it resolves as
+        // soon as the outbox journals the write, so a refusal is the
+        // outbox's own `dropped` event to report, not a catch here.
+        onClick={() => void removeTag(tag._id)}
         className={cn(
           // Same rule as the project row's actions: revealed by pointer or
           // focus where there is a pointer, and permanently visible below `sm`,

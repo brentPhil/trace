@@ -133,12 +133,11 @@ export function EntryTimePopover({
     }
     setError(null)
 
-    void onCommitTime(
-      field,
-      instantOfTypedTime(entry.startedAt, parsed.time, timeZone)
-    ).catch((thrown: unknown) => {
-      setError(thrown instanceof Error ? thrown.message : "That didn't save.")
-    })
+    // `onCommitTime` is `onTimeChange` → `editTime`, optimistic by
+    // construction now: it resolves as soon as the outbox journals the
+    // write, so a refusal is the outbox's own `dropped` event to report,
+    // not this popover's.
+    void onCommitTime(field, instantOfTypedTime(entry.startedAt, parsed.time, timeZone))
   }
 
   return (
