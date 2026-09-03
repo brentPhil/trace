@@ -500,8 +500,18 @@ export type OpKind<Args extends Record<string, unknown>, Result> = {
   minted?: (result: Result) => string
   /** What the caller is handed straight away. */
   immediate: (args: Args, now: number) => Result
-  /** Two consecutive unsent ops with equal keys collapse into the later one. */
+  /** Two consecutive unsent ops with equal keys collapse into one. */
   coalesceKey?: (args: Args) => string
+  /**
+   * How a collapse combines the two ops' args.
+   *
+   * Default (false/absent) is REPLACE, which is right when the args are the
+   * whole value — a retitle carries the complete title, so the later one is
+   * the answer. MERGE is for a patch of independent fields: two settings
+   * saves, one setting the currency and one the timezone, must not lose the
+   * currency because the timezone was typed second.
+   */
+  coalesceMerge?: boolean
   /** Older than this, and not followed by one of `closedBy`, the op is dropped. */
   staleAfterMs?: number
   closedBy?: ReadonlyArray<string>
@@ -1077,6 +1087,13 @@ const kinds: Record<string, OpKind<any, any>> = {
     closedBy: ["stop"],
   },
   stop: { ref: anyApi.things.stop, label: "Stopping", immediate: () => null },
+  settings: {
+    ref: anyApi.things.settings,
+    label: "Saving settings",
+    immediate: () => null,
+    coalesceKey: () => "settings",
+    coalesceMerge: true,
+  },
 }
 
 type Harness = {
@@ -1181,6 +1198,22 @@ describe("Outbox", () => {
     h.resolveSend(null)
     await flush()
     expect(h.sent[1].args).toEqual({ id: "x", title: "ab" })
+  })
+
+  it("merges a coalesced patch's args when the kind asks for it", async () => {
+    // The default collapse REPLACES, which is right for a retitle: the later
+    // op carries the whole title. A settings save carries one field of many,
+    // so replacing would lose the currency because the timezone was typed
+    // second.
+    const h = harness({ manual: true })
+    await h.outbox.enqueue("stop", {}) // occupies the sender
+    await flush()
+    await h.outbox.enqueue("settings", { currency: "EUR" })
+    await h.outbox.enqueue("settings", { timezone: "UTC" })
+    expect(h.outbox.pending()).toBe(2)
+    h.resolveSend(null)
+    await flush()
+    expect(h.sent[1].args).toEqual({ currency: "EUR", timezone: "UTC" })
   })
 
   it("drops a refused op, reports it, and drops what depended on it", async () => {
@@ -1386,7 +1419,20 @@ export class Outbox {
         this.kinds[last.kind]?.coalesceKey?.(last.args) === key
       ) {
         replaced = last
-        return { ...s, ops: [...s.ops.slice(0, -1), { ...op, id: last.id, enqueuedAt: last.enqueuedAt }] }
+        return {
+          ...s,
+          ops: [
+            ...s.ops.slice(0, -1),
+            {
+              ...op,
+              id: last.id,
+              enqueuedAt: last.enqueuedAt,
+              // REPLACE by default; MERGE for a patch of independent fields.
+              // See `coalesceMerge` on OpKind for why both are needed.
+              args: def.coalesceMerge === true ? { ...last.args, ...args } : args,
+            },
+          ],
+        }
       }
       return { ...s, ops: [...s.ops, op] }
     })
@@ -2289,6 +2335,8 @@ export const OP_KINDS = {
     optimistic: optimisticSettingsUpdate,
     immediate: nothing,
     coalesceKey: () => "settings",
+    // MERGE, not replace: a settings save carries one field of many.
+    coalesceMerge: true,
   }),
 } as const
 
@@ -2299,21 +2347,7 @@ export type ResultOf<K extends OpKindName> = FunctionReturnType<(typeof OP_KINDS
 
 If `api.projects.remove`, `api.projects.setArchived`, `api.tags.rename`, `api.tags.remove` or `api.entries.discardRunning`'s return types are not `null`, adjust the `immediate` for that kind to build a value of the right shape (read the `returns:` validator in the Convex file). If `projects.create`'s `clientKey` is typed optional, the `as string` casts above stay.
 
-Note on coalescing `settings.update`: two consecutive settings ops collapse into the LATER op's args only. That is wrong when the first set `currency` and the second set `timezone`. Change the engine's coalesce to MERGE args for kinds that opt in: add `coalesceMerge?: boolean` to `OpKind` (Task 3's type), set it on `settings.update`, and in `Outbox.enqueue` replace `{ ...op, id: last.id, enqueuedAt: last.enqueuedAt }` with `{ ...op, id: last.id, enqueuedAt: last.enqueuedAt, args: def.coalesceMerge ? { ...last.args, ...args } : args }`. Add a test to `outbox.test.ts`:
-
-```ts
-  it("merges args when the kind asks for it", async () => {
-    const h = harness({ manual: true })
-    kinds.settings = { ref: anyApi.settings.update, label: "Saving", immediate: () => null, coalesceKey: () => "s", coalesceMerge: true }
-    await h.outbox.enqueue("stop", {})
-    await flush()
-    await h.outbox.enqueue("settings", { currency: "EUR" })
-    await h.outbox.enqueue("settings", { timezone: "UTC" })
-    h.resolveSend(null)
-    await flush()
-    expect(h.sent[1].args).toEqual({ currency: "EUR", timezone: "UTC" })
-  })
-```
+`settings.update` carries `coalesceMerge: true` above, and that is load-bearing rather than decorative: the default collapse replaces the earlier op's args, which would lose the currency when the timezone is typed second. The engine and its test for both behaviours land in Task 6; here you only set the flag.
 
 - [ ] **Step 3: Run, typecheck, commit**
 
