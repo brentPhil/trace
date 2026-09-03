@@ -342,8 +342,9 @@ export class Outbox {
  * How many resolved placeholder mappings to keep.
  *
  * They are kept by AGE — objects preserve string-key insertion order, so the
- * oldest are simply the first — and NOT by whether a queued op still names
- * one. Reference-counting the live queue looks tighter and is wrong: the
+ * oldest are simply the first — and never by whether a queued op still names
+ * one ALONE, though `capResolved` does consult the queue as well; see there.
+ * Reference-counting the live queue on its own looks tighter and is wrong: the
  * mapping is minted in the very transaction that removes its producer from
  * the queue, so a mapping with no dependent YET would be discarded
  * microseconds after being learned. The screen still shows the placeholder
