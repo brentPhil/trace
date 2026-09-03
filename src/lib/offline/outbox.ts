@@ -8,7 +8,12 @@ export type OutboxEvent =
   | { type: "dropped"; op: Op; reason: "rejected" | "stale" | "orphaned"; error?: unknown }
   /** The drain itself threw. The queue has stopped for a reason that is NOT
    *  being offline, and saying so is the whole point: a frozen pending count
-   *  reads as "waiting for the network", which is exactly wrong here. */
+   *  reads as "waiting for the network", which is exactly wrong here.
+   *
+   *  A listener must NOT answer this by calling `kick()`. The catch runs
+   *  before the `finally` that clears `draining`, so a kick from here is
+   *  recorded and replayed immediately into the same persistent failure —
+   *  a tight loop. Report it and wait for a real signal. */
   | { type: "failed"; error: unknown }
 
 /** Rejection given to a `settled` promise whose op was drained by another tab.
@@ -261,7 +266,7 @@ export class Outbox {
         if (def.mints !== undefined && def.minted !== undefined) {
           resolved[def.mints(op.args)] = def.minted(result)
         }
-        return { ops, resolved: capResolved(resolved) }
+        return { ops, resolved: capResolved(resolved, ops) }
       })
       this.settlers.get(op.id)?.resolve(result)
       this.settlers.delete(op.id)
@@ -304,6 +309,12 @@ export class Outbox {
    * the honest answer, and it is why `settled` is documented as best-effort
    * across tabs: never depend on it for correctness, only for extras like
    * recording the server's clock.
+   *
+   * RESTS ON AN ORDERING INVARIANT: `enqueue` registers its settler
+   * synchronously after `store.update` resolves, with no `await` between. So
+   * a settler's op is always already in the journal, and this can never
+   * reject one for an op that is merely about to be written. An added `await`
+   * in that window would break it silently.
    */
   private reconcileSettlers(snap: OutboxSnapshot): void {
     if (this.settlers.size === 0) return
@@ -346,10 +357,32 @@ export class Outbox {
  */
 const RESOLVED_LIMIT = 100
 
-function capResolved(resolved: Record<string, string>): Record<string, string> {
+/**
+ * The newest mappings, PLUS anything a queued op still names.
+ *
+ * The second half is not belt-and-braces, it is the whole safety property:
+ * this cap must only ever be able to over-retain. `resolved` is a lifetime
+ * accumulator, so an established account sits at the limit permanently and
+ * every mint evicts the oldest — and a journal like
+ * `[create P, …100 creates…, retitle P]` would push P's mapping out before
+ * the retitle reached the head. That op would then be dropped as "orphaned",
+ * blaming a producer that in fact succeeded: exactly the loss this mechanism
+ * was written to prevent, reintroduced at a different threshold.
+ *
+ * `unresolvedPlaceholders(args, {})` with an empty map enumerates every
+ * placeholder the queue names, which is precisely the set that must survive.
+ */
+function capResolved(resolved: Record<string, string>, ops: Op[]): Record<string, string> {
   const keys = Object.keys(resolved)
   if (keys.length <= RESOLVED_LIMIT) return resolved
+
+  const needed = new Set(unresolvedPlaceholders(ops.map((o) => o.args), {}))
+  const newest = new Set(keys.slice(keys.length - RESOLVED_LIMIT))
   const kept: Record<string, string> = {}
-  for (const key of keys.slice(keys.length - RESOLVED_LIMIT)) kept[key] = resolved[key]
+  // One pass over `keys`, so insertion order — which is the age order the
+  // eviction above depends on — survives the rebuild.
+  for (const key of keys) {
+    if (needed.has(key) || newest.has(key)) kept[key] = resolved[key]
+  }
   return kept
 }

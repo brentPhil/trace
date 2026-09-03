@@ -1,6 +1,6 @@
 import { anyApi } from "convex/server"
 import { describe, expect, it } from "vitest"
-import { Outbox } from "./outbox"
+import { Outbox, SENT_BY_ANOTHER_TAB } from "./outbox"
 import { MemoryOutboxStore } from "./outbox-store-memory"
 import { optimisticIdFor } from "@/lib/optimistic-id"
 import type { OutboxEvent, Sender } from "./outbox"
@@ -310,6 +310,89 @@ describe("Outbox", () => {
     await flush()
     expect(h.sent.at(-1)).toEqual({ kind: "retitle", args: { id: "real:k1", title: "B" } })
     expect(h.events.some((e) => e.type === "dropped")).toBe(false)
+  })
+
+  it("never evicts a mapping a queued op still names, however full the map", async () => {
+    // The cap must only ever be able to OVER-retain. `resolved` is a lifetime
+    // accumulator, so an established account sits at the limit permanently and
+    // every mint evicts the oldest — and a bare newest-N would push out the
+    // producer of a dependent still waiting behind a long queue.
+    const store = new MemoryOutboxStore()
+    const saturated: Record<string, string> = {}
+    for (let i = 0; i < 100; i++) saturated[`optimistic:filler-${i}`] = `real:filler-${i}`
+    await store.update((s) => ({ ...s, resolved: saturated }))
+
+    const sent: Array<Record<string, unknown>> = []
+    const dropped: OutboxEvent[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: (op, args) => {
+        sent.push(args)
+        return Promise.resolve(op.kind === "create" ? { id: `real:${args.clientKey}` } : null)
+      },
+      applyLocal: () => {},
+      retryable: () => false,
+      lock: (fn) => fn(),
+    })
+    outbox.subscribe((e) => {
+      if (e.type === "dropped") dropped.push(e)
+    })
+
+    await outbox.enqueue("create", { clientKey: "k1", name: "P" })
+    // Enough later mints to push k1 past the limit under a newest-N rule.
+    for (let i = 0; i < 100; i++) {
+      await outbox.enqueue("create", { clientKey: `pad-${i}`, name: "pad" })
+    }
+    await outbox.enqueue("retitle", { id: "optimistic:k1", title: "B" })
+    await flush()
+    await flush()
+
+    expect(sent.at(-1)).toEqual({ id: "real:k1", title: "B" })
+    expect(dropped).toEqual([])
+  })
+
+  it("rejects a settler whose op another tab drained", async () => {
+    // `settlers` is per-instance, and with the Web Lock only one tab drains.
+    // Without reconciliation the other tab's promise stays pending forever.
+    const store = new MemoryOutboxStore()
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    // This tab does not hold the lock, so its own drain waits on it.
+    const mine = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+      lock: async (fn) => {
+        await held
+        return await fn()
+      },
+    })
+    const { settled } = await mine.enqueue("stop", {})
+    const outcome = expect(settled).rejects.toThrow(SENT_BY_ANOTHER_TAB)
+
+    // The tab that does hold the lock drains the shared journal.
+    const other = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+      lock: (fn) => fn(),
+    })
+    other.kick()
+    await flush()
+    expect((await store.read()).ops).toEqual([])
+
+    // Now this tab's drain runs and finds its op already gone.
+    release()
+    await flush()
+    await outcome
   })
 
   it("reports a drain that throws instead of freezing quietly", async () => {
