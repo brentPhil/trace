@@ -3809,6 +3809,22 @@ describe("SyncStatus", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Syncing 1 change…")
   })
 
+  it("does not pin the confirmation when the socket blips mid-window", () => {
+    // The timer used to be armed inside the effect that watches `offline`,
+    // so an offline flip cleared it and the re-run never re-armed —
+    // "All changes saved." then stayed on the shell indefinitely.
+    vi.useFakeTimers()
+    const { rerender, container } = render(<SyncStatus offline={false} pending={2} />)
+    rerender(<SyncStatus offline={false} pending={0} />)
+    rerender(<SyncStatus offline pending={0} />)
+    rerender(<SyncStatus offline={false} pending={0} />)
+    act(() => {
+      vi.advanceTimersByTime(2_100)
+    })
+    expect(container.innerHTML).toBe("")
+    vi.useRealTimers()
+  })
+
   it("confirms briefly once the count returns to zero", () => {
     vi.useFakeTimers()
     const { rerender, container } = render(<SyncStatus offline={false} pending={2} />)
@@ -3846,15 +3862,28 @@ export function SyncStatus({ offline, pending }: { offline: boolean; pending: nu
   const [justSaved, setJustSaved] = useState(false)
   const previous = useRef(pending)
 
+  /*
+   * Arming and clearing are separate effects, deliberately.
+   *
+   * With the timer armed inside this effect, a change to `offline` runs the
+   * cleanup and clears it — and the re-run then sees `previous.current === 0`
+   * and never re-arms. `justSaved` would stay true forever. That is not a
+   * corner case: `isOffline` flips on the FIRST failed retry of a socket that
+   * was connected, so a blip within the two-second window is ordinary, and
+   * the result is "All changes saved." pinned to the shell until the next
+   * time something syncs.
+   */
   useEffect(() => {
-    if (previous.current > 0 && pending === 0 && !offline) {
-      setJustSaved(true)
-      const timer = setTimeout(() => setJustSaved(false), SAVED_FOR_MS)
-      previous.current = pending
-      return () => clearTimeout(timer)
-    }
+    const settled = previous.current > 0 && pending === 0 && !offline
     previous.current = pending
+    if (settled) setJustSaved(true)
   }, [pending, offline])
+
+  useEffect(() => {
+    if (!justSaved) return
+    const timer = setTimeout(() => setJustSaved(false), SAVED_FOR_MS)
+    return () => clearTimeout(timer)
+  }, [justSaved])
 
   const changes = `${pending} ${pending === 1 ? "change" : "changes"}`
 
@@ -3912,11 +3941,16 @@ In `src/routes/_authed.tsx`'s `AuthedShell`, after `const report = …`, add:
         }
         if (event.type !== "dropped") return
         const label = OP_KINDS[event.op.kind as OpKindName]?.label ?? "A change"
+        // Each reads as a sentence after the kind's label, which is a gerund
+        // phrase: "Starting the timer was skipped: …". The stale wording in
+        // particular cannot be "was started more than a day ago" — the only
+        // kind that can go stale is the start, so that composes to "Starting
+        // the timer was started…".
         const why =
           event.reason === "stale"
-            ? "was started more than a day ago while offline, so it wasn't resumed."
+            ? "was skipped: it had been waiting more than a day."
             : event.reason === "orphaned"
-              ? "depended on something that didn't save."
+              ? "was skipped: something it depended on didn't save."
               : `didn't save: ${errorMessage(event.error)}`
         toasts.add({ title: `${label} ${why}`, priority: "high", timeout: 8_000 })
       },
