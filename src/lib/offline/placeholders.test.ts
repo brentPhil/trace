@@ -22,6 +22,16 @@ describe("rewritePlaceholders", () => {
   it("returns the same reference when nothing changes", () => {
     const args = { title: "hello", n: 1 }
     expect(rewritePlaceholders(args, resolved)).toBe(args)
+    const nested = { a: ["x"], b: { c: "y" } }
+    expect(rewritePlaceholders(nested, resolved)).toBe(nested)
+  })
+
+  it("leaves a string that names a prototype property alone", () => {
+    // Every string in the args reaches the lookup, not only placeholder-shaped
+    // ones, and a plain object answers for its prototype. An entry really can
+    // be titled "constructor".
+    const args = { title: "constructor", note: "toString", tags: ["__proto__"] }
+    expect(rewritePlaceholders(args, resolved)).toBe(args)
   })
 })
 
