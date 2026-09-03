@@ -2856,9 +2856,19 @@ import type { OpKind } from "./op-types"
 /** An unclosed start older than this is not resumed — `pending-start`'s rule. */
 export const STALE_START_MS = 24 * 60 * 60 * 1000
 
-function kind<Ref extends FunctionReference<"mutation", "public">>(
-  def: OpKind<FunctionArgs<Ref>, FunctionReturnType<Ref>> & { ref: Ref }
-) {
+/**
+ * Checks a kind against its mutation without flattening it.
+ *
+ * Generic over `Def` rather than annotating the parameter, because an
+ * annotation becomes the return type: every kind's `immediate` would read as
+ * `… | undefined` even where a function literal was plainly given, and the
+ * registry's own test could not call one. This validates and hands the
+ * literal type straight back.
+ */
+function kind<
+  Ref extends FunctionReference<"mutation", "public">,
+  Def extends OpKind<FunctionArgs<Ref>, FunctionReturnType<Ref>> & { ref: Ref },
+>(def: Def): Def {
   return def
 }
 
@@ -2971,7 +2981,21 @@ export const OP_KINDS = {
   "projects.create": kind({
     ref: api.projects.create,
     label: "Creating a project",
-    optimistic: classifiers.optimisticProjectCreate,
+    /*
+     * Wrapped rather than referenced bare, because the mutation's `clientKey`
+     * is OPTIONAL — projects created before the outbox existed have none —
+     * while the optimistic function needs one to key its placeholder on.
+     *
+     * A guard, not a cast, for this one of the three: without a key there is
+     * no stable placeholder, and `optimistic:undefined` would be a row the
+     * outbox could never resolve. Doing nothing is the honest answer. Every
+     * op the outbox enqueues carries a key (Task 9 mints it), so this is a
+     * boundary that should never be crossed rather than a case to handle.
+     */
+    optimistic: (store, args) => {
+      if (args.clientKey === undefined) return
+      classifiers.optimisticProjectCreate(store, { ...args, clientKey: args.clientKey })
+    },
     mints: (args) => optimisticIdFor(args.clientKey as string),
     minted: (result) => result.projectId,
     immediate: (args) => ({
