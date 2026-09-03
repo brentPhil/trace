@@ -2110,6 +2110,7 @@ Create `src/lib/offline/optimistic-entries.ts`. Move, VERBATIM including their c
 import { insertAtPosition } from "convex/react"
 import { applyTimeEdit } from "@shared/entryTimes"
 import { optimisticIdFor } from "@/lib/optimistic-id"
+import { getSkewMs } from "@/lib/clock"
 import { api } from "../../../convex/_generated/api"
 import type { OptimisticLocalStore } from "convex/browser"
 import type { TimeEdit } from "@shared/entryTimes"
@@ -2808,6 +2809,8 @@ Create `src/lib/offline/op-kinds.test.ts`:
 import { describe, expect, it } from "vitest"
 import { getFunctionName } from "convex/server"
 import { OP_KINDS, STALE_START_MS } from "./op-kinds"
+import type { OptimisticLocalStore } from "convex/browser"
+import type { OpKindName } from "./op-kinds"
 
 describe("OP_KINDS", () => {
   it("names every kind after the Convex function it sends", () => {
@@ -2832,9 +2835,57 @@ describe("OP_KINDS", () => {
     ])
   })
 
+  it("only names closers that are real kinds", () => {
+    // `closedBy` is `ReadonlyArray<string>` — it cannot reference OpKindName
+    // without a type cycle — so a typo would leave `entries.start`
+    // permanently un-closeable and drop every replayed start after a day.
+    for (const [name, def] of Object.entries(OP_KINDS)) {
+      for (const closer of def.closedBy ?? []) {
+        expect(Object.keys(OP_KINDS), `${name} closedBy`).toContain(closer)
+      }
+    }
+  })
+
+  it("mints the id its optimistic function actually writes", () => {
+    // A drift here is catastrophic and silent: the outbox records a
+    // resolution for an id nothing is showing, and every dependent op is
+    // dropped as "orphaned". Each of the four minting kinds is driven
+    // through its own optimistic function against a stub store, and the id
+    // that lands is compared with what `mints` claims.
+    const cases: Array<{ kind: OpKindName; args: any; seed: unknown }> = [
+      { kind: "entries.start", args: { clientKey: "k1" }, seed: null },
+      {
+        kind: "entries.create",
+        args: { clientKey: "k2", startedAt: 1_000, endedAt: 2_000 },
+        seed: [],
+      },
+      { kind: "projects.create", args: { clientKey: "k3", name: "P" }, seed: [] },
+      { kind: "tags.ensure", args: { name: "  Ops " }, seed: [] },
+    ]
+
+    for (const { kind, args, seed } of cases) {
+      const def = OP_KINDS[kind]
+      let written: unknown
+      const store = {
+        getQuery: () => seed,
+        getAllQueries: () => [],
+        setQuery: (_q: unknown, _a: unknown, value: unknown) => {
+          written = value
+        },
+      } as unknown as OptimisticLocalStore
+
+      def.optimistic?.(store, args, undefined)
+      const rows = Array.isArray(written) ? written : written === null ? [] : [written]
+      const ids = (rows as Array<{ _id?: string }>).map((row) => row._id)
+      expect(ids, kind).toContain(def.mints?.(args))
+    }
+  })
+
   it("start's immediate result carries the placeholder the optimistic row uses", () => {
     const r = OP_KINDS["entries.start"].immediate({ clientKey: "k", title: "" }, 5)
-    expect(r).toEqual({ entryId: "optimistic:k", stoppedEntryIds: [], serverNow: 5, replayed: false })
+    expect(r.entryId).toBe("optimistic:k")
+    expect(r.stoppedEntryIds).toEqual([])
+    expect(r.replayed).toBe(false)
   })
 })
 ```
@@ -2892,7 +2943,12 @@ export const OP_KINDS = {
     immediate: (args, now) => ({
       entryId: optimisticIdFor(args.clientKey) as unknown as Id<"timeEntries">,
       stoppedEntryIds: [],
-      serverNow: now,
+      // The best estimate of server time available synchronously. Raw
+      // `Date.now()` here would be a claim that the device clock IS the
+      // server's, and a caller feeding it to `recordServerNow` would zero a
+      // skew that had been measured — making a running timer jump. The real
+      // answer arrives through `settled`.
+      serverNow: now + getSkewMs(),
       replayed: false,
     }),
     staleAfterMs: STALE_START_MS,
@@ -2902,15 +2958,14 @@ export const OP_KINDS = {
     ref: api.entries.stop,
     label: "Stopping the timer",
     optimistic: entries.optimisticStop,
-    immediate: (_args, now) => ({ stoppedEntryIds: [], serverNow: now }),
+    // Skew-adjusted for the same reason `start`'s is — see there.
+    immediate: (_args, now) => ({ stoppedEntryIds: [], serverNow: now + getSkewMs() }),
   }),
   "entries.discardRunning": kind({
     ref: api.entries.discardRunning,
     label: "Discarding the timer",
     optimistic: entries.optimisticDiscard,
-    // NOT `nothing`: this is the one mutation here that returns a shape
-    // rather than null (`discardReturns` in convex/entries.ts). Empty is
-    // honest — the caller learns nothing was discarded yet.
+    // Empty is honest — nothing has been discarded on the server yet.
     immediate: () => ({ discardedEntryIds: [] }),
   }),
   "entries.setTitle": kind({
@@ -2986,11 +3041,13 @@ export const OP_KINDS = {
      * is OPTIONAL — projects created before the outbox existed have none —
      * while the optimistic function needs one to key its placeholder on.
      *
-     * A guard, not a cast, for this one of the three: without a key there is
-     * no stable placeholder, and `optimistic:undefined` would be a row the
-     * outbox could never resolve. Doing nothing is the honest answer. Every
-     * op the outbox enqueues carries a key (Task 9 mints it), so this is a
-     * boundary that should never be crossed rather than a case to handle.
+     * A guard here and casts in `mints`/`immediate` below, deliberately, and
+     * the difference is what each one can do wrong. This function PAINTS —
+     * without a key it would put a row keyed `optimistic:undefined` on screen
+     * that the outbox could never resolve, so doing nothing is the honest
+     * answer. `mints` and `immediate` only ever run for an op the outbox
+     * itself enqueued, and Task 9 mints a key for every one, so their casts
+     * describe a boundary that is not crossed rather than a case to handle.
      */
     optimistic: (store, args) => {
       if (args.clientKey === undefined) return
@@ -3008,6 +3065,11 @@ export const OP_KINDS = {
     optimistic: classifiers.optimisticProjectUpdate,
     immediate: nothing,
     coalesceKey: (args) => args.projectId,
+    // MERGE, for the same reason settings.update does: `updateArgs` is a patch
+    // of independent optionals and /projects sends genuine partials — a colour
+    // swatch sends {projectId, color}, the name field sends {projectId, name}.
+    // Replacing would drop the colour when the name is edited second.
+    coalesceMerge: true,
   }),
   "projects.setArchived": kind({
     ref: api.projects.setArchived,
