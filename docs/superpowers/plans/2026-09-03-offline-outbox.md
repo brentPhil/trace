@@ -16,7 +16,10 @@ Spec: `docs/superpowers/specs/2026-09-03-offline-outbox-design.md`.
 - Nothing under `src/components/` may import `api`, `useConvexMutation` or `convexQuery` (`eslint.config.js` enforces it). Components take data and writes as props.
 - The palette is closed: no new colour tokens. State is never carried by colour alone (The Over-Determined State Rule). Status surfaces use `role="status"`.
 - Placeholder ids are `optimistic:<key>` from `src/lib/optimistic-id.ts`. Never send one to a mutation.
-- Run `pnpm test`, `pnpm typecheck` and `pnpm lint` before every commit. `pnpm typecheck` runs both tsconfigs.
+- Run `pnpm typecheck` and the tests before every commit. `pnpm typecheck` runs both tsconfigs.
+- **Lint your own files with `pnpm eslint <paths you touched>`, never by reading the tail of `pnpm lint`.** The whole-repo run exits 1 on a clean tree from 209 pre-existing errors in the gitignored vendored directories `ds-bundle/` and `design-sync/`, and a real error in your own file scrolls past above them. Two tasks shipped six lint errors this way.
+- **Type-only imports are top-level, never inline.** `import type { A, B } from "./x"` on its own line — not `import { c, type A } from "./x"`. `import/consistent-type-specifier-style` enforces it, and the code blocks in this plan predate the rule being noticed, so fix the form as you transcribe them.
+- Do not run bare `pnpm test`: all three vitest projects at once has a known flake (~11 convex tests time out; they pass alone). Run `pnpm vitest run --project unit --project dom`, `pnpm vitest run --project convex`, or a single file.
 - Commit after every task. Commit messages follow the repo's `type(scope): sentence` style and end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
 - Tests: pure modules → `src/**/*.test.ts` (node, project `unit`); React → `src/**/*.test.tsx` (jsdom, project `dom`); Convex functions → `convex/*.test.ts` (project `convex`). Run one file with `pnpm vitest run <path>`.
 - The dev server is `pnpm dev` on port 3100 (memory: always that port). The service worker is production-only; do not register it in dev.
@@ -681,7 +684,8 @@ import "fake-indexeddb/auto"
 import { describe, expect, it } from "vitest"
 import { MemoryOutboxStore } from "./outbox-store-memory"
 import { IdbOutboxStore } from "./outbox-store-idb"
-import { EMPTY_SNAPSHOT, type Op, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
+import type { Op, OutboxStore } from "./op-types"
 
 function op(id: string): Op {
   return { id, kind: "entries.setTitle", args: { title: id }, enqueuedAt: 1, inFlight: false }
@@ -744,6 +748,47 @@ it("degrades to memory when IndexedDB is present but refuses", async () => {
     indexedDB.open = realOpen
   }
 })
+
+it("keeps what was already journaled when a transaction fails after reading it", async () => {
+  // The dangerous half of degrading. idb-keyval runs the updater after a
+  // SUCCESSFUL read, so a transaction that aborts on the write has already
+  // shown us the queue — and a fallback that started empty would drop it.
+  const name = `late-failure-${Math.random()}`
+  const store = new IdbOutboxStore(name)
+  await store.update((s) => ({ ...s, ops: [op("a")] }))
+
+  const realOpen = indexedDB.open
+  let calls = 0
+  indexedDB.open = ((...args: Parameters<typeof realOpen>) => {
+    // Let the read-side open through, then refuse, so the failure lands
+    // after the updater has seen the stored queue.
+    calls += 1
+    if (calls > 1) throw new Error("aborted")
+    return realOpen.apply(indexedDB, args)
+  }) as typeof indexedDB.open
+  try {
+    const after = await store.update((s) => ({ ...s, ops: [...s.ops, op("b")] }))
+    expect(after.ops.map((o) => o.id)).toEqual(["a", "b"])
+  } finally {
+    indexedDB.open = realOpen
+  }
+})
+
+it("a throwing updater reaches the caller and does not degrade the store", async () => {
+  // A bug in `fn` is not a storage failure. Treating it as one would trade a
+  // transient bug for a session with no durability at all.
+  const store = new IdbOutboxStore(`throwing-${Math.random()}`)
+  await store.update((s) => ({ ...s, ops: [op("a")] }))
+
+  await expect(
+    store.update(() => {
+      throw new Error("caller bug")
+    })
+  ).rejects.toThrow("caller bug")
+
+  // Still on IndexedDB, still holding the op — not silently in memory.
+  expect((await store.read()).ops.map((o) => o.id)).toEqual(["a"])
+})
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -759,12 +804,20 @@ Expected: FAIL — modules not found.
 Create `src/lib/offline/outbox-store-memory.ts`:
 
 ```ts
-import { EMPTY_SNAPSHOT, type OutboxSnapshot, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
+import type { OutboxSnapshot, OutboxStore } from "./op-types"
 
-/** Tests, SSR, and a browser whose IndexedDB throws (private mode). */
+/** Tests, SSR, and a browser whose IndexedDB refuses (private mode). */
 export class MemoryOutboxStore implements OutboxStore {
-  private snapshot: OutboxSnapshot = EMPTY_SNAPSHOT
+  private snapshot: OutboxSnapshot
   private chain: Promise<unknown> = Promise.resolve()
+
+  /** `initial` is for the degrade path in outbox-store-idb.ts: when IndexedDB
+   *  fails mid-transaction it has already read the queue, and starting the
+   *  fallback empty would drop every op that was on it. */
+  constructor(initial: OutboxSnapshot = EMPTY_SNAPSHOT) {
+    this.snapshot = initial
+  }
 
   /** Joins the chain, so a read issued after an un-awaited update still sees
    *  it. Returning `this.snapshot` bare would hand back the pre-update value
@@ -791,8 +844,9 @@ Create `src/lib/offline/outbox-store-idb.ts`:
 
 ```ts
 import { createStore, get, update } from "idb-keyval"
-import { EMPTY_SNAPSHOT, type OutboxSnapshot, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
 import { MemoryOutboxStore } from "./outbox-store-memory"
+import type { OutboxSnapshot, OutboxStore } from "./op-types"
 
 const KEY = "outbox.v1"
 
@@ -818,25 +872,58 @@ export class IdbOutboxStore implements OutboxStore {
     try {
       return (await get<OutboxSnapshot>(KEY, this.store)) ?? EMPTY_SNAPSHOT
     } catch {
-      return await this.degrade().read()
+      // Nothing was read, so there is nothing to carry across.
+      return await this.degrade(EMPTY_SNAPSHOT).read()
     }
   }
 
   async update(fn: (current: OutboxSnapshot) => OutboxSnapshot): Promise<OutboxSnapshot> {
     if (this.fallback !== null) return await this.fallback.update(fn)
+
+    /*
+     * Two things have to be got right here, and the obvious `try { … } catch {
+     * degrade() }` gets both wrong. idb-keyval runs the updater INSIDE the
+     * transaction's `onsuccess`, after a successful read, and only then puts
+     * and waits on the transaction — so a failure can land either side of the
+     * caller's `fn` having already run against real data.
+     *
+     *   `seen` is what the transaction managed to read. A transaction that
+     *   aborts AFTER that point (quota, or Safari dropping the connection —
+     *   idb-keyval's own source comments on it) must not take the queue with
+     *   it: degrading to an EMPTY fallback would silently discard every op
+     *   already journaled, which is the exact loss this whole file exists to
+     *   prevent.
+     *
+     *   `fnError` separates the caller's bug from a storage failure. They
+     *   arrive as the same rejection, and treating an exception thrown by
+     *   `fn` as "IndexedDB is broken" would trade one transient bug for a
+     *   session with no durability at all.
+     */
+    let seen: OutboxSnapshot = EMPTY_SNAPSHOT
+    let fnThrew = false
+    let fnError: unknown
+
     try {
       let result: OutboxSnapshot = EMPTY_SNAPSHOT
       await update<OutboxSnapshot>(
         KEY,
         (current) => {
-          result = fn(current ?? EMPTY_SNAPSHOT)
+          seen = current ?? EMPTY_SNAPSHOT
+          try {
+            result = fn(seen)
+          } catch (error) {
+            fnThrew = true
+            fnError = error
+            throw error
+          }
           return result
         },
         this.store
       )
       return result
     } catch {
-      return await this.degrade().update(fn)
+      if (fnThrew) throw fnError
+      return await this.degrade(seen).update(fn)
     }
   }
 
@@ -853,9 +940,11 @@ export class IdbOutboxStore implements OutboxStore {
    * The cost is honest and unavoidable: in a browser that will not store
    * anything, nothing survives a reload. Within the session the outbox still
    * works, which is strictly better than a boot that throws.
+   *
+   * `seed` is whatever IndexedDB had told us before it failed — see `update`.
    */
-  private degrade(): MemoryOutboxStore {
-    this.fallback ??= new MemoryOutboxStore()
+  private degrade(seed: OutboxSnapshot): MemoryOutboxStore {
+    this.fallback ??= new MemoryOutboxStore(seed)
     return this.fallback
   }
 }
