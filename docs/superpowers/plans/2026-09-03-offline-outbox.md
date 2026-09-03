@@ -20,7 +20,7 @@ Spec: `docs/superpowers/specs/2026-09-03-offline-outbox-design.md`.
 - **Lint your own files with `pnpm eslint <paths you touched>`, never by reading the tail of `pnpm lint`.** The whole-repo run exits 1 on a clean tree from 209 pre-existing errors in the gitignored vendored directories `ds-bundle/` and `design-sync/`, and a real error in your own file scrolls past above them. Two tasks shipped six lint errors this way.
 - **Type-only imports are top-level, never inline.** `import type { A, B } from "./x"` on its own line — not `import { c, type A } from "./x"`. `import/consistent-type-specifier-style` enforces it, and the code blocks in this plan predate the rule being noticed, so fix the form as you transcribe them.
 - Do not run bare `pnpm test`: all three vitest projects at once has a known flake (~11 convex tests time out; they pass alone). Run `pnpm vitest run --project unit --project dom`, `pnpm vitest run --project convex`, or a single file.
-- Commit after every task. Commit messages follow the repo's `type(scope): sentence` style and end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Commit after every task. Commit messages follow the repo's `type(scope): sentence` style and end with `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
 - Tests: pure modules → `src/**/*.test.ts` (node, project `unit`); React → `src/**/*.test.tsx` (jsdom, project `dom`); Convex functions → `convex/*.test.ts` (project `convex`). Run one file with `pnpm vitest run <path>`.
 - The dev server is `pnpm dev` on port 3100 (memory: always that port). The service worker is production-only; do not register it in dev.
 
@@ -850,6 +850,16 @@ import type { OutboxSnapshot, OutboxStore } from "./op-types"
 
 const KEY = "outbox.v1"
 
+/** Marks a rejection as "the caller's `fn` threw" rather than "IndexedDB
+ *  failed" — see `IdbOutboxStore.update`. A plain boolean flag set inside the
+ *  updater closure and read after the `await` does not survive TypeScript's
+ *  control-flow narrowing across the call boundary, so the distinction is
+ *  carried on the thrown value itself instead. Not exported, so no caller's
+ *  `fn` can throw one and be mistaken for this. */
+class FnFailure {
+  constructor(readonly error: unknown) {}
+}
+
 /**
  * The journal, in IndexedDB.
  *
@@ -894,35 +904,33 @@ export class IdbOutboxStore implements OutboxStore {
      *   already journaled, which is the exact loss this whole file exists to
      *   prevent.
      *
-     *   `fnError` separates the caller's bug from a storage failure. They
+     *   `FnFailure` separates the caller's bug from a storage failure. They
      *   arrive as the same rejection, and treating an exception thrown by
      *   `fn` as "IndexedDB is broken" would trade one transient bug for a
      *   session with no durability at all.
      */
     let seen: OutboxSnapshot = EMPTY_SNAPSHOT
-    let fnThrew = false
-    let fnError: unknown
 
     try {
       let result: OutboxSnapshot = EMPTY_SNAPSHOT
       await update<OutboxSnapshot>(
         KEY,
         (current) => {
+          // BEFORE `fn` runs, so the seeded retry below applies `fn` to the
+          // pre-image rather than to an already-appended result.
           seen = current ?? EMPTY_SNAPSHOT
           try {
             result = fn(seen)
           } catch (error) {
-            fnThrew = true
-            fnError = error
-            throw error
+            throw new FnFailure(error)
           }
           return result
         },
         this.store
       )
       return result
-    } catch {
-      if (fnThrew) throw fnError
+    } catch (error) {
+      if (error instanceof FnFailure) throw error.error
       return await this.degrade(seen).update(fn)
     }
   }
