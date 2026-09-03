@@ -82,11 +82,6 @@ export function isConvexQueryKey(key: readonly unknown[]): boolean {
  * query with a snapshot resolves from it at once; Convex marks its queries
  * never-stale so nothing refetches; and the subscription the cache opened
  * replaces the snapshot the moment the socket delivers.
- *
- * A debounced write is lost if the page unloads inside the debounce window
- * (bounded by `debounceMs`, no `pagehide` flush), so it is not rediscovered
- * later as a bug — it simply means a snapshot may lag reality by the
- * debounce interval, which is acceptable.
  */
 export function snapshotQueryFn(
   inner: QueryFunction,
@@ -103,7 +98,14 @@ export function snapshotQueryFn(
   }
 }
 
-/** Write-through of every successful Convex result, debounced per key. */
+/**
+ * Write-through of every successful Convex result, debounced per key.
+ *
+ * A debounced write is LOST if the page unloads inside the window — bounded
+ * by `debounceMs`, and there is no `pagehide` flush — so the stored snapshot
+ * can lag the last result by that interval. Recorded so it is not
+ * rediscovered later as a bug.
+ */
 export function attachSnapshotWriter(
   cache: QueryCache,
   store: SnapshotStore,
