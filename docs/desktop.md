@@ -57,10 +57,17 @@ the network returns. The tray's **Start timer** still reaches a page that
 actually loaded, because that page is the cached one, not a blank window
 waiting on a fetch that will never resolve.
 
-That only holds for a window that has loaded the site online at least once.
-A window that has never done so still gets the platform's own error page —
-Edge WebView2's on Windows, WKWebView's on macOS — because there is nothing
-in any cache yet for the service worker to serve.
+That only holds once the service worker has been **registered** on this
+device, which itself requires one successful online page load —
+`registerServiceWorker()` runs from the root route, and only in a production
+build. From that point on, every offline navigation is intercepted by the
+worker, and `networkFirstNavigation` always answers it: the cached response
+for that URL if one exists, otherwise Chroneli's own inline offline page at
+503 — never a fall-through to the platform's chrome, even for a URL that was
+never individually visited. A window on a device where the worker has never
+registered — no page has ever loaded there while online — is the only case
+that still gets the platform's own error page: Edge WebView2's on Windows,
+WKWebView's on macOS.
 
 **Verified on Windows (WebView2).** WebView2 is Chromium, and service
 workers there behave exactly as they do in a desktop browser.

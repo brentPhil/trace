@@ -97,8 +97,11 @@ immediate answer) at enqueue time, not at send time, so a stop replayed hours
 later closes the entry at the moment the user actually pressed it.
 
 **Correction from the design spec.** The spec's §1 said a replayed stop
-"carries the id of the entry it is stopping." What shipped is stronger and
-more specific than that sentence suggests: `entries.stop` and
+"carries the id of the entry it is stopping" — looser than what shipped;
+§6 already specifies the shape below precisely, including the rejected
+timestamp guard, so the gap is really between two parts of the spec, not
+between spec and code. What shipped is stronger and more specific than that
+§1 sentence suggests: `entries.stop` and
 `entries.discardRunning` both take an **optional `entryId`** on the server
 (`convex/entries.ts`), and every outbox-issued stop/discard now sends one.
 Given an id, the server closes or deletes *only that entry*, and only while
@@ -289,17 +292,19 @@ machine — replaying their writes under a different session — is worse, and
 an unreachable sign-out guarantees exactly that outcome on a shared device.
 
 Sign-out cleanup (`src/lib/offline/clear-local-data.ts`, `clearLocalData`)
-clears three things independently, each `.catch`-guarded so one failing
-store can't block the others or block the user leaving:
+clears the remembered auth flag first, synchronously and outside the
+`Promise.all` below — it has no `.catch` at that call site, and is
+exception-proof only because `remembered-auth.ts` wraps its own
+`localStorage` access internally. The other three run through `Promise.all`,
+each `.catch`-guarded independently so one failing store can't block the
+others or block the user leaving:
 
-- the remembered auth flag,
-- the query snapshot store,
-- the service worker's caches,
-
-and — the one that has to go through `Outbox.clear()` rather than being
-poked directly — **the outbox itself**, including rejecting every pending
-`settled` promise as `DISCARDED` and emitting the `changed` event a visible
-sync-status line depends on to notice the queue disappeared.
+- the query snapshot store (`snapshots.clear()`),
+- the outbox — the one that has to go through `Outbox.clear()` rather than
+  being poked directly, including rejecting every pending `settled` promise
+  as `DISCARDED` and emitting the `changed` event a visible sync-status line
+  depends on to notice the queue disappeared,
+- the service worker's caches (`clearServiceWorkerCaches()`).
 
 ## What is now stored on the device
 
