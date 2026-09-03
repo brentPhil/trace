@@ -2888,7 +2888,10 @@ export const OP_KINDS = {
     ref: api.entries.discardRunning,
     label: "Discarding the timer",
     optimistic: entries.optimisticDiscard,
-    immediate: nothing,
+    // NOT `nothing`: this is the one mutation here that returns a shape
+    // rather than null (`discardReturns` in convex/entries.ts). Empty is
+    // honest — the caller learns nothing was discarded yet.
+    immediate: () => ({ discardedEntryIds: [] }),
   }),
   "entries.setTitle": kind({
     ref: api.entries.setTitle,
@@ -3019,7 +3022,7 @@ export type ArgsOf<K extends OpKindName> = FunctionArgs<(typeof OP_KINDS)[K]["re
 export type ResultOf<K extends OpKindName> = FunctionReturnType<(typeof OP_KINDS)[K]["ref"]>
 ```
 
-If `api.projects.remove`, `api.projects.setArchived`, `api.tags.rename`, `api.tags.remove` or `api.entries.discardRunning`'s return types are not `null`, adjust the `immediate` for that kind to build a value of the right shape (read the `returns:` validator in the Convex file). If `projects.create`'s `clientKey` is typed optional, the `as string` casts above stay.
+Return types are already resolved, so do not re-derive them: `projects.update`, `projects.setArchived`, `projects.remove`, `tags.rename`, `tags.remove` and `settings.update` all declare `returns: v.null()`, so `nothing` is right for each. `entries.discardRunning` is the exception and is handled above. `projects.create`'s `clientKey` is optional, so the `as string` casts stay.
 
 `settings.update` carries `coalesceMerge: true` above, and that is load-bearing rather than decorative: the default collapse replaces the earlier op's args, which would lose the currency when the timezone is typed second. The engine and its test for both behaviours land in Task 6; here you only set the flag.
 
