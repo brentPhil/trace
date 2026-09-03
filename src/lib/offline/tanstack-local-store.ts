@@ -48,6 +48,12 @@ export class TanStackLocalStore implements OptimisticLocalStore {
   ): void {
     // `setQueryData(key, undefined)` is a no-op in TanStack; say so here
     // rather than letting a caller believe it unset something.
+    //
+    // Convex's own store documents `undefined` as "remove the query, to show
+    // a loading state while it recomputes". That is NOT reproducible here —
+    // clearing a TanStack entry needs `removeQueries`, which would drop the
+    // subscription too — so an optimistic function must never rely on it.
+    // None does: they write `null` for "nothing is running", never undefined.
     if (value === undefined) return
     this.queryClient.setQueryData(["convexQuery", getFunctionName(query), args], value)
   }
