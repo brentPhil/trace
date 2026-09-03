@@ -1,5 +1,5 @@
 import { anyApi } from "convex/server"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { Outbox } from "./outbox"
 import { MemoryOutboxStore } from "./outbox-store-memory"
 import { optimisticIdFor } from "@/lib/optimistic-id"
@@ -237,6 +237,99 @@ describe("Outbox", () => {
     expect(outbox.pending()).toBe(1)
   })
 
+  it("drops a journaled op whose kind no longer exists", async () => {
+    // The guard the `kinds` typing turns on. An app version that removes a
+    // mutation leaves ops naming it in journals on real devices, and they
+    // must be dropped and reported rather than jamming the queue behind
+    // them forever.
+    const store = new MemoryOutboxStore()
+    await store.update((s) => ({
+      ...s,
+      ops: [{ id: "op-gone", kind: "gone", args: {}, enqueuedAt: 0, inFlight: false }],
+    }))
+    const events: OutboxEvent[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+    })
+    outbox.subscribe((e) => events.push(e))
+    await outbox.load()
+    await flush()
+    expect(
+      events.some((e) => e.type === "dropped" && e.op.kind === "gone" && e.reason === "rejected")
+    ).toBe(true)
+    expect(outbox.pending()).toBe(0)
+  })
+
+  it("boots the rest of the journal when one op cannot be re-applied", async () => {
+    // `load` does not consult the kind registry, so a bad op reaches
+    // `applyLocal` before `drain` can drop it. Unguarded, its throw left every
+    // other op unapplied AND skipped the kick, stranding the whole queue.
+    const store = new MemoryOutboxStore()
+    await store.update((s) => ({
+      ...s,
+      ops: [
+        { id: "op-bad", kind: "stop", args: {}, enqueuedAt: 0, inFlight: false },
+        { id: "op-good", kind: "stop", args: {}, enqueuedAt: 0, inFlight: false },
+      ],
+    }))
+    const applied: string[] = []
+    const sent: string[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: (op) => {
+        sent.push(op.id)
+        return Promise.resolve(null)
+      },
+      applyLocal: (op) => {
+        if (op.id === "op-bad") throw new Error("cannot replay")
+        applied.push(op.id)
+      },
+      retryable: () => false,
+    })
+    await outbox.load()
+    await flush()
+    expect(applied).toEqual(["op-good"])
+    expect(sent).toEqual(["op-bad", "op-good"])
+  })
+
+  it("keeps a resolved mapping after its producer leaves the queue", async () => {
+    // The dependent may be enqueued AFTER the producer is acknowledged: the
+    // screen still shows the placeholder until the reactive query swaps it.
+    // Pruning on producer removal dropped that edit as orphaned.
+    const h = harness()
+    await h.outbox.enqueue("create", { clientKey: "k1", name: "A" })
+    await flush()
+    expect(h.outbox.pending()).toBe(0)
+
+    await h.outbox.enqueue("retitle", { id: "optimistic:k1", title: "B" })
+    await flush()
+    expect(h.sent.at(-1)).toEqual({ kind: "retitle", args: { id: "real:k1", title: "B" } })
+    expect(h.events.some((e) => e.type === "dropped")).toBe(false)
+  })
+
+  it("reports a drain that throws instead of freezing quietly", async () => {
+    const store = new MemoryOutboxStore()
+    const events: OutboxEvent[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+      // The one dependency a drain cannot proceed without.
+      lock: () => Promise.reject(new Error("lock exploded")),
+    })
+    outbox.subscribe((e) => events.push(e))
+    outbox.kick()
+    await flush()
+    expect(events.some((e) => e.type === "failed")).toBe(true)
+  })
+
   it("notifies pending-count changes", async () => {
     const h = harness()
     await h.outbox.enqueue("stop", {})
@@ -245,6 +338,4 @@ describe("Outbox", () => {
     expect(counts[0]).toBe(1)
     expect(counts[counts.length - 1]).toBe(0)
   })
-
-  vi.useRealTimers()
 })

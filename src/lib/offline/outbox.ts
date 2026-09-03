@@ -6,6 +6,14 @@ import type { Lock } from "./web-lock"
 export type OutboxEvent =
   | { type: "changed"; pending: number }
   | { type: "dropped"; op: Op; reason: "rejected" | "stale" | "orphaned"; error?: unknown }
+  /** The drain itself threw. The queue has stopped for a reason that is NOT
+   *  being offline, and saying so is the whole point: a frozen pending count
+   *  reads as "waiting for the network", which is exactly wrong here. */
+  | { type: "failed"; error: unknown }
+
+/** Rejection given to a `settled` promise whose op was drained by another tab.
+ *  See `reconcileSettlers`. */
+export const SENT_BY_ANOTHER_TAB = "This change was sent by another tab."
 
 export type Sender = (op: Op, args: Record<string, unknown>) => Promise<unknown>
 
@@ -72,11 +80,27 @@ export class Outbox {
       ...s,
       ops: s.ops.map((op) => ({ ...op, inFlight: false })),
     }))
-    for (const op of snap.ops) this.applyLocal(op)
+    for (const op of snap.ops) {
+      try {
+        this.applyLocal(op)
+      } catch {
+        // One unreplayable op must not stop the boot. `load` does not consult
+        // the kind registry at all, so an op naming a kind a later version of
+        // the app removed reaches here BEFORE `drain` can drop it — and an
+        // unguarded throw would leave the rest of the journal unapplied and
+        // never call `kick`, silently stranding every other op in it.
+      }
+    }
     this.setPending(snap.ops.length)
     this.kick()
   }
 
+  /**
+   * `settled` resolves with the server's answer once this op is sent — but
+   * only when THIS instance is the one that sends it. Another tab may drain
+   * it first (see `reconcileSettlers`), in which case it rejects instead of
+   * hanging forever. Treat it as best-effort across tabs, never load-bearing.
+   */
   async enqueue(
     kind: string,
     args: Record<string, unknown>,
@@ -166,19 +190,29 @@ export class Outbox {
       return
     }
     this.draining = true
-    void this.lock(() => this.drain()).finally(() => {
-      this.draining = false
-      if (this.kicked) {
-        this.kicked = false
-        this.kick()
-      }
-    })
+    void this.lock(() => this.drain())
+      .catch((error: unknown) => {
+        // A drain that throws must not die quietly. Everything it owns — the
+        // pending count, the settlers, the journal — freezes in place, and a
+        // frozen pending count is indistinguishable from being offline, which
+        // is precisely what this class tells its reader to assume. Say so
+        // instead, and let the next kick try again.
+        this.emit({ type: "failed", error })
+      })
+      .finally(() => {
+        this.draining = false
+        if (this.kicked) {
+          this.kicked = false
+          this.kick()
+        }
+      })
   }
 
   private async drain(): Promise<void> {
     for (;;) {
       const snap = await this.store.read()
       this.setPending(snap.ops.length)
+      this.reconcileSettlers(snap)
       const op = snap.ops.at(0)
       if (op === undefined) return
       const def = this.kinds[op.kind]
@@ -227,7 +261,7 @@ export class Outbox {
         if (def.mints !== undefined && def.minted !== undefined) {
           resolved[def.mints(op.args)] = def.minted(result)
         }
-        return { ops, resolved: pruneResolved(resolved, ops) }
+        return { ops, resolved: capResolved(resolved) }
       })
       this.settlers.get(op.id)?.resolve(result)
       this.settlers.delete(op.id)
@@ -235,18 +269,18 @@ export class Outbox {
     }
   }
 
+  /** Only ever asked about the head of the queue, so "later ops" is the tail. */
   private isStale(op: Op, def: OpKind<any, any>, snap: OutboxSnapshot): boolean {
     if (def.staleAfterMs === undefined) return false
     if (this.now() - op.enqueuedAt <= def.staleAfterMs) return false
     const closers = def.closedBy ?? []
-    const index = snap.ops.findIndex((o) => o.id === op.id)
-    return !snap.ops.slice(index + 1).some((o) => closers.includes(o.kind))
+    return !snap.ops.slice(1).some((o) => closers.includes(o.kind))
   }
 
   private async drop(op: Op, reason: "rejected" | "stale" | "orphaned", error?: unknown): Promise<void> {
     const next = await this.store.update((s) => {
       const ops = s.ops.filter((o) => o.id !== op.id)
-      return { ops, resolved: pruneResolved(s.resolved, ops) }
+      return { ops, resolved: s.resolved }
     })
     this.settlers.get(op.id)?.reject(error ?? new Error(reason))
     this.settlers.delete(op.id)
@@ -260,27 +294,62 @@ export class Outbox {
     this.emit({ type: "changed", pending: count })
   }
 
+  /**
+   * Settles anything that left the journal without THIS instance sending it.
+   *
+   * With the Web Lock in place another tab may hold the sender and drain an
+   * op this tab enqueued. Its result never comes back here, so the promise
+   * cannot be resolved with one — but leaving it pending forever would hang
+   * every caller awaiting it and grow `settlers` without bound. Rejecting is
+   * the honest answer, and it is why `settled` is documented as best-effort
+   * across tabs: never depend on it for correctness, only for extras like
+   * recording the server's clock.
+   */
+  private reconcileSettlers(snap: OutboxSnapshot): void {
+    if (this.settlers.size === 0) return
+    const live = new Set(snap.ops.map((o) => o.id))
+    for (const [id, deferred] of this.settlers) {
+      if (live.has(id)) continue
+      deferred.reject(new Error(SENT_BY_ANOTHER_TAB))
+      this.settlers.delete(id)
+    }
+  }
+
   private emit(event: OutboxEvent): void {
-    for (const listener of this.listeners) listener(event)
+    for (const listener of this.listeners) {
+      try {
+        listener(event)
+      } catch {
+        // One subscriber's bug must not take the drain down with it — and
+        // `setPending` emits on every drain iteration, so it would.
+      }
+    }
   }
 }
 
 /**
- * Forget a placeholder once no pending op mentions it.
+ * How many resolved placeholder mappings to keep.
  *
- * A crude `JSON.stringify` + substring test rather than a real walk of every
- * op's args: it can only OVER-retain (a placeholder id that happens to be a
- * substring of some unrelated string survives a little longer than it has
- * to), never under-retain, and over-retention costs a few bytes and nothing
- * else. Do not "fix" this into something exact — an exact version that gets
- * the walk wrong can prune a mapping a still-pending op depends on, which
- * turns into a silently orphaned op instead of a few stale bytes.
+ * They are kept by AGE — objects preserve string-key insertion order, so the
+ * oldest are simply the first — and NOT by whether a queued op still names
+ * one. Reference-counting the live queue looks tighter and is wrong: the
+ * mapping is minted in the very transaction that removes its producer from
+ * the queue, so a mapping with no dependent YET would be discarded
+ * microseconds after being learned. The screen still shows the placeholder
+ * until the reactive query swaps it, so an edit made in that window would
+ * arrive naming an id nothing could resolve and be dropped as "orphaned" —
+ * blamed on a producer that in fact succeeded. That is exactly the loss
+ * src/lib/optimistic-id.ts was written to warn about.
+ *
+ * A hundred is far more than a session offline can produce, and each entry is
+ * two short strings.
  */
-function pruneResolved(resolved: Record<string, string>, ops: Op[]): Record<string, string> {
-  const text = JSON.stringify(ops.map((o) => o.args))
+const RESOLVED_LIMIT = 100
+
+function capResolved(resolved: Record<string, string>): Record<string, string> {
+  const keys = Object.keys(resolved)
+  if (keys.length <= RESOLVED_LIMIT) return resolved
   const kept: Record<string, string> = {}
-  for (const [placeholder, real] of Object.entries(resolved)) {
-    if (text.includes(placeholder)) kept[placeholder] = real
-  }
+  for (const key of keys.slice(keys.length - RESOLVED_LIMIT)) kept[key] = resolved[key]
   return kept
 }
