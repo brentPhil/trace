@@ -719,6 +719,31 @@ it("indexeddb persists across store instances of the same name", async () => {
   await new IdbOutboxStore(name).update((s) => ({ ...s, ops: [op("a")] }))
   expect((await new IdbOutboxStore(name).read()).ops).toHaveLength(1)
 })
+
+it("a memory read sees an update that was never awaited", async () => {
+  const store = new MemoryOutboxStore()
+  void store.update((s) => ({ ...s, ops: [op("a")] }))
+  expect((await store.read()).ops).toHaveLength(1)
+})
+
+it("degrades to memory when IndexedDB is present but refuses", async () => {
+  // Safari's private mode: the API is there, opening a database is refused.
+  // The refusal cannot surface in the constructor — `createStore` is lazy —
+  // so the store has to absorb it on first use.
+  const realOpen = indexedDB.open
+  indexedDB.open = (() => {
+    throw new Error("refused")
+  }) as typeof indexedDB.open
+  try {
+    const store = new IdbOutboxStore(`refused-${Math.random()}`)
+    // Resolves rather than rejecting: this is the "never a thrown boot" claim.
+    expect(await store.read()).toEqual(EMPTY_SNAPSHOT)
+    await store.update((s) => ({ ...s, ops: [op("a")] }))
+    expect((await store.read()).ops).toHaveLength(1)
+  } finally {
+    indexedDB.open = realOpen
+  }
+})
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -741,7 +766,11 @@ export class MemoryOutboxStore implements OutboxStore {
   private snapshot: OutboxSnapshot = EMPTY_SNAPSHOT
   private chain: Promise<unknown> = Promise.resolve()
 
+  /** Joins the chain, so a read issued after an un-awaited update still sees
+   *  it. Returning `this.snapshot` bare would hand back the pre-update value
+   *  and give the two stores different observable behaviour. */
   async read(): Promise<OutboxSnapshot> {
+    await this.chain
     return this.snapshot
   }
 
@@ -777,37 +806,65 @@ const KEY = "outbox.v1"
  */
 export class IdbOutboxStore implements OutboxStore {
   private readonly store
+  /** Set once IndexedDB has refused, and used for the rest of the session. */
+  private fallback: MemoryOutboxStore | null = null
 
   constructor(dbName = "chroneli-offline") {
     this.store = createStore(dbName, "outbox")
   }
 
   async read(): Promise<OutboxSnapshot> {
-    return (await get<OutboxSnapshot>(KEY, this.store)) ?? EMPTY_SNAPSHOT
+    if (this.fallback !== null) return await this.fallback.read()
+    try {
+      return (await get<OutboxSnapshot>(KEY, this.store)) ?? EMPTY_SNAPSHOT
+    } catch {
+      return await this.degrade().read()
+    }
   }
 
   async update(fn: (current: OutboxSnapshot) => OutboxSnapshot): Promise<OutboxSnapshot> {
-    let result: OutboxSnapshot = EMPTY_SNAPSHOT
-    await update<OutboxSnapshot>(
-      KEY,
-      (current) => {
-        result = fn(current ?? EMPTY_SNAPSHOT)
-        return result
-      },
-      this.store
-    )
-    return result
+    if (this.fallback !== null) return await this.fallback.update(fn)
+    try {
+      let result: OutboxSnapshot = EMPTY_SNAPSHOT
+      await update<OutboxSnapshot>(
+        KEY,
+        (current) => {
+          result = fn(current ?? EMPTY_SNAPSHOT)
+          return result
+        },
+        this.store
+      )
+      return result
+    } catch {
+      return await this.degrade().update(fn)
+    }
+  }
+
+  /**
+   * IndexedDB is there but will not store anything — Safari's private mode
+   * refuses the open — so carry on in memory for the rest of the session.
+   *
+   * THE FACTORY BELOW CANNOT DO THIS. `createStore` is lazy: it builds a
+   * closure and does not touch `indexedDB.open()` until the first read or
+   * write, so a constructor-time try/catch guards nothing and the refusal
+   * arrives later as a rejected promise. Degrading here is what makes "never
+   * a thrown boot" true rather than merely intended. Found in review.
+   *
+   * The cost is honest and unavoidable: in a browser that will not store
+   * anything, nothing survives a reload. Within the session the outbox still
+   * works, which is strictly better than a boot that throws.
+   */
+  private degrade(): MemoryOutboxStore {
+    this.fallback ??= new MemoryOutboxStore()
+    return this.fallback
   }
 }
 
-/** IndexedDB when the runtime has one, else memory — never a thrown boot. */
+/** IndexedDB when the runtime has one, else memory. A runtime that HAS one
+ *  and refuses it is handled by `degrade` above, not here. */
 export function createOutboxStore(): OutboxStore {
-  try {
-    if (typeof indexedDB === "undefined") return new MemoryOutboxStore()
-    return new IdbOutboxStore()
-  } catch {
-    return new MemoryOutboxStore()
-  }
+  if (typeof indexedDB === "undefined") return new MemoryOutboxStore()
+  return new IdbOutboxStore()
 }
 ```
 
