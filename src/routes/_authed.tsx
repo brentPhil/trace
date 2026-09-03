@@ -35,6 +35,8 @@ import {
 } from "@/lib/offline/outbox-provider"
 import { useOnlineStatus } from "@/lib/offline/use-online-status"
 import { OP_KINDS } from "@/lib/offline/op-kinds"
+import { clearLocalData } from "@/lib/offline/clear-local-data"
+import { OFFLINE_SIGN_OUT_REASON, pendingSignOutReason } from "@/lib/offline/offline-copy"
 import { SyncStatus } from "@/components/shell/sync-status"
 import { OfflinePending } from "@/components/shell/offline-pending"
 import { MusicControls } from "@/components/music/music-controls"
@@ -166,7 +168,7 @@ function AuthedLayout() {
 function AuthedShell() {
   useEnsureSettings()
 
-  const { sidebarOpen } = Route.useRouteContext()
+  const { sidebarOpen, snapshots } = Route.useRouteContext()
   const { data: user } = useSuspenseQuery(
     convexQuery(api.auth.getAuthenticatedUser, {})
   )
@@ -221,6 +223,15 @@ function AuthedShell() {
 
   const online = useOnlineStatus()
   const pending = usePendingCount()
+  // Two different reasons a control has to say, not one collapsed into the
+  // other: offline is a connection problem, a full outbox is a "your changes
+  // would be stranded" problem, and the sentences in offline-copy.ts are
+  // written for each separately.
+  const signOutDisabledReason = !online
+    ? OFFLINE_SIGN_OUT_REASON
+    : pending > 0
+      ? pendingSignOutReason(pending)
+      : null
   useOutboxEvents(
     useCallback(
       (event) => {
@@ -338,7 +349,8 @@ function AuthedShell() {
       // with an email and a password and never edited, so `undefined` rather
       // than `""` is what the sidebar has to branch on.
       name={user.name === "" ? undefined : user.name}
-      onSignOut={() => signOutAndLeave()}
+      onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots))}
+      signOutDisabledReason={signOutDisabledReason}
       sidebarDefaultOpen={sidebarOpen}
       timer={
         <>

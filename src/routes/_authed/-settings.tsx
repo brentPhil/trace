@@ -29,6 +29,8 @@ import { authClient } from "@/lib/auth-client"
 import { useLatest } from "@/hooks/use-latest"
 import { useClassifierMutations } from "@/hooks/use-classifiers"
 import { useOutboxMutation } from "@/lib/offline/outbox-provider"
+import { useOnlineStatus } from "@/lib/offline/use-online-status"
+import { OFFLINE_GOOGLE_REASON, OFFLINE_UPLOAD_REASON } from "@/lib/offline/offline-copy"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
 import { rateHelp } from "@/lib/format-money"
@@ -116,6 +118,7 @@ export function Settings() {
   const clearLogo = useLatest(useConvexMutation(api.settings.clearLogo))
   const setLogo = useLatest(useConvexAction(api.settings.setLogo))
   const toasts = useToastManager()
+  const online = useOnlineStatus()
   const [logoBusy, setLogoBusy] = useState(false)
   /* The page reads the theme context ONCE and hands the pieces down, so
      `ThemeSection` stays presentational like every other section here. */
@@ -652,56 +655,76 @@ export function Settings() {
 
         <Section
           title="Invoice logo"
-          hint="Invoices already raised keep the logo they were made with."
+          hint={
+            online
+              ? "Invoices already raised keep the logo they were made with."
+              : OFFLINE_UPLOAD_REASON
+          }
         >
-          <InvoiceLogoSection
-            logoUrl={settings.logoUrl}
-            busy={logoBusy}
-            onFile={(file) => void uploadLogo(file)}
-            onRemove={() => {
-              setLogoBusy(true)
-              void clearLogo({})
-                .catch((thrown: unknown) => {
-                  toasts.add({
-                    title: errorMessage(thrown),
-                    priority: "high",
+          {/* A disabled `<fieldset>` disables every native form control it
+              contains — the file input and every `Button` beneath it are
+              exactly that underneath (see app-sidebar.tsx's ProfileMenu for
+              the one control in this app that is not). `className="contents"`
+              keeps the fieldset out of the grid this section's children sit
+              in: a bare `<fieldset>` is a block box with a UA border, which
+              would otherwise wrap the control column in a frame nothing else
+              on this page draws. */}
+          <fieldset disabled={!online} className="contents">
+            <InvoiceLogoSection
+              logoUrl={settings.logoUrl}
+              busy={logoBusy}
+              onFile={(file) => void uploadLogo(file)}
+              onRemove={() => {
+                setLogoBusy(true)
+                void clearLogo({})
+                  .catch((thrown: unknown) => {
+                    toasts.add({
+                      title: errorMessage(thrown),
+                      priority: "high",
+                    })
                   })
-                })
-                .finally(() => setLogoBusy(false))
-            }}
-          />
+                  .finally(() => setLogoBusy(false))
+              }}
+            />
+          </fieldset>
         </Section>
 
         <Section
           title="Google Calendar"
-          hint="Chroneli only ever reads. Nothing is written back, and no meeting starts a timer on its own."
+          hint={
+            online
+              ? "Chroneli only ever reads. Nothing is written back, and no meeting starts a timer on its own."
+              : OFFLINE_GOOGLE_REASON
+          }
         >
-          <GoogleCalendarSection
-            connection={connection}
-            calendars={calendars}
-            projects={projects}
-            timeZone={settings.timezone}
-            use12Hour={settings.timeFormat === "12"}
-            /* Read once per render rather than through `useClock`: "Last
-               synced" only needs to know which local DAY it is, and a ticking
-               clock would re-render this whole page every second to answer a
-               question whose answer changes at midnight. */
-            nowMs={Date.now()}
-            actions={{
-              connect: connectGoogle,
-              disconnect: () => void disconnectGoogle().catch(report),
-              setShow: (calendarId, show) =>
-                void setCalendarShowMutation({ calendarId, show }).catch(
-                  report
-                ),
-              setProject: (calendarId, projectId) =>
-                void setCalendarProjectMutation({
-                  calendarId,
-                  projectId,
-                }).catch(report),
-              createProject: (name) => createProject({ name }),
-            }}
-          />
+          <fieldset disabled={!online} className="contents">
+            <GoogleCalendarSection
+              connection={connection}
+              calendars={calendars}
+              projects={projects}
+              timeZone={settings.timezone}
+              use12Hour={settings.timeFormat === "12"}
+              /* Read once per render rather than through `useClock`: "Last
+                 synced" only needs to know which local DAY it is, and a ticking
+                 clock would re-render this whole page every second to answer a
+                 question whose answer changes at midnight. */
+              nowMs={Date.now()}
+              actions={{
+                connect: connectGoogle,
+                disconnect: () => void disconnectGoogle().catch(report),
+                setShow: (calendarId, show) =>
+                  void setCalendarShowMutation({ calendarId, show }).catch(
+                    report
+                  ),
+                setProject: (calendarId, projectId) =>
+                  void setCalendarProjectMutation({
+                    calendarId,
+                    projectId,
+                  }).catch(report),
+                createProject: (name) => createProject({ name }),
+              }}
+            />
+          </fieldset>
         </Section>
 
         <Section

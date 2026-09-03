@@ -58,6 +58,8 @@ import { LibraryUsage } from "@/components/music/library-usage"
 import { UploadQueuePanel } from "@/components/music/upload-queue-panel"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
+import { OFFLINE_UPLOAD_REASON } from "@/lib/offline/offline-copy"
+import { useOnlineStatus } from "@/lib/offline/use-online-status"
 import { errorMessage } from "@/lib/error-message"
 import { UploadCancelled, postFileWithProgress } from "@/lib/music/post-file"
 import { acceptedFormatList, advance, precheck } from "@/lib/music/upload-queue"
@@ -124,6 +126,7 @@ export function MusicLibrarySection() {
   const removeTrack = useLatest(useConvexMutation(api.music.removeTrack))
 
   const toasts = useToastManager()
+  const online = useOnlineStatus()
 
   /* The one error posture on this page, and it is /projects' verbatim: the
    * backend's INVALID_TRACK and LIBRARY_FULL messages are already sentences
@@ -434,7 +437,7 @@ export function MusicLibrarySection() {
             // See the layout note above: pushed right only when it has
             // something to be pushed away FROM.
             !empty && "ml-auto",
-            busy && "pointer-events-none opacity-50"
+            (busy || !online) && "pointer-events-none opacity-50"
           )}
         >
           <Upload className="size-4" />
@@ -443,7 +446,7 @@ export function MusicLibrarySection() {
             type="file"
             accept={AUDIO_INPUT_ACCEPT}
             multiple
-            disabled={busy}
+            disabled={busy || !online}
             aria-label="Music files"
             onChange={(event) => {
               const files = Array.from(event.target.files ?? [])
@@ -457,6 +460,10 @@ export function MusicLibrarySection() {
           />
         </label>
       </div>
+
+      {!online ? (
+        <p className="text-xs text-muted-foreground">{OFFLINE_UPLOAD_REASON}</p>
+      ) : null}
 
       {empty ? null : (
         <div className="flex max-w-prose flex-col gap-1.5">

@@ -13,7 +13,13 @@ function mount(
     email = "a@b.com",
     name,
     onSignOut = vi.fn(),
-  }: { email?: string; name?: string; onSignOut?: () => void } = {}
+    signOutDisabledReason = null,
+  }: {
+    email?: string
+    name?: string
+    onSignOut?: () => void
+    signOutDisabledReason?: string | null
+  } = {}
 ) {
   render(
     renderWithRouter(
@@ -24,7 +30,12 @@ function mount(
       // the tree actually needs, exactly as it already does for the sidebar.
       <ThemeProvider>
         <SidebarProvider defaultOpen>
-          <AppSidebar email={email} name={name} onSignOut={onSignOut} />
+          <AppSidebar
+            email={email}
+            name={name}
+            onSignOut={onSignOut}
+            signOutDisabledReason={signOutDisabledReason}
+          />
         </SidebarProvider>
       </ThemeProvider>,
       { path }
@@ -113,6 +124,38 @@ describe("AppSidebar", () => {
     fireEvent.click(await screen.findByRole("button", { name: /a@b\.com/ }))
     fireEvent.click(await screen.findByRole("button", { name: "Sign out" }))
     expect(onSignOut).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * A control that cannot work is disabled and SAYS WHY — never hidden. This
+   * is the shell's half of that rule: `_authed.tsx` decides which sentence
+   * applies (offline, or a non-empty outbox) and hands it down as a single
+   * prop, so this only has to prove the prop reaches the control and its text.
+   */
+  it("disables Sign out and shows the reason when one is given", async () => {
+    const onSignOut = vi.fn()
+    mount("/timer", {
+      onSignOut,
+      signOutDisabledReason: "You're offline. Sign out once you're back online.",
+    })
+    fireEvent.click(await screen.findByRole("button", { name: /a@b\.com/ }))
+
+    const signOut = await screen.findByRole("button", { name: "Sign out" })
+    expect((signOut as HTMLButtonElement).disabled).toBe(true)
+    const popup = signOut.closest('[role="dialog"]')
+    expect(popup?.textContent).toContain(
+      "You're offline. Sign out once you're back online."
+    )
+
+    fireEvent.click(signOut)
+    expect(onSignOut).not.toHaveBeenCalled()
+  })
+
+  it("renders no reason, and an enabled control, when nothing is stopping sign-out", async () => {
+    mount("/timer")
+    fireEvent.click(await screen.findByRole("button", { name: /a@b\.com/ }))
+    const signOut = await screen.findByRole("button", { name: "Sign out" })
+    expect((signOut as HTMLButtonElement).disabled).toBe(false)
   })
 
   /**

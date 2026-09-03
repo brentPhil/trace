@@ -8,16 +8,23 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { Settings } from "@/routes/_authed/-settings"
-import { convexKey } from "@/test-utils/convex-query"
+import {
+  convexKey,
+  resetConnectionOnline,
+  setConnectionOnline,
+} from "@/test-utils/convex-query"
 import { SETTINGS } from "@/test-utils/fixtures"
 import { chooseOption, selectedLabel } from "@/test-utils/select"
 import { api } from "../../../convex/_generated/api"
 import { getFunctionName } from "convex/server"
 import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
+import type * as ConvexReactModuleType from "convex/react"
 
 type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
+type ConvexReactModule = typeof ConvexReactModuleType
 
 /*
  * /settings' notes-in-the-PDF control.
@@ -107,6 +114,19 @@ vi.mock("@/lib/offline/outbox-provider", () => ({
   },
 }))
 
+// `useOnlineStatus` (the two online-only sections' own gate) reads
+// `useConvexConnectionState` from "convex/react", which needs a real
+// `ConvexReactClient` this file does not have. `useConvexConnectionStateDouble`
+// answers "online" by default — see `@/test-utils/convex-query` for what
+// flipping it offline means and why.
+vi.mock("convex/react", async (importOriginal) => {
+  const actual = await importOriginal<ConvexReactModule>()
+  const { useConvexConnectionStateDouble } = await import(
+    "@/test-utils/convex-query"
+  )
+  return { ...actual, useConvexConnectionState: useConvexConnectionStateDouble }
+})
+
 afterEach(() => {
   cleanup()
   update.mockClear()
@@ -136,6 +156,7 @@ afterEach(() => {
   // The round-trip marker lives in `sessionStorage` precisely so it survives a
   // document load; it therefore also survives between tests unless cleared.
   window.sessionStorage.clear()
+  resetConnectionOnline()
   vi.unstubAllGlobals()
 })
 
@@ -477,6 +498,77 @@ describe("/settings — invoice logo", () => {
     renderSettings({ logoUrl: "https://files.example/current.png" })
     fireEvent.click(screen.getByRole("button", { name: "Remove logo" }))
     await waitFor(() => expect(clearLogo).toHaveBeenCalledWith({}))
+  })
+})
+
+/*
+ * Both sections below need a connection: the logo goes straight to Convex
+ * storage and Google's own writes are plain `useConvexMutation` calls, never
+ * the offline outbox — so a `<fieldset disabled>` is what stops them offline,
+ * and the hint beside each one says why (see offline-copy.ts).
+ *
+ * These assert the `<fieldset>` ITSELF carries `disabled`, not the native
+ * controls nested inside it. jsdom does not implement a fieldset's disabling
+ * cascade onto its descendants (verified directly: a `<button>` inside
+ * `<fieldset disabled>` still reads `.disabled === false` under jsdom), so a
+ * test asserting the nested control would pass or fail on a browser behaviour
+ * this environment cannot reproduce either way — real browsers apply it
+ * universally, which is the whole reason `-settings.tsx` reaches for a
+ * `<fieldset>` rather than threading `disabled` through every control by hand.
+ */
+describe("/settings — offline", () => {
+  it("disables the invoice logo fieldset and swaps its hint offline", () => {
+    setConnectionOnline(false)
+    renderSettings({ logoUrl: "https://files.example/current.png" })
+
+    const heading = screen.getByRole("heading", { name: "Invoice logo" })
+    const section = heading.closest("section")
+    expect(section).toBeTruthy()
+    expect(
+      within(section as HTMLElement).getByText(
+        "You're offline. Uploads need a connection."
+      )
+    ).toBeTruthy()
+    const fieldset = section?.querySelector("fieldset")
+    expect((fieldset as HTMLFieldSetElement | null)?.disabled).toBe(true)
+  })
+
+  it("disables the Google Calendar fieldset and swaps its hint offline", () => {
+    setConnectionOnline(false)
+    renderSettings()
+
+    const heading = screen.getByRole("heading", { name: "Google Calendar" })
+    const section = heading.closest("section")
+    expect(section).toBeTruthy()
+    expect(
+      within(section as HTMLElement).getByText(
+        "You're offline. Google Calendar settings need a connection."
+      )
+    ).toBeTruthy()
+    const fieldset = section?.querySelector("fieldset")
+    expect((fieldset as HTMLFieldSetElement | null)?.disabled).toBe(true)
+  })
+
+  it("leaves both fieldsets enabled and their ordinary hints in place while online", () => {
+    renderSettings({ logoUrl: "https://files.example/current.png" })
+
+    for (const name of ["Invoice logo", "Google Calendar"]) {
+      const section = screen
+        .getByRole("heading", { name })
+        .closest("section")
+      const fieldset = section?.querySelector("fieldset")
+      expect((fieldset as HTMLFieldSetElement | null)?.disabled).toBe(false)
+    }
+    expect(
+      screen.getByText(
+        "Invoices already raised keep the logo they were made with."
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        "Chroneli only ever reads. Nothing is written back, and no meeting starts a timer on its own."
+      )
+    ).toBeTruthy()
   })
 })
 

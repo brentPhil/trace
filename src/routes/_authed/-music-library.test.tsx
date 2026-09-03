@@ -10,13 +10,19 @@ import {
 } from "@testing-library/react"
 import { MAX_LIBRARY_BYTES, MAX_TRACK_BYTES, formatBytes } from "@shared/audio"
 import { MusicLibrarySection } from "@/routes/_authed/-music-library"
-import { convexKey } from "@/test-utils/convex-query"
+import {
+  convexKey,
+  resetConnectionOnline,
+  setConnectionOnline,
+} from "@/test-utils/convex-query"
 import { api } from "../../../convex/_generated/api"
 import { getFunctionName } from "convex/server"
 import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
 import { chooseOption } from "@/test-utils/select"
+import type * as ConvexReactModuleType from "convex/react"
 
 type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
+type ConvexReactModule = typeof ConvexReactModuleType
 
 /*
  * /music — the library.
@@ -68,12 +74,26 @@ vi.mock("@convex-dev/react-query", async (importOriginal) => {
   }
 })
 
+// `useOnlineStatus` (the section's own online-only gate, see -music-library.tsx)
+// reads `useConvexConnectionState` from "convex/react", which needs a real
+// `ConvexReactClient` this file does not have. `useConvexConnectionStateDouble`
+// answers "online" by default — see `@/test-utils/convex-query` for what
+// flipping it offline means and why.
+vi.mock("convex/react", async (importOriginal) => {
+  const actual = await importOriginal<ConvexReactModule>()
+  const { useConvexConnectionStateDouble } = await import(
+    "@/test-utils/convex-query"
+  )
+  return { ...actual, useConvexConnectionState: useConvexConnectionStateDouble }
+})
+
 afterEach(() => {
   cleanup()
   generateUploadUrl.mockClear()
   addTrack.mockClear()
   renameTrack.mockClear()
   removeTrack.mockClear()
+  resetConnectionOnline()
   vi.unstubAllGlobals()
 })
 
@@ -621,5 +641,34 @@ describe("the library", () => {
       await screen.findAllByText(/That didn't save\. Try again\./)
     ).not.toHaveLength(0)
     expect(addTrack).not.toHaveBeenCalled()
+  })
+
+  /*
+   * Uploading goes straight to Convex storage — `generateUploadUrl` and
+   * `addTrack` above are a plain mutation and action, never the offline
+   * outbox — so this stays online-only, the same rule the invoice logo
+   * picker in -settings.tsx follows.
+   */
+  it("disables the file picker and states the offline reason", () => {
+    setConnectionOnline(false)
+    renderMusic()
+
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Music files").disabled
+    ).toBe(true)
+    expect(
+      screen.getByText("You're offline. Uploads need a connection.")
+    ).toBeTruthy()
+  })
+
+  it("leaves the file picker enabled and says nothing about being offline while online", () => {
+    renderMusic()
+
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Music files").disabled
+    ).toBe(false)
+    expect(
+      screen.queryByText("You're offline. Uploads need a connection.")
+    ).toBeNull()
   })
 })

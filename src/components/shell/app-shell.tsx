@@ -21,6 +21,7 @@ export function AppShell({
   email,
   name,
   onSignOut,
+  signOutDisabledReason,
   sidebarDefaultOpen,
   timer,
 }: {
@@ -28,6 +29,11 @@ export function AppShell({
   email?: string
   name?: string
   onSignOut: () => void
+  /** Non-null disables the sign-out control and shows this beneath it — a
+   *  connection problem or a non-empty outbox, each with its own sentence
+   *  (see offline-copy.ts). Not optional: forgetting to pass it should be a
+   *  type error, the same reasoning `sidebarDefaultOpen` states above. */
+  signOutDisabledReason: string | null
   sidebarDefaultOpen: boolean
   timer: ReactNode
 }) {
@@ -46,7 +52,12 @@ export function AppShell({
     // just with Base UI's default (non-zero) open delay.
     <TooltipProvider>
       <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-        <AppSidebar email={email} name={name} onSignOut={onSignOut} />
+        <AppSidebar
+          email={email}
+          name={name}
+          onSignOut={onSignOut}
+          signOutDisabledReason={signOutDisabledReason}
+        />
 
         <SidebarInset
           ref={hostRef}

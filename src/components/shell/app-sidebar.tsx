@@ -173,10 +173,12 @@ export function AppSidebar({
   email,
   name,
   onSignOut,
+  signOutDisabledReason,
 }: {
   email?: string
   name?: string
   onSignOut: () => void
+  signOutDisabledReason: string | null
 }) {
   return (
     /*
@@ -324,7 +326,12 @@ export function AppSidebar({
             of its own: the footer's gap-2 is the spacing, and a margin on
             top of it was the doubled gap this once shipped with. */}
         <WhatsNewBanner />
-        <ProfileMenu email={email} name={name} onSignOut={onSignOut} />
+        <ProfileMenu
+          email={email}
+          name={name}
+          onSignOut={onSignOut}
+          signOutDisabledReason={signOutDisabledReason}
+        />
       </SidebarFooter>
     </Sidebar>
   )
@@ -364,10 +371,12 @@ function ProfileMenu({
   email,
   name,
   onSignOut,
+  signOutDisabledReason,
 }: {
   email?: string
   name?: string
   onSignOut: () => void
+  signOutDisabledReason: string | null
 }) {
   /*
    * WHO YOU ARE, resolved once for both places that show it.
@@ -564,6 +573,7 @@ function ProfileMenu({
             <Button
               variant="ghost"
               size="sm"
+              disabled={signOutDisabledReason !== null}
               onClick={onSignOut}
               className="w-full justify-start gap-2 px-2"
             >
@@ -575,6 +585,16 @@ function ProfileMenu({
             </Button>
           }
         />
+
+        {/* Why the control above is inert, said beneath it rather than
+            leaving the button to vanish or to silently do nothing — the same
+            rule every other online-only control in this product follows (see
+            offline-copy.ts). Two different sentences share this one slot: a
+            connection problem and a non-empty outbox are different reasons,
+            and `_authed.tsx` is the one place that decides which applies. */}
+        {signOutDisabledReason !== null ? (
+          <p className="px-2 pb-1 text-xs text-muted-foreground">{signOutDisabledReason}</p>
+        ) : null}
       </PopoverContent>
     </Popover>
   )

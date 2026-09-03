@@ -78,3 +78,46 @@ export function usePaginatedQueryDouble(query: unknown, args: unknown) {
     : "CanLoadMore"
   return { results: snapshot.page, status, loadMore: () => {} }
 }
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Module state behind `useConvexConnectionStateDouble`, below. A `let` rather
+ * than a `useState` inside the double itself: the double is a plain function
+ * called from inside components under test, not a hook with state of its own
+ * to manage, and a test flips it with `setConnectionOnline` from OUTSIDE the
+ * render it is about to affect — before calling `render`, exactly like seeding
+ * the query client before it.
+ */
+let connectionOnline = true
+
+/** Flips the double's answer. Call before `render`, not from inside an act(). */
+export function setConnectionOnline(next: boolean): void {
+  connectionOnline = next
+}
+
+/** Back to "online", so one test's offline case cannot leak into the next.
+ *  Call from `afterEach`. */
+export function resetConnectionOnline(): void {
+  connectionOnline = true
+}
+
+/**
+ * A stand-in for `useConvexConnectionState` from "convex/react" — there is no
+ * real `ConvexReactClient` behind these page-fragment renders (the same gap
+ * `usePaginatedQueryDouble` above exists for), so the real hook throws: it
+ * reads its client from context.
+ *
+ * The shape matches what `isOffline` (src/lib/offline/online.ts) actually
+ * branches on. "Online" is a socket that is connected and has never dropped;
+ * "offline" is one that dropped once and has not reconnected — the
+ * `hasEverConnected: true, connectionRetries: 1` combination `isOffline`
+ * treats as offline on its first failed retry, which is the case a "you're
+ * offline" test wants, not the two-tries-from-cold grace `isOffline` gives a
+ * socket that never connected at all.
+ */
+export function useConvexConnectionStateDouble() {
+  return connectionOnline
+    ? { isWebSocketConnected: true, hasEverConnected: true, connectionRetries: 0 }
+    : { isWebSocketConnected: false, hasEverConnected: true, connectionRetries: 1 }
+}
