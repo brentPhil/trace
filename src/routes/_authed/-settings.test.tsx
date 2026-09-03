@@ -40,7 +40,11 @@ const {
   googleConnect,
   googleDisconnect,
 } = vi.hoisted(() => ({
-  update: vi.fn(async () => null),
+  // Typed to accept an argument (unused) rather than the bare `() => null` a
+  // Convex mutation mock would need: `useOutboxMutation`'s mock below calls
+  // this one directly with the op's args, and the calls this file asserts
+  // against (`toHaveBeenCalledWith({...})`) need that argument recorded.
+  update: vi.fn(async (_args?: unknown) => null),
   generateLogoUploadUrl: vi.fn(async () => "https://upload.example/logo"),
   clearLogo: vi.fn(async () => null),
   setLogo: vi.fn(async () => null),
@@ -88,6 +92,20 @@ vi.mock("@convex-dev/react-query", async (importOriginal) => {
     useConvexAction: () => setLogo,
   }
 })
+
+/*
+ * `-settings.tsx` now saves through the outbox rather than a bare Convex
+ * mutation, and `useClassifierMutations()` (behind `GoogleCalendarSection`'s
+ * create-project action) requests six more kinds nobody here exercises. Only
+ * `settings.update` needs to reach the existing `update` spy — the classifier
+ * kinds are unused by every test in this file and resolve to `null` untouched.
+ */
+vi.mock("@/lib/offline/outbox-provider", () => ({
+  useOutboxMutation: (kind: string) => async (args: unknown) => {
+    const result = kind === "settings.update" ? await update(args) : null
+    return { result, settled: Promise.resolve(result) }
+  },
+}))
 
 afterEach(() => {
   cleanup()

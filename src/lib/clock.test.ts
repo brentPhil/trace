@@ -1,8 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { getSkewMs, recordServerNow, resetClockSkew } from "./clock"
 import { newClientKey } from "./client-key"
-import { PENDING_START_MAX_AGE_MS, shouldReplay } from "./pending-start"
-import type { PendingStart } from "./pending-start"
 
 afterEach(() => {
   resetClockSkew()
@@ -57,36 +55,5 @@ describe("newClientKey", () => {
   it("does not collide across a tight loop", () => {
     const keys = new Set(Array.from({ length: 5_000 }, () => newClientKey()))
     expect(keys.size).toBe(5_000)
-  })
-})
-
-describe("shouldReplay", () => {
-  const pending: PendingStart = {
-    clientKey: "k",
-    title: "Checkout",
-    startedAt: 1_000,
-    recordedAt: 1_000,
-  }
-
-  it("replays an unconfirmed start when the server has nothing running", () => {
-    expect(shouldReplay(pending, false, 2_000)).toBe(true)
-  })
-
-  /**
-   * The case that matters: a timer IS running, so either the start landed after
-   * all or the user has since started something else. Replaying would insert a
-   * second entry — a duplicate on the invoice.
-   */
-  it("never replays while something is already running", () => {
-    expect(shouldReplay(pending, true, 2_000)).toBe(false)
-  })
-
-  it("does not resurrect a stale intent unasked", () => {
-    expect(shouldReplay(pending, false, 1_000 + PENDING_START_MAX_AGE_MS)).toBe(true)
-    expect(shouldReplay(pending, false, 1_000 + PENDING_START_MAX_AGE_MS + 1)).toBe(false)
-  })
-
-  it("is safe with nothing recorded", () => {
-    expect(shouldReplay(null, false, 2_000)).toBe(false)
   })
 })

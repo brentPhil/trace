@@ -346,6 +346,13 @@ export function optimisticUpdate(
   patchEverywhere(store, args.entryId, (entry) => applyUpdateFields(entry, args))
 }
 
+/**
+ * `patchEverywhere` per id, so a sitting's members move together in the same
+ * commit rather than one row at a time. Shares `applyUpdateFields` with
+ * `optimisticUpdate` above rather than repeating the patch body — kept
+ * identical deliberately, because two spellings of "what this write does
+ * locally" is how the log and the server start disagreeing about a note.
+ */
 export function optimisticUpdateMany(
   store: OptimisticLocalStore,
   args: UpdateFields & { entryIds: Array<Id<"timeEntries">> }
@@ -360,13 +367,21 @@ export function optimisticEditTime(
   args: { entryId: Id<"timeEntries">; field: TimeEdit["field"]; value: number }
 ): void {
   const now = Date.now()
+  // A `day` edit is the only one that can move a row off the range it is
+  // rendered in, so it is the only one that needs the evicting writer.
   const write = args.field === "day" ? moveEverywhere : patchEverywhere
   write(store, args.entryId, (entry) => {
+    // The SAME pure function the mutation runs. This is the payoff for
+    // keeping the reconciliation rule out of Convex: the optimistic result
+    // and the authoritative one cannot disagree, so the row never settles
+    // to a different set of times a moment after the user let go.
     const result = applyTimeEdit(
       { startedAt: entry.startedAt, endedAt: entry.endedAt, durationMs: entry.durationMs },
       { field: args.field, value: args.value },
       now
     )
+    // A refusal is left for the server to report. Painting a rejected edit
+    // and then snapping it back would be worse than a brief nothing.
     return result.ok ? { ...entry, ...result.times } : entry
   })
 }

@@ -1,66 +1,18 @@
 import { useCallback } from "react"
-import { useConvexMutation } from "@convex-dev/react-query"
-import { useLatest } from "@/hooks/use-latest"
+import { useOutboxMutation } from "@/lib/offline/outbox-provider"
 import { recordServerNow } from "@/lib/clock"
 import { newClientKey } from "@/lib/client-key"
-import { optimisticEntry } from "@/lib/offline/optimistic-entries"
-import { clearPendingStart, recordPendingStart } from "@/lib/pending-start"
-import { api } from "../../convex/_generated/api"
 import type { Doc, Id } from "../../convex/_generated/dataModel"
 
-/**
- * Every mutation below is wrapped in `useLatest`.
- *
- * `.withOptimisticUpdate()` returns a new function on every render, so without
- * this the callbacks this hook exports change identity every render — and an
- * effect that debounces one of them re-arms its timer every render instead of
- * every keystroke. See src/hooks/use-latest.ts.
- */
 export function useEntryMutations() {
-  const startMutation = useLatest(
-    useConvexMutation(api.entries.start).withOptimisticUpdate((localStore, args) => {
-      localStore.setQuery(
-        api.entries.getRunning,
-        {},
-        optimisticEntry({
-          clientKey: args.clientKey,
-          title: args.title ?? "",
-          startedAt: args.startedAt ?? Date.now(),
-          billable: args.billable ?? false,
-          tagIds: [],
-        })
-      )
-    })
-  )
-
-  const stopMutation = useLatest(
-    useConvexMutation(api.entries.stop).withOptimisticUpdate((localStore) => {
-      localStore.setQuery(api.entries.getRunning, {}, null)
-    })
-  )
-
-  const discardMutation = useLatest(
-    useConvexMutation(api.entries.discardRunning).withOptimisticUpdate((localStore) => {
-      localStore.setQuery(api.entries.getRunning, {}, null)
-    })
-  )
-
-  const setTitleMutation = useLatest(
-    useConvexMutation(api.entries.setTitle).withOptimisticUpdate((localStore, args) => {
-      const running = localStore.getQuery(api.entries.getRunning, {})
-      if (running != null && running._id === args.entryId) {
-        localStore.setQuery(api.entries.getRunning, {}, { ...running, title: args.title })
-      }
-    })
-  )
+  const startOp = useOutboxMutation("entries.start")
+  const stopOp = useOutboxMutation("entries.stop")
+  const discardOp = useOutboxMutation("entries.discardRunning")
+  const setTitleOp = useOutboxMutation("entries.setTitle")
 
   /**
-   * Starts tracking.
-   *
-   * The intent is written to localStorage BEFORE the mutation is sent and
-   * cleared only once the server confirms. Convex's in-memory retry buffer does
-   * not survive a reload, so without this a start lost to a discarded tab is
-   * gone with nothing on screen to say so.
+   * Starts tracking. Journaled before anything else happens — the outbox is
+   * what `pending-start` used to be, for every write rather than this one.
    */
   const start = useCallback(
     async (
@@ -72,27 +24,18 @@ export function useEntryMutations() {
         billable?: boolean
       } = {}
     ) => {
-      const clientKey = newClientKey()
-      const startedAt = input.startedAt ?? Date.now()
-      const title = input.title ?? ""
-
-      recordPendingStart({ clientKey, title, startedAt, recordedAt: Date.now() })
-
-      // No try/catch: the intent must STAY in storage if this throws, so the
-      // next load replays it. Clearing happens only on the success path.
-      const result = await startMutation({
-        clientKey,
-        title,
-        startedAt,
+      const { result, settled } = await startOp({
+        clientKey: newClientKey(),
+        title: input.title ?? "",
+        startedAt: input.startedAt ?? Date.now(),
         projectId: input.projectId,
         tagIds: input.tagIds,
         billable: input.billable,
       })
-      recordServerNow(result.serverNow)
-      clearPendingStart(clientKey)
+      void settled.then((r) => recordServerNow(r.serverNow)).catch(() => undefined)
       return result
     },
-    [startMutation]
+    [startOp]
   )
 
   /**
@@ -117,45 +60,35 @@ export function useEntryMutations() {
   )
 
   /**
-   * Re-sends a start that was recorded but never confirmed, reusing its
-   * original clientKey.
+   * `endedAt` is recorded NOW: a stop replayed hours later must close the
+   * entry at the moment the user pressed it, not at the moment it synced.
    *
-   * Reusing the key is what makes this safe to call whenever in doubt: if the
-   * original did land, the mutation finds it and returns the existing row
-   * rather than inserting a second one.
+   * `entryId` is what makes that safe — see `stopImpl` in convex/entries.ts.
+   * It may be an `optimistic:` placeholder when the start has not landed yet,
+   * which is exactly what the outbox rewrites once that start resolves.
    */
-  const replayStart = useCallback(
-    async (pending: { clientKey: string; title: string; startedAt: number }) => {
-      const result = await startMutation({
-        clientKey: pending.clientKey,
-        title: pending.title,
-        startedAt: pending.startedAt,
-      })
-      recordServerNow(result.serverNow)
-      clearPendingStart(pending.clientKey)
-      return result
+  const stop = useCallback(
+    async (entryId?: Id<"timeEntries">) => {
+      const { result, settled } = await stopOp({ entryId, endedAt: Date.now() })
+      void settled.then((r) => recordServerNow(r.serverNow)).catch(() => undefined)
+      // `entries.stop` always defines `immediate` — `entries.editTime` is the
+      // only kind whose result is genuinely absent — so this is never undefined.
+      return result!
     },
-    [startMutation]
+    [stopOp]
   )
 
-  const stop = useCallback(async () => {
-    const result = await stopMutation({})
-    recordServerNow(result.serverNow)
-    clearPendingStart()
-    return result
-  }, [stopMutation])
-
-  const discard = useCallback(async () => {
-    clearPendingStart()
-    return await discardMutation({})
-  }, [discardMutation])
+  const discard = useCallback(
+    async (entryId?: Id<"timeEntries">) => (await discardOp({ entryId })).result,
+    [discardOp]
+  )
 
   const setTitle = useCallback(
     async (entryId: Id<"timeEntries">, title: string) => {
-      await setTitleMutation({ entryId, title })
+      await setTitleOp({ entryId, title })
     },
-    [setTitleMutation]
+    [setTitleOp]
   )
 
-  return { start, resume, replayStart, stop, discard, setTitle }
+  return { start, resume, stop, discard, setTitle }
 }

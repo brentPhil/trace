@@ -23,53 +23,36 @@ function sameQuery(a: unknown, b: unknown): boolean {
   return getFunctionName(a as any) === getFunctionName(b as any)
 }
 
-type OptimisticUpdateFn = (store: OptimisticLocalStore, args: unknown) => void
-
-/**
- * `useConvexMutation(ref).withOptimisticUpdate(fn)` is the only seam
- * `insertEverywhere` and friends live behind — the hook module does not
- * export them. Mocking `useConvexMutation` captures the REAL `fn` the
- * module registers for each mutation, keyed by its function reference, so
- * the test drives the exact path a live undo does: `restore()` populates
- * `pendingRestore`, calls the (mocked) mutation, and the mock invokes the
- * captured optimistic-update callback against a fake `OptimisticLocalStore`
- * — the same shape Convex itself would call it with.
- *
- * `vi.hoisted` because `vi.mock`'s factory below is hoisted above this
- * file's imports, so it can only close over state created the same way.
- */
-const { registerOptimisticUpdate, invokeOptimisticUpdate, setActiveStore } = vi.hoisted(() => {
-  const registry = new Map<unknown, OptimisticUpdateFn>()
+const { setActiveStore, getActiveStore } = vi.hoisted(() => {
   let activeStore: OptimisticLocalStore | undefined
   return {
-    registerOptimisticUpdate: (ref: unknown, fn: OptimisticUpdateFn) => {
-      registry.set(ref, fn)
-    },
-    invokeOptimisticUpdate: (ref: unknown, args: unknown) => {
-      if (activeStore !== undefined) registry.get(ref)?.(activeStore, args)
-    },
     setActiveStore: (store: OptimisticLocalStore) => {
       activeStore = store
     },
+    getActiveStore: () => activeStore,
   }
 })
 
-vi.mock("@convex-dev/react-query", () => ({
-  useConvexMutation: (ref: unknown) => {
-    const mutate = vi.fn(async (args: unknown) => {
-      invokeOptimisticUpdate(ref, args)
-      return null
-    })
-    // Mirrors the real return shape: a callable function carrying a
-    // `withOptimisticUpdate` method, not a plain object.
-    return Object.assign(mutate, {
-      withOptimisticUpdate: (fn: OptimisticUpdateFn) => {
-        registerOptimisticUpdate(ref, fn)
-        return mutate
-      },
-    })
-  },
-}))
+/**
+ * The hook now binds through `useOutboxMutation`, so that is the seam. The
+ * mock runs the kind's REAL optimistic function (from op-kinds.ts) against
+ * the fake store, which is exactly what the outbox does on enqueue.
+ */
+vi.mock("@/lib/offline/outbox-provider", async () => {
+  const { OP_KINDS } = await import("@/lib/offline/op-kinds")
+  return {
+    useOutboxMutation: (kind: keyof typeof OP_KINDS) => async (args: unknown, local?: unknown) => {
+      const def = OP_KINDS[kind] as unknown as {
+        optimistic?: (store: OptimisticLocalStore, args: unknown, local: unknown) => void
+        immediate: (args: unknown, now: number) => unknown
+      }
+      const store = getActiveStore()
+      if (store !== undefined) def.optimistic?.(store, args, local)
+      const result = def.immediate(args, Date.now())
+      return { result, settled: Promise.resolve(result) }
+    },
+  }
+})
 
 type Entry = Doc<"timeEntries">
 type ListPageArgs = {

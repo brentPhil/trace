@@ -22,15 +22,13 @@ import { useEnsureSettings } from "@/hooks/use-ensure-settings"
 import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
-import {
-  useReplayPendingStart,
-  useTabTitleClock,
-} from "@/hooks/use-timer-effects"
+import { useTabTitleClock } from "@/hooks/use-timer-effects"
 import { useMusicTracking } from "@/hooks/use-music-tracking"
 import { useDesktopBridge } from "@/hooks/use-desktop-bridge"
 import { useLatest } from "@/hooks/use-latest"
 import { useSwitchUndo } from "@/lib/use-switch-undo"
 import { MusicProvider, useMusic } from "@/components/music/music-provider"
+import { OutboxProvider } from "@/lib/offline/outbox-provider"
 import { MusicControls } from "@/components/music/music-controls"
 import { cn } from "@/lib/utils"
 import { api } from "../../convex/_generated/api"
@@ -119,24 +117,26 @@ function AuthedLayout() {
   // catalog while this is in flight and flips `tracksReady` when it lands.
   const { data: uploads } = useQuery(convexQuery(api.music.listTracks, {}))
   return (
-    <MusicProvider
-      // Passed through exactly as TanStack Query reports it, `undefined`
-      // included. That `undefined` is the provider's only way to distinguish
-      // "no answer yet" from "this account has uploaded nothing", and
-      // defaulting it to `[]` here would quietly tell every consumer the
-      // library had arrived empty — see `uploads` on `MusicProvider`.
-      uploads={uploads}
-      onError={(message) => {
-        // `priority: "high"` and the 8s timeout match `AuthedShell`'s `report`
-        // exactly. Music failing is not more urgent than a failed save, but it
-        // must not be quieter either — a shorter, low-priority toast for the
-        // one failure the user cannot see the cause of (audio that simply
-        // stopped) is the one case where a lower priority would be wrong.
-        toasts.add({ title: message, priority: "high", timeout: 8_000 })
-      }}
-    >
-      <AuthedShell />
-    </MusicProvider>
+    <OutboxProvider>
+      <MusicProvider
+        // Passed through exactly as TanStack Query reports it, `undefined`
+        // included. That `undefined` is the provider's only way to distinguish
+        // "no answer yet" from "this account has uploaded nothing", and
+        // defaulting it to `[]` here would quietly tell every consumer the
+        // library had arrived empty — see `uploads` on `MusicProvider`.
+        uploads={uploads}
+        onError={(message) => {
+          // `priority: "high"` and the 8s timeout match `AuthedShell`'s `report`
+          // exactly. Music failing is not more urgent than a failed save, but it
+          // must not be quieter either — a shorter, low-priority toast for the
+          // one failure the user cannot see the cause of (audio that simply
+          // stopped) is the one case where a lower priority would be wrong.
+          toasts.add({ title: message, priority: "high", timeout: 8_000 })
+        }}
+      >
+        <AuthedShell />
+      </MusicProvider>
+    </OutboxProvider>
   )
 }
 
@@ -164,7 +164,6 @@ function AuthedShell() {
   )
 
   useTabTitleClock(running, settings.tabTitleClock)
-  useReplayPendingStart(running)
 
   const toasts = useToastManager()
 
@@ -239,7 +238,7 @@ function AuthedShell() {
    */
   const discardRunning = () => {
     void entryMutations
-      .discard()
+      .discard(running?._id)
       .then(() => announce("Timer discarded. Nothing was recorded."))
       .catch(report)
   }
@@ -247,7 +246,7 @@ function AuthedShell() {
   const timerActions: TimerBarActions = useMemo(
     () => ({
       start: entryMutations.start,
-      stop: entryMutations.stop,
+      stop: () => entryMutations.stop(running?._id),
       // No `discard`: the bar's Discard control went on 2026-08-12 and the
       // field went with it. `RunawayBanner` below takes its own `onDiscard`,
       // which is the only surviving caller of the mutation.
@@ -275,7 +274,7 @@ function AuthedShell() {
       // what silently dropped them.
       createCompleted: async (input) => await editMutations.create(input),
     }),
-    [entryMutations, editMutations, createProject, ensureTag]
+    [entryMutations, editMutations, createProject, ensureTag, running]
   )
 
   return (
@@ -305,7 +304,7 @@ function AuthedShell() {
           <RunawayBanner
             running={running}
             thresholdMs={settings.runawayThresholdMs}
-            onStop={() => void entryMutations.stop().catch(report)}
+            onStop={() => void entryMutations.stop(running?._id).catch(report)}
             onDiscard={discardRunning}
           />
         </>

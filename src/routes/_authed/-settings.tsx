@@ -27,6 +27,8 @@ import { useTheme } from "@/components/theme-provider"
 import { Page } from "@/components/shell/page"
 import { authClient } from "@/lib/auth-client"
 import { useLatest } from "@/hooks/use-latest"
+import { useClassifierMutations } from "@/hooks/use-classifiers"
+import { useOutboxMutation } from "@/lib/offline/outbox-provider"
 import { errorMessage } from "@/lib/error-message"
 import { formatTotal } from "@/lib/format-total"
 import { rateHelp } from "@/lib/format-money"
@@ -107,7 +109,7 @@ function takeGoogleLinkReturn(): boolean {
 
 export function Settings() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
-  const update = useLatest(useConvexMutation(api.settings.update))
+  const update = useOutboxMutation("settings.update")
   const generateLogoUploadUrl = useLatest(
     useConvexMutation(api.settings.generateLogoUploadUrl)
   )
@@ -125,9 +127,8 @@ export function Settings() {
   }
 
   const save = (patch: Parameters<typeof update>[0]) => {
-    void update(patch).catch((thrown: unknown) => {
-      toasts.add({ title: errorMessage(thrown), priority: "high" })
-    })
+    // Never rejects: a refusal reaches the user through the outbox's toast.
+    void update(patch)
   }
 
   // `useLatest`-wrapped for a stable identity, so it can sit in the connect
@@ -163,9 +164,7 @@ export function Settings() {
   const setCalendarProjectMutation = useLatest(
     useConvexMutation(api.google.setCalendarProject)
   )
-  const createProjectMutation = useLatest(
-    useConvexMutation(api.projects.create)
-  )
+  const { createProject } = useClassifierMutations()
 
   /*
    * `linkSocial`, never `signIn.social`.
@@ -700,7 +699,7 @@ export function Settings() {
                   calendarId,
                   projectId,
                 }).catch(report),
-              createProject: (name) => createProjectMutation({ name }),
+              createProject: (name) => createProject({ name }),
             }}
           />
         </Section>
