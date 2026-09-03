@@ -3,6 +3,13 @@ import { QueryClient, notifyManager } from "@tanstack/react-query"
 import { setupRouterSsrQueryIntegration } from "@tanstack/react-router-ssr-query"
 import { ConvexQueryClient } from "@convex-dev/react-query"
 import { routeTree } from "./routeTree.gen"
+import {
+  MemorySnapshotStore,
+  SNAPSHOT_MAX_AGE_MS,
+  attachSnapshotWriter,
+  createSnapshotStore,
+  snapshotQueryFn,
+} from "@/lib/offline/query-snapshots"
 
 export function getRouter() {
   if (typeof document !== "undefined") {
@@ -21,20 +28,31 @@ export function getRouter() {
     expectAuth: true,
   })
 
+  const hashFn = convexQueryClient.hashFn()
+  const snapshots = typeof document === "undefined" ? new MemorySnapshotStore() : createSnapshotStore()
   const queryClient: QueryClient = new QueryClient({
     defaultOptions: {
       queries: {
-        queryKeyHashFn: convexQueryClient.hashFn(),
-        queryFn: convexQueryClient.queryFn(),
+        queryKeyHashFn: hashFn,
+        queryFn: snapshotQueryFn(
+          convexQueryClient.queryFn(),
+          snapshots,
+          hashFn,
+          () => convexQueryClient.convexClient.connectionState().isWebSocketConnected
+        ),
       },
     },
   })
   convexQueryClient.connect(queryClient)
+  if (typeof document !== "undefined") {
+    attachSnapshotWriter(queryClient.getQueryCache(), snapshots)
+    void snapshots.prune(Date.now() - SNAPSHOT_MAX_AGE_MS)
+  }
 
   const router = createTanStackRouter({
     routeTree,
 
-    context: { queryClient, convexQueryClient },
+    context: { queryClient, convexQueryClient, snapshots },
     scrollRestoration: true,
     defaultPreload: "intent",
     defaultPreloadStaleTime: 0,
