@@ -2120,6 +2120,27 @@ type StartArgs = {
   billable?: boolean
 }
 
+/**
+ * The billable flag the server would land on.
+ *
+ * `start` and `create` both do `args.billable ?? project?.billableByDefault
+ * ?? false` against the real row. Painting `?? false` here instead is a
+ * visible lie for the whole offline session — the row sits unbillable, and
+ * so does every billable total on the page, until the outbox replays. The
+ * project list is already in the cache on every authed surface, so the
+ * fallback costs a lookup.
+ */
+function billableFor(
+  store: OptimisticLocalStore,
+  projectId: Id<"projects"> | undefined,
+  explicit: boolean | undefined
+): boolean {
+  if (explicit !== undefined) return explicit
+  if (projectId === undefined) return false
+  const project = store.getQuery(api.projects.list, {})?.find((p) => p._id === projectId)
+  return project?.billableByDefault ?? false
+}
+
 export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): void {
   store.setQuery(
     api.entries.getRunning,
@@ -2128,7 +2149,7 @@ export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): v
       clientKey: args.clientKey,
       title: args.title ?? "",
       startedAt: args.startedAt ?? Date.now(),
-      billable: args.billable ?? false,
+      billable: billableFor(store, args.projectId, args.billable),
       projectId: args.projectId,
       tagIds: args.tagIds ?? [],
     })
@@ -2255,7 +2276,7 @@ export function optimisticCreate(store: OptimisticLocalStore, args: CreateArgs):
     clientKey: args.clientKey,
     title: args.title ?? "",
     startedAt: args.startedAt,
-    billable: args.billable ?? false,
+    billable: billableFor(store, args.projectId, args.billable),
     projectId: args.projectId,
     tagIds: args.tagIds ?? [],
   })
@@ -2265,6 +2286,10 @@ export function optimisticCreate(store: OptimisticLocalStore, args: CreateArgs):
     note: note === undefined || note === "" ? undefined : note,
     endedAt: args.endedAt,
     durationMs: args.endedAt - args.startedAt,
+    // `optimisticEntry` says "web" because it was written for `start`.
+    // `entries.create` writes "manual", and this row has to match the one it
+    // will be replaced by.
+    source: "manual",
   })
 }
 ```
@@ -2277,6 +2302,162 @@ In `src/hooks/use-entry-edit-mutations.ts` delete the moved functions and the `i
 
 Run `pnpm vitest run src/hooks && pnpm typecheck` → green.
 
+- [ ] **Step 2b: Test the per-mutation entry functions**
+
+The moved helpers are already guarded by `src/hooks/use-entry-edit-mutations.test.ts`. What has no coverage at all is the per-mutation layer on top of them, and `optimisticCreate` in particular is new code whose whole job is to paint a row the server will agree with.
+
+Create `src/lib/offline/optimistic-entries.test.ts`:
+
+```ts
+import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it } from "vitest"
+import { TanStackLocalStore } from "./tanstack-local-store"
+import {
+  optimisticCreate,
+  optimisticRestore,
+  optimisticSetTitle,
+  optimisticStart,
+  optimisticStop,
+} from "./optimistic-entries"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
+
+const RUNNING = ["convexQuery", "entries:getRunning", {}]
+const PROJECTS = ["convexQuery", "projects:list", {}]
+const range = { fromMs: 0, toMs: 4_000_000_000_000 }
+const RANGE = ["convexQuery", "entries:listRange", range]
+
+function project(overrides: Partial<Doc<"projects">> = {}): Doc<"projects"> {
+  return {
+    _id: "p1" as Id<"projects">,
+    _creationTime: 1,
+    userId: "u",
+    name: "Website",
+    color: "slate",
+    archived: false,
+    billableByDefault: true,
+    updatedAt: 1,
+    deletedAt: null,
+    ...overrides,
+  }
+}
+
+function setup() {
+  const client = new QueryClient()
+  client.setQueryData(RUNNING, null)
+  client.setQueryData(PROJECTS, [project()])
+  client.setQueryData(RANGE, [])
+  return { client, store: new TanStackLocalStore(client) }
+}
+
+describe("optimisticStart", () => {
+  it("puts a placeholder-keyed row in the running slot", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", title: "Writing", startedAt: 1_000 })
+    const running = client.getQueryData<Doc<"timeEntries">>(RUNNING)!
+    expect(running._id).toBe("optimistic:k1")
+    expect(running.title).toBe("Writing")
+    expect(running.endedAt).toBeNull()
+    expect(running.durationMs).toBeNull()
+  })
+
+  it("inherits the project's billable default, as the server does", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", projectId: "p1" as Id<"projects"> })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.billable).toBe(true)
+  })
+
+  it("lets an explicit billable win over the project's default", () => {
+    const { client, store } = setup()
+    optimisticStart(store, {
+      clientKey: "k1",
+      projectId: "p1" as Id<"projects">,
+      billable: false,
+    })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.billable).toBe(false)
+  })
+})
+
+describe("optimisticStop", () => {
+  it("empties the running slot with null, never undefined", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1" })
+    optimisticStop(store)
+    expect(client.getQueryData(RUNNING)).toBeNull()
+  })
+})
+
+describe("optimisticSetTitle", () => {
+  it("retitles the running entry", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", title: "First" })
+    optimisticSetTitle(store, {
+      entryId: "optimistic:k1" as Id<"timeEntries">,
+      title: "Second",
+    })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.title).toBe("Second")
+  })
+
+  it("leaves a different running entry alone", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", title: "First" })
+    optimisticSetTitle(store, { entryId: "other" as Id<"timeEntries">, title: "Second" })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.title).toBe("First")
+  })
+})
+
+describe("optimisticCreate", () => {
+  it("paints a completed row the server will agree with", () => {
+    const { client, store } = setup()
+    optimisticCreate(store, {
+      clientKey: "k1",
+      title: "Migration",
+      note: "  ",
+      startedAt: 1_000,
+      endedAt: 4_600_000,
+      projectId: "p1" as Id<"projects">,
+    })
+    const [row] = client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)!
+    expect(row._id).toBe("optimistic:k1")
+    expect(row.durationMs).toBe(4_599_000)
+    // Blank normalises away, exactly as convex/entries.ts's normaliseNote does.
+    expect(row.note).toBeUndefined()
+    // Inherited, not defaulted to false — offline nothing corrects this.
+    expect(row.billable).toBe(true)
+    // `entries.create` writes "manual"; only `start` writes "web".
+    expect(row.source).toBe("manual")
+  })
+})
+
+describe("optimisticRestore", () => {
+  it("puts back the snapshot the op carried", () => {
+    const { client, store } = setup()
+    const entry = {
+      _id: "e1" as Id<"timeEntries">,
+      _creationTime: 1_000,
+      userId: "u",
+      clientKey: "c1",
+      title: "Deleted",
+      startedAt: 1_000,
+      endedAt: 2_000,
+      durationMs: 1_000,
+      tagIds: [],
+      billable: false,
+      source: "web",
+      updatedAt: 2_000,
+      deletedAt: null,
+    } as Doc<"timeEntries">
+    optimisticRestore(store, { entryId: entry._id }, { entry })
+    expect(client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)).toEqual([entry])
+  })
+
+  it("does nothing when the op carries no snapshot", () => {
+    const { client, store } = setup()
+    optimisticRestore(store, { entryId: "e1" as Id<"timeEntries"> }, undefined)
+    expect(client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)).toEqual([])
+  })
+})
+```
+
 - [ ] **Step 3: Write the failing classifier test**
 
 Create `src/lib/offline/optimistic-classifiers.test.ts`:
@@ -2286,6 +2467,7 @@ import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 import { TanStackLocalStore } from "./tanstack-local-store"
 import {
+  tagPlaceholder,
   optimisticProjectCreate,
   optimisticProjectRemove,
   optimisticProjectSetArchived,
@@ -2375,6 +2557,22 @@ describe("tags", () => {
     expect(client.getQueryData<Doc<"tags">[]>(TAGS)![0].name).toBe("operations")
     optimisticTagRemove(store, { tagId: "t1" as Id<"tags"> })
     expect(client.getQueryData<Doc<"tags">[]>(TAGS)).toEqual([])
+  })
+
+  it("re-sorts on a rename that moves the row", () => {
+    // A one-row list cannot exercise the sort, so the rename path shipped
+    // untested. The server re-sorts by name; so must this.
+    const { client, store } = setup()
+    client.setQueryData(TAGS, [tag({ _id: "t1" as Id<"tags">, name: "alpha" }), tag({ _id: "t2" as Id<"tags">, name: "beta" })])
+    optimisticTagRename(store, { tagId: "t1" as Id<"tags">, name: "zulu" })
+    expect(client.getQueryData<Doc<"tags">[]>(TAGS)!.map((t) => t.name)).toEqual([
+      "beta",
+      "zulu",
+    ])
+  })
+
+  it("mints one placeholder however the name is spelled", () => {
+    expect(tagPlaceholder("  OPS ")).toBe(tagPlaceholder("ops"))
   })
 })
 ```
@@ -2537,7 +2735,14 @@ it("patches only the fields sent, and null clears the default rate", () => {
   client.setQueryData(KEY, { timezone: "UTC", currency: "USD", defaultHourlyRateCents: 5000, logoUrl: null })
   const store = new TanStackLocalStore(client)
   optimisticSettingsUpdate(store, { currency: "EUR", defaultHourlyRateCents: null })
-  expect(client.getQueryData(KEY)).toEqual({ timezone: "UTC", currency: "EUR", logoUrl: null })
+  // `toStrictEqual`, not `toEqual`: the latter ignores keys whose value is
+  // `undefined`, so it cannot tell a real `delete` from `= undefined` — and
+  // the deleting branch is the whole point of this test.
+  expect(client.getQueryData(KEY)).toStrictEqual({
+    timezone: "UTC",
+    currency: "EUR",
+    logoUrl: null,
+  })
 })
 ```
 
