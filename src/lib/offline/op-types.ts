@@ -50,8 +50,15 @@ export type OpKind<TArgs extends Record<string, unknown>, TResult> = {
   mints?: (args: TArgs) => string
   /** Where the real id for that placeholder lands in the result. */
   minted?: (result: TResult) => string
-  /** What the caller is handed straight away. */
-  immediate: (args: TArgs, now: number) => TResult
+  /**
+   * What the caller is handed straight away.
+   *
+   * Optional: `entries.editTime` returns the RECONCILED times, which need the
+   * entry's current times to compute and so cannot be derived from `args`
+   * alone — `immediate` is not given them. A kind that omits this hands the
+   * caller `undefined` rather than a fabricated, possibly wrong, result.
+   */
+  immediate?: (args: TArgs, now: number) => TResult
   /** Two consecutive unsent ops with equal keys collapse into one. */
   coalesceKey?: (args: TArgs) => string
   /**

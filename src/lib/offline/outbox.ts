@@ -176,7 +176,7 @@ export class Outbox {
     this.applyLocal(stored)
     this.setPending(snap.ops.length)
     this.kick()
-    return { op: stored, result: def.immediate(args, this.now()), settled }
+    return { op: stored, result: def.immediate?.(args, this.now()), settled }
   }
 
   pending(): number {
