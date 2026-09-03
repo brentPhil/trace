@@ -547,6 +547,16 @@ describe("rewritePlaceholders", () => {
   it("returns the same reference when nothing changes", () => {
     const args = { title: "hello", n: 1 }
     expect(rewritePlaceholders(args, resolved)).toBe(args)
+    const nested = { a: ["x"], b: { c: "y" } }
+    expect(rewritePlaceholders(nested, resolved)).toBe(nested)
+  })
+
+  it("leaves a string that names a prototype property alone", () => {
+    // Every string in the args reaches the lookup, not only placeholder-shaped
+    // ones, and a plain object answers for its prototype. An entry really can
+    // be titled "constructor".
+    const args = { title: "constructor", note: "toString", tags: ["__proto__"] }
+    expect(rewritePlaceholders(args, resolved)).toBe(args)
   })
 })
 
@@ -616,7 +626,12 @@ function walk(value: unknown, onString: (s: string) => string): { value: unknown
 
 /** Replaces every resolved placeholder. Same reference back when nothing changed. */
 export function rewritePlaceholders<T>(value: T, resolved: Record<string, string>): T {
-  return walk(value, (s) => resolved[s] ?? s).value as T
+  // `Object.hasOwn`, not `resolved[s] ?? s`. This callback sees EVERY string
+  // in the args, not only placeholder-shaped ones, and a plain object answers
+  // for its prototype: an entry titled "constructor" or a project named
+  // "toString" would look up a function and splice it into the args, which
+  // then goes to a mutation that takes strings. Found in review.
+  return walk(value, (s) => (Object.hasOwn(resolved, s) ? resolved[s] : s)).value as T
 }
 
 /** Placeholders present in `value` that `resolved` cannot answer, in order, once each. */
