@@ -4058,11 +4058,28 @@ describe("attachSnapshotWriter", () => {
   it("writes successful convex results, debounced, and ignores other keys", async () => {
     const client = new QueryClient()
     const store = new MemorySnapshotStore()
-    const detach = attachSnapshotWriter(client.getQueryCache(), store, 10)
+    // Counting writes, not just checking the final value: two rapid changes
+    // leave `{a:2}` stored whether the writer debounces or fires on every
+    // event, so the value alone would pass with the debounce deleted.
+    let writes = 0
+    const counting: SnapshotStore = {
+      ...store,
+      read: (hash) => store.read(hash),
+      write: (hash, snapshot) => {
+        writes += 1
+        return store.write(hash, snapshot)
+      },
+      prune: (olderThanMs) => store.prune(olderThanMs),
+      clear: () => store.clear(),
+    }
+    const detach = attachSnapshotWriter(client.getQueryCache(), counting, 10)
     client.setQueryData(KEY, { a: 1 })
     client.setQueryData(KEY, { a: 2 })
     client.setQueryData(["other"], 1)
+    // Nothing yet: the window has not elapsed.
+    expect(writes).toBe(0)
     await wait(30)
+    expect(writes).toBe(1)
     expect((await store.read(hashKey(KEY)))?.data).toEqual({ a: 2 })
     expect(await store.read(hashKey(["other"]))).toBeUndefined()
     detach()
@@ -4091,6 +4108,14 @@ Create `src/lib/offline/query-snapshots.ts`:
 import { clear, createStore, del, entries, get, set } from "idb-keyval"
 import type { QueryCache, QueryFunction, QueryKey } from "@tanstack/react-query"
 
+/**
+ * `updatedAt` is when this snapshot was last WRITTEN, not when its data was
+ * last fetched from the server. Serving a snapshot offline is recorded by
+ * TanStack as an ordinary success, so the writer stores it back with a fresh
+ * stamp — meaning a snapshot in active use never ages out. That is the
+ * intended behaviour (what is being read is what should be kept), but it does
+ * mean the prune below bounds the store by disuse rather than by age of data.
+ */
 export type Snapshot = { data: unknown; updatedAt: number }
 
 export interface SnapshotStore {
@@ -4198,6 +4223,9 @@ export function attachSnapshotWriter(
       setTimeout(() => {
         timers.delete(queryHash)
         const { data, dataUpdatedAt } = event.query.state
+        // Disambiguating "no data yet" from "success with a falsy value" —
+        // not an assumption about shape. A Convex query answers `null`, not
+        // `undefined`, when it has nothing.
         if (data === undefined) return
         void store.write(queryHash, { data, updatedAt: dataUpdatedAt }).catch(() => undefined)
       }, debounceMs)
@@ -4237,7 +4265,9 @@ Replace the `QueryClient` construction with:
   convexQueryClient.connect(queryClient)
   if (typeof document !== "undefined") {
     attachSnapshotWriter(queryClient.getQueryCache(), snapshots)
-    void snapshots.prune(Date.now() - SNAPSHOT_MAX_AGE_MS)
+    // Swallowed like every other store write in this layer: a refusing
+    // IndexedDB must cost the app its durability, never its boot.
+    void snapshots.prune(Date.now() - SNAPSHOT_MAX_AGE_MS).catch(() => undefined)
   }
 ```
 
