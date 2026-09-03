@@ -5044,6 +5044,13 @@ git commit -m "feat(offline): online-only controls say why they are waiting, and
 
 Cover, in this order and in the register of `docs/desktop.md`: what works offline and what does not; the outbox (journal, order, placeholders, coalescing, rejections, stale starts, one sender per origin); one optimistic function two stores; the snapshot layer and why not persistQueryClient; the log's pagination hook and the one-page-on-boot rule; the service worker's routing table and the build step; the auth fallback and the reload-on-reconnect; sign-out cleanup; how to test offline locally (`pnpm build && pnpm preview`, DevTools Offline); the macOS WKWebView risk. Link the spec.
 
+**One section this document owes the reader, under a heading of its own: what is now stored on the device.** Offline support is a decision to keep the user's data on their machine, and the doc has to say so plainly rather than leave it to be discovered:
+
+- The service worker caches navigation responses, and this app dehydrates real query results into its SSR HTML — so a cached `/timer` contains actual entries, titles and notes, not an empty shell. IndexedDB holds the query snapshots and the outbox journal beside it.
+- All of it lives in the browser profile of whoever is using the machine, and it survives until sign-out clears it (`clearLocalData`, Task 14) or the profile is cleared.
+- **A sign-out that never happens leaves it there**, so a shared or lost device keeps whatever was last cached. That is the ordinary bargain of an offline-capable app rather than a defect, but it is a bargain the reader should be told about, not one they should infer.
+- What is NOT stored: no credentials and no tokens. The remembered signed-in flag is a boolean, and it is a UX guard — every Convex function still checks the session itself.
+
 - [ ] **Step 2: Update the desktop doc**
 
 Replace the "Offline, or chroneli.com down" section's body with: the site now registers a service worker, so a window opened offline after at least one online visit gets the cached shell rather than the engine's error page, and writes made there sync when the network returns; the tray's Start still reaches a page that loaded. Add: "Verified on Windows (WebView2). NOT yet verified on macOS: WKWebView's service-worker support for a remote origin is the open question, and until someone checks it on a Mac the desktop app should not be described as offline-capable there."
