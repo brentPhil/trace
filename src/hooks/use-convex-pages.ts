@@ -22,6 +22,21 @@ type LogStatus = "LoadingFirstPage" | "LoadingMore" | "CanLoadMore" | "Exhausted
  * Starts at ONE page on every mount, deliberately: a restored second page's
  * cursor was minted against an older first page, and after new entries land
  * the two no longer meet. Older pages load again when asked for.
+ *
+ * The page options below carry ONLY the query key, never `convexQuery`'s
+ * `queryFn` — that omission is what leaves the router's default
+ * `snapshotQueryFn` in place for these pages, which is the entire reason this
+ * hook exists: it is what lets the log render from IndexedDB while the socket
+ * is down. Spreading `convexQuery(...)` wholesale to "simplify" this would
+ * quietly undo that.
+ *
+ * Two limits worth knowing before reusing this elsewhere. `baseKey` is
+ * `JSON.stringify(baseArgs)`, so args differing only in key order reset the
+ * count spuriously. And the cursor chain above is a memo over the cache
+ * rather than over the subscription results, so calling `loadMore()` while a
+ * page is still in flight leaves `pages` short of `pageCount` until something
+ * else invalidates the memo — reachable only from a caller that offers "load
+ * more" outside the `CanLoadMore` state, which this one does not.
  */
 export function useConvexPages<
   TQuery extends FunctionReference<"query", "public", any, PaginationResult<any>>,

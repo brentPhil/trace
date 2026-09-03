@@ -6,11 +6,22 @@ import { useConvexPages } from "./use-convex-pages"
 import type { ReactNode } from "react"
 
 const listPage = anyApi.entries.listPage
-const page = (cursor: string | null) => [
+const pageFor = (toMs: number, cursor: string | null) => [
   "convexQuery",
   "entries:listPage",
-  { fromMs: 0, toMs: 10, paginationOpts: { numItems: 2, cursor, id: 1 } },
+  { fromMs: 0, toMs, paginationOpts: { numItems: 2, cursor, id: 1 } },
 ]
+const page = (cursor: string | null) => pageFor(10, cursor)
+
+/** One macrotask. TanStack's notifyManager schedules observer updates through
+ *  a real `setTimeout(0)`, so a bare `act()` leaves `result.current` stale.
+ *  The same idiom as `src/components/music/music-provider.test.tsx` and
+ *  `src/routes/_authed/-timer.test.tsx`. */
+async function flush() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+}
 
 function setup() {
   const client = new QueryClient({
@@ -20,26 +31,6 @@ function setup() {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
   return { client, wrapper }
-}
-
-/*
- * `client.setQueryData` writes the cache synchronously, but the `useQueries`
- * observer that reads it back is notified through TanStack's
- * `notifyManager`, which schedules via a real `setTimeout(0)` by default (the
- * app overrides this with `requestAnimationFrame` in `router.tsx`, still
- * asynchronously — see `notifyManager.setScheduler` there). A bare `act()`
- * around the cache write does not wait for that tick, so a test that reads
- * `result.current` right after needs one real macrotask first.
- *
- * `waitFor` is the more common idiom for this, but it hangs under fake timers
- * elsewhere in this repo (see `calendar-panel.test.tsx`'s header note) — this
- * matches the "one macrotask, explicitly" pattern that file already uses
- * instead, so no test in the suite depends on `waitFor` at all.
- */
-async function flush() {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0))
-  })
 }
 
 describe("useConvexPages", () => {
@@ -73,7 +64,13 @@ describe("useConvexPages", () => {
     expect(result.current.status).toBe("Exhausted")
   })
 
-  it("starts over at one page when the range changes", () => {
+  it("starts over at one page when the range changes", async () => {
+    // Asserting `LoadingFirstPage` after the rerender proves nothing: the new
+    // range's first page is uncached either way, and that branch is checked
+    // before the page count is consulted. So the new range's first page is
+    // seeded, and the assertion is that ONE page is enough — with the reset
+    // deleted the chain still wants three, `loaded.length < pageCount` holds,
+    // and the log wedges in LoadingMore with no button and no recovery.
     const { client, wrapper } = setup()
     const { result, rerender } = renderHook(
       ({ toMs }) => useConvexPages(listPage, { fromMs: 0, toMs }, 2),
@@ -83,7 +80,17 @@ describe("useConvexPages", () => {
       client.setQueryData(page(null), { page: [1, 2], isDone: false, continueCursor: "c1" })
     })
     act(() => result.current.loadMore())
+    act(() => {
+      client.setQueryData(page("c1"), { page: [3], isDone: false, continueCursor: "c2" })
+    })
+    act(() => result.current.loadMore())
+    expect(result.current.status).toBe("LoadingMore")
+
+    client.setQueryData(pageFor(20, null), { page: [9], isDone: false, continueCursor: "d1" })
     rerender({ toMs: 20 })
-    expect(result.current.status).toBe("LoadingFirstPage")
+    await flush()
+
+    expect(result.current.results).toEqual([9])
+    expect(result.current.status).toBe("CanLoadMore")
   })
 })
