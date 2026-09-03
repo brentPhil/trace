@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 import { TanStackLocalStore } from "./tanstack-local-store"
 import {
+  tagPlaceholder,
   optimisticProjectCreate,
   optimisticProjectRemove,
   optimisticProjectSetArchived,
@@ -91,5 +92,21 @@ describe("tags", () => {
     expect(client.getQueryData<Doc<"tags">[]>(TAGS)![0].name).toBe("operations")
     optimisticTagRemove(store, { tagId: "t1" as Id<"tags"> })
     expect(client.getQueryData<Doc<"tags">[]>(TAGS)).toEqual([])
+  })
+
+  it("re-sorts on a rename that moves the row", () => {
+    // A one-row list cannot exercise the sort, so the rename path shipped
+    // untested. The server re-sorts by name; so must this.
+    const { client, store } = setup()
+    client.setQueryData(TAGS, [tag({ _id: "t1" as Id<"tags">, name: "alpha" }), tag({ _id: "t2" as Id<"tags">, name: "beta" })])
+    optimisticTagRename(store, { tagId: "t1" as Id<"tags">, name: "zulu" })
+    expect(client.getQueryData<Doc<"tags">[]>(TAGS)!.map((t) => t.name)).toEqual([
+      "beta",
+      "zulu",
+    ])
+  })
+
+  it("mints one placeholder however the name is spelled", () => {
+    expect(tagPlaceholder("  OPS ")).toBe(tagPlaceholder("ops"))
   })
 })

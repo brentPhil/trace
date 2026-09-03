@@ -266,6 +266,27 @@ type StartArgs = {
   billable?: boolean
 }
 
+/**
+ * The billable flag the server would land on.
+ *
+ * `start` and `create` both do `args.billable ?? project?.billableByDefault
+ * ?? false` against the real row. Painting `?? false` here instead is a
+ * visible lie for the whole offline session — the row sits unbillable, and
+ * so does every billable total on the page, until the outbox replays. The
+ * project list is already in the cache on every authed surface, so the
+ * fallback costs a lookup.
+ */
+function billableFor(
+  store: OptimisticLocalStore,
+  projectId: Id<"projects"> | undefined,
+  explicit: boolean | undefined
+): boolean {
+  if (explicit !== undefined) return explicit
+  if (projectId === undefined) return false
+  const project = store.getQuery(api.projects.list, {})?.find((p) => p._id === projectId)
+  return project?.billableByDefault ?? false
+}
+
 export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): void {
   store.setQuery(
     api.entries.getRunning,
@@ -274,7 +295,7 @@ export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): v
       clientKey: args.clientKey,
       title: args.title ?? "",
       startedAt: args.startedAt ?? Date.now(),
-      billable: args.billable ?? false,
+      billable: billableFor(store, args.projectId, args.billable),
       projectId: args.projectId,
       tagIds: args.tagIds ?? [],
     })
@@ -401,7 +422,7 @@ export function optimisticCreate(store: OptimisticLocalStore, args: CreateArgs):
     clientKey: args.clientKey,
     title: args.title ?? "",
     startedAt: args.startedAt,
-    billable: args.billable ?? false,
+    billable: billableFor(store, args.projectId, args.billable),
     projectId: args.projectId,
     tagIds: args.tagIds ?? [],
   })
@@ -411,5 +432,9 @@ export function optimisticCreate(store: OptimisticLocalStore, args: CreateArgs):
     note: note === undefined || note === "" ? undefined : note,
     endedAt: args.endedAt,
     durationMs: args.endedAt - args.startedAt,
+    // `optimisticEntry` says "web" because it was written for `start`.
+    // `entries.create` writes "manual", and this row has to match the one it
+    // will be replaced by.
+    source: "manual",
   })
 }
