@@ -1,9 +1,17 @@
-import { EMPTY_SNAPSHOT, type OutboxSnapshot, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
+import type { OutboxSnapshot, OutboxStore } from "./op-types"
 
-/** Tests, SSR, and a browser whose IndexedDB throws (private mode). */
+/** Tests, SSR, and a browser whose IndexedDB refuses (private mode). */
 export class MemoryOutboxStore implements OutboxStore {
-  private snapshot: OutboxSnapshot = EMPTY_SNAPSHOT
+  private snapshot: OutboxSnapshot
   private chain: Promise<unknown> = Promise.resolve()
+
+  /** `initial` is for the degrade path in outbox-store-idb.ts: when IndexedDB
+   *  fails mid-transaction it has already read the queue, and starting the
+   *  fallback empty would drop every op that was on it. */
+  constructor(initial: OutboxSnapshot = EMPTY_SNAPSHOT) {
+    this.snapshot = initial
+  }
 
   /** Joins the chain, so a read issued after an un-awaited update still sees
    *  it. Returning `this.snapshot` bare would hand back the pre-update value

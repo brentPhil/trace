@@ -2,7 +2,8 @@ import "fake-indexeddb/auto"
 import { describe, expect, it } from "vitest"
 import { MemoryOutboxStore } from "./outbox-store-memory"
 import { IdbOutboxStore } from "./outbox-store-idb"
-import { EMPTY_SNAPSHOT, type Op, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
+import type { Op, OutboxStore } from "./op-types"
 
 function op(id: string): Op {
   return { id, kind: "entries.setTitle", args: { title: id }, enqueuedAt: 1, inFlight: false }
@@ -64,4 +65,49 @@ it("degrades to memory when IndexedDB is present but refuses", async () => {
   } finally {
     indexedDB.open = realOpen
   }
+})
+
+it("keeps what was already journaled when a transaction fails after reading it", async () => {
+  // The dangerous half of degrading. idb-keyval runs the updater after a
+  // SUCCESSFUL read, so a transaction that aborts on the WRITE has already
+  // shown us the queue — and a fallback that started empty would drop it.
+  //
+  // Stubbing `indexedDB.open` a second time does not reach this path:
+  // `createStore` caches the DB-open promise per store instance, so once the
+  // first `update` above has opened the connection, a later `update` never
+  // calls `open` again — the stub never fires and nothing fails. What idb-
+  // keyval's `update` (idb-keyval/dist/index.js) actually does after a
+  // successful read is call `store.put(...)` on the same transaction, so
+  // stubbing `put` to throw is what lands the failure on the write side,
+  // after our updater has already run against the real `{ops:[a]}`.
+  const name = `late-failure-${Math.random()}`
+  const store = new IdbOutboxStore(name)
+  await store.update((s) => ({ ...s, ops: [op("a")] }))
+
+  const realPut = IDBObjectStore.prototype.put
+  IDBObjectStore.prototype.put = function put() {
+    throw new Error("put failed")
+  }
+  try {
+    const after = await store.update((s) => ({ ...s, ops: [...s.ops, op("b")] }))
+    expect(after.ops.map((o) => o.id)).toEqual(["a", "b"])
+  } finally {
+    IDBObjectStore.prototype.put = realPut
+  }
+})
+
+it("a throwing updater reaches the caller and does not degrade the store", async () => {
+  // A bug in `fn` is not a storage failure. Treating it as one would trade a
+  // transient bug for a session with no durability at all.
+  const store = new IdbOutboxStore(`throwing-${Math.random()}`)
+  await store.update((s) => ({ ...s, ops: [op("a")] }))
+
+  await expect(
+    store.update(() => {
+      throw new Error("caller bug")
+    })
+  ).rejects.toThrow("caller bug")
+
+  // Still on IndexedDB, still holding the op — not silently in memory.
+  expect((await store.read()).ops.map((o) => o.id)).toEqual(["a"])
 })

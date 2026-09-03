@@ -1,8 +1,18 @@
 import { createStore, get, update } from "idb-keyval"
-import { EMPTY_SNAPSHOT, type OutboxSnapshot, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
 import { MemoryOutboxStore } from "./outbox-store-memory"
+import type { OutboxSnapshot, OutboxStore } from "./op-types"
 
 const KEY = "outbox.v1"
+
+/** Marks a rejection as "the caller's `fn` threw" rather than "IndexedDB
+ *  failed" — see `IdbOutboxStore.update`. A plain boolean flag set inside the
+ *  updater closure and read after the `await` does not survive TypeScript's
+ *  control-flow narrowing across the call boundary, so the distinction is
+ *  carried on the thrown value itself instead. */
+class FnFailure {
+  constructor(readonly error: unknown) {}
+}
 
 /**
  * The journal, in IndexedDB.
@@ -26,25 +36,54 @@ export class IdbOutboxStore implements OutboxStore {
     try {
       return (await get<OutboxSnapshot>(KEY, this.store)) ?? EMPTY_SNAPSHOT
     } catch {
-      return await this.degrade().read()
+      // Nothing was read, so there is nothing to carry across.
+      return await this.degrade(EMPTY_SNAPSHOT).read()
     }
   }
 
   async update(fn: (current: OutboxSnapshot) => OutboxSnapshot): Promise<OutboxSnapshot> {
     if (this.fallback !== null) return await this.fallback.update(fn)
+
+    /*
+     * Two things have to be got right here, and the obvious `try { … } catch {
+     * degrade() }` gets both wrong. idb-keyval runs the updater INSIDE the
+     * transaction's `onsuccess`, after a successful read, and only then puts
+     * and waits on the transaction — so a failure can land either side of the
+     * caller's `fn` having already run against real data.
+     *
+     *   `seen` is what the transaction managed to read. A transaction that
+     *   aborts AFTER that point (quota, or Safari dropping the connection —
+     *   idb-keyval's own source comments on it) must not take the queue with
+     *   it: degrading to an EMPTY fallback would silently discard every op
+     *   already journaled, which is the exact loss this whole file exists to
+     *   prevent.
+     *
+     *   `FnFailure` separates the caller's bug from a storage failure. They
+     *   arrive as the same rejection, and treating an exception thrown by
+     *   `fn` as "IndexedDB is broken" would trade one transient bug for a
+     *   session with no durability at all.
+     */
+    let seen: OutboxSnapshot = EMPTY_SNAPSHOT
+
     try {
       let result: OutboxSnapshot = EMPTY_SNAPSHOT
       await update<OutboxSnapshot>(
         KEY,
         (current) => {
-          result = fn(current ?? EMPTY_SNAPSHOT)
+          seen = current ?? EMPTY_SNAPSHOT
+          try {
+            result = fn(seen)
+          } catch (error) {
+            throw new FnFailure(error)
+          }
           return result
         },
         this.store
       )
       return result
-    } catch {
-      return await this.degrade().update(fn)
+    } catch (error) {
+      if (error instanceof FnFailure) throw error.error
+      return await this.degrade(seen).update(fn)
     }
   }
 
@@ -61,9 +100,11 @@ export class IdbOutboxStore implements OutboxStore {
    * The cost is honest and unavoidable: in a browser that will not store
    * anything, nothing survives a reload. Within the session the outbox still
    * works, which is strictly better than a boot that throws.
+   *
+   * `seed` is whatever IndexedDB had told us before it failed — see `update`.
    */
-  private degrade(): MemoryOutboxStore {
-    this.fallback ??= new MemoryOutboxStore()
+  private degrade(seed: OutboxSnapshot): MemoryOutboxStore {
+    this.fallback ??= new MemoryOutboxStore(seed)
     return this.fallback
   }
 }
