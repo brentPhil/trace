@@ -17,6 +17,5 @@ export default defineConfig({
       name: "sw",
       fileName: () => "sw.js",
     },
-    rollupOptions: { output: { inlineDynamicImports: true } },
   },
 })
