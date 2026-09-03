@@ -5,7 +5,11 @@ export class MemoryOutboxStore implements OutboxStore {
   private snapshot: OutboxSnapshot = EMPTY_SNAPSHOT
   private chain: Promise<unknown> = Promise.resolve()
 
+  /** Joins the chain, so a read issued after an un-awaited update still sees
+   *  it. Returning `this.snapshot` bare would hand back the pre-update value
+   *  and give the two stores different observable behaviour. */
   async read(): Promise<OutboxSnapshot> {
+    await this.chain
     return this.snapshot
   }
 

@@ -40,3 +40,28 @@ it("indexeddb persists across store instances of the same name", async () => {
   await new IdbOutboxStore(name).update((s) => ({ ...s, ops: [op("a")] }))
   expect((await new IdbOutboxStore(name).read()).ops).toHaveLength(1)
 })
+
+it("a memory read sees an update that was never awaited", async () => {
+  const store = new MemoryOutboxStore()
+  void store.update((s) => ({ ...s, ops: [op("a")] }))
+  expect((await store.read()).ops).toHaveLength(1)
+})
+
+it("degrades to memory when IndexedDB is present but refuses", async () => {
+  // Safari's private mode: the API is there, opening a database is refused.
+  // The refusal cannot surface in the constructor — `createStore` is lazy —
+  // so the store has to absorb it on first use.
+  const realOpen = indexedDB.open
+  indexedDB.open = () => {
+    throw new Error("refused")
+  }
+  try {
+    const store = new IdbOutboxStore(`refused-${Math.random()}`)
+    // Resolves rather than rejecting: this is the "never a thrown boot" claim.
+    expect(await store.read()).toEqual(EMPTY_SNAPSHOT)
+    await store.update((s) => ({ ...s, ops: [op("a")] }))
+    expect((await store.read()).ops).toHaveLength(1)
+  } finally {
+    indexedDB.open = realOpen
+  }
+})
