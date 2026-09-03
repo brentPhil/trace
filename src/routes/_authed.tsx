@@ -365,7 +365,7 @@ function AuthedShell() {
       // than `""` is what the sidebar has to branch on.
       name={user.name === "" ? undefined : user.name}
       onSignOut={() =>
-        void signOutAndLeave(() => clearLocalData(snapshots, outbox.store))
+        void signOutAndLeave(() => clearLocalData(snapshots, outbox))
       }
       signOutDisabledReason={signOutDisabledReason}
       signOutWarning={signOutWarning}

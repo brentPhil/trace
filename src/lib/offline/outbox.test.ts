@@ -55,17 +55,23 @@ type Harness = {
   now: { value: number }
 }
 
-function harness(opts: { manual?: boolean; retryable?: (e: unknown) => boolean } = {}): Harness {
+function harness(
+  opts: { manual?: boolean; retryable?: (e: unknown) => boolean } = {}
+): Harness {
   const sent: Harness["sent"] = []
   const events: OutboxEvent[] = []
   const applied: Op[] = []
   const now = { value: 1_000 }
-  let pending: { resolve: (v: unknown) => void; reject: (e: unknown) => void } | null = null
+  let pending: {
+    resolve: (v: unknown) => void
+    reject: (e: unknown) => void
+  } | null = null
 
   const send: Sender = (op, args) => {
     sent.push({ kind: op.kind, args })
     if (!opts.manual) {
-      if (op.kind === "create") return Promise.resolve({ id: `real:${args.clientKey}` })
+      if (op.kind === "create")
+        return Promise.resolve({ id: `real:${args.clientKey}` })
       return Promise.resolve(null)
     }
     return new Promise((resolve, reject) => {
@@ -102,7 +108,10 @@ const flush = () => new Promise((r) => setTimeout(r, 0))
 describe("Outbox", () => {
   it("applies the optimistic update at once and hands the caller the immediate result", async () => {
     const h = harness({ manual: true })
-    const { result } = await h.outbox.enqueue("create", { clientKey: "k1", name: "A" })
+    const { result } = await h.outbox.enqueue("create", {
+      clientKey: "k1",
+      name: "A",
+    })
     expect(result).toEqual({ id: "optimistic:k1" })
     expect(h.applied.map((o) => o.kind)).toEqual(["create"])
     expect(h.outbox.pending()).toBe(1)
@@ -132,7 +141,10 @@ describe("Outbox", () => {
 
   it("resolves `settled` with the server's answer", async () => {
     const h = harness()
-    const { settled } = await h.outbox.enqueue("create", { clientKey: "k1", name: "A" })
+    const { settled } = await h.outbox.enqueue("create", {
+      clientKey: "k1",
+      name: "A",
+    })
     await expect(settled).resolves.toEqual({ id: "real:k1" })
   })
 
@@ -204,7 +216,9 @@ describe("Outbox", () => {
     h.resolveSend(null)
     await flush()
     await flush()
-    expect(h.events.some((e) => e.type === "dropped" && e.reason === "stale")).toBe(true)
+    expect(
+      h.events.some((e) => e.type === "dropped" && e.reason === "stale")
+    ).toBe(true)
 
     const h2 = harness({ manual: true })
     await h2.outbox.enqueue("stop", {})
@@ -221,7 +235,9 @@ describe("Outbox", () => {
     const store = new MemoryOutboxStore()
     await store.update((s) => ({
       ...s,
-      ops: [{ id: "op-9", kind: "stop", args: {}, enqueuedAt: 0, inFlight: true }],
+      ops: [
+        { id: "op-9", kind: "stop", args: {}, enqueuedAt: 0, inFlight: true },
+      ],
     }))
     const applied: Op[] = []
     const outbox = new Outbox({
@@ -245,7 +261,15 @@ describe("Outbox", () => {
     const store = new MemoryOutboxStore()
     await store.update((s) => ({
       ...s,
-      ops: [{ id: "op-gone", kind: "gone", args: {}, enqueuedAt: 0, inFlight: false }],
+      ops: [
+        {
+          id: "op-gone",
+          kind: "gone",
+          args: {},
+          enqueuedAt: 0,
+          inFlight: false,
+        },
+      ],
     }))
     const events: OutboxEvent[] = []
     const outbox = new Outbox({
@@ -259,7 +283,12 @@ describe("Outbox", () => {
     await outbox.load()
     await flush()
     expect(
-      events.some((e) => e.type === "dropped" && e.op.kind === "gone" && e.reason === "rejected")
+      events.some(
+        (e) =>
+          e.type === "dropped" &&
+          e.op.kind === "gone" &&
+          e.reason === "rejected"
+      )
     ).toBe(true)
     expect(outbox.pending()).toBe(0)
   })
@@ -272,8 +301,20 @@ describe("Outbox", () => {
     await store.update((s) => ({
       ...s,
       ops: [
-        { id: "op-bad", kind: "stop", args: {}, enqueuedAt: 0, inFlight: false },
-        { id: "op-good", kind: "stop", args: {}, enqueuedAt: 0, inFlight: false },
+        {
+          id: "op-bad",
+          kind: "stop",
+          args: {},
+          enqueuedAt: 0,
+          inFlight: false,
+        },
+        {
+          id: "op-good",
+          kind: "stop",
+          args: {},
+          enqueuedAt: 0,
+          inFlight: false,
+        },
       ],
     }))
     const applied: string[] = []
@@ -308,7 +349,10 @@ describe("Outbox", () => {
 
     await h.outbox.enqueue("retitle", { id: "optimistic:k1", title: "B" })
     await flush()
-    expect(h.sent.at(-1)).toEqual({ kind: "retitle", args: { id: "real:k1", title: "B" } })
+    expect(h.sent.at(-1)).toEqual({
+      kind: "retitle",
+      args: { id: "real:k1", title: "B" },
+    })
     expect(h.events.some((e) => e.type === "dropped")).toBe(false)
   })
 
@@ -319,7 +363,8 @@ describe("Outbox", () => {
     // producer of a dependent still waiting behind a long queue.
     const store = new MemoryOutboxStore()
     const saturated: Record<string, string> = {}
-    for (let i = 0; i < 100; i++) saturated[`optimistic:filler-${i}`] = `real:filler-${i}`
+    for (let i = 0; i < 100; i++)
+      saturated[`optimistic:filler-${i}`] = `real:filler-${i}`
     await store.update((s) => ({ ...s, resolved: saturated }))
 
     const sent: Array<Record<string, unknown>> = []
@@ -329,7 +374,9 @@ describe("Outbox", () => {
       kinds,
       send: (op, args) => {
         sent.push(args)
-        return Promise.resolve(op.kind === "create" ? { id: `real:${args.clientKey}` } : null)
+        return Promise.resolve(
+          op.kind === "create" ? { id: `real:${args.clientKey}` } : null
+        )
       },
       applyLocal: () => {},
       retryable: () => false,
@@ -395,6 +442,48 @@ describe("Outbox", () => {
     await outcome
   })
 
+  /*
+   * Sign-out's own `clearLocalData` calls this, deliberately with an op still
+   * queued (see `clearLocalData`'s docblock) — refusing sign-out on a
+   * non-empty outbox was the trap this whole task exists to undo. `send`
+   * never resolves here, standing in for an op that is genuinely in flight
+   * (`inFlight: true` already written to the store) the moment `clear()`
+   * runs, which is exactly the case `clear()`'s own docblock argues through
+   * the engine rather than a bare `store.update`.
+   */
+  it("clear() empties the journal, drops pending to zero, and notifies listeners", async () => {
+    const store = new MemoryOutboxStore()
+    const events: OutboxEvent[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      // Never resolves — the op sits `inFlight` in the journal for good,
+      // standing in for a real request still on the wire.
+      send: () => new Promise(() => {}),
+      applyLocal: () => {},
+      retryable: () => false,
+    })
+    outbox.subscribe((e) => events.push(e))
+
+    const { settled } = await outbox.enqueue("stop", {})
+    const outcome = expect(settled).rejects.toThrow()
+    await flush()
+    expect(outbox.pending()).toBe(1)
+
+    await outbox.clear()
+
+    expect(outbox.pending()).toBe(0)
+    expect((await store.read()).ops).toEqual([])
+    const counts = events
+      .filter((e) => e.type === "changed")
+      .map((e) => e.pending)
+    expect(counts[counts.length - 1]).toBe(0)
+    // The settler for the erased op is rejected, not left to hang forever —
+    // the same reconciliation `reconcileSettlers` already runs for another
+    // tab's drain, reused here rather than duplicated.
+    await outcome
+  })
+
   it("reports a drain that throws instead of freezing quietly", async () => {
     const store = new MemoryOutboxStore()
     const events: OutboxEvent[] = []
@@ -417,7 +506,9 @@ describe("Outbox", () => {
     const h = harness()
     await h.outbox.enqueue("stop", {})
     await flush()
-    const counts = h.events.filter((e) => e.type === "changed").map((e) => e.pending)
+    const counts = h.events
+      .filter((e) => e.type === "changed")
+      .map((e) => e.pending)
     expect(counts[0]).toBe(1)
     expect(counts[counts.length - 1]).toBe(0)
   })

@@ -1,8 +1,7 @@
 import { clearRememberedAuth } from "./remembered-auth"
 import { clearServiceWorkerCaches } from "./register-sw"
-import { EMPTY_SNAPSHOT } from "./op-types"
 import type { SnapshotStore } from "./query-snapshots"
-import type { OutboxStore } from "./op-types"
+import type { Outbox } from "./outbox"
 
 /**
  * Everything offline support keeps on the device, gone at sign-out.
@@ -15,6 +14,13 @@ import type { OutboxStore } from "./op-types"
  * Losing the queue is bad; that is worse. `pendingSignOutWarning` is what
  * makes the loss a choice rather than a surprise.
  *
+ * THE WHOLE OUTBOX, NOT ITS STORE. This takes the `Outbox` engine rather than
+ * reaching for the `OutboxStore` underneath it — a bare `store.update(() =>
+ * EMPTY_SNAPSHOT)` from outside would leave `pendingCount` stale, emit no
+ * `changed` event, and strand any settler still waiting on an op the write
+ * just erased. `Outbox.clear()` does all three correctly and is the one
+ * sanctioned way in.
+ *
  * Each clear is caught independently, so one failing store cannot stop the
  * others — and none of them can stop the user leaving. A `console.warn`
  * names what failed: a cleared cache is what stands between "signed out" and
@@ -23,7 +29,7 @@ import type { OutboxStore } from "./op-types"
  */
 export async function clearLocalData(
   snapshots: SnapshotStore,
-  outbox: OutboxStore
+  outbox: Outbox
 ): Promise<void> {
   clearRememberedAuth()
   await Promise.all([
@@ -33,9 +39,9 @@ export async function clearLocalData(
         console.warn("clearLocalData: snapshots.clear() failed", error)
       ),
     outbox
-      .update(() => EMPTY_SNAPSHOT)
+      .clear()
       .catch((error: unknown) =>
-        console.warn("clearLocalData: outbox.update() failed", error)
+        console.warn("clearLocalData: outbox.clear() failed", error)
       ),
     clearServiceWorkerCaches().catch((error: unknown) =>
       console.warn("clearLocalData: clearServiceWorkerCaches() failed", error)

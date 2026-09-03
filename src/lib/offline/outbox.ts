@@ -1,5 +1,6 @@
 import { newClientKey } from "@/lib/client-key"
 import { rewritePlaceholders, unresolvedPlaceholders } from "./placeholders"
+import { EMPTY_SNAPSHOT } from "./op-types"
 import type {
   Op,
   OpKind,
@@ -64,19 +65,7 @@ type Deferred = {
  * "stuck" is exactly a drain that is offline. It resumes when the socket does.
  */
 export class Outbox {
-  /**
-   * The journal itself, exposed so sign-out can empty it.
-   *
-   * `clearLocalData` runs at sign-out, which is now refused ONLY while
-   * offline (see `pendingSignOutWarning`) — a non-empty queue is a warning,
-   * not a refusal — so this can run with ops still in the journal, and
-   * leaving them would mean the next person to sign in on this machine
-   * replays the previous user's writes under their own session. Public
-   * rather than reached around: every other piece of state this class holds
-   * stays private because nothing outside `Outbox` needs it, and this is the
-   * one exception with a real caller.
-   */
-  readonly store: OutboxStore
+  private readonly store: OutboxStore
   // `| undefined`: an op's `kind` is a plain string read back from the
   // journal, so a lookup by an unknown one is a real runtime case (see
   // `drain`'s "Unknown op kind" drop) — not something the type can rule out.
@@ -207,6 +196,34 @@ export class Outbox {
 
   pending(): number {
     return this.pendingCount
+  }
+
+  /**
+   * Empties the journal outright — for sign-out, and nothing else.
+   *
+   * Sign-out is now refused ONLY while offline (see `pendingSignOutWarning`
+   * in offline-copy.ts for why refusing on a non-empty queue was a trap), so
+   * this can run mid-drain, with an op in flight or settlers still waiting on
+   * ops this clear is about to erase. Going THROUGH the engine rather than
+   * around it (a caller poking `store.update` directly) is what keeps that
+   * safe: `reconcileSettlers` rejects every settler whose op no longer
+   * exists — the same reconciliation a drain already runs after another tab
+   * empties the journal out from under it — and `setPending` emits the
+   * `changed` event a live `SyncStatus` or a sign-out warning depends on to
+   * notice the queue is gone. Skip either step and a failed sign-out (the
+   * network drops between the clear and `authClient.signOut`) leaves the
+   * user on a live authed page with a sidebar still warning about a queue
+   * that no longer exists, and deferreds that will now hang forever.
+   *
+   * An op whose `send` resolves AFTER this runs can still write back a
+   * placeholder→id mapping into the now-empty journal — `ops` stays empty
+   * either way, so the hazard `capResolved`'s own docblock warns about does
+   * not reoccur here; not worth chasing further.
+   */
+  async clear(): Promise<void> {
+    const next = await this.store.update(() => EMPTY_SNAPSHOT)
+    this.reconcileSettlers(next)
+    this.setPending(next.ops.length)
   }
 
   subscribe(listener: (event: OutboxEvent) => void): () => void {

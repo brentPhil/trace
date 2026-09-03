@@ -677,6 +677,16 @@ describe("the library", () => {
    * drop handler says the guard "has to be repeated here". The list itself is
    * the drop target (see the component's docblock on why there is no
    * separate dashed zone), so its parent is where `onDrop` is wired.
+   *
+   * ASSERTS A SYNCHRONOUS SIGNAL, not `generateUploadUrl`. `upload` only
+   * reaches `generateUploadUrl` after `await decodeDurationMs(file)`, and
+   * that resolves via a promise on EVERY path — including jsdom's own
+   * missing-`URL.createObjectURL` early return — so an assertion made
+   * synchronously after `fireEvent.drop` would still read "not called"
+   * whether or not the guard exists: the call just has not happened YET.
+   * `upload`'s first act, before any `await`, is `setQueue` — so the queued
+   * file's own name appearing on screen is the earliest true signal that the
+   * drop was accepted, and its absence is what a real gate produces.
    */
   it("ignores a drop on the list while offline", () => {
     setConnectionOnline(false)
@@ -688,6 +698,6 @@ describe("the library", () => {
     })
     fireEvent.drop(dropTarget, { dataTransfer: { files: [file] } })
 
-    expect(generateUploadUrl).not.toHaveBeenCalled()
+    expect(screen.queryByText("track.mp3")).toBeNull()
   })
 })
