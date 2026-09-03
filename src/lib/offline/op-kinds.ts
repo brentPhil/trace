@@ -1,3 +1,4 @@
+import { getSkewMs } from "@/lib/clock"
 import { optimisticIdFor } from "@/lib/optimistic-id"
 import { api } from "../../../convex/_generated/api"
 import * as entries from "./optimistic-entries"
@@ -19,18 +20,21 @@ export const STALE_START_MS = 24 * 60 * 60 * 1000
  * registry's own test could not call one. This validates and hands the
  * literal type straight back.
  *
- * The `Pick<..., "mints" | "minted">` in the return type is the other half of
- * that same trade: preserving the literal also means a kind that never
- * writes `mints`/`minted` (most of them) genuinely lacks those keys on its
- * inferred type, so `Object.values(OP_KINDS)` — as the registry's own test
- * does — sees a union that doesn't carry them everywhere and `.mints` stops
- * typechecking. The `Pick` guarantees both stay present (optional) on every
- * kind without widening anything else `Def` already knows precisely.
+ * The `Pick<..., "mints" | "minted" | "closedBy">` in the return type is the
+ * other half of that same trade: preserving the literal also means a kind
+ * that never writes one of these (most of them) genuinely lacks that key on
+ * its inferred type, so `Object.values(OP_KINDS)`/`Object.entries(OP_KINDS)`
+ * — as the registry's own tests do, for mints/minted and for closedBy — see a
+ * union that doesn't carry them everywhere and the property access stops
+ * typechecking. The `Pick` guarantees all three stay present (optional) on
+ * every kind without widening anything else `Def` already knows precisely.
  */
 function kind<
   TRef extends FunctionReference<"mutation", "public">,
   TDef extends OpKind<FunctionArgs<TRef>, FunctionReturnType<TRef>> & { ref: TRef },
->(def: TDef): TDef & Pick<OpKind<FunctionArgs<TRef>, FunctionReturnType<TRef>>, "mints" | "minted"> {
+>(
+  def: TDef
+): TDef & Pick<OpKind<FunctionArgs<TRef>, FunctionReturnType<TRef>>, "mints" | "minted" | "closedBy"> {
   return def
 }
 
@@ -54,7 +58,12 @@ export const OP_KINDS = {
     immediate: (args, now) => ({
       entryId: optimisticIdFor(args.clientKey) as unknown as Id<"timeEntries">,
       stoppedEntryIds: [],
-      serverNow: now,
+      // The best estimate of server time available synchronously. Raw
+      // Date.now() here would be a claim that the device clock IS the
+      // server's, and a caller feeding it to recordServerNow would zero a
+      // skew that had been measured — making a running timer jump. The real
+      // answer arrives through settled.
+      serverNow: now + getSkewMs(),
       replayed: false,
     }),
     staleAfterMs: STALE_START_MS,
@@ -64,15 +73,14 @@ export const OP_KINDS = {
     ref: api.entries.stop,
     label: "Stopping the timer",
     optimistic: entries.optimisticStop,
-    immediate: (_args, now) => ({ stoppedEntryIds: [], serverNow: now }),
+    // Skew-adjusted for the same reason start's is — see there.
+    immediate: (_args, now) => ({ stoppedEntryIds: [], serverNow: now + getSkewMs() }),
   }),
   "entries.discardRunning": kind({
     ref: api.entries.discardRunning,
     label: "Discarding the timer",
     optimistic: entries.optimisticDiscard,
-    // NOT `nothing`: this is the one mutation here that returns a shape
-    // rather than null (`discardReturns` in convex/entries.ts). Empty is
-    // honest — the caller learns nothing was discarded yet.
+    // Empty is honest — nothing has been discarded on the server yet.
     immediate: () => ({ discardedEntryIds: [] }),
   }),
   "entries.setTitle": kind({
@@ -148,11 +156,13 @@ export const OP_KINDS = {
      * is OPTIONAL — projects created before the outbox existed have none —
      * while the optimistic function needs one to key its placeholder on.
      *
-     * A guard, not a cast, for this one of the three: without a key there is
-     * no stable placeholder, and `optimistic:undefined` would be a row the
-     * outbox could never resolve. Doing nothing is the honest answer. Every
-     * op the outbox enqueues carries a key (Task 9 mints it), so this is a
-     * boundary that should never be crossed rather than a case to handle.
+     * A guard here and casts in `mints`/`immediate` below, deliberately, and
+     * the difference is what each one can do wrong. This function PAINTS —
+     * without a key it would put a row keyed `optimistic:undefined` on screen
+     * that the outbox could never resolve, so doing nothing is the honest
+     * answer. `mints` and `immediate` only ever run for an op the outbox
+     * itself enqueued, and Task 9 mints a key for every one, so their casts
+     * describe a boundary that is not crossed rather than a case to handle.
      */
     optimistic: (store, args) => {
       if (args.clientKey === undefined) return
@@ -170,6 +180,12 @@ export const OP_KINDS = {
     optimistic: classifiers.optimisticProjectUpdate,
     immediate: nothing,
     coalesceKey: (args) => args.projectId,
+    // MERGE, for the same reason settings.update does: updateArgs is a patch
+    // of independent optionals and /projects sends genuine partials — a
+    // colour swatch sends {projectId, color}, the name field sends
+    // {projectId, name}. Replacing would drop the colour when the name is
+    // edited second.
+    coalesceMerge: true,
   }),
   "projects.setArchived": kind({
     ref: api.projects.setArchived,
