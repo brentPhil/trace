@@ -4971,8 +4971,23 @@ export const OFFLINE_INVOICE_REASON =
 export const OFFLINE_UPLOAD_REASON = "You're offline. Uploads need a connection."
 export const OFFLINE_GOOGLE_REASON = "You're offline. Google Calendar settings need a connection."
 export const OFFLINE_SIGN_OUT_REASON = "You're offline. Sign out once you're back online."
-export function pendingSignOutReason(pending: number): string {
-  return `${pending} ${pending === 1 ? "change is" : "changes are"} still syncing. Sign out once they have saved.`
+
+/**
+ * A WARNING beside sign-out, not a refusal.
+ *
+ * Refusing while the queue is non-empty was the first design and it was a
+ * trap: an op the server keeps refusing, or a drain that has thrown, leaves
+ * the count above zero for good — and the user is then told to wait for
+ * something that will never happen, with sign-out, and therefore the device
+ * clear, unreachable on that machine forever.
+ *
+ * The trade runs the other way round. Losing queued changes is bad; leaving
+ * one person's entries cached on a machine the next person uses is worse, and
+ * an unreachable sign-out guarantees exactly that. So the count is stated,
+ * the loss is stated, and the choice is the user's.
+ */
+export function pendingSignOutWarning(pending: number): string {
+  return `${pending} ${pending === 1 ? "change has" : "changes have"} not synced yet and will be lost.`
 }
 ```
 
@@ -4981,17 +4996,33 @@ Create `src/lib/offline/clear-local-data.ts`:
 ```ts
 import { clearRememberedAuth } from "./remembered-auth"
 import { clearServiceWorkerCaches } from "./register-sw"
+import { EMPTY_SNAPSHOT } from "./op-types"
 import type { SnapshotStore } from "./query-snapshots"
+import type { OutboxStore } from "./op-types"
 
 /**
  * Everything offline support keeps on the device, gone at sign-out.
  *
- * The outbox is NOT cleared here: sign-out is refused while it holds
- * anything (see the shell), so by the time this runs it is empty.
+ * THE OUTBOX GOES TOO, and that is the uncomfortable half. Sign-out is only
+ * refused while offline, so this can run with ops still queued — and leaving
+ * them would mean the next person to sign in on this machine replays the
+ * previous user's writes under their own session. Losing the queue is bad;
+ * that is worse. `pendingSignOutWarning` is what makes the loss a choice
+ * rather than a surprise.
+ *
+ * Each clear is caught independently, so one failing store cannot stop the
+ * others — and none of them can stop the user leaving.
  */
-export async function clearLocalData(snapshots: SnapshotStore): Promise<void> {
+export async function clearLocalData(
+  snapshots: SnapshotStore,
+  outbox: OutboxStore
+): Promise<void> {
   clearRememberedAuth()
-  await Promise.all([snapshots.clear().catch(() => undefined), clearServiceWorkerCaches().catch(() => undefined)])
+  await Promise.all([
+    snapshots.clear().catch(() => undefined),
+    outbox.update(() => EMPTY_SNAPSHOT).catch(() => undefined),
+    clearServiceWorkerCaches().catch(() => undefined),
+  ])
 }
 ```
 
@@ -5010,25 +5041,28 @@ Update every caller (`grep -rn "signOutAndLeave(" src`): the authed shell passes
 
 - [ ] **Step 2: Sign-out with a reason**
 
-Thread a new prop `signOutDisabledReason: string | null` through `AppShell` → `AppSidebar` → `ProfileMenu`. In `ProfileMenu`'s sign-out `Button` add `disabled={signOutDisabledReason !== null}` and render the reason beneath it when non-null:
+Thread TWO new props through `AppShell` → `AppSidebar` → `ProfileMenu`: `signOutDisabledReason: string | null` (a refusal — only ever the offline sentence) and `signOutWarning: string | null` (a caution that does NOT disable). Render the refusal beneath a disabled button, the warning beneath a live one; both in `text-xs text-muted-foreground`. In `ProfileMenu`'s sign-out `Button` add `disabled={signOutDisabledReason !== null}` and render the reason beneath it when non-null:
 
 ```tsx
-            {signOutDisabledReason !== null ? (
-              <p className="px-2 pb-1 text-xs text-muted-foreground">{signOutDisabledReason}</p>
+            {(signOutDisabledReason ?? signOutWarning) !== null ? (
+              <p className="px-2 pb-1 text-xs text-muted-foreground">
+                {signOutDisabledReason ?? signOutWarning}
+              </p>
             ) : null}
 ```
 
 In `AuthedShell`, compute:
 
 ```ts
-  const signOutDisabledReason = !online
-    ? OFFLINE_SIGN_OUT_REASON
-    : pending > 0
-      ? pendingSignOutReason(pending)
-      : null
+  // Offline is the only REFUSAL: a session cannot be ended without the
+  // network. A queue that has not drained is a warning — see
+  // `pendingSignOutWarning` for why refusing on it was a trap.
+  const signOutDisabledReason = online ? null : OFFLINE_SIGN_OUT_REASON
+  const signOutWarning =
+    online && pending > 0 ? pendingSignOutWarning(pending) : null
 ```
 
-and pass it to `<AppShell signOutDisabledReason={signOutDisabledReason} …>`, with `onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots))}`.
+and pass both to `<AppShell signOutDisabledReason={signOutDisabledReason} signOutWarning={signOutWarning} …>`, with `onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots, outbox.store))}`.
 
 - [ ] **Step 3: Invoices, uploads, Google**
 
@@ -5071,6 +5105,25 @@ A disabled `<fieldset>` disables every native control inside it, which is what t
 ```
 
 Import `useOnlineStatus` from `@/lib/offline/use-online-status` and the sentences from `@/lib/offline/offline-copy` in each route.
+
+**The drop targets need the same gate as the pickers.** `-music-library.tsx`'s drop handler and `invoice-logo-section.tsx`'s both guard on `busy` alone, and `-music-library.tsx`'s own comment already says the picker's guard "has to be repeated here" because "a drop bypasses that element entirely". Disabling the picker without repeating it leaves a section that renders "You're offline. Uploads need a connection." beside a tile that still accepts a file and starts an upload it cannot finish. Both become `if (busy || !online) return`. `InvoiceLogoSection` takes `online` as a prop, like every other piece of state a component in this repo renders from.
+
+Dim the logo picker's `<label>` on `!online` as well as `busy`, matching what the music one already does — a control that is inert must look it, not merely be it.
+
+- [ ] **Step 3b: Assert the gate on the controls, not on the wrapper**
+
+`<fieldset disabled>` is what disables the controls inside those two settings sections, and **jsdom does not implement that cascade** — so a test asserting `fieldset.disabled` asserts only the prop it was just handed, in an environment that cannot show what the prop does. It would not catch a control switching to a `render`-as-`div`, a control being portalled out of the fieldset, or a drop handler bypassing it entirely.
+
+Assert containment instead. For each of the named controls — the `Music files` input, `Remove logo`, `Disconnect`, and the calendar `Project` picker — find it by role or label and assert it sits inside a disabled fieldset:
+
+```ts
+function inDisabledFieldset(element: HTMLElement): boolean {
+  const fieldset = element.closest("fieldset")
+  return fieldset !== null && fieldset.disabled
+}
+```
+
+That catches the failure a refactor actually produces: a control escaping the wrapper.
 
 - [ ] **Step 4: Verify, commit**
 
