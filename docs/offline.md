@@ -226,6 +226,33 @@ computed, not the offline session sitting on top of them. `listRange` and
 `listPage` — what the log and the week-totals strip render from — do not
 have this problem; only these two aggregate queries do.
 
+## Undoing an offline delete of a running entry
+
+Narrow, self-correcting, and recorded so it is not rediscovered as a bug.
+
+Deleting a running entry is reachable in one click from the calendar
+(`calendar-entry-popover.tsx` hides Resume and Duplicate for a running block
+but leaves Delete rendered), though not from the log, which filters running
+rows out before building a row.
+
+The server never restores an entry as running: `removeImpl` closes a running
+entry before soft-deleting it, and `restoreImpl` synthesizes an end even for a
+row that somehow still has `endedAt === null`, specifically so an undo cannot
+resurrect a second timer. `optimisticRestore` leaving `getRunning` null is
+therefore the correct answer, not an oversight.
+
+What diverges is the restored row itself. Offline, `optimisticRestore`
+reinstates the snapshot captured *before* the delete, which for a running entry
+still carries `endedAt: null` and `durationMs: null`; the server would have
+restored it with a synthesized end. `group-entries.ts` filters
+`durationMs === null` out of the log, so between the undo and the outbox
+draining, the row shows on the calendar and nowhere else.
+
+It is left alone deliberately. Closing it means mirroring `restoreImpl`'s
+end-synthesis in the optimistic layer, which is a behaviour decision — whose
+clock mints the end, and how it reconciles with the server's — rather than a
+correction, and it resolves itself on reconnect.
+
 ## Booting offline: the service worker
 
 Hand-written (`src/sw/index.ts`, routing logic split out as a pure function
