@@ -27,7 +27,18 @@ export class IdbOutboxStore implements OutboxStore {
   /** Set once IndexedDB has refused, and used for the rest of the session. */
   private fallback: MemoryOutboxStore | null = null
 
-  constructor(dbName = "chroneli-offline") {
+  /**
+   * `chroneli-outbox`, NOT `chroneli-offline` — and not
+   * `IdbSnapshotStore`'s database name under any name. See the matching
+   * comment on `IdbSnapshotStore`'s constructor in `query-snapshots.ts` for
+   * why: sharing one `createStore` database name made whichever store ran
+   * second throw `NotFoundError` on every transaction, and this store's own
+   * `degrade` below turned that into a silent, permanent in-memory fallback
+   * on the very first write, every session — the outbox always lost,
+   * because the snapshot store is the one `router.tsx` touches first. Do
+   * not consolidate these two names.
+   */
+  constructor(dbName = "chroneli-outbox") {
     this.store = createStore(dbName, "outbox")
   }
 

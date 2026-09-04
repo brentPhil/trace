@@ -24,38 +24,129 @@ export const SNAPSHOT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
 export class MemorySnapshotStore implements SnapshotStore {
   private map = new Map<string, Snapshot>()
+  /**
+   * Set by `clear()` and never unset — see the docblock on `IdbSnapshotStore`'s
+   * field of the same name for why a write after clearing must be refused
+   * rather than merely raced against.
+   */
+  private sealed = false
   async read(hash: string) {
     return this.map.get(hash)
   }
   async write(hash: string, snapshot: Snapshot) {
+    if (this.sealed) return
     this.map.set(hash, snapshot)
   }
   async prune(olderThanMs: number) {
     for (const [hash, snap] of this.map) if (snap.updatedAt < olderThanMs) this.map.delete(hash)
   }
   async clear() {
+    this.sealed = true
     this.map.clear()
   }
 }
 
 export class IdbSnapshotStore implements SnapshotStore {
   private readonly store
-  constructor(dbName = "chroneli-offline") {
+  /**
+   * `chroneli-snapshots`, NOT `chroneli-offline` — and not the outbox
+   * store's database name under any name. idb-keyval's `createStore` calls
+   * `indexedDB.open(dbName)` with no version and creates its object store
+   * only inside `onupgradeneeded`, so whichever store touches a shared
+   * database first creates it at version 1 holding only ITS OWN object
+   * store; the second store then opens the existing v1 database, gets no
+   * upgrade event, and every one of its transactions throws `NotFoundError`
+   * forever. Found in review: `router.tsx` prunes snapshots at router
+   * construction, long before `OutboxProvider` mounts, so the outbox was
+   * always the one that lost — and its own `degrade()` (see
+   * `outbox-store-idb.ts`) swallowed that into a silent, permanent
+   * in-memory fallback on the very first write, every session. Two
+   * independent database names is the fix; do not consolidate these.
+   */
+  constructor(dbName = "chroneli-snapshots") {
     this.store = createStore(dbName, "query-snapshots")
   }
+
+  /** Set once IndexedDB has refused, and used for the rest of the session. */
+  private fallback: MemorySnapshotStore | null = null
+
+  /**
+   * Set by `clear()` and never unset.
+   *
+   * Sign-out calls `clearLocalData`, which calls `clear()`, and then awaits a
+   * NETWORK round trip (`authClient.signOut`) before leaving the page. A
+   * debounced write armed by `attachSnapshotWriter` before the clear can
+   * still be sitting on a timer, and that timer fires DURING the round trip
+   * — after the clear, before the navigation — and would otherwise write a
+   * fresh snapshot of the just-signed-out user's data straight back into
+   * IndexedDB. `router.tsx` never keeps `attachSnapshotWriter`'s detach
+   * function, so there is no timer to cancel from outside; sealing the store
+   * itself is what makes the clear win regardless. One-way on purpose: a
+   * cleared store has no "resume writing" case, only "stay cleared until the
+   * next sign-in constructs a fresh store instance."
+   */
+  private sealed = false
+
   async read(hash: string) {
-    return await get<Snapshot>(hash, this.store)
+    if (this.fallback !== null) return await this.fallback.read(hash)
+    try {
+      return await get<Snapshot>(hash, this.store)
+    } catch {
+      return await this.degrade().read(hash)
+    }
   }
   async write(hash: string, snapshot: Snapshot) {
-    await set(hash, snapshot, this.store)
+    if (this.sealed) return
+    if (this.fallback !== null) return await this.fallback.write(hash, snapshot)
+    try {
+      await set(hash, snapshot, this.store)
+    } catch {
+      await this.degrade().write(hash, snapshot)
+    }
   }
   async prune(olderThanMs: number) {
-    for (const [hash, snap] of await entries<string, Snapshot>(this.store)) {
-      if (snap.updatedAt < olderThanMs) await del(hash, this.store)
+    if (this.fallback !== null) return await this.fallback.prune(olderThanMs)
+    try {
+      for (const [hash, snap] of await entries<string, Snapshot>(this.store)) {
+        if (snap.updatedAt < olderThanMs) await del(hash, this.store)
+      }
+    } catch {
+      await this.degrade().prune(olderThanMs)
     }
   }
   async clear() {
-    await clear(this.store)
+    this.sealed = true
+    if (this.fallback !== null) return await this.fallback.clear()
+    try {
+      await clear(this.store)
+    } catch {
+      await this.degrade().clear()
+    }
+  }
+
+  /**
+   * IndexedDB is there but will not store anything — Safari's private mode
+   * refuses the open — so carry on in memory for the rest of the session.
+   *
+   * THE FACTORY BELOW CANNOT DO THIS. `createStore` is lazy: it builds a
+   * closure and does not touch `indexedDB.open()` until the first read or
+   * write, so a constructor-time try/catch guards nothing and the refusal
+   * arrives later as a rejected promise. Degrading here is what makes "never
+   * a thrown boot" true rather than merely intended — the same argument as
+   * `IdbOutboxStore.degrade` in `outbox-store-idb.ts`, which this mirrors.
+   *
+   * Unlike the outbox, each snapshot lives under its own key rather than one
+   * atomic whole-snapshot value, so there is no partial-write "seen" state to
+   * carry across — whatever IndexedDB had is simply unreachable once it has
+   * refused, and the fallback starts empty.
+   */
+  private degrade(): MemorySnapshotStore {
+    if (this.fallback === null) {
+      this.fallback = new MemorySnapshotStore()
+      // A clear that raced the refusal itself must still stick.
+      if (this.sealed) void this.fallback.clear()
+    }
+    return this.fallback
   }
 }
 

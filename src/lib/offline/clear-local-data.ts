@@ -26,6 +26,15 @@ import type { Outbox } from "./outbox"
  * names what failed: a cleared cache is what stands between "signed out" and
  * a stale, still-cached authed page showing someone else's entries, and that
  * failure otherwise produces nothing at all, on screen or in the console.
+ *
+ * `snapshots.clear()` RETURNING is not the end of the race with
+ * `attachSnapshotWriter`'s debounce timers: this function's caller
+ * (`signOutAndLeave`) still awaits a network round trip to `authClient.signOut`
+ * before leaving the page, and a timer armed before this call can fire during
+ * that wait, after the clear. `SnapshotStore.clear()` seals the store against
+ * that — every `write` after a `clear` is a no-op for the rest of that
+ * store's lifetime — so this function does not need to, and does not, chase
+ * down `attachSnapshotWriter`'s detach function to stop the timers itself.
  */
 export async function clearLocalData(
   snapshots: SnapshotStore,
