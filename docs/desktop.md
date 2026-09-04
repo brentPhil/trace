@@ -47,15 +47,35 @@ development — see `reportPushFailure` in `src/hooks/use-desktop-bridge.ts`.)
 
 ### Offline, or chroneli.com down
 
-There is no local frontend to fall back to. If the site is unreachable when the
-window opens, what the user gets is **the platform webview's own error page** —
-Edge WebView2's on Windows, WKWebView's on macOS. No Chroneli branding, no retry
-button, nothing that suggests the app is fine and the network isn't. Meanwhile
-the tray is still there, still offering **Start timer**, and that Start goes
-nowhere: it emits an event into a page that never loaded.
+There is no local frontend to fall back to — but the site itself now
+registers a service worker (`docs/offline.md`), and that changes what "the
+window opens with no network" actually means. A window opened offline, after
+at least one prior online visit, gets **the cached shell** — the last page it
+loaded, with real data dehydrated into it — rather than the platform
+webview's own error page. Writes made there queue in the outbox and sync when
+the network returns. The tray's **Start timer** still reaches a page that
+actually loaded, because that page is the cached one, not a blank window
+waiting on a fetch that will never resolve.
 
-Worth fixing if the app gets real usage; not worth pre-building an offline shell
-before then.
+That only holds once the service worker has been **registered** on this
+device, which itself requires one successful online page load —
+`registerServiceWorker()` runs from the root route, and only in a production
+build. From that point on, every offline navigation is intercepted by the
+worker, and `networkFirstNavigation` always answers it: the cached response
+for that URL if one exists, otherwise Chroneli's own inline offline page at
+503 — never a fall-through to the platform's chrome, even for a URL that was
+never individually visited. A window on a device where the worker has never
+registered — no page has ever loaded there while online — is the only case
+that still gets the platform's own error page: Edge WebView2's on Windows,
+WKWebView's on macOS.
+
+**Verified on Windows (WebView2).** WebView2 is Chromium, and service
+workers there behave exactly as they do in a desktop browser.
+
+**NOT yet verified on macOS.** WKWebView's support for a service worker
+registered against a *remote* origin is the open question — as opposed to
+one bundled with a local app — and until someone checks it on a real Mac,
+the desktop app should not be described as offline-capable there.
 
 ### `"csp": null` is deliberate
 

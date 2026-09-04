@@ -15,7 +15,6 @@ import { useToastManager } from "@/components/ui/toast"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
-import { usePaginatedQuery } from "convex/react"
 import { WrapText } from "lucide-react"
 import { CalendarPanel, NO_MEETINGS } from "@/components/calendar/calendar-panel"
 import { CopyEntriesButton } from "@/components/entries/copy-entries-button"
@@ -28,6 +27,7 @@ import { RangeBar } from "@/components/timer/range-bar"
 import { Page } from "@/components/shell/page"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useSecond } from "@/hooks/use-clock"
+import { useConvexPages } from "@/hooks/use-convex-pages"
 import { useEntryActions } from "@/hooks/use-entry-actions"
 import { useLatest } from "@/hooks/use-latest"
 import { boundsOf, dayTotals, rangeOf, totalOverDays } from "@/lib/calendar-events"
@@ -56,7 +56,11 @@ import type { CalendarSize } from "@/lib/calendar-label"
 import type { DayRange, TimerPreset, TimerRange } from "@/lib/timer-range"
 import type { TimerView } from "@/lib/timer-view"
 
-const PAGE_SIZE = 50
+// Exported for -timer.test.tsx, which seeds the log's first page straight
+// into the TanStack cache — the same `paginationOpts.numItems` this hands
+// `useConvexPages` has to be the number the test's queryKey is built with, or
+// the seeded page sits under a key `useConvexPages` never subscribes to.
+export const PAGE_SIZE = 50
 
 export function Timer() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
@@ -373,10 +377,10 @@ export function Timer() {
     [today, settings.timezone]
   )
 
-  const { results, status, loadMore } = usePaginatedQuery(
+  const { results, status, loadMore } = useConvexPages(
     api.entries.listPage,
     range === null ? logRange : "skip",
-    { initialNumItems: PAGE_SIZE }
+    PAGE_SIZE
   )
 
   /*
@@ -897,7 +901,7 @@ export function Timer() {
                 filtering={false}
                 matchCount={rowCount}
                 status={status}
-                onLoadMore={() => loadMore(PAGE_SIZE)}
+                onLoadMore={loadMore}
               />
             ) : null}
           </>

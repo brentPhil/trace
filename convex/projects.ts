@@ -170,6 +170,7 @@ const createArgs = {
   color: v.optional(v.string()),
   billableByDefault: v.optional(v.boolean()),
   hourlyRateCents: v.optional(v.number()),
+  clientKey: v.optional(v.string()),
 }
 
 type CreateArgs = {
@@ -177,6 +178,7 @@ type CreateArgs = {
   color?: string
   billableByDefault?: boolean
   hourlyRateCents?: number
+  clientKey?: string
 }
 
 /**
@@ -188,6 +190,18 @@ type CreateArgs = {
  * creation order tell them apart, and a rename is one edit away.
  */
 async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
+  // Replay branch first, before validation: the row that exists already
+  // passed it, and the retry may carry a name the user has since edited.
+  if (args.clientKey !== undefined) {
+    const replay = await ctx.db
+      .query("projects")
+      .withIndex("by_user_clientKey", (q) =>
+        q.eq("userId", userId).eq("clientKey", args.clientKey)
+      )
+      .first()
+    if (replay !== null) return { projectId: replay._id }
+  }
+
   const name = checkName(args.name)
   checkRate(args.hourlyRateCents)
   const existing = await allProjects(ctx, userId)
@@ -199,6 +213,7 @@ async function createImpl(ctx: MutationCtx, userId: string, args: CreateArgs) {
   const now = Date.now()
   const projectId = await ctx.db.insert("projects", {
     userId,
+    clientKey: args.clientKey,
     name,
     color,
     archived: false,

@@ -10,6 +10,8 @@ import { useCreateInvoice } from "@/hooks/use-invoice-mutations"
 import { errorMessage } from "@/lib/error-message"
 import { invoiceDisabledReason } from "@/lib/export/export-disabled-reason"
 import { defaultFilters, rangeOf, PRESET_LABELS } from "@/lib/history-filters"
+import { OFFLINE_INVOICE_REASON } from "@/lib/offline/offline-copy"
+import { useOnlineStatus } from "@/lib/offline/use-online-status"
 import {
   REFUSAL_FIELD_OF,
   draftArgs,
@@ -141,6 +143,8 @@ export function NewInvoicePage({
     convexQuery(api.invoices.lastDetails, {})
   )
   const { createInvoice } = useCreateInvoice()
+
+  const online = useOnlineStatus()
 
   const timeZone = settings.timezone
 
@@ -351,11 +355,9 @@ export function NewInvoicePage({
    * `NO_PRICED_TIME` — so this is the sentence before the click rather than the
    * only thing standing in the way.
    */
-  const disabledReason = invoiceDisabledReason(
-    breakdown,
-    isPlaceholderData,
-    lines.length
-  )
+  const disabledReason = online
+    ? invoiceDisabledReason(breakdown, isPlaceholderData, lines.length)
+    : OFFLINE_INVOICE_REASON
 
   async function create() {
     // Set BEFORE the first `await` — the ref write and this read are in one

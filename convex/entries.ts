@@ -1458,12 +1458,36 @@ const stopReturns = v.object({
  * durations a user TYPES, not to a clock that genuinely ran. Refusing here
  * would make the timer permanently unstoppable.
  */
-async function stopImpl(ctx: MutationCtx, userId: string, endedAt: number | undefined) {
+async function stopImpl(
+  ctx: MutationCtx,
+  userId: string,
+  endedAt: number | undefined,
+  entryId: Id<"timeEntries"> | undefined
+) {
   const now = Date.now()
   const running = await runningEntries(ctx, userId)
 
+  /*
+   * A stop that NAMES an entry closes that entry and nothing else.
+   *
+   * The offline outbox replays a stop carrying the instant the user pressed
+   * it, which can arrive after another device has started something new.
+   * Against the timestamps alone that is the same shape as a backwards clock
+   * — the case the test above insists must still stop the timer, because a
+   * timer that can never be stopped is the worst failure this product has.
+   * There is no telling them apart from the numbers. The name does it: it
+   * says which timer the user was looking at.
+   *
+   * Filtering `running` rather than fetching by id is what keeps ownership
+   * intact for free — `runningEntries` is already scoped to `userId`, so a
+   * name belonging to somebody else matches nothing rather than needing its
+   * own check that a later edit could drop.
+   */
+  const targets =
+    entryId === undefined ? running : running.filter((entry) => entry._id === entryId)
+
   const stoppedEntryIds: Array<Id<"timeEntries">> = []
-  for (const entry of running) {
+  for (const entry of targets) {
     if (await closeEntry(ctx, entry, endedAt ?? now, now)) {
       stoppedEntryIds.push(entry._id)
     }
@@ -1471,17 +1495,24 @@ async function stopImpl(ctx: MutationCtx, userId: string, endedAt: number | unde
   return { stoppedEntryIds, serverNow: now }
 }
 
+const stopArgs = {
+  endedAt: v.optional(v.number()),
+  /** Which timer this stop is for. Absent means "whatever is running", which
+   *  is every caller that is looking at the live server state. */
+  entryId: v.optional(v.id("timeEntries")),
+}
+
 export const stop = mutation({
-  args: { endedAt: v.optional(v.number()) },
+  args: stopArgs,
   returns: stopReturns,
   handler: async (ctx, args) =>
-    await stopImpl(ctx, await requireUserId(ctx), args.endedAt),
+    await stopImpl(ctx, await requireUserId(ctx), args.endedAt, args.entryId),
 })
 
 export const stopAs = internalMutation({
-  args: { userId: v.string(), endedAt: v.optional(v.number()) },
+  args: { ...stopArgs, userId: v.string() },
   returns: stopReturns,
-  handler: async (ctx, args) => await stopImpl(ctx, args.userId, args.endedAt),
+  handler: async (ctx, args) => await stopImpl(ctx, args.userId, args.endedAt, args.entryId),
 })
 
 // ---------------------------------------------------------------------------
@@ -1547,12 +1578,23 @@ const discardReturns = v.object({
  * the trash is a valid interval and restoring it yields something usable rather
  * than a ghost.
  */
-async function discardRunningImpl(ctx: MutationCtx, userId: string) {
+async function discardRunningImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryId: Id<"timeEntries"> | undefined
+) {
   const now = Date.now()
   const running = await runningEntries(ctx, userId)
 
+  // Same narrowing as `stopImpl`, for the same reason: a replayed discard
+  // must take down only the entry it names, not whatever happens to be
+  // running when it finally arrives. `runningEntries` is already scoped to
+  // `userId`, so a name belonging to somebody else matches nothing.
+  const targets =
+    entryId === undefined ? running : running.filter((entry) => entry._id === entryId)
+
   const discardedEntryIds: Array<Id<"timeEntries">> = []
-  for (const entry of running) {
+  for (const entry of targets) {
     if (await closeEntry(ctx, entry, now, now, { deletedAt: now })) {
       await dropEntryTags(ctx, userId, entry._id)
       discardedEntryIds.push(entry._id)
@@ -1561,16 +1603,23 @@ async function discardRunningImpl(ctx: MutationCtx, userId: string) {
   return { discardedEntryIds }
 }
 
+const discardArgs = {
+  /** Which timer to discard. Absent means "whatever is running" — see the
+   *  note in `stopImpl` for why a replayed discard has to say. */
+  entryId: v.optional(v.id("timeEntries")),
+}
+
 export const discardRunning = mutation({
-  args: {},
+  args: discardArgs,
   returns: discardReturns,
-  handler: async (ctx) => await discardRunningImpl(ctx, await requireUserId(ctx)),
+  handler: async (ctx, args) =>
+    await discardRunningImpl(ctx, await requireUserId(ctx), args.entryId),
 })
 
 export const discardRunningAs = internalMutation({
-  args: { userId: v.string() },
+  args: { ...discardArgs, userId: v.string() },
   returns: discardReturns,
-  handler: async (ctx, args) => await discardRunningImpl(ctx, args.userId),
+  handler: async (ctx, args) => await discardRunningImpl(ctx, args.userId, args.entryId),
 })
 
 // ---------------------------------------------------------------------------

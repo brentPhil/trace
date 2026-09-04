@@ -43,7 +43,13 @@
  */
 import { Empty } from "@/components/ui/empty"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { useToastManager } from "@/components/ui/toast"
 import { useEffect, useRef, useState } from "react"
@@ -58,6 +64,8 @@ import { LibraryUsage } from "@/components/music/library-usage"
 import { UploadQueuePanel } from "@/components/music/upload-queue-panel"
 import { useLatest } from "@/hooks/use-latest"
 import { newClientKey } from "@/lib/client-key"
+import { OFFLINE_UPLOAD_REASON } from "@/lib/offline/offline-copy"
+import { useOnlineStatus } from "@/lib/offline/use-online-status"
 import { errorMessage } from "@/lib/error-message"
 import { UploadCancelled, postFileWithProgress } from "@/lib/music/post-file"
 import { acceptedFormatList, advance, precheck } from "@/lib/music/upload-queue"
@@ -124,6 +132,7 @@ export function MusicLibrarySection() {
   const removeTrack = useLatest(useConvexMutation(api.music.removeTrack))
 
   const toasts = useToastManager()
+  const online = useOnlineStatus()
 
   /* The one error posture on this page, and it is /projects' verbatim: the
    * backend's INVALID_TRACK and LIBRARY_FULL messages are already sentences
@@ -387,10 +396,7 @@ export function MusicLibrarySection() {
               onChange={(event) => setSearch(event.target.value)}
               className="h-8 w-48 text-sm"
             />
-            <Select
-              value={sort}
-              onValueChange={setSort}
-            >
+            <Select value={sort} onValueChange={setSort}>
               <SelectTrigger aria-label="Sort" size="sm" className="w-44">
                 {/* Values are keys; the labels are prose. */}
                 <SelectValue>
@@ -434,7 +440,7 @@ export function MusicLibrarySection() {
             // See the layout note above: pushed right only when it has
             // something to be pushed away FROM.
             !empty && "ml-auto",
-            busy && "pointer-events-none opacity-50"
+            (busy || !online) && "pointer-events-none opacity-50"
           )}
         >
           <Upload className="size-4" />
@@ -443,7 +449,7 @@ export function MusicLibrarySection() {
             type="file"
             accept={AUDIO_INPUT_ACCEPT}
             multiple
-            disabled={busy}
+            disabled={busy || !online}
             aria-label="Music files"
             onChange={(event) => {
               const files = Array.from(event.target.files ?? [])
@@ -457,6 +463,10 @@ export function MusicLibrarySection() {
           />
         </label>
       </div>
+
+      {!online ? (
+        <p className="text-xs text-muted-foreground">{OFFLINE_UPLOAD_REASON}</p>
+      ) : null}
 
       {empty ? null : (
         <div className="flex max-w-prose flex-col gap-1.5">
@@ -489,17 +499,20 @@ export function MusicLibrarySection() {
         onDrop={(event) => {
           event.preventDefault()
           setDragging(false)
-          // Ignored, not queued, while `busy`: the file picker above is
-          // already `disabled` for the same reason, but a drop bypasses that
-          // element entirely, so the guard has to be repeated here. Letting a
-          // second drop through would start a concurrent `upload()`, and
-          // `upload`'s own comment explains uploads are SEQUENTIAL precisely
-          // so the account-cap check inside `acceptTrack` cannot be raced by
-          // parallel batches each reading the same pre-upload total — two
-          // concurrent runs from two drops reintroduce exactly that race. The
-          // first run's `finally` would also flip `busy` back to false while
-          // the second run is still going, re-enabling the picker mid-upload.
-          if (busy) return
+          // Ignored, not queued, while `busy` OR `!online`: the file picker
+          // above is already `disabled` for both reasons, but a drop bypasses
+          // that element entirely, so the guard has to be repeated here.
+          // Letting a second drop through while `busy` would start a
+          // concurrent `upload()`, and `upload`'s own comment explains
+          // uploads are SEQUENTIAL precisely so the account-cap check inside
+          // `acceptTrack` cannot be raced by parallel batches each reading
+          // the same pre-upload total — two concurrent runs from two drops
+          // reintroduce exactly that race. The first run's `finally` would
+          // also flip `busy` back to false while the second run is still
+          // going, re-enabling the picker mid-upload. Offline, an upload
+          // that starts cannot finish, and the picker's own `disabled` is
+          // meant to make that impossible — a drop is the other door in.
+          if (busy || !online) return
           void upload(Array.from(event.dataTransfer.files))
         }}
         className={cn(

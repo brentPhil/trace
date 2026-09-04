@@ -125,24 +125,26 @@ export function useEntryActions(timeZone: string): EntryActions {
    * the offset and could land an hour out across a DST boundary — putting the
    * entry back somewhere it never was.
    *
-   * The write is caught here rather than left to propagate, unlike the other
-   * row edits. Those commit into a control that is still on screen and can
-   * reopen with the rejected value in it; this one closes its popover as it
-   * fires, so a rejection had nowhere to land at all — the optimistic update
-   * moved the row, Convex rolled it back, the row jumped home with no
-   * explanation, and the failure surfaced only as an unhandled promise
-   * rejection in the console. Same treatment `onRemove` above already gives a
-   * delete that fails.
+   * Nothing here catches a refusal anymore. It used to — historically
+   * because this one closes its popover as it fires, so a control-less
+   * rejection had nowhere to land — but `editTime` is optimistic by
+   * construction now: it resolves as soon as the outbox journals it, and a
+   * refusal is the outbox's own `dropped` event to report, not this
+   * function's.
    */
   const onDayChange = useCallback(
     async (entry: Entry, day: string) => {
       const from = entry.startedAt
+      let moved: number
       try {
-        await editTime(entry._id, "day", instantMovedToDay(from, day, timeZone))
+        moved = instantMovedToDay(from, day, timeZone)
       } catch (thrown) {
-        toasts.add({ title: errorMessage(thrown), priority: "high", timeout: UNDO_MS })
+        // Not an outbox refusal — an arithmetic failure before anything is
+        // enqueued, so nothing downstream will report it.
+        toasts.add({ title: errorMessage(thrown), priority: "high" })
         return
       }
+      await editTime(entry._id, "day", moved)
 
       // The same label the day headers use, so the toast names the heading the
       // row has just gone to rather than a raw date string.
@@ -231,8 +233,9 @@ export function useEntryActions(timeZone: string): EntryActions {
         await editTime(entry._id, "duration", ms)
       },
       // Classifier changes are fire-and-forget with an optimistic update behind
-      // them, so the row reflects the choice immediately. A failure surfaces as a
-      // toast rather than reverting silently.
+      // them, so the row reflects the choice immediately. The write is optimistic
+      // by construction now — it resolves as soon as the outbox journals it — so
+      // a refusal is the outbox's own `dropped` event to report.
       onClassify: (entry, rawChange) => {
         // Assigning a billable client's project ticks the `$` in the same
         // write — promotion only, and an explicit `billable` always wins.
@@ -247,18 +250,16 @@ export function useEntryActions(timeZone: string): EntryActions {
           ...(change.projectId !== undefined ? { projectId: change.projectId } : {}),
           ...(change.tagIds !== undefined ? { tagIds: change.tagIds } : {}),
           ...(change.billable !== undefined ? { billable: change.billable } : {}),
-        }).catch((thrown: unknown) => {
-          toasts.add({ title: errorMessage(thrown), priority: "high" })
         })
       },
       onCreateProject: createProject,
       onCreateTag: ensureTag,
       onRemove,
       onRemoveMany,
+      // `resume` is `start` under another name — optimistic by construction,
+      // so a refusal is the outbox's own `dropped` event to report.
       onResume: (entry) => {
-        void resume(entry).catch((thrown: unknown) => {
-          toasts.add({ title: errorMessage(thrown), priority: "high" })
-        })
+        void resume(entry)
       },
       onDuplicate,
     }),

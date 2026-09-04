@@ -3,13 +3,8 @@ import { Toaster } from "@/components/ui/toast"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { Timer } from "@/routes/_authed/-timer"
-import {
-  convexKey,
-  paginatedKey,
-  resetPaginatedStore,
-  resolvePage,
-} from "@/test-utils/convex-query"
+import { PAGE_SIZE, Timer } from "@/routes/_authed/-timer"
+import { convexKey } from "@/test-utils/convex-query"
 import { TIMER_VIEW_KEY } from "@/lib/timer-view"
 import { NOW, SETTINGS, makeEntry } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
@@ -18,11 +13,9 @@ import { getFunctionName } from "convex/server"
 import { api } from "../../../convex/_generated/api"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type { CalendarRange } from "@/lib/calendar-events"
-import type * as ConvexReactModuleType from "convex/react"
 import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
 import type * as UseClockModuleType from "@/hooks/use-clock"
 
-type ConvexReactModule = typeof ConvexReactModuleType
 type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
 type UseClockModule = typeof UseClockModuleType
 
@@ -213,19 +206,9 @@ vi.mock("@convex-dev/react-query", async (importOriginal) => {
   }
 })
 
-/* The same hand-driven `usePaginatedQuery` double `-reports.test.tsx` uses:
- * the real hook wants a subscription this test does not have, and the branch
- * under test keys off its `status`. See `@/test-utils/convex-query`. */
-vi.mock("convex/react", async (importOriginal) => {
-  const actual = await importOriginal<ConvexReactModule>()
-  const { usePaginatedQueryDouble } = await import("@/test-utils/convex-query")
-  return { ...actual, usePaginatedQuery: usePaginatedQueryDouble }
-})
-
 let dateSpy: ReturnType<typeof vi.spyOn> | null = null
 
 beforeEach(() => {
-  resetPaginatedStore()
   logLifecycle.mounts = 0
   logLifecycle.unmounts = 0
   // The remembered view is real `localStorage` here, and it outlives a render.
@@ -247,6 +230,19 @@ const lastWeek = weekWindow(
   SETTINGS.weekStartDay
 )
 const logRange = { fromMs: 0, toMs: dayWindow(today, SETTINGS.timezone).toMs }
+
+/**
+ * The key `useConvexPages` subscribes the unbounded log's FIRST page under —
+ * `id: 1` and `cursor: null`, exactly what `insertAtPosition` groups by (see
+ * `src/hooks/use-convex-pages.ts`). `PAGE_SIZE` has to be `-timer.tsx`'s own
+ * constant, not a number copied here, or a change to one and not the other
+ * seeds a key nothing subscribes to.
+ */
+const logPageKey = () =>
+  convexKey(api.entries.listPage, {
+    ...logRange,
+    paginationOpts: { numItems: PAGE_SIZE, cursor: null, id: 1 },
+  })
 
 /** The args shape both the week totals and the range query mint. */
 const rangeArgs = (w: { fromMs: number; toMs: number }) => ({
@@ -278,6 +274,7 @@ function renderTimer({
   onYesterday = [],
   projects = [],
   settings = {},
+  logPage,
 }: {
   thisWeek?: Array<Doc<"timeEntries">>
   previousWeek?: Array<Doc<"timeEntries">>
@@ -292,6 +289,13 @@ function renderTimer({
    * one a user reaches by unticking the box.
    */
   settings?: Partial<typeof SETTINGS>
+  /**
+   * Seeds the unbounded log's first page — `useConvexPages` reads it straight
+   * out of the TanStack cache under `logPageKey()`, so leaving this unset
+   * leaves that query unresolved and the log on its "LoadingFirstPage"
+   * skeleton, same as a real first paint before the page arrives.
+   */
+  logPage?: { page: Array<Doc<"timeEntries">>; isDone: boolean }
 } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   queryClient.setQueryData(convexKey(api.settings.get, {}), { ...SETTINGS, ...settings })
@@ -309,6 +313,13 @@ function renderTimer({
     convexKey(api.entries.listRange, rangeArgs(dayWindow(yesterday, SETTINGS.timezone))),
     onYesterday
   )
+  if (logPage) {
+    queryClient.setQueryData(logPageKey(), {
+      page: logPage.page,
+      isDone: logPage.isDone,
+      continueCursor: logPage.isDone ? null : "more",
+    })
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       {/* Timer raises one toast of its own — a calendar block whose row is not
@@ -383,11 +394,9 @@ describe("Timer — Calendar and List", () => {
   })
 
   it("swaps the log for the calendar and back", () => {
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ title: "Client call" })],
-      isDone: true,
+    renderTimer({
+      logPage: { page: [makeEntry({ title: "Client call" })], isDone: true },
     })
-    renderTimer()
 
     expect(screen.getByTestId("entry-log")).toBeTruthy()
 
@@ -593,18 +602,6 @@ describe("Timer — the range control", () => {
      * page it has walked back through; bounded, it is `entries.listRange` —
      * the same query the grid reads, for the same range.
      */
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [
-        makeEntry({ _id: "a" as unknown as Id<"timeEntries">, title: "Today's work" }),
-        makeEntry({
-          _id: "b" as unknown as Id<"timeEntries">,
-          title: "Yesterday's work",
-          startedAt: NOW - 86_400_000,
-          endedAt: NOW - 86_400_000 + 3_600_000,
-        }),
-      ],
-      isDone: false, // pages remain, so "Load earlier entries" is offered
-    })
     renderTimer({
       onYesterday: [
         makeEntry({
@@ -614,6 +611,18 @@ describe("Timer — the range control", () => {
           endedAt: NOW - 86_400_000 + 3_600_000,
         }),
       ],
+      logPage: {
+        page: [
+          makeEntry({ _id: "a" as unknown as Id<"timeEntries">, title: "Today's work" }),
+          makeEntry({
+            _id: "b" as unknown as Id<"timeEntries">,
+            title: "Yesterday's work",
+            startedAt: NOW - 86_400_000,
+            endedAt: NOW - 86_400_000 + 3_600_000,
+          }),
+        ],
+        isDone: false, // pages remain, so "Load earlier entries" is offered
+      },
     })
 
     expect(screen.getByTestId("entry-log").textContent).toBe("2 day groups")
@@ -642,11 +651,10 @@ describe("Timer — the range control", () => {
      * row right now. Two sibling branches each rendering their own log would
      * unmount one and mount the other on every change of range.
      */
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ title: "Client call" })],
-      isDone: true,
+    renderTimer({
+      onYesterday: [],
+      logPage: { page: [makeEntry({ title: "Client call" })], isDone: true },
     })
-    renderTimer({ onYesterday: [] })
 
     expect(logLifecycle.mounts).toBe(1)
 
@@ -661,11 +669,10 @@ describe("Timer — the range control", () => {
   it("does not fall back to the onboarding copy for a quiet range", () => {
     // "Nothing tracked yet" means a new account. It is flatly false of a
     // freelancer who has narrowed to a day they did not work.
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ title: "Client call" })],
-      isDone: true,
+    renderTimer({
+      onYesterday: [],
+      logPage: { page: [makeEntry({ title: "Client call" })], isDone: true },
     })
-    renderTimer({ onYesterday: [] })
 
     fireEvent.click(pill())
     fireEvent.click(screen.getByRole("button", { name: "Yesterday" }))
@@ -777,15 +784,16 @@ describe("Timer — reading the notes in full", () => {
   const notesButton = () => screen.getByRole("button", { name: "Full notes" })
   const logNotes = () => screen.getByTestId("entry-log").getAttribute("data-notes")
 
-  beforeEach(() => {
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ title: "Client call", note: "Rewrote the import step." })],
-      isDone: true,
-    })
-  })
+  // Every test in this block reads the same seeded log — a `beforeEach`
+  // can't hand it to `renderTimer` (each render mints its own `QueryClient`),
+  // so it is a fixture each call passes explicitly instead.
+  const NOTE_PAGE = {
+    page: [makeEntry({ title: "Client call", note: "Rewrote the import step." })],
+    isDone: true,
+  }
 
   it("clips notes until asked, then writes them out in full", () => {
-    renderTimer()
+    renderTimer({ logPage: NOTE_PAGE })
 
     // The default is the log this page has always drawn.
     expect(notesButton().getAttribute("aria-pressed")).toBe("false")
@@ -802,7 +810,7 @@ describe("Timer — reading the notes in full", () => {
   })
 
   it("is offered only where there are note lines to unclip", () => {
-    renderTimer()
+    renderTimer({ logPage: NOTE_PAGE })
     expect(notesButton()).toBeTruthy()
 
     fireEvent.click(tab("Calendar"))
@@ -818,11 +826,11 @@ describe("Timer — reading the notes in full", () => {
   it("remembers the mode across a remount", () => {
     // Someone reading yesterday back at a standup sets this once. Resetting it
     // on every reload would mean setting it again every morning.
-    renderTimer()
+    renderTimer({ logPage: NOTE_PAGE })
     fireEvent.click(notesButton())
 
     cleanup()
-    renderTimer()
+    renderTimer({ logPage: NOTE_PAGE })
 
     expect(notesButton().getAttribute("aria-pressed")).toBe("true")
     expect(logNotes()).toBe("full")
@@ -836,15 +844,13 @@ describe("Timer — reading the notes in full", () => {
 describe("Timer — the grouping setting reaches the log", () => {
   const grouped = () => screen.getByTestId("entry-log").getAttribute("data-grouped")
 
-  beforeEach(() => {
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ title: "Client call" })],
-      isDone: true,
-    })
-  })
+  // Same reasoning as `NOTE_PAGE` above: each `renderTimer` mints its own
+  // `QueryClient`, so the seed is a fixture passed at each call rather than a
+  // `beforeEach`.
+  const CLIENT_CALL_PAGE = { page: [makeEntry({ title: "Client call" })], isDone: true }
 
   it("hands the log the account's own groupEntries", () => {
-    renderTimer()
+    renderTimer({ logPage: CLIENT_CALL_PAGE })
     expect(grouped()).toBe("true")
   })
 
@@ -852,7 +858,7 @@ describe("Timer — the grouping setting reaches the log", () => {
    * and asserting the default alone would pass against a page that hardcoded
    * the prop, which is the same as not passing the setting at all. */
   it("hands it down turned off, rather than ignoring the account", () => {
-    renderTimer({ settings: { groupEntries: false } })
+    renderTimer({ settings: { groupEntries: false }, logPage: CLIENT_CALL_PAGE })
     expect(grouped()).toBe("false")
   })
 })
@@ -867,11 +873,9 @@ describe("Timer — the unbounded log", () => {
   })
 
   it("keeps the load-more button while pages remain", () => {
-    resolvePage(paginatedKey(api.entries.listPage, logRange), {
-      page: [makeEntry({ title: "Client call" })],
-      isDone: false,
+    renderTimer({
+      logPage: { page: [makeEntry({ title: "Client call" })], isDone: false },
     })
-    renderTimer()
 
     expect(screen.getByText("Load earlier entries")).toBeTruthy()
   })

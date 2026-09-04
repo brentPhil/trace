@@ -8,16 +8,24 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react"
 import { Settings } from "@/routes/_authed/-settings"
-import { convexKey } from "@/test-utils/convex-query"
+import {
+  convexKey,
+  resetConnectionOnline,
+  setConnectionOnline,
+} from "@/test-utils/convex-query"
 import { SETTINGS } from "@/test-utils/fixtures"
 import { chooseOption, selectedLabel } from "@/test-utils/select"
 import { api } from "../../../convex/_generated/api"
 import { getFunctionName } from "convex/server"
 import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
+import type * as ConvexReactModuleType from "convex/react"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
 
 type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
+type ConvexReactModule = typeof ConvexReactModuleType
 
 /*
  * /settings' notes-in-the-PDF control.
@@ -40,7 +48,11 @@ const {
   googleConnect,
   googleDisconnect,
 } = vi.hoisted(() => ({
-  update: vi.fn(async () => null),
+  // Typed to accept an argument (unused) rather than the bare `() => null` a
+  // Convex mutation mock would need: `useOutboxMutation`'s mock below calls
+  // this one directly with the op's args, and the calls this file asserts
+  // against (`toHaveBeenCalledWith({...})`) need that argument recorded.
+  update: vi.fn(async (_args?: unknown) => null),
   generateLogoUploadUrl: vi.fn(async () => "https://upload.example/logo"),
   clearLogo: vi.fn(async () => null),
   setLogo: vi.fn(async () => null),
@@ -89,6 +101,32 @@ vi.mock("@convex-dev/react-query", async (importOriginal) => {
   }
 })
 
+/*
+ * `-settings.tsx` now saves through the outbox rather than a bare Convex
+ * mutation, and `useClassifierMutations()` (behind `GoogleCalendarSection`'s
+ * create-project action) requests six more kinds nobody here exercises. Only
+ * `settings.update` needs to reach the existing `update` spy — the classifier
+ * kinds are unused by every test in this file and resolve to `null` untouched.
+ */
+vi.mock("@/lib/offline/outbox-provider", () => ({
+  useOutboxMutation: (kind: string) => async (args: unknown) => {
+    const result = kind === "settings.update" ? await update(args) : null
+    return { result, settled: Promise.resolve(result) }
+  },
+}))
+
+// `useOnlineStatus` (the two online-only sections' own gate) reads
+// `useConvexConnectionState` from "convex/react", which needs a real
+// `ConvexReactClient` this file does not have. `useConvexConnectionStateDouble`
+// answers "online" by default — see `@/test-utils/convex-query` for what
+// flipping it offline means and why.
+vi.mock("convex/react", async (importOriginal) => {
+  const actual = await importOriginal<ConvexReactModule>()
+  const { useConvexConnectionStateDouble } =
+    await import("@/test-utils/convex-query")
+  return { ...actual, useConvexConnectionState: useConvexConnectionStateDouble }
+})
+
 afterEach(() => {
   cleanup()
   update.mockClear()
@@ -118,6 +156,7 @@ afterEach(() => {
   // The round-trip marker lives in `sessionStorage` precisely so it survives a
   // document load; it therefore also survives between tests unless cleared.
   window.sessionStorage.clear()
+  resetConnectionOnline()
   vi.unstubAllGlobals()
 })
 
@@ -133,7 +172,9 @@ type ConnectionFixture = {
 
 function renderSettings(
   over: Partial<SettingsFixture> = {},
-  connectionOver: Partial<ConnectionFixture> = {}
+  connectionOver: Partial<ConnectionFixture> = {},
+  calendarsOver: Array<Doc<"googleCalendars">> = [],
+  projectsOver: Array<Doc<"projects">> = []
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -150,8 +191,8 @@ function renderSettings(
     lastSyncedAt: null,
     ...connectionOver,
   })
-  client.setQueryData(convexKey(api.google.listCalendars, {}), [])
-  client.setQueryData(convexKey(api.projects.list, {}), [])
+  client.setQueryData(convexKey(api.google.listCalendars, {}), calendarsOver)
+  client.setQueryData(convexKey(api.projects.list, {}), projectsOver)
   // The music LIBRARY moved onto this page from /music on 2026-08-29 and
   // brought two more `useSuspenseQuery` reads with it — same story as Google
   // Calendar's above, and it failed the same way the moment it landed: an
@@ -459,6 +500,168 @@ describe("/settings — invoice logo", () => {
     renderSettings({ logoUrl: "https://files.example/current.png" })
     fireEvent.click(screen.getByRole("button", { name: "Remove logo" }))
     await waitFor(() => expect(clearLogo).toHaveBeenCalledWith({}))
+  })
+
+  /*
+   * The picker's own `disabled` is what stops an upload starting offline, but
+   * a drop bypasses that element entirely — `InvoiceLogoSection`'s drop
+   * handler has to repeat the guard itself, the same reasoning `/music`'s
+   * drop handler carries. Dropping onto the tile's dashed empty state, its
+   * parent, is the drop target `invoice-logo-section.tsx` wires `onDrop` on.
+   */
+  it("ignores a drop on the logo tile while offline", () => {
+    setConnectionOnline(false)
+    renderSettings()
+
+    const dropTarget = screen.getByText("Drop an image here")
+      .parentElement as HTMLElement
+    const file = new File([new Uint8Array([1, 2, 3])], "mark.png", {
+      type: "image/png",
+    })
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [file] } })
+
+    expect(generateLogoUploadUrl).not.toHaveBeenCalled()
+  })
+})
+
+/** A minimal calendar row, the same shape `google-calendar-section.test.tsx`
+ *  builds — `show: true` so the section renders the real `ProjectPicker`
+ *  rather than the disabled stand-in button it swaps in for a hidden
+ *  calendar (see that component's own comment). */
+function calendarFixture(
+  over: Partial<Doc<"googleCalendars">> = {}
+): Doc<"googleCalendars"> {
+  return {
+    _id: "gc_1" as Id<"googleCalendars">,
+    _creationTime: 0,
+    userId: "user_1",
+    googleId: "primary",
+    summary: "Brent",
+    show: true,
+    syncToken: null,
+    lastSyncedAt: null,
+    updatedAt: 0,
+    ...over,
+  }
+}
+
+/** A minimal project row, so `ProjectPicker`'s option list has something
+ *  real to build a `ProjectDot` from — the same shape
+ *  `google-calendar-section.test.tsx` builds. */
+function projectFixture(over: Partial<Doc<"projects">> = {}): Doc<"projects"> {
+  return {
+    _id: "proj_1" as Id<"projects">,
+    _creationTime: 0,
+    userId: "user_1",
+    name: "Acme",
+    color: "amber",
+    archived: false,
+    billableByDefault: false,
+    hourlyRateCents: undefined,
+    updatedAt: 0,
+    deletedAt: null,
+    ...over,
+  }
+}
+
+/*
+ * Both sections below need a connection: the logo goes straight to Convex
+ * storage and Google's own writes are plain `useConvexMutation` calls, never
+ * the offline outbox — so a `<fieldset disabled>` is what stops them offline,
+ * and the hint beside each one says why (see offline-copy.ts).
+ *
+ * THESE ASSERT CONTAINMENT, not the `<fieldset>` element's own `disabled`
+ * property. jsdom does not implement a fieldset's disabling cascade onto its
+ * descendants (verified directly: a `<button>` inside `<fieldset disabled>`
+ * still reads `.disabled === false` under jsdom), so `fieldset.disabled ===
+ * true` only ever restates the prop this file just passed — it would not
+ * catch a control switching to a non-native element, one portalled out of
+ * the fieldset, or a drop handler bypassing it (see -music-library.tsx's own
+ * drop guard for exactly that failure mode). Finding each control by its
+ * accessible name and walking up to its nearest `<fieldset>` is what a real
+ * browser's cascade would also require: the control has to actually be
+ * inside a disabled fieldset, not merely near one that says so.
+ */
+function inDisabledFieldset(element: HTMLElement): boolean {
+  const fieldset = element.closest("fieldset")
+  return fieldset !== null && fieldset.disabled
+}
+
+describe("/settings — offline", () => {
+  it("puts the invoice logo controls inside a disabled fieldset and swaps its hint offline", () => {
+    setConnectionOnline(false)
+    renderSettings({ logoUrl: "https://files.example/current.png" })
+
+    // Scoped to the section: the music library below shares this same
+    // sentence (see offline-copy.ts's one `OFFLINE_UPLOAD_REASON`), so an
+    // unscoped query would find both and fail on ambiguity rather than on
+    // the thing this test is actually about.
+    const section = screen
+      .getByRole("heading", { name: "Invoice logo" })
+      .closest("section") as HTMLElement
+    expect(
+      within(section).getByText("You're offline. Uploads need a connection.")
+    ).toBeTruthy()
+    expect(inDisabledFieldset(screen.getByLabelText("Invoice logo file"))).toBe(
+      true
+    )
+    expect(
+      inDisabledFieldset(screen.getByRole("button", { name: "Remove logo" }))
+    ).toBe(true)
+  })
+
+  it("puts the Google Calendar controls inside a disabled fieldset and swaps its hint offline", () => {
+    setConnectionOnline(false)
+    renderSettings(
+      {},
+      { connected: true, status: "ok" },
+      [calendarFixture()],
+      [projectFixture()]
+    )
+
+    expect(
+      screen.getByText(
+        "You're offline. Google Calendar settings need a connection."
+      )
+    ).toBeTruthy()
+    expect(
+      inDisabledFieldset(screen.getByRole("button", { name: "Disconnect" }))
+    ).toBe(true)
+    expect(
+      inDisabledFieldset(screen.getByRole("button", { name: "Project" }))
+    ).toBe(true)
+  })
+
+  it("leaves both sections' controls outside any disabled fieldset and their ordinary hints in place while online", () => {
+    renderSettings(
+      { logoUrl: "https://files.example/current.png" },
+      { connected: true, status: "ok" },
+      [calendarFixture()],
+      [projectFixture()]
+    )
+
+    expect(inDisabledFieldset(screen.getByLabelText("Invoice logo file"))).toBe(
+      false
+    )
+    expect(
+      inDisabledFieldset(screen.getByRole("button", { name: "Remove logo" }))
+    ).toBe(false)
+    expect(
+      inDisabledFieldset(screen.getByRole("button", { name: "Disconnect" }))
+    ).toBe(false)
+    expect(
+      inDisabledFieldset(screen.getByRole("button", { name: "Project" }))
+    ).toBe(false)
+    expect(
+      screen.getByText(
+        "Invoices already raised keep the logo they were made with."
+      )
+    ).toBeTruthy()
+    expect(
+      screen.getByText(
+        "Chroneli only ever reads. Nothing is written back, and no meeting starts a timer on its own."
+      )
+    ).toBeTruthy()
   })
 })
 

@@ -1,6 +1,10 @@
 import { AppSidebar } from "@/components/shell/app-sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar"
 import { useHeightVar } from "@/hooks/use-height-var"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
@@ -21,6 +25,8 @@ export function AppShell({
   email,
   name,
   onSignOut,
+  signOutDisabledReason,
+  signOutWarning,
   sidebarDefaultOpen,
   timer,
 }: {
@@ -28,6 +34,18 @@ export function AppShell({
   email?: string
   name?: string
   onSignOut: () => void
+  /** Non-null disables the sign-out control and shows this beneath it — a
+   *  connection problem, and ONLY a connection problem: a session cannot be
+   *  ended without the network (see `signOutWarning` below for the other
+   *  reason a sentence appears here, which does not disable). Not optional:
+   *  forgetting to pass it should be a type error, the same reasoning
+   *  `sidebarDefaultOpen` states above. */
+  signOutDisabledReason: string | null
+  /** Non-null shows this beneath a STILL-LIVE sign-out control — a non-empty
+   *  outbox, stated as the loss it is (see `pendingSignOutWarning` in
+   *  offline-copy.ts for why a full queue no longer refuses sign-out). Not
+   *  optional for the same reason `signOutDisabledReason` is not. */
+  signOutWarning: string | null
   sidebarDefaultOpen: boolean
   timer: ReactNode
 }) {
@@ -37,7 +55,8 @@ export function AppShell({
    * element that is an ancestor of both the bar and the outlet — custom
    * properties inherit down, not sideways.
    */
-  const { hostRef, measuredRef } = useHeightVar<HTMLElement>("--timer-bar-height")
+  const { hostRef, measuredRef } =
+    useHeightVar<HTMLElement>("--timer-bar-height")
 
   return (
     // Sets `delay={0}` for every Tooltip in the tree below — the icon-rail
@@ -46,7 +65,13 @@ export function AppShell({
     // just with Base UI's default (non-zero) open delay.
     <TooltipProvider>
       <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-        <AppSidebar email={email} name={name} onSignOut={onSignOut} />
+        <AppSidebar
+          email={email}
+          name={name}
+          onSignOut={onSignOut}
+          signOutDisabledReason={signOutDisabledReason}
+          signOutWarning={signOutWarning}
+        />
 
         <SidebarInset
           ref={hostRef}

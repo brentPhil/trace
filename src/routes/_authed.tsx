@@ -22,20 +22,32 @@ import { useEnsureSettings } from "@/hooks/use-ensure-settings"
 import { useClassifierMutations, useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { useEntryMutations } from "@/hooks/use-entry-mutations"
-import {
-  useReplayPendingStart,
-  useTabTitleClock,
-} from "@/hooks/use-timer-effects"
+import { useTabTitleClock } from "@/hooks/use-timer-effects"
 import { useMusicTracking } from "@/hooks/use-music-tracking"
 import { useDesktopBridge } from "@/hooks/use-desktop-bridge"
 import { useLatest } from "@/hooks/use-latest"
 import { useSwitchUndo } from "@/lib/use-switch-undo"
 import { MusicProvider, useMusic } from "@/components/music/music-provider"
+import {
+  OutboxProvider,
+  useOutbox,
+  usePendingCount,
+  useOutboxEvents,
+} from "@/lib/offline/outbox-provider"
+import { useOnlineStatus } from "@/lib/offline/use-online-status"
+import { OP_KINDS } from "@/lib/offline/op-kinds"
+import { clearLocalData } from "@/lib/offline/clear-local-data"
+import {
+  OFFLINE_SIGN_OUT_REASON,
+  pendingSignOutWarning,
+} from "@/lib/offline/offline-copy"
+import { SyncStatus } from "@/components/shell/sync-status"
+import { OfflinePending } from "@/components/shell/offline-pending"
 import { MusicControls } from "@/components/music/music-controls"
 import { cn } from "@/lib/utils"
 import { api } from "../../convex/_generated/api"
 import type { TimerBarActions } from "@/components/timer/timer-bar"
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 
 /**
  * Pathless layout route. Anything nested under `_authed/` requires a session.
@@ -77,8 +89,15 @@ export const Route = createFileRoute("/_authed")({
     ])
   },
   errorComponent: AuthedErrorBoundary,
+  pendingComponent: AuthedPending,
   component: AuthedLayout,
 })
+
+/** A route file may read connection state; components take it as a prop. */
+function AuthedPending() {
+  const online = useOnlineStatus()
+  return <OfflinePending offline={!online} />
+}
 
 /**
  * Just the provider boundary. `AuthedShell` below is the one that calls
@@ -119,24 +138,26 @@ function AuthedLayout() {
   // catalog while this is in flight and flips `tracksReady` when it lands.
   const { data: uploads } = useQuery(convexQuery(api.music.listTracks, {}))
   return (
-    <MusicProvider
-      // Passed through exactly as TanStack Query reports it, `undefined`
-      // included. That `undefined` is the provider's only way to distinguish
-      // "no answer yet" from "this account has uploaded nothing", and
-      // defaulting it to `[]` here would quietly tell every consumer the
-      // library had arrived empty — see `uploads` on `MusicProvider`.
-      uploads={uploads}
-      onError={(message) => {
-        // `priority: "high"` and the 8s timeout match `AuthedShell`'s `report`
-        // exactly. Music failing is not more urgent than a failed save, but it
-        // must not be quieter either — a shorter, low-priority toast for the
-        // one failure the user cannot see the cause of (audio that simply
-        // stopped) is the one case where a lower priority would be wrong.
-        toasts.add({ title: message, priority: "high", timeout: 8_000 })
-      }}
-    >
-      <AuthedShell />
-    </MusicProvider>
+    <OutboxProvider>
+      <MusicProvider
+        // Passed through exactly as TanStack Query reports it, `undefined`
+        // included. That `undefined` is the provider's only way to distinguish
+        // "no answer yet" from "this account has uploaded nothing", and
+        // defaulting it to `[]` here would quietly tell every consumer the
+        // library had arrived empty — see `uploads` on `MusicProvider`.
+        uploads={uploads}
+        onError={(message) => {
+          // `priority: "high"` and the 8s timeout match `AuthedShell`'s `report`
+          // exactly. Music failing is not more urgent than a failed save, but it
+          // must not be quieter either — a shorter, low-priority toast for the
+          // one failure the user cannot see the cause of (audio that simply
+          // stopped) is the one case where a lower priority would be wrong.
+          toasts.add({ title: message, priority: "high", timeout: 8_000 })
+        }}
+      >
+        <AuthedShell />
+      </MusicProvider>
+    </OutboxProvider>
   )
 }
 
@@ -151,7 +172,7 @@ function AuthedLayout() {
 function AuthedShell() {
   useEnsureSettings()
 
-  const { sidebarOpen } = Route.useRouteContext()
+  const { sidebarOpen, snapshots } = Route.useRouteContext()
   const { data: user } = useSuspenseQuery(
     convexQuery(api.auth.getAuthenticatedUser, {})
   )
@@ -164,7 +185,6 @@ function AuthedShell() {
   )
 
   useTabTitleClock(running, settings.tabTitleClock)
-  useReplayPendingStart(running)
 
   const toasts = useToastManager()
 
@@ -205,18 +225,79 @@ function AuthedShell() {
     })
   }
 
+  const online = useOnlineStatus()
+  const pending = usePendingCount()
+  const outbox = useOutbox()
+  // Offline is the only REFUSAL: a session cannot be ended without the
+  // network. A queue that has not drained is a WARNING, not a refusal —
+  // refusing on it was a trap (see `pendingSignOutWarning`'s own docblock):
+  // an op the server keeps refusing, or a drain that has thrown, leaves
+  // `pending` above zero permanently, and a refusal tied to that count would
+  // make sign-out — and the device clear that comes with it — unreachable on
+  // that machine forever.
+  const signOutDisabledReason = online ? null : OFFLINE_SIGN_OUT_REASON
+  const signOutWarning =
+    online && pending > 0 ? pendingSignOutWarning(pending) : null
+  useOutboxEvents(
+    useCallback(
+      (event) => {
+        if (event.type === "failed") {
+          // Not "offline": the queue stopped for a reason of its own, and
+          // the status line's count would otherwise sit there implying it is
+          // merely waiting for the network.
+          toasts.add({
+            title:
+              "Syncing stopped unexpectedly. Your changes are saved on this device.",
+            priority: "high",
+            timeout: 8_000,
+          })
+          return
+        }
+        if (event.type !== "dropped") return
+        // Not `as OpKindName`: `event.op.kind` is a plain string read back
+        // from the journal (see `outbox.ts`'s own `Record<string, … |
+        // undefined>`), so a kind this build no longer recognises is a real
+        // runtime case, not one the type system can rule out.
+        const label =
+          (OP_KINDS as Record<string, { label: string } | undefined>)[
+            event.op.kind
+          ]?.label ?? "A change"
+        // Each reads as a sentence after the kind's label, which is a gerund
+        // phrase: "Starting the timer was skipped: …". The stale wording in
+        // particular cannot be "was started more than a day ago" — the only
+        // kind that can go stale is the start, so that composes to "Starting
+        // the timer was started…".
+        const why =
+          event.reason === "stale"
+            ? "was skipped: it had been waiting more than a day."
+            : event.reason === "orphaned"
+              ? "was skipped: something it depended on didn't save."
+              : `didn't save: ${errorMessage(event.error)}`
+        toasts.add({
+          title: `${label} ${why}`,
+          priority: "high",
+          timeout: 8_000,
+        })
+      },
+      [toasts]
+    )
+  )
+
   // Mounted here rather than up with `useTabTitleClock` and the other
-  // `running` watchers: it needs `entryMutations` and `report`, both declared
-  // below that block, and React only requires hooks to run unconditionally in
-  // the same order every render — it does not care what plain declarations
-  // sit between them. Same survives-navigation reasoning as `useSwitchUndo`
+  // `running` watchers: it needs `entryMutations`, declared below that
+  // block, and React only requires hooks to run unconditionally in the same
+  // order every render — it does not care what plain declarations sit
+  // between them. Same survives-navigation reasoning as `useSwitchUndo`
   // above: this is the one mount that outlives every page, so the tray never
   // goes stale because the user changed pages.
-  useDesktopBridge(
-    running,
-    { start: entryMutations.start, stop: entryMutations.stop },
-    report
-  )
+  //
+  // No `report` passed: `start`/`stop` are optimistic by construction now —
+  // they resolve as soon as the outbox journals the write — so a refusal is
+  // the outbox's own `dropped` event to report, not this bridge's.
+  useDesktopBridge(running, {
+    start: entryMutations.start,
+    stop: entryMutations.stop,
+  })
 
   const announce = useAnnounce()
 
@@ -230,24 +311,22 @@ function AuthedShell() {
    * with the control on 2026-08-12; `RunawayBanner`'s is the one that remains,
    * and it inherited the silence rather than the announcement.
    *
-   * THE ORDER IS THE POINT. Announcing first would claim a discard that the
-   * server may still refuse — a screen-reader user told the timer was gone
-   * while it is in fact still running, which is the exact bug
-   * `timer-bar.test.tsx` records having fixed once already. The rejection path
-   * announces nothing and reports through `report`, so the user hears the
-   * error rather than a contradiction.
+   * The announcement is optimistic by construction now: `discard` resolves as
+   * soon as the outbox journals the write, before any round trip, so "after
+   * the write lands" means after the local journal accepts it, not after the
+   * server does. A refusal is no longer this function's problem to report —
+   * the outbox surfaces it through its own `dropped` event.
    */
   const discardRunning = () => {
     void entryMutations
-      .discard()
+      .discard(running?._id)
       .then(() => announce("Timer discarded. Nothing was recorded."))
-      .catch(report)
   }
 
   const timerActions: TimerBarActions = useMemo(
     () => ({
       start: entryMutations.start,
-      stop: entryMutations.stop,
+      stop: () => entryMutations.stop(running?._id),
       // No `discard`: the bar's Discard control went on 2026-08-12 and the
       // field went with it. `RunawayBanner` below takes its own `onDiscard`,
       // which is the only surviving caller of the mutation.
@@ -275,7 +354,7 @@ function AuthedShell() {
       // what silently dropped them.
       createCompleted: async (input) => await editMutations.create(input),
     }),
-    [entryMutations, editMutations, createProject, ensureTag]
+    [entryMutations, editMutations, createProject, ensureTag, running]
   )
 
   return (
@@ -285,7 +364,11 @@ function AuthedShell() {
       // with an email and a password and never edited, so `undefined` rather
       // than `""` is what the sidebar has to branch on.
       name={user.name === "" ? undefined : user.name}
-      onSignOut={() => signOutAndLeave()}
+      onSignOut={() =>
+        void signOutAndLeave(() => clearLocalData(snapshots, outbox))
+      }
+      signOutDisabledReason={signOutDisabledReason}
+      signOutWarning={signOutWarning}
       sidebarDefaultOpen={sidebarOpen}
       timer={
         <>
@@ -305,9 +388,12 @@ function AuthedShell() {
           <RunawayBanner
             running={running}
             thresholdMs={settings.runawayThresholdMs}
-            onStop={() => void entryMutations.stop().catch(report)}
+            // No `.catch`: `stop` is optimistic by construction now, so a
+            // refusal is the outbox's own `dropped` event to report.
+            onStop={() => void entryMutations.stop(running?._id)}
             onDiscard={discardRunning}
           />
+          <SyncStatus offline={!online} pending={pending} />
         </>
       }
     >

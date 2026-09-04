@@ -67,9 +67,13 @@ the sender until the connection or the auth state changes.
 stop/discard/start in the journal closes is not replayed; it is dropped and
 reported. This preserves `pending-start`'s existing rule.
 
-**Instants travel with the op.** `stop` records `endedAt` at enqueue time (it
-used to let the server use "now"), so a stop replayed hours later closes the
-entry at the moment the user pressed it.
+**Instants travel with the op, and so does the name.** `stop` records
+`endedAt` at enqueue time (it used to let the server use "now"), so a stop
+replayed hours later closes the entry at the moment the user pressed it. It
+also carries the id of the entry it is stopping, because the instant alone
+cannot distinguish a replayed stop from a backwards clock — and the backwards
+clock must still stop the timer. `discardRunning` carries the same name, where
+the stakes are higher still: it deletes rather than closes.
 
 **One sender across tabs.** The sender runs under a Web Lock, so two tabs
 never double-send. Ops are idempotent anyway: entry and project creates by
@@ -169,9 +173,13 @@ allowance before the first connection so the status does not flash at boot.
 - `projects` gains optional `clientKey` and a `by_user_clientKey` index;
   `projects.create` accepts `clientKey` and returns the existing row on a
   replay, exactly as `entries.start` does.
-- `entries.stop` with an explicit `endedAt` skips entries that started at or
-  after it, so a stale stop replayed from one device cannot close a timer
-  another device started later.
+- `entries.stop` and `entries.discardRunning` take an optional `entryId`. Given
+  one they act on that entry alone, and only while it is running; omitted, they
+  behave exactly as they do today. This is what stops a replayed stop from
+  ending — or a replayed discard from deleting — a timer another device started
+  in the meantime. A timestamp guard was tried first and rejected: it cannot be
+  told apart from a backwards clock, which `convex/entries.test.ts` requires
+  still stop the timer.
 
 Clients need nothing: the client never creates or edits them. Tags dedupe by
 name already.

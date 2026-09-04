@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useToastManager } from "@/components/ui/toast"
 import { useAnnounce } from "@/components/a11y/announcer"
 import { BulkEntryActions } from "@/components/entries/bulk-entry-actions"
 import { DayList } from "@/components/entries/day-list"
 import { useClassifiers } from "@/hooks/use-classifiers"
 import { useEntryEditMutations } from "@/hooks/use-entry-edit-mutations"
 import { pruneSelection, toggleSelection } from "@/lib/entry-selection"
-import { errorMessage } from "@/lib/error-message"
 import { withInheritedBillable } from "@/lib/inherit-billable"
 import { cn } from "@/lib/utils"
 import type { ReactNode } from "react"
@@ -85,7 +83,6 @@ export function EntryLog({
 }) {
   const { updateMany } = useEntryEditMutations()
   const { projects, tags } = useClassifiers()
-  const toasts = useToastManager()
 
   const [selectedIds, setSelectedIds] = useState<Set<Id<"timeEntries">>>(
     new Set()
@@ -232,17 +229,14 @@ export function EntryLog({
           ? null
           : projects.find((project) => project._id === rawChange.projectId)
       )
+      // Same reasoning as the row's own classify (`use-entry-actions.ts`):
+      // `updateMany` is optimistic by construction now, so a refusal is the
+      // outbox's own `dropped` event to report, not a catch here.
       void updateMany({
         entryIds: entries.map((entry) => entry._id),
         ...change,
         // `projectId` is already `Id | null` in `Classification`, which is the
         // shape `updateMany` takes — null clears, absent leaves alone.
-      }).catch((thrown: unknown) => {
-        // Same reasoning as the row's own classify (`use-entry-actions.ts`):
-        // a failure here reverts every member's optimistic patch at once,
-        // including `billable`, which reaches invoices — silence would let
-        // the reader believe a discarded change had stuck.
-        toasts.add({ title: errorMessage(thrown), priority: "high" })
       })
     },
     /*

@@ -64,6 +64,7 @@ import { LOGO_INPUT_ACCEPT, MAX_LOGO_BYTES } from "@shared/logo"
 export function InvoiceLogoSection({
   logoUrl,
   busy,
+  online,
   onFile,
   onRemove,
 }: {
@@ -71,6 +72,14 @@ export function InvoiceLogoSection({
   logoUrl: string | null
   /** An upload or a removal is in flight. Both controls go inert. */
   busy: boolean
+  /** Offline, the picker and the Remove button are inert too — this section
+   *  is wrapped in a disabled `<fieldset>` by its caller for that half, but
+   *  the drop target below bypasses that wrapper entirely (a drop never
+   *  passes through the disabled elements) and has to be told directly, the
+   *  same reasoning `/music`'s drop handler already carries. Rendered from a
+   *  prop, like every other piece of state a component in this repo takes,
+   *  rather than reading connection state itself. */
+  online: boolean
   onFile: (file: File) => void
   onRemove: () => void
 }) {
@@ -91,10 +100,11 @@ export function InvoiceLogoSection({
           onDrop={(event) => {
             event.preventDefault()
             setDragging(false)
-            // Repeated here even though both controls are disabled while busy:
-            // a drop bypasses the disabled elements entirely, so the guard has
-            // to exist on this path too. Same reasoning `/music` records.
-            if (busy) return
+            // Repeated here even though both controls are disabled while busy
+            // or offline: a drop bypasses the disabled elements entirely, so
+            // the guard has to exist on this path too. Same reasoning
+            // `/music` records.
+            if (busy || !online) return
             // `length`, not `files[0] !== undefined`: the index signature is
             // typed `File` rather than `File | undefined`, so the undefined
             // check is dead to the type checker while the empty drop it guards
@@ -200,7 +210,7 @@ export function InvoiceLogoSection({
             className={cn(
               buttonVariants({ variant: "outline", size: "sm" }),
               "cursor-pointer",
-              busy && "pointer-events-none opacity-50"
+              (busy || !online) && "pointer-events-none opacity-50"
             )}
           >
             <Upload className="size-4" aria-hidden="true" />
@@ -208,7 +218,7 @@ export function InvoiceLogoSection({
             <input
               type="file"
               accept={LOGO_INPUT_ACCEPT}
-              disabled={busy}
+              disabled={busy || !online}
               aria-label="Invoice logo file"
               onChange={(event) => {
                 const file = event.target.files?.[0]
@@ -227,7 +237,7 @@ export function InvoiceLogoSection({
               type="button"
               variant="outline"
               size="sm"
-              disabled={busy}
+              disabled={busy || !online}
               onClick={onRemove}
             >
               Remove logo

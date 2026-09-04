@@ -48,7 +48,7 @@ describe("useDesktopBridge", () => {
   it("pushes the running state on mount and again when it changes", () => {
     const actions = { start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) }
     const { rerender } = renderHook(
-      ({ running }) => useDesktopBridge(running, actions, vi.fn()),
+      ({ running }) => useDesktopBridge(running, actions),
       { initialProps: { running: null as Doc<"timeEntries"> | null } }
     )
     expect(bridge.pushTimerState).toHaveBeenCalledWith({
@@ -82,7 +82,7 @@ describe("useDesktopBridge", () => {
     // local instant or it would show 90s too little.
     clock.getSkewMs.mockReturnValue(90_000)
     const actions = { start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) }
-    renderHook(() => useDesktopBridge(runningEntry({ startedAt: 5_000_000 }), actions, vi.fn()))
+    renderHook(() => useDesktopBridge(runningEntry({ startedAt: 5_000_000 }), actions))
 
     expect(bridge.pushTimerState).toHaveBeenCalledWith({
       running: true,
@@ -96,7 +96,7 @@ describe("useDesktopBridge", () => {
     // would hand the shell a bare negative skew and draw a tray clock counting
     // up from the epoch for a timer that does not exist.
     clock.getSkewMs.mockReturnValue(90_000)
-    renderHook(() => useDesktopBridge(null, { start: vi.fn(), stop: vi.fn() }, vi.fn()))
+    renderHook(() => useDesktopBridge(null, { start: vi.fn(), stop: vi.fn() }))
 
     expect(bridge.pushTimerState).toHaveBeenCalledWith({
       running: false,
@@ -107,25 +107,26 @@ describe("useDesktopBridge", () => {
 
   it("does nothing outside the shell", () => {
     bridge.isDesktopShell.mockReturnValueOnce(false).mockReturnValueOnce(false)
-    renderHook(() => useDesktopBridge(null, { start: vi.fn(), stop: vi.fn() }, vi.fn()))
+    renderHook(() => useDesktopBridge(null, { start: vi.fn(), stop: vi.fn() }))
     expect(bridge.pushTimerState).not.toHaveBeenCalled()
     expect(bridge.onTrayCommand).not.toHaveBeenCalled()
   })
 
-  it("wires tray commands to the actions and reports their failures", async () => {
+  /**
+   * `start`/`stop` are the outbox-wrapped mutations: optimistic by
+   * construction, so they resolve on their own and this hook has nothing
+   * left to catch. A refusal is the outbox's own `dropped` event to report.
+   */
+  it("wires tray commands to the actions", async () => {
     const start = vi.fn(async () => undefined)
-    const stop = vi.fn(async () => {
-      throw new Error("offline")
-    })
-    const onError = vi.fn()
-    renderHook(() => useDesktopBridge(null, { start, stop }, onError))
+    const stop = vi.fn(async () => undefined)
+    renderHook(() => useDesktopBridge(null, { start, stop }))
 
     // The handlers the hook registered with the bridge:
     const handlers = bridge.onTrayCommand.mock.calls[0][0]
     handlers.start()
     handlers.stop()
-    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1))
-    expect(start).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1))
     expect(stop).toHaveBeenCalledTimes(1)
   })
 
@@ -137,7 +138,7 @@ describe("useDesktopBridge", () => {
    */
   it("pushes idle once when it unmounts with a timer running", () => {
     const { unmount } = renderHook(() =>
-      useDesktopBridge(runningEntry(), { start: vi.fn(), stop: vi.fn() }, vi.fn())
+      useDesktopBridge(runningEntry(), { start: vi.fn(), stop: vi.fn() })
     )
     bridge.pushTimerState.mockClear()
 
@@ -159,7 +160,7 @@ describe("useDesktopBridge", () => {
    */
   it("does not push idle merely because the running entry changed", () => {
     const { rerender } = renderHook(
-      ({ running }) => useDesktopBridge(running, { start: vi.fn(), stop: vi.fn() }, vi.fn()),
+      ({ running }) => useDesktopBridge(running, { start: vi.fn(), stop: vi.fn() }),
       { initialProps: { running: runningEntry() } }
     )
     bridge.pushTimerState.mockClear()
@@ -175,7 +176,7 @@ describe("useDesktopBridge", () => {
     const unlisten = vi.fn()
     bridge.onTrayCommand.mockResolvedValueOnce(unlisten)
     const { unmount } = renderHook(() =>
-      useDesktopBridge(null, { start: vi.fn(), stop: vi.fn() }, vi.fn())
+      useDesktopBridge(null, { start: vi.fn(), stop: vi.fn() })
     )
     await vi.waitFor(() => expect(bridge.onTrayCommand).toHaveBeenCalled())
     unmount()

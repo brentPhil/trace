@@ -10,13 +10,19 @@ import {
 } from "@testing-library/react"
 import { MAX_LIBRARY_BYTES, MAX_TRACK_BYTES, formatBytes } from "@shared/audio"
 import { MusicLibrarySection } from "@/routes/_authed/-music-library"
-import { convexKey } from "@/test-utils/convex-query"
+import {
+  convexKey,
+  resetConnectionOnline,
+  setConnectionOnline,
+} from "@/test-utils/convex-query"
 import { api } from "../../../convex/_generated/api"
 import { getFunctionName } from "convex/server"
 import type * as ConvexReactQueryModuleType from "@convex-dev/react-query"
 import { chooseOption } from "@/test-utils/select"
+import type * as ConvexReactModuleType from "convex/react"
 
 type ConvexReactQueryModule = typeof ConvexReactQueryModuleType
+type ConvexReactModule = typeof ConvexReactModuleType
 
 /*
  * /music — the library.
@@ -68,12 +74,25 @@ vi.mock("@convex-dev/react-query", async (importOriginal) => {
   }
 })
 
+// `useOnlineStatus` (the section's own online-only gate, see -music-library.tsx)
+// reads `useConvexConnectionState` from "convex/react", which needs a real
+// `ConvexReactClient` this file does not have. `useConvexConnectionStateDouble`
+// answers "online" by default — see `@/test-utils/convex-query` for what
+// flipping it offline means and why.
+vi.mock("convex/react", async (importOriginal) => {
+  const actual = await importOriginal<ConvexReactModule>()
+  const { useConvexConnectionStateDouble } =
+    await import("@/test-utils/convex-query")
+  return { ...actual, useConvexConnectionState: useConvexConnectionStateDouble }
+})
+
 afterEach(() => {
   cleanup()
   generateUploadUrl.mockClear()
   addTrack.mockClear()
   renameTrack.mockClear()
   removeTrack.mockClear()
+  resetConnectionOnline()
   vi.unstubAllGlobals()
 })
 
@@ -621,5 +640,64 @@ describe("the library", () => {
       await screen.findAllByText(/That didn't save\. Try again\./)
     ).not.toHaveLength(0)
     expect(addTrack).not.toHaveBeenCalled()
+  })
+
+  /*
+   * Uploading goes straight to Convex storage — `generateUploadUrl` and
+   * `addTrack` above are a plain mutation and action, never the offline
+   * outbox — so this stays online-only, the same rule the invoice logo
+   * picker in -settings.tsx follows.
+   */
+  it("disables the file picker and states the offline reason", () => {
+    setConnectionOnline(false)
+    renderMusic()
+
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Music files").disabled
+    ).toBe(true)
+    expect(
+      screen.getByText("You're offline. Uploads need a connection.")
+    ).toBeTruthy()
+  })
+
+  it("leaves the file picker enabled and says nothing about being offline while online", () => {
+    renderMusic()
+
+    expect(
+      screen.getByLabelText<HTMLInputElement>("Music files").disabled
+    ).toBe(false)
+    expect(
+      screen.queryByText("You're offline. Uploads need a connection.")
+    ).toBeNull()
+  })
+
+  /*
+   * The picker's own `disabled` is what stops an upload starting offline, but
+   * a drop bypasses that element entirely — this file's own comment on the
+   * drop handler says the guard "has to be repeated here". The list itself is
+   * the drop target (see the component's docblock on why there is no
+   * separate dashed zone), so its parent is where `onDrop` is wired.
+   *
+   * ASSERTS A SYNCHRONOUS SIGNAL, not `generateUploadUrl`. `upload` only
+   * reaches `generateUploadUrl` after `await decodeDurationMs(file)`, and
+   * that resolves via a promise on EVERY path — including jsdom's own
+   * missing-`URL.createObjectURL` early return — so an assertion made
+   * synchronously after `fireEvent.drop` would still read "not called"
+   * whether or not the guard exists: the call just has not happened YET.
+   * `upload`'s first act, before any `await`, is `setQueue` — so the queued
+   * file's own name appearing on screen is the earliest true signal that the
+   * drop was accepted, and its absence is what a real gate produces.
+   */
+  it("ignores a drop on the list while offline", () => {
+    setConnectionOnline(false)
+    renderMusic()
+
+    const dropTarget = screen.getByRole("list").parentElement as HTMLElement
+    const file = new File([new Uint8Array([1, 2, 3])], "track.mp3", {
+      type: "audio/mpeg",
+    })
+    fireEvent.drop(dropTarget, { dataTransfer: { files: [file] } })
+
+    expect(screen.queryByText("track.mp3")).toBeNull()
   })
 })

@@ -48,18 +48,21 @@ function reportPushFailure(thrown: unknown): void {
  * Mounted in `AuthedShell` beside the other hooks that watch `running` — the
  * one mount that survives navigation, so the tray never goes stale because the
  * user changed pages. Everything is a no-op outside the Tauri shell.
+ *
+ * Takes no `onError`: `actions.start`/`actions.stop` are the outbox-wrapped
+ * mutations, optimistic by construction now — they resolve as soon as the
+ * write is journaled, so a refusal is the outbox's own `dropped` event to
+ * report, not this bridge's.
  */
 export function useDesktopBridge(
   running: Doc<"timeEntries"> | null,
-  actions: { start: () => Promise<unknown>; stop: () => Promise<unknown> },
-  onError: (thrown: unknown) => void
+  actions: { start: () => Promise<unknown>; stop: () => Promise<unknown> }
 ): void {
   // `useLatest` for the same reason every effect-crossing callback in this
   // codebase uses it: the callers hand in fresh closures per render, and the
   // listener effect below must register exactly once.
   const start = useLatest(actions.start)
   const stop = useLatest(actions.stop)
-  const report = useLatest(onError)
 
   useEffect(() => {
     if (!isDesktopShell()) return
@@ -109,8 +112,8 @@ export function useDesktopBridge(
     let cleanup: (() => void) | null = null
     let cancelled = false
     void onTrayCommand({
-      start: () => void start().catch(report),
-      stop: () => void stop().catch(report),
+      start: () => void start(),
+      stop: () => void stop(),
     }).then((unlisten) => {
       // The unmount can land while `listen` is still resolving; a listener
       // registered after its cleanup ran would survive forever.
@@ -121,5 +124,5 @@ export function useDesktopBridge(
       cancelled = true
       cleanup?.()
     }
-  }, [start, stop, report])
+  }, [start, stop])
 }

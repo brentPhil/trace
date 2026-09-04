@@ -10,7 +10,11 @@ import {
 } from "@testing-library/react"
 import { NewInvoicePage, Route } from "@/routes/_authed/invoices_.new"
 import { BillPreview } from "@/components/invoices/bill-preview"
-import { convexKey } from "@/test-utils/convex-query"
+import {
+  convexKey,
+  resetConnectionOnline,
+  setConnectionOnline,
+} from "@/test-utils/convex-query"
 import { NOW, SETTINGS } from "@/test-utils/fixtures"
 import { expectPageHeading } from "@/test-utils/page-heading"
 import { defaultFilters, rangeOf } from "@/lib/history-filters"
@@ -22,8 +26,10 @@ import type { InvoiceSearch } from "@/lib/invoice-search"
 import type { Doc, Id } from "../../../convex/_generated/dataModel"
 import type * as RouterModuleType from "@tanstack/react-router"
 import { chooseOption } from "@/test-utils/select"
+import type * as ConvexReactModuleType from "convex/react"
 
 type RouterModule = typeof RouterModuleType
+type ConvexReactModule = typeof ConvexReactModuleType
 
 /*
  * `/invoices/new` — the page that ASKS.
@@ -83,6 +89,18 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   }
 })
 
+// `useOnlineStatus` (this page's own online-only gate) reads
+// `useConvexConnectionState` from "convex/react", which needs a real
+// `ConvexReactClient` this file does not have. `useConvexConnectionStateDouble`
+// answers "online" by default — see `@/test-utils/convex-query` for what
+// flipping it offline means and why.
+vi.mock("convex/react", async (importOriginal) => {
+  const actual = await importOriginal<ConvexReactModule>()
+  const { useConvexConnectionStateDouble } =
+    await import("@/test-utils/convex-query")
+  return { ...actual, useConvexConnectionState: useConvexConnectionStateDouble }
+})
+
 beforeEach(() => {
   createInvoice.mockReset()
   createInvoice.mockResolvedValue({
@@ -93,7 +111,10 @@ beforeEach(() => {
   onCreated.mockReset()
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  resetConnectionOnline()
+})
 
 const HOUR = 3_600_000
 const TODAY = dayOf(NOW, SETTINGS.timezone)
@@ -1042,6 +1063,43 @@ describe("/invoices/new — refusals", () => {
     expect(screen.getAllByText("Still totalling this period.")).toHaveLength(2)
     expect(document.querySelector("table")).toBeNull()
     expect(screen.queryByText(/No lines on this invoice/)).toBeNull()
+    dateSpy.mockRestore()
+  })
+})
+
+/*
+ * Raising an invoice mints a number that has to be unique across the whole
+ * account history — the one thing on this page a full outbox replay cannot
+ * promise on its own — so it stays online-only rather than going through the
+ * offline outbox everything else in this product now does.
+ */
+describe("/invoices/new — offline", () => {
+  it("disables Create invoice and swaps the reason for the offline sentence", () => {
+    setConnectionOnline(false)
+    const { dateSpy } = renderNew()
+
+    const button = screen.getByRole("button", { name: "Create invoice" })
+    expect(button.hasAttribute("disabled")).toBe(true)
+    expect(
+      document.getElementById(button.getAttribute("aria-describedby") ?? "")
+        ?.textContent
+    ).toBe(
+      "You're offline. Raising an invoice needs a connection, so its number is unique."
+    )
+
+    fireEvent.click(button)
+    expect(createInvoice).not.toHaveBeenCalled()
+
+    dateSpy.mockRestore()
+  })
+
+  it("leaves Create invoice exactly as priced once back online", () => {
+    const { dateSpy } = renderNew()
+    expect(
+      screen
+        .getByRole("button", { name: "Create invoice" })
+        .hasAttribute("disabled")
+    ).toBe(false)
     dateSpy.mockRestore()
   })
 })

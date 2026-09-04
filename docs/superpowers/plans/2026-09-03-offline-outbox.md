@@ -16,8 +16,11 @@ Spec: `docs/superpowers/specs/2026-09-03-offline-outbox-design.md`.
 - Nothing under `src/components/` may import `api`, `useConvexMutation` or `convexQuery` (`eslint.config.js` enforces it). Components take data and writes as props.
 - The palette is closed: no new colour tokens. State is never carried by colour alone (The Over-Determined State Rule). Status surfaces use `role="status"`.
 - Placeholder ids are `optimistic:<key>` from `src/lib/optimistic-id.ts`. Never send one to a mutation.
-- Run `pnpm test`, `pnpm typecheck` and `pnpm lint` before every commit. `pnpm typecheck` runs both tsconfigs.
-- Commit after every task. Commit messages follow the repo's `type(scope): sentence` style and end with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Run `pnpm typecheck` and the tests before every commit. `pnpm typecheck` runs both tsconfigs.
+- **Lint your own files with `pnpm eslint <paths you touched>`, never by reading the tail of `pnpm lint`.** The whole-repo run exits 1 on a clean tree from 209 pre-existing errors in the gitignored vendored directories `ds-bundle/` and `design-sync/`, and a real error in your own file scrolls past above them. Two tasks shipped six lint errors this way.
+- **Type-only imports are top-level, never inline.** `import type { A, B } from "./x"` on its own line — not `import { c, type A } from "./x"`. `import/consistent-type-specifier-style` enforces it, and the code blocks in this plan predate the rule being noticed, so fix the form as you transcribe them.
+- Do not run bare `pnpm test`: all three vitest projects at once has a known flake (~11 convex tests time out; they pass alone). Run `pnpm vitest run --project unit --project dom`, `pnpm vitest run --project convex`, or a single file.
+- Commit after every task. Commit messages follow the repo's `type(scope): sentence` style and end with `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
 - Tests: pure modules → `src/**/*.test.ts` (node, project `unit`); React → `src/**/*.test.tsx` (jsdom, project `dom`); Convex functions → `convex/*.test.ts` (project `convex`). Run one file with `pnpm vitest run <path>`.
 - The dev server is `pnpm dev` on port 3100 (memory: always that port). The service worker is production-only; do not register it in dev.
 
@@ -228,76 +231,205 @@ git commit -m "feat(projects): an idempotent create, keyed like entries, for the
 
 ---
 
-### Task 2: `stop` never closes an entry started after its `endedAt`
+### Task 2: `stop` closes only the entry it names
 
 **Files:**
-- Modify: `convex/entries.ts:1474-1520` (`stopImpl`)
+- Modify: `convex/entries.ts` — `stopImpl` and the `stop` / `stopAs` declarations beneath it
 - Modify: `convex/entries.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+**Interfaces:**
+- Produces: `api.entries.stop` and `internal.entries.stopAs` accept an optional `entryId: v.id("timeEntries")`. Given one, only that entry is closed, and only while it is still running. Omitted, behaviour is exactly as it is today — every running entry closes at `endedAt ?? now`.
 
-Append to the top-level `describe` in `convex/entries.test.ts` (the file already has `setup`, `ALICE`, and uses `internal.entries.startAs` / `stopAs`):
+**Why an id rather than a timestamp guard.** The outbox replays a stop carrying the instant the user pressed it, which can land after another device has started something new. From the timestamps alone that is indistinguishable from a backwards clock — the case `convex/entries.test.ts`'s "never produces an end at or before the start" pins, because a timer that can never be stopped is the worst failure in the product. The name is what tells them apart: it says which timer the user was actually looking at. This was found during implementation; an earlier version of this task used a `entry.startedAt >= endedAt` guard and broke that test.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append both inside the existing top-level `describe` in `convex/entries.test.ts`, which already has `setup`, `ALICE`, `key()`, and uses `internal.entries.startAs` / `stopAs` / `getRunningAs`:
 
 ```ts
-  it("a stop replayed with an old endedAt leaves a timer started after it alone", async () => {
+  it("closes only the entry it names, so a replayed stop cannot end a later timer", async () => {
     const t = setup()
-    const base = 1_700_000_000_000
-    // Device A pressed stop at base+1h while offline. Meanwhile device B
-    // started a new timer at base+2h. A's stop arrives at base+3h.
-    await t.mutation(internal.entries.startAs, {
+    const { entryId: earlier } = await t.mutation(internal.entries.startAs, {
       userId: ALICE,
-      clientKey: "b-start",
-      startedAt: base + 2 * 3_600_000,
+      clientKey: key(1),
     })
+    // A second start closes the first and becomes the running one — which is
+    // what another device starting something else looks like from here.
+    await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(2) })
+
+    // The stop the first device queued while offline, naming the entry it was
+    // looking at, arriving now.
     const result = await t.mutation(internal.entries.stopAs, {
       userId: ALICE,
-      endedAt: base + 3_600_000,
+      entryId: earlier,
+      endedAt: Date.now(),
     })
+
     expect(result.stoppedEntryIds).toEqual([])
-    const running = await t.query(internal.entries.getRunningAs, { userId: ALICE })
-    expect(running).not.toBeNull()
+    expect(
+      await t.query(internal.entries.getRunningAs, { userId: ALICE })
+    ).not.toBeNull()
+  })
+
+  it("stops the entry it names when that entry is the running one", async () => {
+    const t = setup()
+    const { entryId } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+
+    const result = await t.mutation(internal.entries.stopAs, { userId: ALICE, entryId })
+
+    expect(result.stoppedEntryIds).toEqual([entryId])
+    expect(await t.query(internal.entries.getRunningAs, { userId: ALICE })).toBeNull()
+  })
+
+  it("discards only the entry it names, so a replayed discard cannot delete a later timer", async () => {
+    const t = setup()
+    const { entryId: earlier } = await t.mutation(internal.entries.startAs, {
+      userId: ALICE,
+      clientKey: key(1),
+    })
+    await t.mutation(internal.entries.startAs, { userId: ALICE, clientKey: key(2) })
+
+    await t.mutation(internal.entries.discardRunningAs, { userId: ALICE, entryId: earlier })
+
+    expect(
+      await t.query(internal.entries.getRunningAs, { userId: ALICE })
+    ).not.toBeNull()
   })
 ```
 
-If `getRunningAs` does not exist, use whichever internal query the file already uses to read the running entry (search the file for `getRunning`).
-
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 2: Run them to verify they fail**
 
 ```bash
-pnpm vitest run convex/entries.test.ts -t "replayed with an old endedAt"
+pnpm vitest run convex/entries.test.ts -t "only the entry it names"
 ```
 
-Expected: FAIL — `stoppedEntryIds` has one id (the clamp closed B's entry at its own start + 1ms).
+Expected: FAIL on argument validation — `entryId` is not in `stopAs`'s args.
 
-- [ ] **Step 3: Skip later-started entries in `stopImpl`**
+- [ ] **Step 3: Take the name in `stopImpl`**
 
-In `convex/entries.ts`, change the loop in `stopImpl` to:
+In `convex/entries.ts`, replace `stopImpl` and the two declarations under it with:
 
 ```ts
-  for (const entry of running) {
-    // An explicit endedAt is a fact about when the user pressed stop. A
-    // timer that started AFTER that instant — on another device, while this
-    // stop sat in an offline outbox — was never the thing being stopped.
-    if (endedAt !== undefined && entry.startedAt >= endedAt) continue
+async function stopImpl(
+  ctx: MutationCtx,
+  userId: string,
+  endedAt: number | undefined,
+  entryId: Id<"timeEntries"> | undefined
+) {
+  const now = Date.now()
+  const running = await runningEntries(ctx, userId)
+
+  /*
+   * A stop that NAMES an entry closes that entry and nothing else.
+   *
+   * The offline outbox replays a stop carrying the instant the user pressed
+   * it, which can arrive after another device has started something new.
+   * Against the timestamps alone that is the same shape as a backwards clock
+   * — the case the test above insists must still stop the timer, because a
+   * timer that can never be stopped is the worst failure this product has.
+   * There is no telling them apart from the numbers. The name does it: it
+   * says which timer the user was looking at.
+   *
+   * Filtering `running` rather than fetching by id is what keeps ownership
+   * intact for free — `runningEntries` is already scoped to `userId`, so a
+   * name belonging to somebody else matches nothing rather than needing its
+   * own check that a later edit could drop.
+   */
+  const targets =
+    entryId === undefined ? running : running.filter((entry) => entry._id === entryId)
+
+  const stoppedEntryIds: Array<Id<"timeEntries">> = []
+  for (const entry of targets) {
     if (await closeEntry(ctx, entry, endedAt ?? now, now)) {
       stoppedEntryIds.push(entry._id)
     }
   }
+  return { stoppedEntryIds, serverNow: now }
+}
+
+const stopArgs = {
+  endedAt: v.optional(v.number()),
+  /** Which timer this stop is for. Absent means "whatever is running", which
+   *  is every caller that is looking at the live server state. */
+  entryId: v.optional(v.id("timeEntries")),
+}
+
+export const stop = mutation({
+  args: stopArgs,
+  returns: stopReturns,
+  handler: async (ctx, args) =>
+    await stopImpl(ctx, await requireUserId(ctx), args.endedAt, args.entryId),
+})
+
+export const stopAs = internalMutation({
+  args: { ...stopArgs, userId: v.string() },
+  returns: stopReturns,
+  handler: async (ctx, args) => await stopImpl(ctx, args.userId, args.endedAt, args.entryId),
+})
 ```
 
-- [ ] **Step 4: Run the file**
+Leave `stopImpl`'s existing doc comment above it in place — its "never refuses, and is a no-op when nothing is" argument still holds, and a named stop that matches nothing is exactly such a no-op.
+
+- [ ] **Step 3b: The same name on `discardRunning`**
+
+`discardRunning` carries the identical hazard and is worse when it bites: it DELETES rather than closes, so a discard replayed after another device started something takes a live timer with it. Give it the same optional name. Find `discardRunningImpl` in `convex/entries.ts`, add the parameter, and filter the running entries it acts on exactly as `stopImpl` now does:
+
+```ts
+async function discardRunningImpl(
+  ctx: MutationCtx,
+  userId: string,
+  entryId: Id<"timeEntries"> | undefined
+) {
+  // … whatever the existing body reads the running entries into, then the
+  // same one-line narrowing stopImpl uses, for the same reason and with the
+  // same ownership argument — `runningEntries` is already scoped to userId:
+  //
+  //   const targets =
+  //     entryId === undefined ? running : running.filter((e) => e._id === entryId)
+  //
+  // and the existing delete loop runs over `targets`.
+}
+```
+
+Read the existing `discardRunningImpl` and adapt it in place rather than rewriting it — keep its current doc comment, its return shape, and whatever it does per entry. Then thread the argument through both declarations:
+
+```ts
+const discardArgs = {
+  /** Which timer to discard. Absent means "whatever is running" — see the
+   *  note in `stopImpl` for why a replayed discard has to say. */
+  entryId: v.optional(v.id("timeEntries")),
+}
+
+export const discardRunning = mutation({
+  args: discardArgs,
+  returns: discardReturns,
+  handler: async (ctx, args) =>
+    await discardRunningImpl(ctx, await requireUserId(ctx), args.entryId),
+})
+
+export const discardRunningAs = internalMutation({
+  args: { ...discardArgs, userId: v.string() },
+  returns: discardReturns,
+  handler: async (ctx, args) => await discardRunningImpl(ctx, args.userId, args.entryId),
+})
+```
+
+- [ ] **Step 4: Run the whole file**
 
 ```bash
 pnpm vitest run convex/entries.test.ts
 ```
 
-Expected: all pass.
+Expected: every test passes, including "never produces an end at or before the start, even with a backwards clock" and "is a no-op the second time", both of which call `stopAs` with no `entryId` and must be untouched by this change.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add convex/entries.ts convex/entries.test.ts
-git commit -m "fix(entries): a stale stop cannot close a timer another device started later"
+git commit -m "feat(entries): a stop or discard names the timer it is for, so a replayed one cannot take a later entry"
 ```
 
 ---
@@ -369,10 +501,30 @@ export type OpKind<Args extends Record<string, unknown>, Result> = {
   mints?: (args: Args) => string
   /** Where the real id for that placeholder lands in the result. */
   minted?: (result: Result) => string
-  /** What the caller is handed straight away. */
-  immediate: (args: Args, now: number) => Result
-  /** Two consecutive unsent ops with equal keys collapse into the later one. */
+  /**
+   * What the caller is handed straight away.
+   *
+   * OPTIONAL, because not every mutation has an honest synchronous answer.
+   * `entries.editTime` returns the RECONCILED times, which cannot be derived
+   * from the args alone — the rule needs the entry's current times, and this
+   * function is not given them. Fabricating a shape there would hand callers
+   * numbers that are simply wrong; omitting it hands them `undefined`, which
+   * is true. The optimistic function still writes the real values to the
+   * cache, and the server's answer arrives through `settled`.
+   */
+  immediate?: (args: Args, now: number) => Result
+  /** Two consecutive unsent ops with equal keys collapse into one. */
   coalesceKey?: (args: Args) => string
+  /**
+   * How a collapse combines the two ops' args.
+   *
+   * Default (false/absent) is REPLACE, which is right when the args are the
+   * whole value — a retitle carries the complete title, so the later one is
+   * the answer. MERGE is for a patch of independent fields: two settings
+   * saves, one setting the currency and one the timezone, must not lose the
+   * currency because the timezone was typed second.
+   */
+  coalesceMerge?: boolean
   /** Older than this, and not followed by one of `closedBy`, the op is dropped. */
   staleAfterMs?: number
   closedBy?: ReadonlyArray<string>
@@ -407,6 +559,16 @@ describe("rewritePlaceholders", () => {
 
   it("returns the same reference when nothing changes", () => {
     const args = { title: "hello", n: 1 }
+    expect(rewritePlaceholders(args, resolved)).toBe(args)
+    const nested = { a: ["x"], b: { c: "y" } }
+    expect(rewritePlaceholders(nested, resolved)).toBe(nested)
+  })
+
+  it("leaves a string that names a prototype property alone", () => {
+    // Every string in the args reaches the lookup, not only placeholder-shaped
+    // ones, and a plain object answers for its prototype. An entry really can
+    // be titled "constructor".
+    const args = { title: "constructor", note: "toString", tags: ["__proto__"] }
     expect(rewritePlaceholders(args, resolved)).toBe(args)
   })
 })
@@ -477,7 +639,12 @@ function walk(value: unknown, onString: (s: string) => string): { value: unknown
 
 /** Replaces every resolved placeholder. Same reference back when nothing changed. */
 export function rewritePlaceholders<T>(value: T, resolved: Record<string, string>): T {
-  return walk(value, (s) => resolved[s] ?? s).value as T
+  // `Object.hasOwn`, not `resolved[s] ?? s`. This callback sees EVERY string
+  // in the args, not only placeholder-shaped ones, and a plain object answers
+  // for its prototype: an entry titled "constructor" or a project named
+  // "toString" would look up a function and splice it into the args, which
+  // then goes to a mutation that takes strings. Found in review.
+  return walk(value, (s) => (Object.hasOwn(resolved, s) ? resolved[s] : s)).value as T
 }
 
 /** Placeholders present in `value` that `resolved` cannot answer, in order, once each. */
@@ -516,7 +683,7 @@ git commit -m "feat(offline): op types, and the placeholder rewrite the outbox s
 - Test: `src/lib/offline/outbox-store.test.ts`
 
 **Interfaces:**
-- Produces: `class MemoryOutboxStore implements OutboxStore`; `class IdbOutboxStore implements OutboxStore` (constructor `(dbName = "chroneli-offline")`); `createOutboxStore(): OutboxStore` (IDB when available, else memory).
+- Produces: `class MemoryOutboxStore implements OutboxStore`; `class IdbOutboxStore implements OutboxStore` (constructor `(dbName = "chroneli-outbox")`); `createOutboxStore(): OutboxStore` (IDB when available, else memory).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -527,7 +694,8 @@ import "fake-indexeddb/auto"
 import { describe, expect, it } from "vitest"
 import { MemoryOutboxStore } from "./outbox-store-memory"
 import { IdbOutboxStore } from "./outbox-store-idb"
-import { EMPTY_SNAPSHOT, type Op, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
+import type { Op, OutboxStore } from "./op-types"
 
 function op(id: string): Op {
   return { id, kind: "entries.setTitle", args: { title: id }, enqueuedAt: 1, inFlight: false }
@@ -565,6 +733,72 @@ it("indexeddb persists across store instances of the same name", async () => {
   await new IdbOutboxStore(name).update((s) => ({ ...s, ops: [op("a")] }))
   expect((await new IdbOutboxStore(name).read()).ops).toHaveLength(1)
 })
+
+it("a memory read sees an update that was never awaited", async () => {
+  const store = new MemoryOutboxStore()
+  void store.update((s) => ({ ...s, ops: [op("a")] }))
+  expect((await store.read()).ops).toHaveLength(1)
+})
+
+it("degrades to memory when IndexedDB is present but refuses", async () => {
+  // Safari's private mode: the API is there, opening a database is refused.
+  // The refusal cannot surface in the constructor — `createStore` is lazy —
+  // so the store has to absorb it on first use.
+  const realOpen = indexedDB.open
+  indexedDB.open = (() => {
+    throw new Error("refused")
+  }) as typeof indexedDB.open
+  try {
+    const store = new IdbOutboxStore(`refused-${Math.random()}`)
+    // Resolves rather than rejecting: this is the "never a thrown boot" claim.
+    expect(await store.read()).toEqual(EMPTY_SNAPSHOT)
+    await store.update((s) => ({ ...s, ops: [op("a")] }))
+    expect((await store.read()).ops).toHaveLength(1)
+  } finally {
+    indexedDB.open = realOpen
+  }
+})
+
+it("keeps what was already journaled when a transaction fails after reading it", async () => {
+  // The dangerous half of degrading. idb-keyval runs the updater after a
+  // SUCCESSFUL read, so a transaction that aborts on the write has already
+  // shown us the queue — and a fallback that started empty would drop it.
+  const name = `late-failure-${Math.random()}`
+  const store = new IdbOutboxStore(name)
+  await store.update((s) => ({ ...s, ops: [op("a")] }))
+
+  const realOpen = indexedDB.open
+  let calls = 0
+  indexedDB.open = ((...args: Parameters<typeof realOpen>) => {
+    // Let the read-side open through, then refuse, so the failure lands
+    // after the updater has seen the stored queue.
+    calls += 1
+    if (calls > 1) throw new Error("aborted")
+    return realOpen.apply(indexedDB, args)
+  }) as typeof indexedDB.open
+  try {
+    const after = await store.update((s) => ({ ...s, ops: [...s.ops, op("b")] }))
+    expect(after.ops.map((o) => o.id)).toEqual(["a", "b"])
+  } finally {
+    indexedDB.open = realOpen
+  }
+})
+
+it("a throwing updater reaches the caller and does not degrade the store", async () => {
+  // A bug in `fn` is not a storage failure. Treating it as one would trade a
+  // transient bug for a session with no durability at all.
+  const store = new IdbOutboxStore(`throwing-${Math.random()}`)
+  await store.update((s) => ({ ...s, ops: [op("a")] }))
+
+  await expect(
+    store.update(() => {
+      throw new Error("caller bug")
+    })
+  ).rejects.toThrow("caller bug")
+
+  // Still on IndexedDB, still holding the op — not silently in memory.
+  expect((await store.read()).ops.map((o) => o.id)).toEqual(["a"])
+})
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -580,14 +814,26 @@ Expected: FAIL — modules not found.
 Create `src/lib/offline/outbox-store-memory.ts`:
 
 ```ts
-import { EMPTY_SNAPSHOT, type OutboxSnapshot, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
+import type { OutboxSnapshot, OutboxStore } from "./op-types"
 
-/** Tests, SSR, and a browser whose IndexedDB throws (private mode). */
+/** Tests, SSR, and a browser whose IndexedDB refuses (private mode). */
 export class MemoryOutboxStore implements OutboxStore {
-  private snapshot: OutboxSnapshot = EMPTY_SNAPSHOT
+  private snapshot: OutboxSnapshot
   private chain: Promise<unknown> = Promise.resolve()
 
+  /** `initial` is for the degrade path in outbox-store-idb.ts: when IndexedDB
+   *  fails mid-transaction it has already read the queue, and starting the
+   *  fallback empty would drop every op that was on it. */
+  constructor(initial: OutboxSnapshot = EMPTY_SNAPSHOT) {
+    this.snapshot = initial
+  }
+
+  /** Joins the chain, so a read issued after an un-awaited update still sees
+   *  it. Returning `this.snapshot` bare would hand back the pre-update value
+   *  and give the two stores different observable behaviour. */
   async read(): Promise<OutboxSnapshot> {
+    await this.chain
     return this.snapshot
   }
 
@@ -608,10 +854,21 @@ Create `src/lib/offline/outbox-store-idb.ts`:
 
 ```ts
 import { createStore, get, update } from "idb-keyval"
-import { EMPTY_SNAPSHOT, type OutboxSnapshot, type OutboxStore } from "./op-types"
+import { EMPTY_SNAPSHOT } from "./op-types"
 import { MemoryOutboxStore } from "./outbox-store-memory"
+import type { OutboxSnapshot, OutboxStore } from "./op-types"
 
 const KEY = "outbox.v1"
+
+/** Marks a rejection as "the caller's `fn` threw" rather than "IndexedDB
+ *  failed" — see `IdbOutboxStore.update`. A plain boolean flag set inside the
+ *  updater closure and read after the `await` does not survive TypeScript's
+ *  control-flow narrowing across the call boundary, so the distinction is
+ *  carried on the thrown value itself instead. Not exported, so no caller's
+ *  `fn` can throw one and be mistaken for this. */
+class FnFailure {
+  constructor(readonly error: unknown) {}
+}
 
 /**
  * The journal, in IndexedDB.
@@ -623,37 +880,98 @@ const KEY = "outbox.v1"
  */
 export class IdbOutboxStore implements OutboxStore {
   private readonly store
+  /** Set once IndexedDB has refused, and used for the rest of the session. */
+  private fallback: MemoryOutboxStore | null = null
 
-  constructor(dbName = "chroneli-offline") {
+  constructor(dbName = "chroneli-outbox") {
     this.store = createStore(dbName, "outbox")
   }
 
   async read(): Promise<OutboxSnapshot> {
-    return (await get<OutboxSnapshot>(KEY, this.store)) ?? EMPTY_SNAPSHOT
+    if (this.fallback !== null) return await this.fallback.read()
+    try {
+      return (await get<OutboxSnapshot>(KEY, this.store)) ?? EMPTY_SNAPSHOT
+    } catch {
+      // Nothing was read, so there is nothing to carry across.
+      return await this.degrade(EMPTY_SNAPSHOT).read()
+    }
   }
 
   async update(fn: (current: OutboxSnapshot) => OutboxSnapshot): Promise<OutboxSnapshot> {
-    let result: OutboxSnapshot = EMPTY_SNAPSHOT
-    await update<OutboxSnapshot>(
-      KEY,
-      (current) => {
-        result = fn(current ?? EMPTY_SNAPSHOT)
-        return result
-      },
-      this.store
-    )
-    return result
+    if (this.fallback !== null) return await this.fallback.update(fn)
+
+    /*
+     * Two things have to be got right here, and the obvious `try { … } catch {
+     * degrade() }` gets both wrong. idb-keyval runs the updater INSIDE the
+     * transaction's `onsuccess`, after a successful read, and only then puts
+     * and waits on the transaction — so a failure can land either side of the
+     * caller's `fn` having already run against real data.
+     *
+     *   `seen` is what the transaction managed to read. A transaction that
+     *   aborts AFTER that point (quota, or Safari dropping the connection —
+     *   idb-keyval's own source comments on it) must not take the queue with
+     *   it: degrading to an EMPTY fallback would silently discard every op
+     *   already journaled, which is the exact loss this whole file exists to
+     *   prevent.
+     *
+     *   `FnFailure` separates the caller's bug from a storage failure. They
+     *   arrive as the same rejection, and treating an exception thrown by
+     *   `fn` as "IndexedDB is broken" would trade one transient bug for a
+     *   session with no durability at all.
+     */
+    let seen: OutboxSnapshot = EMPTY_SNAPSHOT
+
+    try {
+      let result: OutboxSnapshot = EMPTY_SNAPSHOT
+      await update<OutboxSnapshot>(
+        KEY,
+        (current) => {
+          // BEFORE `fn` runs, so the seeded retry below applies `fn` to the
+          // pre-image rather than to an already-appended result.
+          seen = current ?? EMPTY_SNAPSHOT
+          try {
+            result = fn(seen)
+          } catch (error) {
+            throw new FnFailure(error)
+          }
+          return result
+        },
+        this.store
+      )
+      return result
+    } catch (error) {
+      if (error instanceof FnFailure) throw error.error
+      return await this.degrade(seen).update(fn)
+    }
+  }
+
+  /**
+   * IndexedDB is there but will not store anything — Safari's private mode
+   * refuses the open — so carry on in memory for the rest of the session.
+   *
+   * THE FACTORY BELOW CANNOT DO THIS. `createStore` is lazy: it builds a
+   * closure and does not touch `indexedDB.open()` until the first read or
+   * write, so a constructor-time try/catch guards nothing and the refusal
+   * arrives later as a rejected promise. Degrading here is what makes "never
+   * a thrown boot" true rather than merely intended. Found in review.
+   *
+   * The cost is honest and unavoidable: in a browser that will not store
+   * anything, nothing survives a reload. Within the session the outbox still
+   * works, which is strictly better than a boot that throws.
+   *
+   * `seed` is whatever IndexedDB had told us before it failed — see `update`.
+   */
+  private degrade(seed: OutboxSnapshot): MemoryOutboxStore {
+    this.fallback ??= new MemoryOutboxStore(seed)
+    return this.fallback
   }
 }
 
-/** IndexedDB when the runtime has one, else memory — never a thrown boot. */
+/** IndexedDB when the runtime has one, else memory. A runtime that HAS one
+ *  and refuses it is handled by `degrade` above, not here. */
 export function createOutboxStore(): OutboxStore {
-  try {
-    if (typeof indexedDB === "undefined") return new MemoryOutboxStore()
-    return new IdbOutboxStore()
-  } catch {
-    return new MemoryOutboxStore()
-  }
+  if (typeof indexedDB === "undefined") return new MemoryOutboxStore()
+  return new IdbOutboxStore()
 }
 ```
 
@@ -718,7 +1036,12 @@ describe("TanStackLocalStore", () => {
     const store = new TanStackLocalStore(client)
     client.setQueryData(key("entries:listRange", { fromMs: 0, toMs: 10 }), [1])
     client.setQueryData(key("entries:listRange", { fromMs: 10, toMs: 20 }), [2])
-    client.setQueryData(key("entries:listRange", "skip"), undefined)
+    // A DEFINED value, so the entry actually exists for the filter to drop.
+    // `setQueryData(key, undefined)` builds no cache entry at all in TanStack
+    // (queryClient.js short-circuits before the entry is created), so seeding
+    // this with `undefined` would leave the filter untested — it would pass
+    // with the filter deleted.
+    client.setQueryData(key("entries:listRange", "skip"), [99])
     client.setQueryData(key("entries:getRunning", {}), null)
     const all = store.getAllQueries(listRange)
     expect(all).toEqual([
@@ -727,7 +1050,12 @@ describe("TanStackLocalStore", () => {
     ])
   })
 
-  it("ignores a write of undefined, which TanStack would drop anyway", () => {
+  it("leaves the cached value alone on a write of undefined", () => {
+    // Characterisation, and honest about it: TanStack's own setQueryData is
+    // already a no-op for `undefined`, so this passes with the guard in the
+    // adapter deleted. It is kept because the composed behaviour is what
+    // callers depend on — if a future TanStack made `undefined` clear the
+    // entry, this is what would catch it.
     const client = new QueryClient()
     const store = new TanStackLocalStore(client)
     client.setQueryData(key("entries:getRunning", {}), null)
@@ -800,6 +1128,13 @@ export class TanStackLocalStore implements OptimisticLocalStore {
   ): void {
     // `setQueryData(key, undefined)` is a no-op in TanStack; say so here
     // rather than letting a caller believe it unset something.
+    //
+    // Convex's own store documents `undefined` as "remove the query, to show
+    // a loading state while it recomputes". That is NOT reproducible here —
+    // clearing a TanStack entry needs `removeQueries`, which resets it to a
+    // loading state for everyone watching it — so an optimistic function must
+    // never rely on it. None does: they write `null` for "nothing is
+    // running", never undefined.
     if (value === undefined) return
     this.queryClient.setQueryData(["convexQuery", getFunctionName(query), args], value)
   }
@@ -948,6 +1283,13 @@ const kinds: Record<string, OpKind<any, any>> = {
     closedBy: ["stop"],
   },
   stop: { ref: anyApi.things.stop, label: "Stopping", immediate: () => null },
+  settings: {
+    ref: anyApi.things.settings,
+    label: "Saving settings",
+    immediate: () => null,
+    coalesceKey: () => "settings",
+    coalesceMerge: true,
+  },
 }
 
 type Harness = {
@@ -1054,6 +1396,22 @@ describe("Outbox", () => {
     expect(h.sent[1].args).toEqual({ id: "x", title: "ab" })
   })
 
+  it("merges a coalesced patch's args when the kind asks for it", async () => {
+    // The default collapse REPLACES, which is right for a retitle: the later
+    // op carries the whole title. A settings save carries one field of many,
+    // so replacing would lose the currency because the timezone was typed
+    // second.
+    const h = harness({ manual: true })
+    await h.outbox.enqueue("stop", {}) // occupies the sender
+    await flush()
+    await h.outbox.enqueue("settings", { currency: "EUR" })
+    await h.outbox.enqueue("settings", { timezone: "UTC" })
+    expect(h.outbox.pending()).toBe(2)
+    h.resolveSend(null)
+    await flush()
+    expect(h.sent[1].args).toEqual({ currency: "EUR", timezone: "UTC" })
+  })
+
   it("drops a refused op, reports it, and drops what depended on it", async () => {
     const h = harness({ manual: true })
     await h.outbox.enqueue("create", { clientKey: "k1", name: "A" })
@@ -1126,6 +1484,182 @@ describe("Outbox", () => {
     expect(outbox.pending()).toBe(1)
   })
 
+  it("drops a journaled op whose kind no longer exists", async () => {
+    // The guard the `kinds` typing turns on. An app version that removes a
+    // mutation leaves ops naming it in journals on real devices, and they
+    // must be dropped and reported rather than jamming the queue behind
+    // them forever.
+    const store = new MemoryOutboxStore()
+    await store.update((s) => ({
+      ...s,
+      ops: [{ id: "op-gone", kind: "gone", args: {}, enqueuedAt: 0, inFlight: false }],
+    }))
+    const events: OutboxEvent[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+    })
+    outbox.subscribe((e) => events.push(e))
+    await outbox.load()
+    await flush()
+    expect(
+      events.some((e) => e.type === "dropped" && e.op.kind === "gone" && e.reason === "rejected")
+    ).toBe(true)
+    expect(outbox.pending()).toBe(0)
+  })
+
+  it("boots the rest of the journal when one op cannot be re-applied", async () => {
+    // `load` does not consult the kind registry, so a bad op reaches
+    // `applyLocal` before `drain` can drop it. Unguarded, its throw left every
+    // other op unapplied AND skipped the kick, stranding the whole queue.
+    const store = new MemoryOutboxStore()
+    await store.update((s) => ({
+      ...s,
+      ops: [
+        { id: "op-bad", kind: "stop", args: {}, enqueuedAt: 0, inFlight: false },
+        { id: "op-good", kind: "stop", args: {}, enqueuedAt: 0, inFlight: false },
+      ],
+    }))
+    const applied: string[] = []
+    const sent: string[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: (op) => {
+        sent.push(op.id)
+        return Promise.resolve(null)
+      },
+      applyLocal: (op) => {
+        if (op.id === "op-bad") throw new Error("cannot replay")
+        applied.push(op.id)
+      },
+      retryable: () => false,
+    })
+    await outbox.load()
+    await flush()
+    expect(applied).toEqual(["op-good"])
+    expect(sent).toEqual(["op-bad", "op-good"])
+  })
+
+  it("keeps a resolved mapping after its producer leaves the queue", async () => {
+    // The dependent may be enqueued AFTER the producer is acknowledged: the
+    // screen still shows the placeholder until the reactive query swaps it.
+    // Pruning on producer removal dropped that edit as orphaned.
+    const h = harness()
+    await h.outbox.enqueue("create", { clientKey: "k1", name: "A" })
+    await flush()
+    expect(h.outbox.pending()).toBe(0)
+
+    await h.outbox.enqueue("retitle", { id: "optimistic:k1", title: "B" })
+    await flush()
+    expect(h.sent.at(-1)).toEqual({ kind: "retitle", args: { id: "real:k1", title: "B" } })
+    expect(h.events.some((e) => e.type === "dropped")).toBe(false)
+  })
+
+  it("never evicts a mapping a queued op still names, however full the map", async () => {
+    // The cap must only ever be able to OVER-retain. `resolved` is a lifetime
+    // accumulator, so an established account sits at the limit permanently and
+    // every mint evicts the oldest — and a bare newest-N would push out the
+    // producer of a dependent still waiting behind a long queue.
+    const store = new MemoryOutboxStore()
+    const saturated: Record<string, string> = {}
+    for (let i = 0; i < 100; i++) saturated[`optimistic:filler-${i}`] = `real:filler-${i}`
+    await store.update((s) => ({ ...s, resolved: saturated }))
+
+    const sent: Array<Record<string, unknown>> = []
+    const dropped: OutboxEvent[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: (op, args) => {
+        sent.push(args)
+        return Promise.resolve(op.kind === "create" ? { id: `real:${args.clientKey}` } : null)
+      },
+      applyLocal: () => {},
+      retryable: () => false,
+      lock: (fn) => fn(),
+    })
+    outbox.subscribe((e) => {
+      if (e.type === "dropped") dropped.push(e)
+    })
+
+    await outbox.enqueue("create", { clientKey: "k1", name: "P" })
+    // Enough later mints to push k1 past the limit under a newest-N rule.
+    for (let i = 0; i < 100; i++) {
+      await outbox.enqueue("create", { clientKey: `pad-${i}`, name: "pad" })
+    }
+    await outbox.enqueue("retitle", { id: "optimistic:k1", title: "B" })
+    await flush()
+    await flush()
+
+    expect(sent.at(-1)).toEqual({ id: "real:k1", title: "B" })
+    expect(dropped).toEqual([])
+  })
+
+  it("rejects a settler whose op another tab drained", async () => {
+    // `settlers` is per-instance, and with the Web Lock only one tab drains.
+    // Without reconciliation the other tab's promise stays pending forever.
+    const store = new MemoryOutboxStore()
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    // This tab does not hold the lock, so its own drain waits on it.
+    const mine = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+      lock: async (fn) => {
+        await held
+        return await fn()
+      },
+    })
+    const { settled } = await mine.enqueue("stop", {})
+    const outcome = expect(settled).rejects.toThrow(SENT_BY_ANOTHER_TAB)
+
+    // The tab that does hold the lock drains the shared journal.
+    const other = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+      lock: (fn) => fn(),
+    })
+    other.kick()
+    await flush()
+    expect((await store.read()).ops).toEqual([])
+
+    // Now this tab's drain runs and finds its op already gone.
+    release()
+    await flush()
+    await outcome
+  })
+
+  it("reports a drain that throws instead of freezing quietly", async () => {
+    const store = new MemoryOutboxStore()
+    const events: OutboxEvent[] = []
+    const outbox = new Outbox({
+      store,
+      kinds,
+      send: () => Promise.resolve(null),
+      applyLocal: () => {},
+      retryable: () => false,
+      // The one dependency a drain cannot proceed without.
+      lock: () => Promise.reject(new Error("lock exploded")),
+    })
+    outbox.subscribe((e) => events.push(e))
+    outbox.kick()
+    await flush()
+    expect(events.some((e) => e.type === "failed")).toBe(true)
+  })
+
   it("notifies pending-count changes", async () => {
     const h = harness()
     await h.outbox.enqueue("stop", {})
@@ -1160,6 +1694,19 @@ import type { Lock } from "./web-lock"
 export type OutboxEvent =
   | { type: "changed"; pending: number }
   | { type: "dropped"; op: Op; reason: "rejected" | "stale" | "orphaned"; error?: unknown }
+  /** The drain itself threw. The queue has stopped for a reason that is NOT
+   *  being offline, and saying so is the whole point: a frozen pending count
+   *  reads as "waiting for the network", which is exactly wrong here.
+   *
+   *  A listener must NOT answer this by calling `kick()`. The catch runs
+   *  before the `finally` that clears `draining`, so a kick from here is
+   *  recorded and replayed immediately into the same persistent failure —
+   *  a tight loop. Report it and wait for a real signal. */
+  | { type: "failed"; error: unknown }
+
+/** Rejection given to a `settled` promise whose op was drained by another tab.
+ *  See `reconcileSettlers`. */
+export const SENT_BY_ANOTHER_TAB = "This change was sent by another tab."
 
 export type Sender = (op: Op, args: Record<string, unknown>) => Promise<unknown>
 
@@ -1223,7 +1770,17 @@ export class Outbox {
       ...s,
       ops: s.ops.map((op) => ({ ...op, inFlight: false })),
     }))
-    for (const op of snap.ops) this.applyLocal(op)
+    for (const op of snap.ops) {
+      try {
+        this.applyLocal(op)
+      } catch {
+        // One unreplayable op must not stop the boot. `load` does not consult
+        // the kind registry at all, so an op naming a kind a later version of
+        // the app removed reaches here BEFORE `drain` can drop it — and an
+        // unguarded throw would leave the rest of the journal unapplied and
+        // never call `kick`, silently stranding every other op in it.
+      }
+    }
     this.setPending(snap.ops.length)
     this.kick()
   }
@@ -1257,7 +1814,20 @@ export class Outbox {
         this.kinds[last.kind]?.coalesceKey?.(last.args) === key
       ) {
         replaced = last
-        return { ...s, ops: [...s.ops.slice(0, -1), { ...op, id: last.id, enqueuedAt: last.enqueuedAt }] }
+        return {
+          ...s,
+          ops: [
+            ...s.ops.slice(0, -1),
+            {
+              ...op,
+              id: last.id,
+              enqueuedAt: last.enqueuedAt,
+              // REPLACE by default; MERGE for a patch of independent fields.
+              // See `coalesceMerge` on OpKind for why both are needed.
+              args: def.coalesceMerge === true ? { ...last.args, ...args } : args,
+            },
+          ],
+        }
       }
       return { ...s, ops: [...s.ops, op] }
     })
@@ -1287,7 +1857,7 @@ export class Outbox {
     this.applyLocal(stored)
     this.setPending(snap.ops.length)
     this.kick()
-    return { op: stored, result: def.immediate(args, this.now()), settled }
+    return { op: stored, result: def.immediate?.(args, this.now()), settled }
   }
 
   pending(): number {
@@ -1306,19 +1876,29 @@ export class Outbox {
       return
     }
     this.draining = true
-    void this.lock(() => this.drain()).finally(() => {
-      this.draining = false
-      if (this.kicked) {
-        this.kicked = false
-        this.kick()
-      }
-    })
+    void this.lock(() => this.drain())
+      .catch((error: unknown) => {
+        // A drain that throws must not die quietly. Everything it owns — the
+        // pending count, the settlers, the journal — freezes in place, and a
+        // frozen pending count is indistinguishable from being offline, which
+        // is precisely what this class tells its reader to assume. Say so
+        // instead, and let the next kick try again.
+        this.emit({ type: "failed", error })
+      })
+      .finally(() => {
+        this.draining = false
+        if (this.kicked) {
+          this.kicked = false
+          this.kick()
+        }
+      })
   }
 
   private async drain(): Promise<void> {
     for (;;) {
       const snap = await this.store.read()
       this.setPending(snap.ops.length)
+      this.reconcileSettlers(snap)
       const op = snap.ops[0]
       if (op === undefined) return
       const def = this.kinds[op.kind]
@@ -1367,7 +1947,7 @@ export class Outbox {
         if (def.mints !== undefined && def.minted !== undefined) {
           resolved[def.mints(op.args)] = def.minted(result)
         }
-        return { ops, resolved: pruneResolved(resolved, ops) }
+        return { ops, resolved: capResolved(resolved, ops) }
       })
       this.settlers.get(op.id)?.resolve(result)
       this.settlers.delete(op.id)
@@ -1375,18 +1955,18 @@ export class Outbox {
     }
   }
 
+  /** Only ever asked about the head of the queue, so "later ops" is the tail. */
   private isStale(op: Op, def: OpKind<any, any>, snap: OutboxSnapshot): boolean {
     if (def.staleAfterMs === undefined) return false
     if (this.now() - op.enqueuedAt <= def.staleAfterMs) return false
     const closers = def.closedBy ?? []
-    const index = snap.ops.findIndex((o) => o.id === op.id)
-    return !snap.ops.slice(index + 1).some((o) => closers.includes(o.kind))
+    return !snap.ops.slice(1).some((o) => closers.includes(o.kind))
   }
 
   private async drop(op: Op, reason: "rejected" | "stale" | "orphaned", error?: unknown): Promise<void> {
     const next = await this.store.update((s) => {
       const ops = s.ops.filter((o) => o.id !== op.id)
-      return { ops, resolved: pruneResolved(s.resolved, ops) }
+      return { ops, resolved: s.resolved }
     })
     this.settlers.get(op.id)?.reject(error ?? new Error(reason))
     this.settlers.delete(op.id)
@@ -1400,17 +1980,108 @@ export class Outbox {
     this.emit({ type: "changed", pending: count })
   }
 
+  /**
+   * Empties the journal, and tells everything that watches it.
+   *
+   * A method rather than letting a caller reach for `store` directly: the
+   * queue is not the only state: `pendingCount` drives the status line, the
+   * settlers hold promises for ops that would otherwise never be answered,
+   * and a `changed` event is what the shell re-renders from. Clearing the
+   * store behind the engine's back leaves all three describing a queue that
+   * no longer exists — invisible when the page is about to be torn down, and
+   * exactly wrong when the sign-out that triggered it then fails.
+   */
+  async clear(): Promise<void> {
+    const next = await this.store.update(() => EMPTY_SNAPSHOT)
+    this.reconcileSettlers(next)
+    this.setPending(next.ops.length)
+  }
+
+  /**
+   * Settles anything that left the journal without THIS instance sending it.
+   *
+   * With the Web Lock in place another tab may hold the sender and drain an
+   * op this tab enqueued. Its result never comes back here, so the promise
+   * cannot be resolved with one — but leaving it pending forever would hang
+   * every caller awaiting it and grow `settlers` without bound. Rejecting is
+   * the honest answer, and it is why `settled` is documented as best-effort
+   * across tabs: never depend on it for correctness, only for extras like
+   * recording the server's clock.
+   *
+   * RESTS ON AN ORDERING INVARIANT: `enqueue` registers its settler
+   * synchronously after `store.update` resolves, with no `await` between. So
+   * a settler's op is always already in the journal, and this can never
+   * reject one for an op that is merely about to be written. An added `await`
+   * in that window would break it silently.
+   */
+  private reconcileSettlers(snap: OutboxSnapshot): void {
+    if (this.settlers.size === 0) return
+    const live = new Set(snap.ops.map((o) => o.id))
+    for (const [id, deferred] of this.settlers) {
+      if (live.has(id)) continue
+      deferred.reject(new Error(SENT_BY_ANOTHER_TAB))
+      this.settlers.delete(id)
+    }
+  }
+
   private emit(event: OutboxEvent): void {
-    for (const listener of this.listeners) listener(event)
+    for (const listener of this.listeners) {
+      try {
+        listener(event)
+      } catch {
+        // One subscriber's bug must not take the drain down with it — and
+        // `setPending` emits on every drain iteration, so it would.
+      }
+    }
   }
 }
 
-/** Forget a placeholder once no pending op mentions it. */
-function pruneResolved(resolved: Record<string, string>, ops: Op[]): Record<string, string> {
-  const text = JSON.stringify(ops.map((o) => o.args))
+/**
+ * How many resolved placeholder mappings to keep.
+ *
+ * They are kept by AGE — objects preserve string-key insertion order, so the
+ * oldest are simply the first — and never by whether a queued op still names
+ * one ALONE, though `capResolved` does consult the queue as well; see there.
+ * Reference-counting the live queue on its own looks tighter and is wrong: the
+ * mapping is minted in the very transaction that removes its producer from
+ * the queue, so a mapping with no dependent YET would be discarded
+ * microseconds after being learned. The screen still shows the placeholder
+ * until the reactive query swaps it, so an edit made in that window would
+ * arrive naming an id nothing could resolve and be dropped as "orphaned" —
+ * blamed on a producer that in fact succeeded. That is exactly the loss
+ * src/lib/optimistic-id.ts was written to warn about.
+ *
+ * A hundred is far more than a session offline can produce, and each entry is
+ * two short strings.
+ */
+const RESOLVED_LIMIT = 100
+
+/**
+ * The newest mappings, PLUS anything a queued op still names.
+ *
+ * The second half is not belt-and-braces, it is the whole safety property:
+ * this cap must only ever be able to over-retain. `resolved` is a lifetime
+ * accumulator, so an established account sits at the limit permanently and
+ * every mint evicts the oldest — and a journal like
+ * `[create P, …100 creates…, retitle P]` would push P's mapping out before
+ * the retitle reached the head. That op would then be dropped as "orphaned",
+ * blaming a producer that in fact succeeded: exactly the loss this mechanism
+ * was written to prevent, reintroduced at a different threshold.
+ *
+ * `unresolvedPlaceholders(args, {})` with an empty map enumerates every
+ * placeholder the queue names, which is precisely the set that must survive.
+ */
+function capResolved(resolved: Record<string, string>, ops: Op[]): Record<string, string> {
+  const keys = Object.keys(resolved)
+  if (keys.length <= RESOLVED_LIMIT) return resolved
+
+  const needed = new Set(unresolvedPlaceholders(ops.map((o) => o.args), {}))
+  const newest = new Set(keys.slice(keys.length - RESOLVED_LIMIT))
   const kept: Record<string, string> = {}
-  for (const [placeholder, real] of Object.entries(resolved)) {
-    if (text.includes(placeholder)) kept[placeholder] = real
+  // One pass over `keys`, so insertion order — which is the age order the
+  // eviction above depends on — survives the rebuild.
+  for (const key of keys) {
+    if (needed.has(key) || newest.has(key)) kept[key] = resolved[key]
   }
   return kept
 }
@@ -1456,6 +2127,7 @@ Create `src/lib/offline/optimistic-entries.ts`. Move, VERBATIM including their c
 import { insertAtPosition } from "convex/react"
 import { applyTimeEdit } from "@shared/entryTimes"
 import { optimisticIdFor } from "@/lib/optimistic-id"
+import { getSkewMs } from "@/lib/clock"
 import { api } from "../../../convex/_generated/api"
 import type { OptimisticLocalStore } from "convex/browser"
 import type { TimeEdit } from "@shared/entryTimes"
@@ -1476,6 +2148,27 @@ type StartArgs = {
   billable?: boolean
 }
 
+/**
+ * The billable flag the server would land on.
+ *
+ * `start` and `create` both do `args.billable ?? project?.billableByDefault
+ * ?? false` against the real row. Painting `?? false` here instead is a
+ * visible lie for the whole offline session — the row sits unbillable, and
+ * so does every billable total on the page, until the outbox replays. The
+ * project list is already in the cache on every authed surface, so the
+ * fallback costs a lookup.
+ */
+function billableFor(
+  store: OptimisticLocalStore,
+  projectId: Id<"projects"> | undefined,
+  explicit: boolean | undefined
+): boolean {
+  if (explicit !== undefined) return explicit
+  if (projectId === undefined) return false
+  const project = store.getQuery(api.projects.list, {})?.find((p) => p._id === projectId)
+  return project?.billableByDefault ?? false
+}
+
 export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): void {
   store.setQuery(
     api.entries.getRunning,
@@ -1484,7 +2177,7 @@ export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): v
       clientKey: args.clientKey,
       title: args.title ?? "",
       startedAt: args.startedAt ?? Date.now(),
-      billable: args.billable ?? false,
+      billable: billableFor(store, args.projectId, args.billable),
       projectId: args.projectId,
       tagIds: args.tagIds ?? [],
     })
@@ -1611,7 +2304,7 @@ export function optimisticCreate(store: OptimisticLocalStore, args: CreateArgs):
     clientKey: args.clientKey,
     title: args.title ?? "",
     startedAt: args.startedAt,
-    billable: args.billable ?? false,
+    billable: billableFor(store, args.projectId, args.billable),
     projectId: args.projectId,
     tagIds: args.tagIds ?? [],
   })
@@ -1621,6 +2314,10 @@ export function optimisticCreate(store: OptimisticLocalStore, args: CreateArgs):
     note: note === undefined || note === "" ? undefined : note,
     endedAt: args.endedAt,
     durationMs: args.endedAt - args.startedAt,
+    // `optimisticEntry` says "web" because it was written for `start`.
+    // `entries.create` writes "manual", and this row has to match the one it
+    // will be replaced by.
+    source: "manual",
   })
 }
 ```
@@ -1633,6 +2330,162 @@ In `src/hooks/use-entry-edit-mutations.ts` delete the moved functions and the `i
 
 Run `pnpm vitest run src/hooks && pnpm typecheck` → green.
 
+- [ ] **Step 2b: Test the per-mutation entry functions**
+
+The moved helpers are already guarded by `src/hooks/use-entry-edit-mutations.test.ts`. What has no coverage at all is the per-mutation layer on top of them, and `optimisticCreate` in particular is new code whose whole job is to paint a row the server will agree with.
+
+Create `src/lib/offline/optimistic-entries.test.ts`:
+
+```ts
+import { QueryClient } from "@tanstack/react-query"
+import { describe, expect, it } from "vitest"
+import { TanStackLocalStore } from "./tanstack-local-store"
+import {
+  optimisticCreate,
+  optimisticRestore,
+  optimisticSetTitle,
+  optimisticStart,
+  optimisticStop,
+} from "./optimistic-entries"
+import type { Doc, Id } from "../../../convex/_generated/dataModel"
+
+const RUNNING = ["convexQuery", "entries:getRunning", {}]
+const PROJECTS = ["convexQuery", "projects:list", {}]
+const range = { fromMs: 0, toMs: 4_000_000_000_000 }
+const RANGE = ["convexQuery", "entries:listRange", range]
+
+function project(overrides: Partial<Doc<"projects">> = {}): Doc<"projects"> {
+  return {
+    _id: "p1" as Id<"projects">,
+    _creationTime: 1,
+    userId: "u",
+    name: "Website",
+    color: "slate",
+    archived: false,
+    billableByDefault: true,
+    updatedAt: 1,
+    deletedAt: null,
+    ...overrides,
+  }
+}
+
+function setup() {
+  const client = new QueryClient()
+  client.setQueryData(RUNNING, null)
+  client.setQueryData(PROJECTS, [project()])
+  client.setQueryData(RANGE, [])
+  return { client, store: new TanStackLocalStore(client) }
+}
+
+describe("optimisticStart", () => {
+  it("puts a placeholder-keyed row in the running slot", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", title: "Writing", startedAt: 1_000 })
+    const running = client.getQueryData<Doc<"timeEntries">>(RUNNING)!
+    expect(running._id).toBe("optimistic:k1")
+    expect(running.title).toBe("Writing")
+    expect(running.endedAt).toBeNull()
+    expect(running.durationMs).toBeNull()
+  })
+
+  it("inherits the project's billable default, as the server does", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", projectId: "p1" as Id<"projects"> })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.billable).toBe(true)
+  })
+
+  it("lets an explicit billable win over the project's default", () => {
+    const { client, store } = setup()
+    optimisticStart(store, {
+      clientKey: "k1",
+      projectId: "p1" as Id<"projects">,
+      billable: false,
+    })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.billable).toBe(false)
+  })
+})
+
+describe("optimisticStop", () => {
+  it("empties the running slot with null, never undefined", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1" })
+    optimisticStop(store)
+    expect(client.getQueryData(RUNNING)).toBeNull()
+  })
+})
+
+describe("optimisticSetTitle", () => {
+  it("retitles the running entry", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", title: "First" })
+    optimisticSetTitle(store, {
+      entryId: "optimistic:k1" as Id<"timeEntries">,
+      title: "Second",
+    })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.title).toBe("Second")
+  })
+
+  it("leaves a different running entry alone", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", title: "First" })
+    optimisticSetTitle(store, { entryId: "other" as Id<"timeEntries">, title: "Second" })
+    expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.title).toBe("First")
+  })
+})
+
+describe("optimisticCreate", () => {
+  it("paints a completed row the server will agree with", () => {
+    const { client, store } = setup()
+    optimisticCreate(store, {
+      clientKey: "k1",
+      title: "Migration",
+      note: "  ",
+      startedAt: 1_000,
+      endedAt: 4_600_000,
+      projectId: "p1" as Id<"projects">,
+    })
+    const [row] = client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)!
+    expect(row._id).toBe("optimistic:k1")
+    expect(row.durationMs).toBe(4_599_000)
+    // Blank normalises away, exactly as convex/entries.ts's normaliseNote does.
+    expect(row.note).toBeUndefined()
+    // Inherited, not defaulted to false — offline nothing corrects this.
+    expect(row.billable).toBe(true)
+    // `entries.create` writes "manual"; only `start` writes "web".
+    expect(row.source).toBe("manual")
+  })
+})
+
+describe("optimisticRestore", () => {
+  it("puts back the snapshot the op carried", () => {
+    const { client, store } = setup()
+    const entry = {
+      _id: "e1" as Id<"timeEntries">,
+      _creationTime: 1_000,
+      userId: "u",
+      clientKey: "c1",
+      title: "Deleted",
+      startedAt: 1_000,
+      endedAt: 2_000,
+      durationMs: 1_000,
+      tagIds: [],
+      billable: false,
+      source: "web",
+      updatedAt: 2_000,
+      deletedAt: null,
+    } as Doc<"timeEntries">
+    optimisticRestore(store, { entryId: entry._id }, { entry })
+    expect(client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)).toEqual([entry])
+  })
+
+  it("does nothing when the op carries no snapshot", () => {
+    const { client, store } = setup()
+    optimisticRestore(store, { entryId: "e1" as Id<"timeEntries"> }, undefined)
+    expect(client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)).toEqual([])
+  })
+})
+```
+
 - [ ] **Step 3: Write the failing classifier test**
 
 Create `src/lib/offline/optimistic-classifiers.test.ts`:
@@ -1642,6 +2495,7 @@ import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 import { TanStackLocalStore } from "./tanstack-local-store"
 import {
+  tagPlaceholder,
   optimisticProjectCreate,
   optimisticProjectRemove,
   optimisticProjectSetArchived,
@@ -1731,6 +2585,22 @@ describe("tags", () => {
     expect(client.getQueryData<Doc<"tags">[]>(TAGS)![0].name).toBe("operations")
     optimisticTagRemove(store, { tagId: "t1" as Id<"tags"> })
     expect(client.getQueryData<Doc<"tags">[]>(TAGS)).toEqual([])
+  })
+
+  it("re-sorts on a rename that moves the row", () => {
+    // A one-row list cannot exercise the sort, so the rename path shipped
+    // untested. The server re-sorts by name; so must this.
+    const { client, store } = setup()
+    client.setQueryData(TAGS, [tag({ _id: "t1" as Id<"tags">, name: "alpha" }), tag({ _id: "t2" as Id<"tags">, name: "beta" })])
+    optimisticTagRename(store, { tagId: "t1" as Id<"tags">, name: "zulu" })
+    expect(client.getQueryData<Doc<"tags">[]>(TAGS)!.map((t) => t.name)).toEqual([
+      "beta",
+      "zulu",
+    ])
+  })
+
+  it("mints one placeholder however the name is spelled", () => {
+    expect(tagPlaceholder("  OPS ")).toBe(tagPlaceholder("ops"))
   })
 })
 ```
@@ -1893,7 +2763,14 @@ it("patches only the fields sent, and null clears the default rate", () => {
   client.setQueryData(KEY, { timezone: "UTC", currency: "USD", defaultHourlyRateCents: 5000, logoUrl: null })
   const store = new TanStackLocalStore(client)
   optimisticSettingsUpdate(store, { currency: "EUR", defaultHourlyRateCents: null })
-  expect(client.getQueryData(KEY)).toEqual({ timezone: "UTC", currency: "EUR", logoUrl: null })
+  // `toStrictEqual`, not `toEqual`: the latter ignores keys whose value is
+  // `undefined`, so it cannot tell a real `delete` from `= undefined` — and
+  // the deleting branch is the whole point of this test.
+  expect(client.getQueryData(KEY)).toStrictEqual({
+    timezone: "UTC",
+    currency: "EUR",
+    logoUrl: null,
+  })
 })
 ```
 
@@ -1949,6 +2826,8 @@ Create `src/lib/offline/op-kinds.test.ts`:
 import { describe, expect, it } from "vitest"
 import { getFunctionName } from "convex/server"
 import { OP_KINDS, STALE_START_MS } from "./op-kinds"
+import type { OptimisticLocalStore } from "convex/browser"
+import type { OpKindName } from "./op-kinds"
 
 describe("OP_KINDS", () => {
   it("names every kind after the Convex function it sends", () => {
@@ -1973,9 +2852,57 @@ describe("OP_KINDS", () => {
     ])
   })
 
+  it("only names closers that are real kinds", () => {
+    // `closedBy` is `ReadonlyArray<string>` — it cannot reference OpKindName
+    // without a type cycle — so a typo would leave `entries.start`
+    // permanently un-closeable and drop every replayed start after a day.
+    for (const [name, def] of Object.entries(OP_KINDS)) {
+      for (const closer of def.closedBy ?? []) {
+        expect(Object.keys(OP_KINDS), `${name} closedBy`).toContain(closer)
+      }
+    }
+  })
+
+  it("mints the id its optimistic function actually writes", () => {
+    // A drift here is catastrophic and silent: the outbox records a
+    // resolution for an id nothing is showing, and every dependent op is
+    // dropped as "orphaned". Each of the four minting kinds is driven
+    // through its own optimistic function against a stub store, and the id
+    // that lands is compared with what `mints` claims.
+    const cases: Array<{ kind: OpKindName; args: any; seed: unknown }> = [
+      { kind: "entries.start", args: { clientKey: "k1" }, seed: null },
+      {
+        kind: "entries.create",
+        args: { clientKey: "k2", startedAt: 1_000, endedAt: 2_000 },
+        seed: [],
+      },
+      { kind: "projects.create", args: { clientKey: "k3", name: "P" }, seed: [] },
+      { kind: "tags.ensure", args: { name: "  Ops " }, seed: [] },
+    ]
+
+    for (const { kind, args, seed } of cases) {
+      const def = OP_KINDS[kind]
+      let written: unknown
+      const store = {
+        getQuery: () => seed,
+        getAllQueries: () => [],
+        setQuery: (_q: unknown, _a: unknown, value: unknown) => {
+          written = value
+        },
+      } as unknown as OptimisticLocalStore
+
+      def.optimistic?.(store, args, undefined)
+      const rows = Array.isArray(written) ? written : written === null ? [] : [written]
+      const ids = (rows as Array<{ _id?: string }>).map((row) => row._id)
+      expect(ids, kind).toContain(def.mints?.(args))
+    }
+  })
+
   it("start's immediate result carries the placeholder the optimistic row uses", () => {
     const r = OP_KINDS["entries.start"].immediate({ clientKey: "k", title: "" }, 5)
-    expect(r).toEqual({ entryId: "optimistic:k", stoppedEntryIds: [], serverNow: 5, replayed: false })
+    expect(r.entryId).toBe("optimistic:k")
+    expect(r.stoppedEntryIds).toEqual([])
+    expect(r.replayed).toBe(false)
   })
 })
 ```
@@ -1997,9 +2924,19 @@ import type { OpKind } from "./op-types"
 /** An unclosed start older than this is not resumed — `pending-start`'s rule. */
 export const STALE_START_MS = 24 * 60 * 60 * 1000
 
-function kind<Ref extends FunctionReference<"mutation", "public">>(
-  def: OpKind<FunctionArgs<Ref>, FunctionReturnType<Ref>> & { ref: Ref }
-) {
+/**
+ * Checks a kind against its mutation without flattening it.
+ *
+ * Generic over `Def` rather than annotating the parameter, because an
+ * annotation becomes the return type: every kind's `immediate` would read as
+ * `… | undefined` even where a function literal was plainly given, and the
+ * registry's own test could not call one. This validates and hands the
+ * literal type straight back.
+ */
+function kind<
+  Ref extends FunctionReference<"mutation", "public">,
+  Def extends OpKind<FunctionArgs<Ref>, FunctionReturnType<Ref>> & { ref: Ref },
+>(def: Def): Def {
   return def
 }
 
@@ -2023,7 +2960,12 @@ export const OP_KINDS = {
     immediate: (args, now) => ({
       entryId: optimisticIdFor(args.clientKey) as unknown as Id<"timeEntries">,
       stoppedEntryIds: [],
-      serverNow: now,
+      // The best estimate of server time available synchronously. Raw
+      // `Date.now()` here would be a claim that the device clock IS the
+      // server's, and a caller feeding it to `recordServerNow` would zero a
+      // skew that had been measured — making a running timer jump. The real
+      // answer arrives through `settled`.
+      serverNow: now + getSkewMs(),
       replayed: false,
     }),
     staleAfterMs: STALE_START_MS,
@@ -2033,13 +2975,28 @@ export const OP_KINDS = {
     ref: api.entries.stop,
     label: "Stopping the timer",
     optimistic: entries.optimisticStop,
-    immediate: (_args, now) => ({ stoppedEntryIds: [], serverNow: now }),
+    /*
+     * `stoppedEntryIds` names the timer this stop is FOR, when it names one.
+     *
+     * Not `[]`. Callers branch on this list — `timer-bar.tsx` announces
+     * "Stopped X. 1h 5m recorded." only when it is non-empty — so a
+     * permanently empty answer silently kills the announcement for every
+     * stop. An empty list is the honest answer only when the caller did not
+     * say which timer it meant.
+     *
+     * Skew-adjusted for the same reason `start`'s is — see there.
+     */
+    immediate: (args, now) => ({
+      stoppedEntryIds: args.entryId === undefined ? [] : [args.entryId],
+      serverNow: now + getSkewMs(),
+    }),
   }),
   "entries.discardRunning": kind({
     ref: api.entries.discardRunning,
     label: "Discarding the timer",
     optimistic: entries.optimisticDiscard,
-    immediate: nothing,
+    // Empty is honest — nothing has been discarded on the server yet.
+    immediate: () => ({ discardedEntryIds: [] }),
   }),
   "entries.setTitle": kind({
     ref: api.entries.setTitle,
@@ -2064,31 +3021,36 @@ export const OP_KINDS = {
     ref: api.entries.editTime,
     label: "Editing an entry's time",
     optimistic: entries.optimisticEditTime,
-    immediate: nothing,
+    // NO `immediate`. The server returns the RECONCILED times, which cannot
+    // be derived from the args alone — the rule needs the entry's current
+    // times, and `immediate` is not given them. Every call site discards the
+    // result anyway; the optimistic function writes the true values to the
+    // cache, which is what the screen renders.
   }),
   "entries.remove": kind({
     ref: api.entries.remove,
     label: "Deleting an entry",
     optimistic: entries.optimisticRemove,
-    immediate: nothing,
+    // Empty is honest: nothing has been removed on the server yet.
+    immediate: () => ({ removedEntryIds: [] }),
   }),
   "entries.removeMany": kind({
     ref: api.entries.removeMany,
     label: "Deleting entries",
     optimistic: entries.optimisticRemoveMany,
-    immediate: nothing,
+    immediate: () => ({ removedEntryIds: [] }),
   }),
   "entries.restore": kind({
     ref: api.entries.restore,
     label: "Restoring an entry",
     optimistic: entries.optimisticRestore,
-    immediate: nothing,
+    immediate: () => ({ restoredEntryIds: [] }),
   }),
   "entries.restoreMany": kind({
     ref: api.entries.restoreMany,
     label: "Restoring entries",
     optimistic: entries.optimisticRestoreMany,
-    immediate: nothing,
+    immediate: () => ({ restoredEntryIds: [] }),
   }),
   "entries.create": kind({
     ref: api.entries.create,
@@ -2104,7 +3066,23 @@ export const OP_KINDS = {
   "projects.create": kind({
     ref: api.projects.create,
     label: "Creating a project",
-    optimistic: classifiers.optimisticProjectCreate,
+    /*
+     * Wrapped rather than referenced bare, because the mutation's `clientKey`
+     * is OPTIONAL — projects created before the outbox existed have none —
+     * while the optimistic function needs one to key its placeholder on.
+     *
+     * A guard here and casts in `mints`/`immediate` below, deliberately, and
+     * the difference is what each one can do wrong. This function PAINTS —
+     * without a key it would put a row keyed `optimistic:undefined` on screen
+     * that the outbox could never resolve, so doing nothing is the honest
+     * answer. `mints` and `immediate` only ever run for an op the outbox
+     * itself enqueued, and Task 9 mints a key for every one, so their casts
+     * describe a boundary that is not crossed rather than a case to handle.
+     */
+    optimistic: (store, args) => {
+      if (args.clientKey === undefined) return
+      classifiers.optimisticProjectCreate(store, { ...args, clientKey: args.clientKey })
+    },
     mints: (args) => optimisticIdFor(args.clientKey as string),
     minted: (result) => result.projectId,
     immediate: (args) => ({
@@ -2117,6 +3095,11 @@ export const OP_KINDS = {
     optimistic: classifiers.optimisticProjectUpdate,
     immediate: nothing,
     coalesceKey: (args) => args.projectId,
+    // MERGE, for the same reason settings.update does: `updateArgs` is a patch
+    // of independent optionals and /projects sends genuine partials — a colour
+    // swatch sends {projectId, color}, the name field sends {projectId, name}.
+    // Replacing would drop the colour when the name is edited second.
+    coalesceMerge: true,
   }),
   "projects.setArchived": kind({
     ref: api.projects.setArchived,
@@ -2160,6 +3143,8 @@ export const OP_KINDS = {
     optimistic: optimisticSettingsUpdate,
     immediate: nothing,
     coalesceKey: () => "settings",
+    // MERGE, not replace: a settings save carries one field of many.
+    coalesceMerge: true,
   }),
 } as const
 
@@ -2168,23 +3153,11 @@ export type ArgsOf<K extends OpKindName> = FunctionArgs<(typeof OP_KINDS)[K]["re
 export type ResultOf<K extends OpKindName> = FunctionReturnType<(typeof OP_KINDS)[K]["ref"]>
 ```
 
-If `api.projects.remove`, `api.projects.setArchived`, `api.tags.rename`, `api.tags.remove` or `api.entries.discardRunning`'s return types are not `null`, adjust the `immediate` for that kind to build a value of the right shape (read the `returns:` validator in the Convex file). If `projects.create`'s `clientKey` is typed optional, the `as string` casts above stay.
+**Before writing the registry, widen `OpKind.immediate` to optional** in `src/lib/offline/op-types.ts` (the doc comment above says why), and change the engine's one call site in `src/lib/offline/outbox.ts` from `def.immediate(args, this.now())` to `def.immediate?.(args, this.now())`. `Outbox.enqueue` already types `result` as `unknown`, so nothing else in the engine moves. Re-run `pnpm vitest run src/lib/offline` afterwards — every existing engine test must stay green.
 
-Note on coalescing `settings.update`: two consecutive settings ops collapse into the LATER op's args only. That is wrong when the first set `currency` and the second set `timezone`. Change the engine's coalesce to MERGE args for kinds that opt in: add `coalesceMerge?: boolean` to `OpKind` (Task 3's type), set it on `settings.update`, and in `Outbox.enqueue` replace `{ ...op, id: last.id, enqueuedAt: last.enqueuedAt }` with `{ ...op, id: last.id, enqueuedAt: last.enqueuedAt, args: def.coalesceMerge ? { ...last.args, ...args } : args }`. Add a test to `outbox.test.ts`:
+Return types are already resolved, so do not re-derive them. Declaring `returns: v.null()`, where `nothing` is right: `entries.setTitle`, `entries.update`, `entries.updateMany`, `projects.update`, `projects.setArchived`, `projects.remove`, `tags.rename`, `tags.remove`, `settings.update`. Returning a real shape, handled in the code above: `entries.start`, `entries.stop`, `entries.discardRunning`, `entries.create`, `entries.remove`, `entries.removeMany`, `entries.restore`, `entries.restoreMany`, `projects.create`, `tags.ensure`. With no honest synchronous answer, so no `immediate` at all: `entries.editTime`. `projects.create`'s `clientKey` is optional, so the `as string` casts stay.
 
-```ts
-  it("merges args when the kind asks for it", async () => {
-    const h = harness({ manual: true })
-    kinds.settings = { ref: anyApi.settings.update, label: "Saving", immediate: () => null, coalesceKey: () => "s", coalesceMerge: true }
-    await h.outbox.enqueue("stop", {})
-    await flush()
-    await h.outbox.enqueue("settings", { currency: "EUR" })
-    await h.outbox.enqueue("settings", { timezone: "UTC" })
-    h.resolveSend(null)
-    await flush()
-    expect(h.sent[1].args).toEqual({ currency: "EUR", timezone: "UTC" })
-  })
-```
+`settings.update` carries `coalesceMerge: true` above, and that is load-bearing rather than decorative: the default collapse replaces the earlier op's args, which would lose the currency when the timezone is typed second. The engine and its test for both behaviours land in Task 6; here you only set the flag.
 
 - [ ] **Step 3: Run, typecheck, commit**
 
@@ -2250,10 +3223,14 @@ export function createOutbox(convexClient: ConvexReactClient, queryClient: Query
     applyLocal: (op) => {
       const def = kinds[op.kind]
       try {
-        def.optimistic?.(adapter, op.args, op.local)
+        def?.optimistic?.(adapter, op.args, op.local)
       } catch {
-        // A patch against a cache shape that has since changed must never
-        // stop the boot. The server's answer is on its way regardless.
+        // The LIVE path, not the boot: `Outbox.load` already guards its own
+        // replay loop, so what this catches is a patch made at enqueue time
+        // against a cache shape that has since changed. The cost is that the
+        // edit does not appear until the server answers, which is bad but
+        // survivable; letting it throw would reject the caller's write for a
+        // rendering problem.
       }
     },
     retryable: isRetryableRejection,
@@ -2323,12 +3300,32 @@ export function useOutbox(): Outbox {
  * `settled` is the server's eventual answer for the callers that need it
  * (`start` records `serverNow` from it).
  */
+/**
+ * What `result` is for a given kind — the kind's own result, or `undefined`
+ * when it declares no `immediate`.
+ *
+ * Conditional rather than a blanket `| undefined`, and that is the whole
+ * point: `kind()` deliberately keeps `immediate` out of its widening `Pick`,
+ * so a kind that omits it genuinely lacks the key on its literal type and
+ * this discriminates. A blanket union would push every caller to a `!`, and
+ * a `!` is a lie waiting to happen — removing an `immediate` (which is
+ * exactly what `entries.editTime` did) would leave four call sites compiling
+ * and one of them throwing inside a click handler. This way that same
+ * removal is four compile errors.
+ */
+type ImmediateOf<K extends OpKindName> = "immediate" extends keyof (typeof OP_KINDS)[K]
+  ? ResultOf<K>
+  : undefined
+
 export function useOutboxMutation<K extends OpKindName>(kind: K) {
   const outbox = useOutbox()
   return useCallback(
     async (args: ArgsOf<K>, local?: OpLocal) => {
       const { result, settled } = await outbox.enqueue(kind, args as Record<string, unknown>, local)
-      return { result: result as ResultOf<K>, settled: settled as Promise<ResultOf<K>> }
+      return {
+        result: result as ImmediateOf<K>,
+        settled: settled as Promise<ResultOf<K>>,
+      }
     },
     [outbox, kind]
   )
@@ -2405,15 +3402,27 @@ export function useEntryMutations() {
     [start]
   )
 
-  /** `endedAt` is recorded NOW: a stop replayed hours later must close the
-   *  entry at the moment the user pressed it, not at the moment it synced. */
-  const stop = useCallback(async () => {
-    const { result, settled } = await stopOp({ endedAt: Date.now() })
-    void settled.then((r) => recordServerNow(r.serverNow)).catch(() => undefined)
-    return result
-  }, [stopOp])
+  /**
+   * `endedAt` is recorded NOW: a stop replayed hours later must close the
+   * entry at the moment the user pressed it, not at the moment it synced.
+   *
+   * `entryId` is what makes that safe — see `stopImpl` in convex/entries.ts.
+   * It may be an `optimistic:` placeholder when the start has not landed yet,
+   * which is exactly what the outbox rewrites once that start resolves.
+   */
+  const stop = useCallback(
+    async (entryId?: Id<"timeEntries">) => {
+      const { result, settled } = await stopOp({ entryId, endedAt: Date.now() })
+      void settled.then((r) => recordServerNow(r.serverNow)).catch(() => undefined)
+      return result
+    },
+    [stopOp]
+  )
 
-  const discard = useCallback(async () => (await discardOp({})).result, [discardOp])
+  const discard = useCallback(
+    async (entryId?: Id<"timeEntries">) => (await discardOp({ entryId })).result,
+    [discardOp]
+  )
 
   const setTitle = useCallback(
     async (entryId: Id<"timeEntries">, title: string) => {
@@ -2425,6 +3434,20 @@ export function useEntryMutations() {
   return { start, resume, stop, discard, setTitle }
 }
 ```
+
+**The callers must supply the name.** `TimerBarActions.stop` is typed `() => Promise<…>` and the bar calls it with no argument, so the id is supplied where the running entry is in scope rather than by widening the component's contract. In `src/routes/_authed.tsx`, inside `AuthedShell`, change the two call sites to close over `running`:
+
+```tsx
+      stop: () => entryMutations.stop(running?._id),
+```
+
+in the `timerActions` memo (add `running` to its dependency array), and in the `RunawayBanner` props:
+
+```tsx
+            onStop={() => void entryMutations.stop(running?._id).catch(report)}
+```
+
+`discardRunning` in the same file becomes `entryMutations.discard(running?._id)`. A `running` of `null` leaves the id undefined, which is the old "stop whatever is running" behaviour — correct, because a user can only press stop when the bar is showing them a timer.
 
 Keep the moved `optimisticEntry` import out of this file (it no longer needs it). Delete `src/lib/pending-start.ts` and its test if one exists. In `src/hooks/use-timer-effects.ts` delete `useReplayPendingStart` and its imports (`useEntryMutations`, `readPendingStart`, `shouldReplay`). In `src/routes/_authed.tsx` delete `useReplayPendingStart(running)` and its import.
 
@@ -2479,9 +3502,12 @@ export function useEntryEditMutations() {
     [updateManyOp]
   )
 
+  /** Returns nothing: the reconciled times are not knowable synchronously,
+   *  and every call site discards them. See the `entries.editTime` kind. */
   const editTime = useCallback(
-    async (entryId: Id<"timeEntries">, field: TimeEdit["field"], value: number) =>
-      (await editTimeOp({ entryId, field, value })).result,
+    async (entryId: Id<"timeEntries">, field: TimeEdit["field"], value: number) => {
+      await editTimeOp({ entryId, field, value })
+    },
     [editTimeOp]
   )
 
@@ -2672,7 +3698,7 @@ Add `import { OutboxProvider } from "@/lib/offline/outbox-provider"`.
 pnpm test && pnpm typecheck && pnpm lint
 ```
 
-Then start the app (`pnpm dev`, port 3100), sign in, start/stop/retitle a timer, create a project, and confirm in DevTools → Application → IndexedDB → `chroneli-offline/outbox` that ops appear and clear. Commit:
+Then start the app (`pnpm dev`, port 3100), sign in, start/stop/retitle a timer, create a project, and confirm in DevTools → Application → IndexedDB → `chroneli-outbox/outbox` that ops appear and clear. Commit:
 
 ```bash
 git add -A src/hooks src/lib/offline src/routes/_authed.tsx src/routes/_authed/-settings.tsx
@@ -2800,6 +3826,22 @@ describe("SyncStatus", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Syncing 1 change…")
   })
 
+  it("does not pin the confirmation when the socket blips mid-window", () => {
+    // The timer used to be armed inside the effect that watches `offline`,
+    // so an offline flip cleared it and the re-run never re-armed —
+    // "All changes saved." then stayed on the shell indefinitely.
+    vi.useFakeTimers()
+    const { rerender, container } = render(<SyncStatus offline={false} pending={2} />)
+    rerender(<SyncStatus offline={false} pending={0} />)
+    rerender(<SyncStatus offline pending={0} />)
+    rerender(<SyncStatus offline={false} pending={0} />)
+    act(() => {
+      vi.advanceTimersByTime(2_100)
+    })
+    expect(container.innerHTML).toBe("")
+    vi.useRealTimers()
+  })
+
   it("confirms briefly once the count returns to zero", () => {
     vi.useFakeTimers()
     const { rerender, container } = render(<SyncStatus offline={false} pending={2} />)
@@ -2837,15 +3879,28 @@ export function SyncStatus({ offline, pending }: { offline: boolean; pending: nu
   const [justSaved, setJustSaved] = useState(false)
   const previous = useRef(pending)
 
+  /*
+   * Arming and clearing are separate effects, deliberately.
+   *
+   * With the timer armed inside this effect, a change to `offline` runs the
+   * cleanup and clears it — and the re-run then sees `previous.current === 0`
+   * and never re-arms. `justSaved` would stay true forever. That is not a
+   * corner case: `isOffline` flips on the FIRST failed retry of a socket that
+   * was connected, so a blip within the two-second window is ordinary, and
+   * the result is "All changes saved." pinned to the shell until the next
+   * time something syncs.
+   */
   useEffect(() => {
-    if (previous.current > 0 && pending === 0 && !offline) {
-      setJustSaved(true)
-      const timer = setTimeout(() => setJustSaved(false), SAVED_FOR_MS)
-      previous.current = pending
-      return () => clearTimeout(timer)
-    }
+    const settled = previous.current > 0 && pending === 0 && !offline
     previous.current = pending
+    if (settled) setJustSaved(true)
   }, [pending, offline])
+
+  useEffect(() => {
+    if (!justSaved) return
+    const timer = setTimeout(() => setJustSaved(false), SAVED_FOR_MS)
+    return () => clearTimeout(timer)
+  }, [justSaved])
 
   const changes = `${pending} ${pending === 1 ? "change" : "changes"}`
 
@@ -2890,13 +3945,29 @@ In `src/routes/_authed.tsx`'s `AuthedShell`, after `const report = …`, add:
   useOutboxEvents(
     useCallback(
       (event) => {
+        if (event.type === "failed") {
+          // Not "offline": the queue stopped for a reason of its own, and
+          // the status line's count would otherwise sit there implying it is
+          // merely waiting for the network.
+          toasts.add({
+            title: "Syncing stopped unexpectedly. Your changes are saved on this device.",
+            priority: "high",
+            timeout: 8_000,
+          })
+          return
+        }
         if (event.type !== "dropped") return
         const label = OP_KINDS[event.op.kind as OpKindName]?.label ?? "A change"
+        // Each reads as a sentence after the kind's label, which is a gerund
+        // phrase: "Starting the timer was skipped: …". The stale wording in
+        // particular cannot be "was started more than a day ago" — the only
+        // kind that can go stale is the start, so that composes to "Starting
+        // the timer was started…".
         const why =
           event.reason === "stale"
-            ? "was started more than a day ago while offline, so it wasn't resumed."
+            ? "was skipped: it had been waiting more than a day."
             : event.reason === "orphaned"
-              ? "depended on something that didn't save."
+              ? "was skipped: something it depended on didn't save."
               : `didn't save: ${errorMessage(event.error)}`
         toasts.add({ title: `${label} ${why}`, priority: "high", timeout: 8_000 })
       },
@@ -2908,6 +3979,26 @@ In `src/routes/_authed.tsx`'s `AuthedShell`, after `const report = …`, add:
 Imports: `useCallback` from react, `useOnlineStatus` from `@/lib/offline/use-online-status`, `usePendingCount, useOutboxEvents` from `@/lib/offline/outbox-provider`, `OP_KINDS` and `type OpKindName` from `@/lib/offline/op-kinds`.
 
 Render `<SyncStatus offline={!online} pending={pending} />` inside the `timer` fragment, after `<RunawayBanner … />`. Import it from `@/components/shell/sync-status`.
+
+- [ ] **Step 3b: Retire the error paths the outbox made unreachable**
+
+Task 9 changed every write wrapper to resolve as soon as the op is journaled, so a `.catch(report)` on one of them can no longer fire — a refusal now arrives as the `dropped` event Step 3 just wired up. Until this step those `.catch` calls are dead code that *reads* as live error handling, which is worse than none: the next person to touch one will believe failures are covered there.
+
+Find them with:
+
+```bash
+pnpm eslint --no-eslintrc --rule '{}' /dev/null >/dev/null 2>&1; grep -rn "catch(report)\|catch((thrown" src/routes src/hooks src/components --include=*.tsx --include=*.ts | grep -v "\.test\."
+```
+
+For each hit, decide which of three it is and act:
+
+1. **Wrapping an outbox write** (`start`, `stop`, `discard`, `setTitle`, `update`, `updateMany`, `editTime`, `remove`, `removeMany`, `restore`, `restoreMany`, `create`, `createProject`, `updateProject`, `setArchived`, `removeProject`, `ensureTag`, `renameTag`, `removeTag`, settings `update`) — remove the `.catch` and the now-unused `report`/`toasts` plumbing if nothing else uses it. Where a comment explains the catch, replace it with one naming the outbox as the reporter, so the reasoning is transferred rather than deleted. Two comments are already wrong and must be corrected here rather than left:
+   - `src/routes/_authed.tsx`'s `discardRunning` — its "THE ORDER IS THE POINT. Announcing first would claim a discard that the server may still refuse" no longer describes anything, because the write resolves before any round trip. Say instead that the announcement is now optimistic by construction and the outbox reports a refusal.
+   - `src/hooks/use-entry-actions.ts`'s `onDayChange` — "A failure surfaces as a toast rather than reverting silently", and the longer note explaining why this one catches "unlike the other row edits". Both describe a path that no longer exists.
+2. **Wrapping something still online-only** (`generateLogoUploadUrl`, `setLogo`, `clearLogo`, `music.*`, `google.*`, `invoices.*`) — leave exactly as it is. These still reject.
+3. **Wrapping a non-mutation** (a parse, an export, a clipboard write) — leave as it is.
+
+Do not remove a `try`/`catch` whose `try` also contains something that can still throw. When in doubt about a specific site, leave it and list it in your report rather than guessing.
 
 - [ ] **Step 4: Verify in the browser, commit**
 
@@ -2984,11 +4075,28 @@ describe("attachSnapshotWriter", () => {
   it("writes successful convex results, debounced, and ignores other keys", async () => {
     const client = new QueryClient()
     const store = new MemorySnapshotStore()
-    const detach = attachSnapshotWriter(client.getQueryCache(), store, 10)
+    // Counting writes, not just checking the final value: two rapid changes
+    // leave `{a:2}` stored whether the writer debounces or fires on every
+    // event, so the value alone would pass with the debounce deleted.
+    let writes = 0
+    const counting: SnapshotStore = {
+      ...store,
+      read: (hash) => store.read(hash),
+      write: (hash, snapshot) => {
+        writes += 1
+        return store.write(hash, snapshot)
+      },
+      prune: (olderThanMs) => store.prune(olderThanMs),
+      clear: () => store.clear(),
+    }
+    const detach = attachSnapshotWriter(client.getQueryCache(), counting, 10)
     client.setQueryData(KEY, { a: 1 })
     client.setQueryData(KEY, { a: 2 })
     client.setQueryData(["other"], 1)
+    // Nothing yet: the window has not elapsed.
+    expect(writes).toBe(0)
     await wait(30)
+    expect(writes).toBe(1)
     expect((await store.read(hashKey(KEY)))?.data).toEqual({ a: 2 })
     expect(await store.read(hashKey(["other"]))).toBeUndefined()
     detach()
@@ -3017,6 +4125,14 @@ Create `src/lib/offline/query-snapshots.ts`:
 import { clear, createStore, del, entries, get, set } from "idb-keyval"
 import type { QueryCache, QueryFunction, QueryKey } from "@tanstack/react-query"
 
+/**
+ * `updatedAt` is when this snapshot was last WRITTEN, not when its data was
+ * last fetched from the server. Serving a snapshot offline is recorded by
+ * TanStack as an ordinary success, so the writer stores it back with a fresh
+ * stamp — meaning a snapshot in active use never ages out. That is the
+ * intended behaviour (what is being read is what should be kept), but it does
+ * mean the prune below bounds the store by disuse rather than by age of data.
+ */
 export type Snapshot = { data: unknown; updatedAt: number }
 
 export interface SnapshotStore {
@@ -3048,7 +4164,7 @@ export class MemorySnapshotStore implements SnapshotStore {
 
 export class IdbSnapshotStore implements SnapshotStore {
   private readonly store
-  constructor(dbName = "chroneli-offline") {
+  constructor(dbName = "chroneli-snapshots") {
     this.store = createStore(dbName, "query-snapshots")
   }
   async read(hash: string) {
@@ -3124,6 +4240,9 @@ export function attachSnapshotWriter(
       setTimeout(() => {
         timers.delete(queryHash)
         const { data, dataUpdatedAt } = event.query.state
+        // Disambiguating "no data yet" from "success with a falsy value" —
+        // not an assumption about shape. A Convex query answers `null`, not
+        // `undefined`, when it has nothing.
         if (data === undefined) return
         void store.write(queryHash, { data, updatedAt: dataUpdatedAt }).catch(() => undefined)
       }, debounceMs)
@@ -3163,7 +4282,9 @@ Replace the `QueryClient` construction with:
   convexQueryClient.connect(queryClient)
   if (typeof document !== "undefined") {
     attachSnapshotWriter(queryClient.getQueryCache(), snapshots)
-    void snapshots.prune(Date.now() - SNAPSHOT_MAX_AGE_MS)
+    // Swallowed like every other store write in this layer: a refusing
+    // IndexedDB must cost the app its durability, never its boot.
+    void snapshots.prune(Date.now() - SNAPSHOT_MAX_AGE_MS).catch(() => undefined)
   }
 ```
 
@@ -3202,11 +4323,17 @@ import { useConvexPages } from "./use-convex-pages"
 import type { ReactNode } from "react"
 
 const listPage = anyApi.entries.listPage
-const page = (cursor: string | null) => [
+const pageFor = (toMs: number, cursor: string | null) => [
   "convexQuery",
   "entries:listPage",
-  { fromMs: 0, toMs: 10, paginationOpts: { numItems: 2, cursor, id: 1 } },
+  { fromMs: 0, toMs, paginationOpts: { numItems: 2, cursor, id: 1 } },
 ]
+const page = (cursor: string | null) => pageFor(10, cursor)
+/** One macrotask. TanStack's notifyManager schedules observer updates through
+ *  a real `setTimeout(0)`, so a bare `act()` leaves `result.current` stale.
+ *  The same idiom as `src/components/music/music-provider.test.tsx` and
+ *  `src/routes/_authed/-timer.test.tsx`. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 function setup() {
   const client = new QueryClient({
@@ -3247,7 +4374,13 @@ describe("useConvexPages", () => {
     expect(result.current.status).toBe("Exhausted")
   })
 
-  it("starts over at one page when the range changes", () => {
+  it("starts over at one page when the range changes", async () => {
+    // Asserting `LoadingFirstPage` after the rerender proves nothing: the new
+    // range's first page is uncached either way, and that branch is checked
+    // before the page count is consulted. So the new range's first page is
+    // seeded, and the assertion is that ONE page is enough — with the reset
+    // deleted the chain still wants three, `loaded.length < pageCount` holds,
+    // and the log wedges in LoadingMore with no button and no recovery.
     const { client, wrapper } = setup()
     const { result, rerender } = renderHook(
       ({ toMs }) => useConvexPages(listPage, { fromMs: 0, toMs }, 2),
@@ -3257,8 +4390,18 @@ describe("useConvexPages", () => {
       client.setQueryData(page(null), { page: [1, 2], isDone: false, continueCursor: "c1" })
     })
     act(() => result.current.loadMore())
+    act(() => {
+      client.setQueryData(page("c1"), { page: [3], isDone: false, continueCursor: "c2" })
+    })
+    act(() => result.current.loadMore())
+    expect(result.current.status).toBe("LoadingMore")
+
+    client.setQueryData(pageFor(20, null), { page: [9], isDone: false, continueCursor: "d1" })
     rerender({ toMs: 20 })
-    expect(result.current.status).toBe("LoadingFirstPage")
+    await flush()
+
+    expect(result.current.results).toEqual([9])
+    expect(result.current.status).toBe("CanLoadMore")
   })
 })
 ```
@@ -3292,6 +4435,20 @@ type LogStatus = "LoadingFirstPage" | "LoadingMore" | "CanLoadMore" | "Exhausted
  * Starts at ONE page on every mount, deliberately: a restored second page's
  * cursor was minted against an older first page, and after new entries land
  * the two no longer meet. Older pages load again when asked for.
+ *
+ * The page options carry ONLY the query key — `convexQuery`'s `queryFn` is
+ * deliberately not spread in. That is what leaves the router's default
+ * `snapshotQueryFn` in place for these pages, which is the entire reason this
+ * hook exists: it is what lets the log render from IndexedDB while the socket
+ * is down. Spreading `convexQuery(...)` wholesale would quietly undo it.
+ *
+ * Two limits worth knowing before reusing this elsewhere. `baseKey` is
+ * `JSON.stringify(baseArgs)`, so args differing only in key order reset the
+ * count spuriously. And the cursor chain is a memo over the cache rather than
+ * over the subscription results, so calling `loadMore()` while a page is
+ * still in flight leaves `pages` short of `pageCount` until something else
+ * invalidates the memo — reachable only from a caller that offers "load more"
+ * outside the `CanLoadMore` state, which this one does not.
  */
 export function useConvexPages<
   Query extends FunctionReference<"query", "public", any, PaginationResult<any>>,
@@ -3462,7 +4619,6 @@ import { decide } from "./routing"
 declare const self: ServiceWorkerGlobalScope
 
 const CACHE = "chroneli-v1"
-const SHELL_KEY = "/__shell"
 
 const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chroneli · Offline</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;font:14px system-ui,sans-serif;background:#0a0a0a;color:#fafafa}main{max-width:32rem;padding:2rem;text-align:center}p{color:#a1a1aa}</style></head><body><main><h1>You're offline</h1><p>This page hasn't been opened on this device yet, so there is nothing to show until you're back online. The timer page usually has.</p><p><a href="/timer" style="color:inherit">Go to the timer</a></p></main></body></html>`
 
@@ -3479,21 +4635,47 @@ self.addEventListener("activate", (event) => {
   )
 })
 
+/** Cache-Control the response asked us to respect. The Cache API does not
+ *  honour these on its own — a worker that stores a `no-store` document has
+ *  simply ignored the server. This app dehydrates real entries, titles and
+ *  notes into its SSR HTML, so that is not a technicality. */
+function mayStore(response: Response): boolean {
+  const control = response.headers.get("cache-control") ?? ""
+  return !/no-store|private/i.test(control)
+}
+
+/**
+ * NO SHARED SHELL.
+ *
+ * An earlier version kept the last good page under one key and served it for
+ * any navigation with no entry of its own. That paints the previous route's
+ * fully-dehydrated payload at the wrong URL — `/reports` hydrating against
+ * data dehydrated for `/timer` — and it fires BEFORE the app can render the
+ * pending screen, so the honest "not opened on this device yet" message was
+ * preempted by another page's data.
+ *
+ * A URL that was never visited gets the offline page instead. It carries no
+ * user data, says what it does not know, and offers the one route that is
+ * almost certainly cached.
+ */
 async function networkFirstNavigation(request: Request): Promise<Response> {
   const cache = await caches.open(CACHE)
   try {
     const response = await fetch(request)
-    if (response.ok && (response.headers.get("content-type") ?? "").includes("text/html")) {
+    const isHtml = (response.headers.get("content-type") ?? "").includes("text/html")
+    if (response.ok && isHtml && mayStore(response)) {
       await cache.put(request, response.clone())
-      // The last good page doubles as the shell for a URL never cached.
-      await cache.put(SHELL_KEY, response.clone())
     }
     return response
   } catch {
     return (
       (await cache.match(request)) ??
-      (await cache.match(SHELL_KEY)) ??
-      new Response(OFFLINE_HTML, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } })
+      new Response(OFFLINE_HTML, {
+        // 503, not 200: this is not the page that was asked for, and saying
+        // 200 would tell the browser and any crawler that it was.
+        status: 503,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      })
     )
   }
 }
@@ -3502,12 +4684,19 @@ async function cacheFirst(request: Request): Promise<Response> {
   const cache = await caches.open(CACHE)
   const hit = await cache.match(request)
   if (hit !== undefined) return hit
-  const response = await fetch(request)
-  if (response.ok) await cache.put(request, response.clone())
-  return response
+  try {
+    const response = await fetch(request)
+    if (response.ok) await cache.put(request, response.clone())
+    return response
+  } catch {
+    // An uncached hashed asset while offline — a chunk for a route never
+    // visited. Answering 504 lets the app show its own failure; letting the
+    // promise reject puts a console error there instead and nothing else.
+    return new Response("", { status: 504 })
+  }
 }
 
-async function staleWhileRevalidate(request: Request): Promise<Response> {
+async function staleWhileRevalidate(request: Request, event: FetchEvent): Promise<Response> {
   const cache = await caches.open(CACHE)
   const hit = await cache.match(request)
   const refresh = fetch(request)
@@ -3516,7 +4705,12 @@ async function staleWhileRevalidate(request: Request): Promise<Response> {
       return response
     })
     .catch(() => undefined)
-  if (hit !== undefined) return hit
+  if (hit !== undefined) {
+    // Handed to the event so the browser does not terminate the worker
+    // before the refreshed copy lands.
+    event.waitUntil(refresh)
+    return hit
+  }
   const fresh = await refresh
   if (fresh !== undefined) return fresh
   return new Response("", { status: 504 })
@@ -3527,7 +4721,7 @@ self.addEventListener("fetch", (event) => {
   if (decision === "bypass") return
   if (decision === "navigation") event.respondWith(networkFirstNavigation(event.request))
   else if (decision === "asset") event.respondWith(cacheFirst(event.request))
-  else event.respondWith(staleWhileRevalidate(event.request))
+  else event.respondWith(staleWhileRevalidate(event.request, event))
 })
 ```
 
@@ -3553,12 +4747,11 @@ export default defineConfig({
       name: "sw",
       fileName: () => "sw.js",
     },
-    rollupOptions: { output: { inlineDynamicImports: true } },
   },
 })
 ```
 
-In `package.json` change `"build": "vite build"` to `"build": "vite build && vite build -c vite.sw.config.ts"`. In `tsconfig.json` add `"WebWorker"` to `compilerOptions.lib`.
+In `package.json` change `"build": "vite build"` to `"build": "vite build && vite build -c vite.sw.config.ts"`. Do NOT add `"WebWorker"` to the root `tsconfig.json`. Its `include` covers all of `src/` plus the config files, and `lib.dom` and `lib.webworker` declare conflicting globals — `self` above all — which `skipLibCheck: true` then silences, so a clean `tsc` would prove nothing and one declaration would win arbitrarily for every file in the project. `src/sw/index.ts` already carries `/// <reference lib="webworker" />`, which loads the lib for the program. If that turns out not to be enough, confine it with a `src/sw/tsconfig.json` rather than widening the root.
 
 Create `src/lib/offline/register-sw.ts`:
 
@@ -3655,6 +4848,20 @@ export function clearRememberedAuth(): void {
 ```
 
 Run `pnpm vitest run src/lib/offline/remembered-auth.test.ts` → 2 passed.
+
+Then pin the distinction the whole fallback rests on, which the round-trip test above does not touch. Add to `src/routes/-root-auth.test.ts` (a new file; the route's `beforeLoad` is reachable as `Route.options.beforeLoad`, the same seam `src/routes/-desktop-login.test.ts` uses):
+
+```ts
+/**
+ * A server that ANSWERS "no token" must clear the remembered flag; only a
+ * server that could not be REACHED may leave it standing. Both arrive at the
+ * same call site, and telling them apart is the entire safety argument for
+ * booting offline — so it gets a test of its own rather than resting on a
+ * reading of the code.
+ */
+```
+
+Mock the `getAuth` server function two ways — resolving `undefined`, and rejecting — and assert that the first leaves `readRememberedAuth()` false and returns `isAuthenticated: false`, while the second returns `bootedOffline: true` with `isAuthenticated` equal to whatever was remembered. Follow `-desktop-login.test.ts` for how this repo mocks a server function and invokes `beforeLoad`.
 
 - [ ] **Step 4: The root route tolerates an unreachable server**
 
@@ -3781,8 +4988,23 @@ export const OFFLINE_INVOICE_REASON =
 export const OFFLINE_UPLOAD_REASON = "You're offline. Uploads need a connection."
 export const OFFLINE_GOOGLE_REASON = "You're offline. Google Calendar settings need a connection."
 export const OFFLINE_SIGN_OUT_REASON = "You're offline. Sign out once you're back online."
-export function pendingSignOutReason(pending: number): string {
-  return `${pending} ${pending === 1 ? "change is" : "changes are"} still syncing. Sign out once they have saved.`
+
+/**
+ * A WARNING beside sign-out, not a refusal.
+ *
+ * Refusing while the queue is non-empty was the first design and it was a
+ * trap: an op the server keeps refusing, or a drain that has thrown, leaves
+ * the count above zero for good — and the user is then told to wait for
+ * something that will never happen, with sign-out, and therefore the device
+ * clear, unreachable on that machine forever.
+ *
+ * The trade runs the other way round. Losing queued changes is bad; leaving
+ * one person's entries cached on a machine the next person uses is worse, and
+ * an unreachable sign-out guarantees exactly that. So the count is stated,
+ * the loss is stated, and the choice is the user's.
+ */
+export function pendingSignOutWarning(pending: number): string {
+  return `${pending} ${pending === 1 ? "change has" : "changes have"} not synced yet and will be lost.`
 }
 ```
 
@@ -3792,16 +5014,31 @@ Create `src/lib/offline/clear-local-data.ts`:
 import { clearRememberedAuth } from "./remembered-auth"
 import { clearServiceWorkerCaches } from "./register-sw"
 import type { SnapshotStore } from "./query-snapshots"
+import type { Outbox } from "./outbox"
 
 /**
  * Everything offline support keeps on the device, gone at sign-out.
  *
- * The outbox is NOT cleared here: sign-out is refused while it holds
- * anything (see the shell), so by the time this runs it is empty.
+ * THE OUTBOX GOES TOO, and that is the uncomfortable half. Sign-out is only
+ * refused while offline, so this can run with ops still queued — and leaving
+ * them would mean the next person to sign in on this machine replays the
+ * previous user's writes under their own session. Losing the queue is bad;
+ * that is worse. `pendingSignOutWarning` is what makes the loss a choice
+ * rather than a surprise.
+ *
+ * Each clear is caught independently, so one failing store cannot stop the
+ * others — and none of them can stop the user leaving.
  */
-export async function clearLocalData(snapshots: SnapshotStore): Promise<void> {
+export async function clearLocalData(
+  snapshots: SnapshotStore,
+  outbox: Outbox
+): Promise<void> {
   clearRememberedAuth()
-  await Promise.all([snapshots.clear().catch(() => undefined), clearServiceWorkerCaches().catch(() => undefined)])
+  await Promise.all([
+    snapshots.clear().catch(() => undefined),
+    outbox.clear().catch(() => undefined),
+    clearServiceWorkerCaches().catch(() => undefined),
+  ])
 }
 ```
 
@@ -3820,25 +5057,28 @@ Update every caller (`grep -rn "signOutAndLeave(" src`): the authed shell passes
 
 - [ ] **Step 2: Sign-out with a reason**
 
-Thread a new prop `signOutDisabledReason: string | null` through `AppShell` → `AppSidebar` → `ProfileMenu`. In `ProfileMenu`'s sign-out `Button` add `disabled={signOutDisabledReason !== null}` and render the reason beneath it when non-null:
+Thread TWO new props through `AppShell` → `AppSidebar` → `ProfileMenu`: `signOutDisabledReason: string | null` (a refusal — only ever the offline sentence) and `signOutWarning: string | null` (a caution that does NOT disable). Render the refusal beneath a disabled button, the warning beneath a live one; both in `text-xs text-muted-foreground`. In `ProfileMenu`'s sign-out `Button` add `disabled={signOutDisabledReason !== null}` and render the reason beneath it when non-null:
 
 ```tsx
-            {signOutDisabledReason !== null ? (
-              <p className="px-2 pb-1 text-xs text-muted-foreground">{signOutDisabledReason}</p>
+            {(signOutDisabledReason ?? signOutWarning) !== null ? (
+              <p className="px-2 pb-1 text-xs text-muted-foreground">
+                {signOutDisabledReason ?? signOutWarning}
+              </p>
             ) : null}
 ```
 
 In `AuthedShell`, compute:
 
 ```ts
-  const signOutDisabledReason = !online
-    ? OFFLINE_SIGN_OUT_REASON
-    : pending > 0
-      ? pendingSignOutReason(pending)
-      : null
+  // Offline is the only REFUSAL: a session cannot be ended without the
+  // network. A queue that has not drained is a warning — see
+  // `pendingSignOutWarning` for why refusing on it was a trap.
+  const signOutDisabledReason = online ? null : OFFLINE_SIGN_OUT_REASON
+  const signOutWarning =
+    online && pending > 0 ? pendingSignOutWarning(pending) : null
 ```
 
-and pass it to `<AppShell signOutDisabledReason={signOutDisabledReason} …>`, with `onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots))}`.
+and pass both to `<AppShell signOutDisabledReason={signOutDisabledReason} signOutWarning={signOutWarning} …>`, with `onSignOut={() => void signOutAndLeave(() => clearLocalData(snapshots, outbox))}`.
 
 - [ ] **Step 3: Invoices, uploads, Google**
 
@@ -3882,6 +5122,27 @@ A disabled `<fieldset>` disables every native control inside it, which is what t
 
 Import `useOnlineStatus` from `@/lib/offline/use-online-status` and the sentences from `@/lib/offline/offline-copy` in each route.
 
+**The drop targets need the same gate as the pickers.** `-music-library.tsx`'s drop handler and `invoice-logo-section.tsx`'s both guard on `busy` alone, and `-music-library.tsx`'s own comment already says the picker's guard "has to be repeated here" because "a drop bypasses that element entirely". Disabling the picker without repeating it leaves a section that renders "You're offline. Uploads need a connection." beside a tile that still accepts a file and starts an upload it cannot finish. Both become `if (busy || !online) return`. `InvoiceLogoSection` takes `online` as a prop, like every other piece of state a component in this repo renders from.
+
+Dim the logo picker's `<label>` on `!online` as well as `busy`, matching what the music one already does — a control that is inert must look it, not merely be it.
+
+Test each drop handler: offline, a drop starts no upload. **Assert on a SYNCHRONOUS signal in the music one.** `generateUploadUrl` is only reached after `await decodeDurationMs(file)`, which returns a promise on every path — including jsdom's missing-`URL.createObjectURL` early return — so asserting "not called" straight after `fireEvent.drop` passes whether or not the guard exists. `upload` calls `setQueue` before any `await`, so assert the dropped file's name never appears instead: `expect(screen.queryByText("track.mp3")).toBeNull()`. The logo one needs no such care — `generateLogoUploadUrl({})` is evaluated before that handler's first `await`. Prove each discriminates by deleting `|| !online` from the handler, watching the test fail, and restoring.
+
+- [ ] **Step 3b: Assert the gate on the controls, not on the wrapper**
+
+`<fieldset disabled>` is what disables the controls inside those two settings sections, and **jsdom does not implement that cascade** — so a test asserting `fieldset.disabled` asserts only the prop it was just handed, in an environment that cannot show what the prop does. It would not catch a control switching to a `render`-as-`div`, a control being portalled out of the fieldset, or a drop handler bypassing it entirely.
+
+Assert containment instead. For each of the named controls — the `Music files` input, `Remove logo`, `Disconnect`, and the calendar `Project` picker — find it by role or label and assert it sits inside a disabled fieldset:
+
+```ts
+function inDisabledFieldset(element: HTMLElement): boolean {
+  const fieldset = element.closest("fieldset")
+  return fieldset !== null && fieldset.disabled
+}
+```
+
+That catches the failure a refactor actually produces: a control escaping the wrapper.
+
 - [ ] **Step 4: Verify, commit**
 
 Run the app; go offline; confirm the Create invoice button is disabled with the offline sentence, both settings sections are inert with their hints changed, the music upload is inert with its sentence, and sign out is disabled with its reason; back online with pending changes, sign out shows the pending reason until they clear.
@@ -3903,6 +5164,13 @@ git commit -m "feat(offline): online-only controls say why they are waiting, and
 - [ ] **Step 1: Write `docs/offline.md`**
 
 Cover, in this order and in the register of `docs/desktop.md`: what works offline and what does not; the outbox (journal, order, placeholders, coalescing, rejections, stale starts, one sender per origin); one optimistic function two stores; the snapshot layer and why not persistQueryClient; the log's pagination hook and the one-page-on-boot rule; the service worker's routing table and the build step; the auth fallback and the reload-on-reconnect; sign-out cleanup; how to test offline locally (`pnpm build && pnpm preview`, DevTools Offline); the macOS WKWebView risk. Link the spec.
+
+**One section this document owes the reader, under a heading of its own: what is now stored on the device.** Offline support is a decision to keep the user's data on their machine, and the doc has to say so plainly rather than leave it to be discovered:
+
+- The service worker caches navigation responses, and this app dehydrates real query results into its SSR HTML — so a cached `/timer` contains actual entries, titles and notes, not an empty shell. IndexedDB holds the query snapshots and the outbox journal beside it.
+- All of it lives in the browser profile of whoever is using the machine, and it survives until sign-out clears it (`clearLocalData`, Task 14) or the profile is cleared.
+- **A sign-out that never happens leaves it there**, so a shared or lost device keeps whatever was last cached. That is the ordinary bargain of an offline-capable app rather than a defect, but it is a bargain the reader should be told about, not one they should infer.
+- What is NOT stored: no credentials and no tokens. The remembered signed-in flag is a boolean, and it is a UX guard — every Convex function still checks the session itself.
 
 - [ ] **Step 2: Update the desktop doc**
 

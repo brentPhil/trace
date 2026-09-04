@@ -1,7 +1,8 @@
 import { useCallback, useMemo } from "react"
-import { convexQuery, useConvexMutation } from "@convex-dev/react-query"
+import { convexQuery } from "@convex-dev/react-query"
 import { useSuspenseQuery } from "@tanstack/react-query"
-import { useLatest } from "@/hooks/use-latest"
+import { useOutboxMutation } from "@/lib/offline/outbox-provider"
+import { newClientKey } from "@/lib/client-key"
 import { api } from "../../convex/_generated/api"
 import type { Doc, Id } from "../../convex/_generated/dataModel"
 
@@ -53,22 +54,18 @@ export function resolveClassifiers(
 }
 
 export function useClassifierMutations() {
-  const createProjectMutation = useLatest(useConvexMutation(api.projects.create))
-  const updateProjectMutation = useLatest(useConvexMutation(api.projects.update))
-  const setArchivedMutation = useLatest(useConvexMutation(api.projects.setArchived))
-  const removeProjectMutation = useLatest(useConvexMutation(api.projects.remove))
-  const ensureTagMutation = useLatest(useConvexMutation(api.tags.ensure))
-  const renameTagMutation = useLatest(useConvexMutation(api.tags.rename))
-  const removeTagMutation = useLatest(useConvexMutation(api.tags.remove))
+  const createProjectOp = useOutboxMutation("projects.create")
+  const updateProjectOp = useOutboxMutation("projects.update")
+  const setArchivedOp = useOutboxMutation("projects.setArchived")
+  const removeProjectOp = useOutboxMutation("projects.remove")
+  const ensureTagOp = useOutboxMutation("tags.ensure")
+  const renameTagOp = useOutboxMutation("tags.rename")
+  const removeTagOp = useOutboxMutation("tags.remove")
 
   const createProject = useCallback(
-    async (input: {
-      name: string
-      color?: string
-      billableByDefault?: boolean
-      hourlyRateCents?: number
-    }) => await createProjectMutation(input),
-    [createProjectMutation]
+    async (input: { name: string; color?: string; billableByDefault?: boolean; hourlyRateCents?: number }) =>
+      (await createProjectOp({ clientKey: newClientKey(), ...input })).result,
+    [createProjectOp]
   )
 
   const updateProject = useCallback(
@@ -79,35 +76,35 @@ export function useClassifierMutations() {
       billableByDefault?: boolean
       // `null`, not just omission, means "clear it" — see projects.update.
       hourlyRateCents?: number | null
-    }) => await updateProjectMutation(input),
-    [updateProjectMutation]
+    }) => (await updateProjectOp(input)).result,
+    [updateProjectOp]
   )
 
   const setArchived = useCallback(
     async (projectId: Id<"projects">, archived: boolean) =>
-      await setArchivedMutation({ projectId, archived }),
-    [setArchivedMutation]
+      (await setArchivedOp({ projectId, archived })).result,
+    [setArchivedOp]
   )
 
   const removeProject = useCallback(
-    async (projectId: Id<"projects">) => await removeProjectMutation({ projectId }),
-    [removeProjectMutation]
+    async (projectId: Id<"projects">) => (await removeProjectOp({ projectId })).result,
+    [removeProjectOp]
   )
 
   /** Get-or-create. The picker's flow is "type a word, press Enter". */
   const ensureTag = useCallback(
-    async (name: string) => await ensureTagMutation({ name }),
-    [ensureTagMutation]
+    async (name: string) => (await ensureTagOp({ name })).result,
+    [ensureTagOp]
   )
 
   const renameTag = useCallback(
-    async (tagId: Id<"tags">, name: string) => await renameTagMutation({ tagId, name }),
-    [renameTagMutation]
+    async (tagId: Id<"tags">, name: string) => (await renameTagOp({ tagId, name })).result,
+    [renameTagOp]
   )
 
   const removeTag = useCallback(
-    async (tagId: Id<"tags">) => await removeTagMutation({ tagId }),
-    [removeTagMutation]
+    async (tagId: Id<"tags">) => (await removeTagOp({ tagId })).result,
+    [removeTagOp]
   )
 
   return {
