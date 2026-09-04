@@ -37,6 +37,32 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
     if (isAuthenticated) outbox.kick()
   }, [isAuthenticated, outbox])
 
+  /*
+   * `applyLocal` otherwise runs only at enqueue and once at boot — see
+   * `Outbox.reapply`'s own docblock — so a query that MOUNTS later (a second
+   * log page, a new date range, /reports) would resolve from its snapshot
+   * with none of the pending ops applied. Watching the cache for newly-added
+   * queries is how a later mount gets the same treatment as a query that was
+   * already there at boot.
+   *
+   * Coalesced onto one microtask per burst — a render can add several
+   * queries at once (a paginated subscription's several pages, a route with
+   * more than one query) — rather than calling `reapply` once per event.
+   */
+  useEffect(() => {
+    const cache = queryClient.getQueryCache()
+    let scheduled = false
+    const unsubscribe = cache.subscribe((event) => {
+      if (event.type !== "added" || scheduled) return
+      scheduled = true
+      queueMicrotask(() => {
+        scheduled = false
+        if (outbox.pending() > 0) void outbox.reapply()
+      })
+    })
+    return unsubscribe
+  }, [queryClient, outbox])
+
   return <OutboxContext.Provider value={outbox}>{children}</OutboxContext.Provider>
 }
 

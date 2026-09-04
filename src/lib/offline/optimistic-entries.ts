@@ -1,5 +1,5 @@
 import { insertAtPosition } from "convex/react"
-import { applyTimeEdit } from "@shared/entryTimes"
+import { applyTimeEdit, entryTimes } from "@shared/entryTimes"
 import { optimisticIdFor } from "@/lib/optimistic-id"
 import { api } from "../../../convex/_generated/api"
 import type { OptimisticLocalStore } from "convex/browser"
@@ -287,26 +287,94 @@ function billableFor(
   return project?.billableByDefault ?? false
 }
 
+/**
+ * Both the running slot AND the lists, unlike the version this replaced.
+ *
+ * `listRangeImpl`/`listPageImpl` in convex/entries.ts already return running
+ * entries — online, the server's next transition supplies the row within
+ * milliseconds and nobody notices `getRunning` alone was ever enough.
+ * Offline, nothing else does: the day/week totals (`listRange`-backed) never
+ * see time being tracked, and `entries.create`'s manual-add path already does
+ * `insertEverywhere`, so the two ways of getting a row on screen would
+ * otherwise visibly disagree.
+ */
 export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): void {
-  store.setQuery(
-    api.entries.getRunning,
-    {},
-    optimisticEntry({
-      clientKey: args.clientKey,
-      title: args.title ?? "",
-      startedAt: args.startedAt ?? Date.now(),
-      billable: billableFor(store, args.projectId, args.billable),
-      projectId: args.projectId,
-      tagIds: args.tagIds ?? [],
-    })
-  )
+  const entry = optimisticEntry({
+    clientKey: args.clientKey,
+    title: args.title ?? "",
+    startedAt: args.startedAt ?? Date.now(),
+    billable: billableFor(store, args.projectId, args.billable),
+    projectId: args.projectId,
+    tagIds: args.tagIds ?? [],
+  })
+  store.setQuery(api.entries.getRunning, {}, entry)
+  insertEverywhere(store, entry)
 }
 
-export function optimisticStop(store: OptimisticLocalStore): void {
+type StopArgs = {
+  entryId?: Id<"timeEntries">
+  endedAt?: number
+}
+
+/**
+ * The mirror of `closeEntry` in convex/entries.ts, run locally: the entry
+ * leaves the running slot but STAYS in the lists, patched with the times the
+ * server will land on, rather than disappearing from the screen until
+ * reconnect.
+ *
+ * `args.entryId` names the timer this stop is for — same convention as
+ * `stopImpl` — and falls back to whatever is currently running when the
+ * caller did not say, which is the only sensible answer for an op replayed
+ * from the journal against a store that already has the id.
+ */
+/**
+ * Undoes `optimisticStart`'s placeholder, for a start op `drop` has decided
+ * will now never be sent — a stale start, offline for over a day with no
+ * closing stop, being the concrete case.
+ *
+ * Without this the phantom row `optimisticStart` painted survives the drop:
+ * it persists across reloads (the snapshot writer has already saved it), and
+ * `RunawayBanner` keeps alarming about a timer the outbox has already given
+ * up on.
+ */
+export function unmintStart(store: OptimisticLocalStore, args: StartArgs): void {
+  dropEverywhere(store, optimisticIdFor(args.clientKey) as unknown as Id<"timeEntries">)
+}
+
+export function optimisticStop(store: OptimisticLocalStore, args: StopArgs = {}): void {
+  const running = store.getQuery(api.entries.getRunning, {})
+  const entryId = args.entryId ?? running?._id
   store.setQuery(api.entries.getRunning, {}, null)
+  if (entryId === undefined) return
+
+  const endedAt = args.endedAt ?? Date.now()
+  patchEverywhere(store, entryId, (entry) => {
+    const safeEnd = Math.max(endedAt, entry.startedAt + 1)
+    const result = entryTimes(entry.startedAt, safeEnd)
+    return result.ok
+      ? { ...entry, endedAt: result.times.endedAt, durationMs: result.times.durationMs }
+      : entry
+  })
 }
 
-export const optimisticDiscard = optimisticStop
+type DiscardArgs = {
+  entryId?: Id<"timeEntries">
+}
+
+/**
+ * NOT `optimisticStop` reused: a discard deletes, so the row must leave the
+ * lists (`dropEverywhere`) rather than be patched with an end time it will
+ * never actually have on screen.
+ */
+export function optimisticDiscard(store: OptimisticLocalStore, args: DiscardArgs = {}): void {
+  const running = store.getQuery(api.entries.getRunning, {})
+  const entryId = args.entryId ?? running?._id
+  if (entryId === undefined) {
+    store.setQuery(api.entries.getRunning, {}, null)
+    return
+  }
+  dropEverywhere(store, entryId)
+}
 
 export function optimisticSetTitle(
   store: OptimisticLocalStore,
@@ -452,4 +520,10 @@ export function optimisticCreate(store: OptimisticLocalStore, args: CreateArgs):
     // will be replaced by.
     source: "manual",
   })
+}
+
+/** Undoes `optimisticCreate`'s placeholder, for the same reason
+ *  `unmintStart` undoes `optimisticStart`'s — see there. */
+export function unmintCreate(store: OptimisticLocalStore, args: CreateArgs): void {
+  dropEverywhere(store, optimisticIdFor(args.clientKey) as unknown as Id<"timeEntries">)
 }

@@ -231,6 +231,28 @@ describe("Outbox", () => {
     expect(h2.sent.map((s) => s.kind)).toEqual(["stop", "start"])
   })
 
+  it("reapply() re-applies every queued op's optimistic function without touching inFlight or the drain", async () => {
+    // The case `reapply` exists for: a query that mounts AFTER boot — a
+    // second log page, a new date range, /reports — resolves from its
+    // snapshot with none of the pending ops applied. `load`'s replay only
+    // runs once, at boot, so that later-mounted query never sees them
+    // without a separate hook to re-run the same loop.
+    const h = harness({ manual: true })
+    await h.outbox.enqueue("stop", {})
+    await h.outbox.enqueue("stop", {})
+    await flush()
+    h.applied.length = 0 // enqueue already applied both once; isolate reapply's own work
+    const sentBefore = h.sent.length
+
+    await h.outbox.reapply()
+
+    expect(h.applied.map((o) => o.kind)).toEqual(["stop", "stop"])
+    // Neither the pending count nor the journal's inFlight bookkeeping moved
+    // — reapply does not touch the drain at all.
+    expect(h.outbox.pending()).toBe(2)
+    expect(h.sent).toHaveLength(sentBefore)
+  })
+
   it("re-applies every op and resets in-flight flags on load", async () => {
     const store = new MemoryOutboxStore()
     await store.update((s) => ({

@@ -51,6 +51,16 @@ export function createOutbox(convexClient: ConvexReactClient, queryClient: Query
         // rendering problem.
       }
     },
+    applyUnmint: (op) => {
+      const def = kinds[op.kind] as OpKind<any, any> | undefined
+      try {
+        def?.unmint?.(adapter, op.args)
+      } catch {
+        // Same reasoning as `applyLocal` just above: a rendering problem
+        // undoing a phantom row must not compound into a second failure on
+        // top of the drop that is already happening.
+      }
+    },
     retryable: isRetryableRejection,
     lock: webLock("chroneli-outbox"),
   })

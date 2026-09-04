@@ -20,21 +20,23 @@ export const STALE_START_MS = 24 * 60 * 60 * 1000
  * registry's own test could not call one. This validates and hands the
  * literal type straight back.
  *
- * The `Pick<..., "mints" | "minted" | "closedBy">` in the return type is the
- * other half of that same trade: preserving the literal also means a kind
- * that never writes one of these (most of them) genuinely lacks that key on
- * its inferred type, so `Object.values(OP_KINDS)`/`Object.entries(OP_KINDS)`
- * — as the registry's own tests do, for mints/minted and for closedBy — see a
- * union that doesn't carry them everywhere and the property access stops
- * typechecking. The `Pick` guarantees all three stay present (optional) on
- * every kind without widening anything else `Def` already knows precisely.
+ * The `Pick<..., "mints" | "minted" | "closedBy" | "unmint">` in the return
+ * type is the other half of that same trade: preserving the literal also
+ * means a kind that never writes one of these (most of them) genuinely lacks
+ * that key on its inferred type, so `Object.values(OP_KINDS)`/
+ * `Object.entries(OP_KINDS)` — as the registry's own tests do, for
+ * mints/minted and for closedBy — see a union that doesn't carry them
+ * everywhere and the property access stops typechecking. The `Pick`
+ * guarantees all four stay present (optional) on every kind without widening
+ * anything else `Def` already knows precisely.
  */
 function kind<
   TRef extends FunctionReference<"mutation", "public">,
   TDef extends OpKind<FunctionArgs<TRef>, FunctionReturnType<TRef>> & { ref: TRef },
 >(
   def: TDef
-): TDef & Pick<OpKind<FunctionArgs<TRef>, FunctionReturnType<TRef>>, "mints" | "minted" | "closedBy"> {
+): TDef &
+  Pick<OpKind<FunctionArgs<TRef>, FunctionReturnType<TRef>>, "mints" | "minted" | "closedBy" | "unmint"> {
   return def
 }
 
@@ -53,6 +55,7 @@ export const OP_KINDS = {
     ref: api.entries.start,
     label: "Starting the timer",
     optimistic: entries.optimisticStart,
+    unmint: entries.unmintStart,
     mints: (args) => optimisticIdFor(args.clientKey),
     minted: (result) => result.entryId,
     immediate: (args, now) => ({
@@ -154,6 +157,7 @@ export const OP_KINDS = {
     ref: api.entries.create,
     label: "Adding an entry",
     optimistic: entries.optimisticCreate,
+    unmint: entries.unmintCreate,
     mints: (args) => optimisticIdFor(args.clientKey),
     minted: (result) => result.entryId,
     immediate: (args) => ({
@@ -180,6 +184,13 @@ export const OP_KINDS = {
     optimistic: (store, args) => {
       if (args.clientKey === undefined) return
       classifiers.optimisticProjectCreate(store, { ...args, clientKey: args.clientKey })
+    },
+    // Same guard, same reason: an op the outbox itself never enqueued (a
+    // project created before the outbox existed, with no clientKey) also
+    // never has anything on screen for `unmint` to undo.
+    unmint: (store, args) => {
+      if (args.clientKey === undefined) return
+      classifiers.unmintProjectCreate(store, { clientKey: args.clientKey })
     },
     mints: (args) => optimisticIdFor(args.clientKey as string),
     minted: (result) => result.projectId,
@@ -216,6 +227,7 @@ export const OP_KINDS = {
     ref: api.tags.ensure,
     label: "Adding a tag",
     optimistic: classifiers.optimisticTagEnsure,
+    unmint: classifiers.unmintTagEnsure,
     mints: (args) => classifiers.tagPlaceholder(args.name),
     minted: (result) => result.tagId,
     immediate: (args) => ({

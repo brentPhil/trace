@@ -45,6 +45,10 @@ export type OutboxOptions = {
   send: Sender
   /** Runs the op's optimistic function against the TanStack adapter. */
   applyLocal: (op: Op) => void
+  /** Runs the op kind's `unmint` (if it has one) against the TanStack
+   *  adapter, undoing what `applyLocal` painted for an op that will now
+   *  never be sent. Optional: most kinds mint nothing and need no undo. */
+  applyUnmint?: (op: Op) => void
   retryable: (error: unknown) => boolean
   lock?: Lock
   now?: () => number
@@ -76,6 +80,7 @@ export class Outbox {
   private readonly kinds: Record<string, OpKind<any, any> | undefined>
   private readonly send: Sender
   private readonly applyLocal: (op: Op) => void
+  private readonly applyUnmint?: (op: Op) => void
   private readonly retryable: (error: unknown) => boolean
   private readonly lock: Lock
   private readonly now: () => number
@@ -92,6 +97,7 @@ export class Outbox {
     this.kinds = options.kinds
     this.send = options.send
     this.applyLocal = options.applyLocal
+    this.applyUnmint = options.applyUnmint
     this.retryable = options.retryable
     this.lock = options.lock ?? (async (fn) => await fn())
     this.now = options.now ?? (() => Date.now())
@@ -117,6 +123,28 @@ export class Outbox {
     }
     this.setPending(snap.ops.length)
     this.kick()
+  }
+
+  /**
+   * Re-applies the queue to whatever is in the cache now.
+   *
+   * `applyLocal` otherwise runs only at enqueue and once at boot, so a query
+   * that MOUNTS later — a second log page, a new date range, /reports —
+   * resolves from its snapshot with none of the pending ops applied, and the
+   * status line then promises changes the page in front of the user
+   * contradicts. Safe to call as often as you like: every optimistic function
+   * is idempotent, which is what makes boot replay a no-op too.
+   */
+  async reapply(): Promise<void> {
+    const snap = await this.store.read()
+    for (const op of snap.ops) {
+      try {
+        this.applyLocal(op)
+      } catch {
+        // Same reasoning as `load`'s loop, immediately below: one
+        // unreplayable op must not stop the rest from painting.
+      }
+    }
   }
 
   /**
@@ -349,6 +377,12 @@ export class Outbox {
       const ops = s.ops.filter((o) => o.id !== op.id)
       return { ops, resolved: s.resolved }
     })
+    // Rolls back whatever `applyLocal` painted for this op, so the screen
+    // stops showing an effect the outbox has just given up on sending. Run
+    // for every reason, not only "stale"/"orphaned": a "rejected" drop
+    // self-heals on the next server transition when online, so unminting it
+    // too is harmless — never wrong, just occasionally redundant.
+    this.applyUnmint?.(op)
     this.settlers.get(op.id)?.reject(error ?? new Error(reason))
     this.settlers.delete(op.id)
     this.emit({

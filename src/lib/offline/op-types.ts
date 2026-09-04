@@ -46,6 +46,18 @@ export type OpKind<TArgs extends Record<string, unknown>, TResult> = {
   /** Sentence fragment for a toast: "Retitling an entry". */
   label: string
   optimistic?: (store: OptimisticLocalStore, args: TArgs, local: OpLocal | undefined) => void
+  /**
+   * Undo what `optimistic` put on screen, for an op that will now never be
+   * sent.
+   *
+   * Only the minting kinds need one: `optimistic` paints a placeholder
+   * nothing else will ever resolve, so a drop that leaves it in place is a
+   * phantom row that survives the drop — and, since the snapshot layer
+   * persists whatever `optimistic` painted, survives a reload too. A
+   * non-minting op needs no `unmint`: its patch is a value the server's next
+   * transition overwrites, and offline there is nothing to un-patch back to.
+   */
+  unmint?: (store: OptimisticLocalStore, args: TArgs) => void
   /** The placeholder id this op puts on screen before the server answers. */
   mints?: (args: TArgs) => string
   /** Where the real id for that placeholder lands in the result. */

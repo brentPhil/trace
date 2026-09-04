@@ -207,6 +207,25 @@ silently into it. On an offline boot this means the log shows the newest
 cached page and whatever range queries happen to be cached; older pages load
 once the connection is back.
 
+## Reports: what does not reflect an offline session
+
+`rangeSummary` and `rangeBreakdown` (`convex/entries.ts`) are server-computed
+aggregates — totals and breakdowns summed across a range, in the query
+handler itself, not read off a list the client already has. No optimistic
+function patches them, and none realistically can: an optimistic patch needs
+a value to adjust, and these two return only the aggregate, never the rows
+that went into it.
+
+That means /reports, offline, is the one place the outbox's own promise —
+"everything written offline reaches the server, in order, once the
+connection returns" — is true of the journal but not of what the page shows
+in the meantime. An entry started, stopped, edited or deleted offline is
+correctly queued and will correctly reach the server, but the totals and
+breakdown on screen keep reflecting the last numbers the server actually
+computed, not the offline session sitting on top of them. `listRange` and
+`listPage` — what the log and the week-totals strip render from — do not
+have this problem; only these two aggregate queries do.
+
 ## Booting offline: the service worker
 
 Hand-written (`src/sw/index.ts`, routing logic split out as a pure function

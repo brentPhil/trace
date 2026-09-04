@@ -40,6 +40,19 @@ export function optimisticProjectCreate(
   store.setQuery(api.projects.list, {}, [...list, row].sort(byName))
 }
 
+/** Undoes `optimisticProjectCreate`'s placeholder, for a create op `drop`
+ *  has decided will now never be sent. Filtering the list is enough — there
+ *  is no running slot or paginated cache to also touch, unlike an entry. */
+export function unmintProjectCreate(
+  store: OptimisticLocalStore,
+  args: { clientKey: string }
+): void {
+  const list = store.getQuery(api.projects.list, {})
+  if (list === undefined) return
+  const _id = optimisticIdFor(args.clientKey) as unknown as Id<"projects">
+  store.setQuery(api.projects.list, {}, list.filter((p) => p._id !== _id))
+}
+
 export function optimisticProjectUpdate(
   store: OptimisticLocalStore,
   args: { projectId: Id<"projects">; name?: string; color?: string; billableByDefault?: boolean; hourlyRateCents?: number | null }
@@ -104,6 +117,15 @@ export function optimisticTagEnsure(store: OptimisticLocalStore, args: { name: s
     deletedAt: null,
   }
   store.setQuery(api.tags.list, {}, [...list, row].sort(byName))
+}
+
+/** Undoes `optimisticTagEnsure`'s placeholder, for the same reason
+ *  `unmintProjectCreate` undoes `optimisticProjectCreate`'s — see there. */
+export function unmintTagEnsure(store: OptimisticLocalStore, args: { name: string }): void {
+  const list = store.getQuery(api.tags.list, {})
+  if (list === undefined) return
+  const _id = tagPlaceholder(args.name) as unknown as Id<"tags">
+  store.setQuery(api.tags.list, {}, list.filter((t) => t._id !== _id))
 }
 
 export function optimisticTagRename(

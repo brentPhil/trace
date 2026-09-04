@@ -24,8 +24,9 @@ const { fakeOutbox } = vi.hoisted(() => ({
     load: async () => undefined,
     kick: () => undefined,
     subscribe: () => () => undefined,
-    pending: () => 0,
+    pending: (): number => 0,
     enqueue: async () => ({ result: undefined, settled: Promise.resolve(undefined) }),
+    reapply: async () => undefined,
   },
 }))
 
@@ -67,5 +68,70 @@ describe("useOutboxMutation", () => {
 
     expect(seen).toHaveLength(2)
     expect(seen[0]).toBe(seen[1])
+  })
+})
+
+describe("OutboxProvider reapply on late-mounting queries", () => {
+  /*
+   * `applyLocal` otherwise runs only at enqueue and once at boot — so a
+   * query that mounts later (a second log page, a new date range,
+   * /reports) resolves from its snapshot with none of the pending ops
+   * applied, and the status line then promises changes the page in front
+   * of the user contradicts. This proves the provider itself notices a
+   * newly-added query and calls `reapply()` while ops are pending.
+   */
+  it("calls reapply() when a query is added to the cache while ops are pending", async () => {
+    const calls: number[] = []
+    fakeOutbox.pending = () => 1
+    fakeOutbox.reapply = async () => {
+      calls.push(1)
+    }
+
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <OutboxProvider>
+          <div />
+        </OutboxProvider>
+      </QueryClientProvider>
+    )
+
+    queryClient.getQueryCache().build(queryClient, {
+      queryKey: ["convexQuery", "entries:listPage", { fromMs: 0, toMs: 1 }],
+    })
+
+    // Coalesced onto a microtask/short timeout, not called synchronously.
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls.length).toBeGreaterThan(0)
+
+    // Reset shared fake state so it does not leak into later tests.
+    fakeOutbox.pending = () => 0
+    fakeOutbox.reapply = async () => undefined
+  })
+
+  it("does not call reapply() when no ops are pending", async () => {
+    const calls: number[] = []
+    fakeOutbox.pending = () => 0
+    fakeOutbox.reapply = async () => {
+      calls.push(1)
+    }
+
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <OutboxProvider>
+          <div />
+        </OutboxProvider>
+      </QueryClientProvider>
+    )
+
+    queryClient.getQueryCache().build(queryClient, {
+      queryKey: ["convexQuery", "entries:listPage", { fromMs: 0, toMs: 1 }],
+    })
+
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls).toHaveLength(0)
   })
 })

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { TanStackLocalStore } from "./tanstack-local-store"
 import {
   optimisticCreate,
+  optimisticDiscard,
   optimisticRestore,
   optimisticSetTitle,
   optimisticStart,
@@ -49,6 +50,18 @@ describe("optimisticStart", () => {
     expect(running.durationMs).toBeNull()
   })
 
+  it("also inserts the placeholder into listRange, not just the running slot", () => {
+    // Offline, nothing else supplies the row — the server transition that
+    // does it online never arrives. Without this the day/week totals
+    // (listRange-backed) never see time being tracked at all.
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", title: "Writing", startedAt: 1_000 })
+    const rows = client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)!
+    expect(rows).toHaveLength(1)
+    expect(rows[0]._id).toBe("optimistic:k1")
+    expect(rows[0].endedAt).toBeNull()
+  })
+
   it("inherits the project's billable default, as the server does", () => {
     const { client, store } = setup()
     optimisticStart(store, { clientKey: "k1", projectId: "p1" as Id<"projects"> })
@@ -70,8 +83,41 @@ describe("optimisticStop", () => {
   it("empties the running slot with null, never undefined", () => {
     const { client, store } = setup()
     optimisticStart(store, { clientKey: "k1" })
-    optimisticStop(store)
+    optimisticStop(store, { entryId: "optimistic:k1" as Id<"timeEntries"> })
     expect(client.getQueryData(RUNNING)).toBeNull()
+  })
+
+  it("keeps the entry in the list, with its duration set, instead of dropping it", () => {
+    // Before this, a stop cleared `getRunning` and touched no list at all —
+    // the entry vanished from the screen entirely until reconnect.
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", startedAt: 1_000 })
+    optimisticStop(store, {
+      entryId: "optimistic:k1" as Id<"timeEntries">,
+      endedAt: 5_000,
+    })
+    const rows = client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)!
+    expect(rows).toHaveLength(1)
+    expect(rows[0].endedAt).toBe(5_000)
+    expect(rows[0].durationMs).toBe(4_000)
+  })
+
+  it("falls back to the running entry's id when the args name none", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", startedAt: 1_000 })
+    optimisticStop(store, { endedAt: 5_000 })
+    const rows = client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)!
+    expect(rows[0].endedAt).toBe(5_000)
+  })
+})
+
+describe("optimisticDiscard", () => {
+  it("drops the row from the list rather than patching it — a discard deletes", () => {
+    const { client, store } = setup()
+    optimisticStart(store, { clientKey: "k1", startedAt: 1_000 })
+    optimisticDiscard(store, { entryId: "optimistic:k1" as Id<"timeEntries"> })
+    expect(client.getQueryData(RUNNING)).toBeNull()
+    expect(client.getQueryData<Array<Doc<"timeEntries">>>(RANGE)).toEqual([])
   })
 })
 

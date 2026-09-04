@@ -1,10 +1,14 @@
+import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 import { getFunctionName } from "convex/server"
 import { api } from "../../../convex/_generated/api"
 import { Outbox } from "./outbox"
 import { MemoryOutboxStore } from "./outbox-store-memory"
+import { TanStackLocalStore } from "./tanstack-local-store"
 import { OP_KINDS, STALE_START_MS } from "./op-kinds"
 import type { OptimisticLocalStore } from "convex/browser"
+import type { Doc } from "../../../convex/_generated/dataModel"
+import type { Op, OpKind } from "./op-types"
 import type { OpKindName } from "./op-kinds"
 
 describe("OP_KINDS", () => {
@@ -106,6 +110,75 @@ describe("OP_KINDS", () => {
 
     const unnamed = OP_KINDS["entries.stop"].immediate({}, 0)
     expect(unnamed.stoppedEntryIds).toEqual([])
+  })
+})
+
+describe("OP_KINDS unmint", () => {
+  // A start dropped as "stale" (unclosed for over `STALE_START_MS`, offline)
+  // leaves its optimistic effect behind unless something rolls it back: the
+  // timer bar keeps showing a running timer from the phantom `getRunning`,
+  // and `RunawayBanner` keeps alarming about it, across reloads, until the
+  // socket returns. `unmint` is that rollback.
+  it("a stale-dropped start clears the running slot and the list row", async () => {
+    const queryClient = new QueryClient()
+    const RUNNING = ["convexQuery", "entries:getRunning", {}]
+    const range = { fromMs: 0, toMs: 4_000_000_000_000 }
+    const RANGE = ["convexQuery", "entries:listRange", range]
+    queryClient.setQueryData(RUNNING, null)
+    queryClient.setQueryData(RANGE, [])
+    const adapter = new TanStackLocalStore(queryClient)
+
+    let releaseFirst: (() => void) | undefined
+    const firstSend = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const now = { value: 1_000 }
+
+    const outbox = new Outbox({
+      store: new MemoryOutboxStore(),
+      kinds: OP_KINDS,
+      send: async (op) => {
+        // Occupies the sender so the enqueued start sits at the head,
+        // un-sent, until it goes stale.
+        if (op.kind === "entries.setTitle") await firstSend
+        return null
+      },
+      applyLocal: (op: Op) => {
+        const def = OP_KINDS[op.kind as OpKindName] as OpKind<any, any> | undefined
+        def?.optimistic?.(adapter, op.args, op.local)
+      },
+      applyUnmint: (op: Op) => {
+        const def = OP_KINDS[op.kind as OpKindName] as OpKind<any, any> | undefined
+        def?.unmint?.(adapter, op.args)
+      },
+      retryable: () => false,
+      now: () => now.value,
+    })
+
+    // Occupies the sender, so the start below cannot be sent yet.
+    await outbox.enqueue("entries.setTitle", {
+      entryId: "unrelated",
+      title: "x",
+    })
+    await new Promise((r) => setTimeout(r, 0))
+
+    await outbox.enqueue("entries.start", { clientKey: "k1", startedAt: 1_000 })
+    expect(queryClient.getQueryData<Doc<"timeEntries">>(RUNNING)?._id).toBe(
+      "optimistic:k1"
+    )
+    expect(
+      queryClient.getQueryData<Array<Doc<"timeEntries">>>(RANGE)
+    ).toHaveLength(1)
+
+    now.value += STALE_START_MS + 1
+    releaseFirst?.()
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(queryClient.getQueryData(RUNNING)).toBeNull()
+    expect(queryClient.getQueryData<Array<Doc<"timeEntries">>>(RANGE)).toEqual(
+      []
+    )
   })
 })
 
