@@ -15,6 +15,8 @@ const RUNNING = ["convexQuery", "entries:getRunning", {}]
 const PROJECTS = ["convexQuery", "projects:list", {}]
 const range = { fromMs: 0, toMs: 4_000_000_000_000 }
 const RANGE = ["convexQuery", "entries:listRange", range]
+const pageArgs = { ...range, paginationOpts: { numItems: 25, cursor: null, id: 1 } }
+const PAGE = ["convexQuery", "entries:listPage", pageArgs]
 
 function project(overrides: Partial<Doc<"projects">> = {}): Doc<"projects"> {
   return {
@@ -39,6 +41,47 @@ function setup() {
   return { client, store: new TanStackLocalStore(client) }
 }
 
+function seedEntry(): Doc<"timeEntries"> {
+  return {
+    _id: "seed" as Id<"timeEntries">,
+    _creationTime: 500,
+    userId: "u",
+    clientKey: "seed",
+    title: "Seeded",
+    startedAt: 500,
+    endedAt: 600,
+    durationMs: 100,
+    tagIds: [],
+    billable: false,
+    source: "web",
+    updatedAt: 600,
+    deletedAt: null,
+  }
+}
+
+/**
+ * `setup()` plus one loaded `listPage` page — the branch the Timer log
+ * actually renders from, and the one carrying the harder reasoning
+ * (`insertAtPosition`'s page grouping, the `seenRanges` dedup). The page is
+ * seeded with a row on purpose: `insertAtPosition` needs an existing item to
+ * establish a sort-key reference, so an empty page is a silent no-op.
+ */
+function setupWithPage() {
+  const ctx = setup()
+  ctx.client.setQueryData(PAGE, {
+    page: [seedEntry()],
+    isDone: true,
+    continueCursor: "c",
+  })
+  return ctx
+}
+
+type PageResult = { page: Array<Doc<"timeEntries">>; isDone: boolean; continueCursor: string }
+
+function pageRows(client: QueryClient): Array<Doc<"timeEntries">> {
+  return client.getQueryData<PageResult>(PAGE)!.page
+}
+
 describe("optimisticStart", () => {
   it("puts a placeholder-keyed row in the running slot", () => {
     const { client, store } = setup()
@@ -60,6 +103,17 @@ describe("optimisticStart", () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]._id).toBe("optimistic:k1")
     expect(rows[0].endedAt).toBeNull()
+  })
+
+  it("also inserts the placeholder into the loaded listPage page", () => {
+    // listRange backs the week-totals strip; listPage is what the Timer log
+    // itself renders. Asserting only the former left the branch with the
+    // harder reasoning — insertAtPosition's page grouping — uncovered.
+    const { client, store } = setupWithPage()
+    optimisticStart(store, { clientKey: "k1", title: "Writing", startedAt: 1_000_000 })
+    const rows = pageRows(client)
+    expect(rows.map((r) => r._id)).toContain("optimistic:k1")
+    expect(rows).toHaveLength(2)
   })
 
   it("inherits the project's billable default, as the server does", () => {
@@ -102,6 +156,18 @@ describe("optimisticStop", () => {
     expect(rows[0].durationMs).toBe(4_000)
   })
 
+  it("sets the duration on the listPage row too, not only the listRange one", () => {
+    const { client, store } = setupWithPage()
+    optimisticStart(store, { clientKey: "k1", startedAt: 1_000_000 })
+    optimisticStop(store, {
+      entryId: "optimistic:k1" as Id<"timeEntries">,
+      endedAt: 1_005_000,
+    })
+    const row = pageRows(client).find((r) => r._id === "optimistic:k1")!
+    expect(row.endedAt).toBe(1_005_000)
+    expect(row.durationMs).toBe(5_000)
+  })
+
   it("falls back to the running entry's id when the args name none", () => {
     const { client, store } = setup()
     optimisticStart(store, { clientKey: "k1", startedAt: 1_000 })
@@ -130,6 +196,25 @@ describe("optimisticSetTitle", () => {
       title: "Second",
     })
     expect(client.getQueryData<Doc<"timeEntries">>(RUNNING)!.title).toBe("Second")
+  })
+
+  it("retitles the log row as well as the timer bar", () => {
+    // The running entry IS a row in the log — listRangeImpl/listPageImpl
+    // filter on deletedAt only, they do not exclude running entries. Patching
+    // getRunning alone is how the same entry shows two different titles on
+    // one screen, and attachSnapshotWriter then persists the disagreement.
+    const { client, store } = setupWithPage()
+    optimisticStart(store, { clientKey: "k1", title: "First", startedAt: 1_000_000 })
+    optimisticSetTitle(store, {
+      entryId: "optimistic:k1" as Id<"timeEntries">,
+      title: "Second",
+    })
+    const rangeRow = client
+      .getQueryData<Array<Doc<"timeEntries">>>(RANGE)!
+      .find((r) => r._id === "optimistic:k1")!
+    expect(rangeRow.title).toBe("Second")
+    const pageRow = pageRows(client).find((r) => r._id === "optimistic:k1")!
+    expect(pageRow.title).toBe("Second")
   })
 
   it("leaves a different running entry alone", () => {

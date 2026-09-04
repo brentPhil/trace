@@ -302,6 +302,18 @@ export function optimisticStart(store: OptimisticLocalStore, args: StartArgs): v
   const entry = optimisticEntry({
     clientKey: args.clientKey,
     title: args.title ?? "",
+    // MUST NOT BE RELIED ON. Every real call site supplies `startedAt`
+    // (`use-entry-mutations.ts` mints it at the click), and it stays optional
+    // here only because `entries.start`'s validator declares it
+    // `v.optional` — requiring it would make this function unassignable to
+    // `kind()`'s `optimistic` slot, which is typed from that validator.
+    //
+    // The cost of leaning on it changed when `reapply` started running on
+    // every query mount rather than once at boot: a caller that omitted
+    // `startedAt` would re-mint the running entry with a FRESH timestamp on
+    // each mount, visibly resetting the timer. And because `insertEverywhere`
+    // dedups by `_id`, `getRunning` would drift while the log row stayed put,
+    // so the bar and the log would disagree. Pass it.
     startedAt: args.startedAt ?? Date.now(),
     billable: billableFor(store, args.projectId, args.billable),
     projectId: args.projectId,
@@ -347,6 +359,11 @@ export function optimisticStop(store: OptimisticLocalStore, args: StopArgs = {})
   store.setQuery(api.entries.getRunning, {}, null)
   if (entryId === undefined) return
 
+  // MUST NOT BE RELIED ON, for the same reason as `optimisticStart`'s
+  // `startedAt` default above — see there. `use-entry-mutations.ts` records
+  // `endedAt` at the moment the user presses stop precisely so a stop replayed
+  // hours later still closes the entry then; falling through to this default
+  // would close it whenever `reapply` happened to run instead.
   const endedAt = args.endedAt ?? Date.now()
   patchEverywhere(store, entryId, (entry) => {
     const safeEnd = Math.max(endedAt, entry.startedAt + 1)
@@ -376,14 +393,24 @@ export function optimisticDiscard(store: OptimisticLocalStore, args: DiscardArgs
   dropEverywhere(store, entryId)
 }
 
+/**
+ * The lists too, not only the running slot.
+ *
+ * A running entry is a row in the log — `listRangeImpl`/`listPageImpl` filter
+ * on `deletedAt` alone and neither excludes running entries — so retitling
+ * `getRunning` by itself is precisely the "two different titles on one screen"
+ * case `patchEverywhere`'s docblock above describes. Online the server's next
+ * transition hides it; offline nothing does, and `attachSnapshotWriter`
+ * persists the disagreement across a reload.
+ *
+ * `patchEverywhere` already patches `getRunning` when the id matches, so it
+ * subsumes the explicit running write this used to do on its own.
+ */
 export function optimisticSetTitle(
   store: OptimisticLocalStore,
   args: { entryId: Id<"timeEntries">; title: string }
 ): void {
-  const running = store.getQuery(api.entries.getRunning, {})
-  if (running != null && running._id === args.entryId) {
-    store.setQuery(api.entries.getRunning, {}, { ...running, title: args.title })
-  }
+  patchEverywhere(store, args.entryId, (entry) => ({ ...entry, title: args.title }))
 }
 
 type UpdateFields = {
