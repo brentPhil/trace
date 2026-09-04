@@ -235,7 +235,13 @@ describe("OutboxProvider reapply does not retrigger itself", () => {
     fakeOutbox.pending = () => 1
     fakeOutbox.reapply = async () => {
       calls += 1
-      if (calls > 20) throw new Error("reapply looped")
+      // Go inert past the cap rather than throwing. `reapply` is invoked as
+      // `void outbox.reapply()`, so a throw here is a swallowed rejection that
+      // stops nothing, and a genuine runaway chains microtasks — which drain
+      // ahead of every macrotask, so the `setTimeout` below never fires and
+      // the assertion never runs. A regression would HANG the suite instead of
+      // failing it. Writing nothing ends the loop, so `calls` can be asserted.
+      if (calls > 20) return
       // Writes a key that is not yet in the cache, which is the shape most
       // likely to loop: it emits `added` as well as `success`.
       patchEverywhere(store, "e1" as Id<"timeEntries">, (entry) => ({
