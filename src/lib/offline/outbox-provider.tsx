@@ -52,13 +52,43 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const cache = queryClient.getQueryCache()
     let scheduled = false
-    const unsubscribe = cache.subscribe((event) => {
-      if (event.type !== "added" || scheduled) return
+    const schedule = () => {
+      if (scheduled) return
       scheduled = true
       queueMicrotask(() => {
         scheduled = false
         if (outbox.pending() > 0) void outbox.reapply()
       })
+    }
+    const unsubscribe = cache.subscribe((event) => {
+      // `added` alone is not enough, and on its own it is very nearly a no-op:
+      // at the moment a query is ADDED its `state.data` is still `undefined`,
+      // and every writer in the optimistic layer skips undefined
+      // (`patchEverywhere`, `dropEverywhere`, `insertEverywhere` all `continue`
+      // on it). The snapshot then arrives asynchronously from IndexedDB and is
+      // written UNPATCHED, with nothing left to re-run the ops over it. It is
+      // kept only for the case it does cover: a query added with data already
+      // in hand.
+      if (event.type === "added") return schedule()
+      //
+      // `!manual` is a precise test for "a queryFn just resolved" — NOT a
+      // re-entrancy hack, so please do not delete it as one. In
+      // @tanstack/query-core, `queryClient.setQueryData` always calls
+      // `query.setData(data, { ...options, manual: true })`, and `setData` is
+      // the single site that dispatches `{ type: "success", manual }`. The
+      // fetch-resolution path calls `setData(data)` with no options, so a real
+      // queryFn resolution — and only that — carries `manual: undefined`.
+      //
+      // That is exactly the event this needs: the snapshot arriving
+      // (`snapshotQueryFn` returns the snapshot AS the queryFn's value) and the
+      // first online resolution. It excludes reapply's OWN writes, which go
+      // through `setQueryData` and so are `manual: true`, and it excludes
+      // @convex-dev/react-query's socket pushes, which also go through
+      // `setQueryData`. So reapply cannot retrigger itself: the loop is not
+      // guarded against, it is unreachable.
+      if (event.type === "updated" && event.action.type === "success" && !event.action.manual) {
+        schedule()
+      }
     })
     return unsubscribe
   }, [queryClient, outbox])
