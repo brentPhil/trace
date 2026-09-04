@@ -683,7 +683,7 @@ git commit -m "feat(offline): op types, and the placeholder rewrite the outbox s
 - Test: `src/lib/offline/outbox-store.test.ts`
 
 **Interfaces:**
-- Produces: `class MemoryOutboxStore implements OutboxStore`; `class IdbOutboxStore implements OutboxStore` (constructor `(dbName = "chroneli-offline")`); `createOutboxStore(): OutboxStore` (IDB when available, else memory).
+- Produces: `class MemoryOutboxStore implements OutboxStore`; `class IdbOutboxStore implements OutboxStore` (constructor `(dbName = "chroneli-outbox")`); `createOutboxStore(): OutboxStore` (IDB when available, else memory).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -883,7 +883,7 @@ export class IdbOutboxStore implements OutboxStore {
   /** Set once IndexedDB has refused, and used for the rest of the session. */
   private fallback: MemoryOutboxStore | null = null
 
-  constructor(dbName = "chroneli-offline") {
+  constructor(dbName = "chroneli-outbox") {
     this.store = createStore(dbName, "outbox")
   }
 
@@ -3698,7 +3698,7 @@ Add `import { OutboxProvider } from "@/lib/offline/outbox-provider"`.
 pnpm test && pnpm typecheck && pnpm lint
 ```
 
-Then start the app (`pnpm dev`, port 3100), sign in, start/stop/retitle a timer, create a project, and confirm in DevTools → Application → IndexedDB → `chroneli-offline/outbox` that ops appear and clear. Commit:
+Then start the app (`pnpm dev`, port 3100), sign in, start/stop/retitle a timer, create a project, and confirm in DevTools → Application → IndexedDB → `chroneli-outbox/outbox` that ops appear and clear. Commit:
 
 ```bash
 git add -A src/hooks src/lib/offline src/routes/_authed.tsx src/routes/_authed/-settings.tsx
@@ -4164,7 +4164,7 @@ export class MemorySnapshotStore implements SnapshotStore {
 
 export class IdbSnapshotStore implements SnapshotStore {
   private readonly store
-  constructor(dbName = "chroneli-offline") {
+  constructor(dbName = "chroneli-snapshots") {
     this.store = createStore(dbName, "query-snapshots")
   }
   async read(hash: string) {

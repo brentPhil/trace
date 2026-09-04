@@ -35,6 +35,17 @@ import type { Outbox } from "./outbox"
  * that — every `write` after a `clear` is a no-op for the rest of that
  * store's lifetime — so this function does not need to, and does not, chase
  * down `attachSnapshotWriter`'s detach function to stop the timers itself.
+ *
+ * THE SEAL OUTLIVES A FAILED SIGN-OUT, deliberately. `signOutAndLeave` runs
+ * this first and navigates only from `authClient.signOut`'s `onSuccess`, so if
+ * the network drops in that window the user stays on a live authed page with
+ * the store sealed: nothing caches again until they reload, and going offline
+ * before that reload shows nothing stored. That is the accepted side of the
+ * trade rather than an oversight — unsealing on failure would reopen exactly
+ * the race the seal exists to close, and a sealed store degrades to "no
+ * offline cache", while an unsealed one can write the departing user's entries
+ * back to a device that is meant to have been cleared. `Outbox.clear`'s
+ * docblock reasons about this same failed-sign-out window for the queue.
  */
 export async function clearLocalData(
   snapshots: SnapshotStore,
