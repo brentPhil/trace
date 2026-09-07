@@ -246,7 +246,10 @@ reinstates the snapshot captured *before* the delete, which for a running entry
 still carries `endedAt: null` and `durationMs: null`; the server would have
 restored it with a synthesized end. `group-entries.ts` filters
 `durationMs === null` out of the log, so between the undo and the outbox
-draining, the row shows on the calendar and nowhere else.
+draining, the row itself shows on the calendar and nowhere else — though it is
+not entirely invisible elsewhere: the same function still adds `now - startedAt`
+to the day's total and counts the row in `runningCount`, so its time is in the
+day header, and Reports and the text export say one entry is still running.
 
 It is left alone deliberately. Closing it means mirroring `restoreImpl`'s
 end-synthesis in the optimistic layer, which is a behaviour decision — whose
