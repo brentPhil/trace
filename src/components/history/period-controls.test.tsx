@@ -120,7 +120,7 @@ describe("PeriodControls' preset rail", () => {
     fireEvent.click(screen.getByRole("button", { name: /date range/i }))
   }
 
-  it("offers /reports' seven spans and none of /timer's", () => {
+  it("offers /reports' eight spans and none of /timer's", () => {
     openRail()
 
     for (const label of [
@@ -129,6 +129,7 @@ describe("PeriodControls' preset rail", () => {
       "This month",
       "This year",
       "Last week",
+      "Last 2 weeks",
       "Last month",
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeTruthy()

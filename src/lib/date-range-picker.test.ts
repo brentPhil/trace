@@ -211,6 +211,26 @@ describe("reportsPresetWindow", () => {
     })
   })
 
+  it("makes 'last 2 weeks' the two finished weeks, never the one today is in", () => {
+    expect(reportsPresetWindow("last-two-weeks", today, monday)).toEqual({
+      from: "2026-07-20",
+      to: "2026-08-02",
+    })
+    // Its second week is exactly "Last week" — the two spans nest.
+    expect(reportsPresetWindow("last-two-weeks", today, monday).to).toBe(
+      reportsPresetWindow("last-week", today, monday).to
+    )
+  })
+
+  it("excludes the current week from 'last 2 weeks' even on that week's first day", () => {
+    // A Monday. Fourteen days back from the week's first day is still the
+    // week before last's first day; the window must not slide into this week.
+    expect(reportsPresetWindow("last-two-weeks", "2026-08-03", monday)).toEqual({
+      from: "2026-07-20",
+      to: "2026-08-02",
+    })
+  })
+
   it("rolls 'last month' back over the year boundary", () => {
     expect(reportsPresetWindow("last-month", "2026-01-09", monday)).toEqual({
       from: "2025-12-01",
@@ -227,13 +247,17 @@ describe("reportsPresetWindow", () => {
     })
   })
 
-  it("honours weekStartDay for both of the week spans", () => {
+  it("honours weekStartDay for all three of the week spans", () => {
     expect(reportsPresetWindow("this-week", today, 0)).toEqual({
       from: "2026-08-02",
       to: "2026-08-08",
     })
     expect(reportsPresetWindow("last-week", today, 0)).toEqual({
       from: "2026-07-26",
+      to: "2026-08-01",
+    })
+    expect(reportsPresetWindow("last-two-weeks", today, 0)).toEqual({
+      from: "2026-07-19",
       to: "2026-08-01",
     })
   })

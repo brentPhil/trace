@@ -136,6 +136,7 @@ export type ReportsPreset =
   | "this-quarter"
   | "this-year"
   | "last-week"
+  | "last-two-weeks"
   | "last-month"
 
 /** Sentence case, per The Sentence Case Rule. */
@@ -146,11 +147,13 @@ export const REPORTS_PRESET_LABELS: Record<ReportsPreset, string> = {
   "this-quarter": "This quarter",
   "this-year": "This year",
   "last-week": "Last week",
+  "last-two-weeks": "Last 2 weeks",
   "last-month": "Last month",
 }
 
-/** The rail's order: the current spans widening downward, then the two
- *  finished ones. The reference design's order, and it reads as a scale. */
+/** The rail's order: the current spans widening downward, then the finished
+ *  ones widening the same way. The reference design's order, and it reads as
+ *  a scale. */
 export const REPORTS_PRESETS: ReadonlyArray<ReportsPreset> = [
   "today",
   "this-week",
@@ -158,6 +161,7 @@ export const REPORTS_PRESETS: ReadonlyArray<ReportsPreset> = [
   "this-quarter",
   "this-year",
   "last-week",
+  "last-two-weeks",
   "last-month",
 ]
 
@@ -174,7 +178,7 @@ export const REPORTS_DEFAULT_PRESET: ReportsPreset = "this-quarter"
 /**
  * The days a preset means.
  *
- * `weekStartDay` is threaded through because two of these are weeks and this
+ * `weekStartDay` is threaded through because three of these are weeks and this
  * product does not assume Monday — the same reason `periodWindow` takes it.
  */
 export function reportsPresetWindow(
@@ -193,6 +197,15 @@ export function reportsPresetWindow(
       // if `weekStartOf` ever has to handle a locale that moves.
       const first = weekStartOf(addDays(today, -7), weekStartDay)
       return { from: first, to: addDays(first, 6) }
+    }
+    case "last-two-weeks": {
+      // The two FINISHED weeks — the week before last through the end of last
+      // week — and never the one today is in, however early in it today falls.
+      // Fourteen days back lands in the week before last on every day of the
+      // current week, and that week's start is the window's; thirteen days on
+      // is the last day of last week, the same day "Last week" ends on.
+      const first = weekStartOf(addDays(today, -14), weekStartDay)
+      return { from: first, to: addDays(first, 13) }
     }
     case "this-month":
       return periodWindow("month", today, weekStartDay)
@@ -239,15 +252,18 @@ export function yearWindow(day: DayString): { from: DayString; to: DayString } {
 /**
  * Which period a preset ALSO sets, because the arrows have to keep working.
  *
- * Five of the seven are exactly a Day/Week/Month window, so they say so and
+ * Five of the eight are exactly a Day/Week/Month window, so they say so and
  * `stepPeriod` walks them a calendar week or a calendar month at a time —
  * "Last week" included, since a stepped-away week is still a week even though
  * `rangeTriggerLabel` correctly refuses to call it "This week".
  *
- * Quarter and year are `custom`, which is the honest answer: `Period` has no
- * case for them, and a custom range steps by its own span — the behaviour
- * `stepPeriod` already documents and the one the trigger already labels with
- * plain dates rather than a period name.
+ * Quarter, year and the fortnight are `custom`, which is the honest answer:
+ * `Period` has no case for them, and a custom range steps by its own span —
+ * the behaviour `stepPeriod` already documents and the one the trigger already
+ * labels with plain dates rather than a period name. For "Last 2 weeks" that
+ * means the arrows walk a fortnight at a time, which is what a reader stepping
+ * back through fortnightly reports wants; calling it a `week` would have the
+ * arrows slide a fourteen-day range seven days, overlapping itself.
  *
  * Module-private: `reportsPresetFilters` below is the only caller, and it is
  * the one this page reaches for. Tested through it rather than directly.
@@ -264,6 +280,7 @@ function reportsPresetPeriod(preset: ReportsPreset): Period {
       return "month"
     case "this-quarter":
     case "this-year":
+    case "last-two-weeks":
       return "custom"
   }
 }
