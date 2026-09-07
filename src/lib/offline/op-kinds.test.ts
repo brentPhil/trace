@@ -232,3 +232,85 @@ describe("OP_KINDS coalescing", () => {
     })
   })
 })
+
+describe("Outbox.drain re-applies what is still queued", () => {
+  // Each `send` resolves only once Convex has pushed the resulting server
+  // truth into the client's queries — a whole-array replacement that carries
+  // the sent op's effect and none of the ones still queued behind it. The
+  // provider's cache subscription cannot answer that push (it is a `manual`
+  // write, deliberately excluded), so without a re-apply inside `drain` the
+  // user watches their queued edits vanish one by one while `SyncStatus`
+  // still says they are pending.
+  it("an edit still in the queue survives the server truth pushed by the send before it", async () => {
+    const queryClient = new QueryClient()
+    const range = { fromMs: 0, toMs: 4_000_000_000_000 }
+    const RANGE = ["convexQuery", "entries:listRange", range]
+    const row = (id: string, startedAt: number, title: string) =>
+      ({ _id: id, _creationTime: startedAt, startedAt, title }) as unknown as Doc<"timeEntries">
+    // Newest-first, the order `listRange` returns and `patchEverywhere` keeps.
+    queryClient.setQueryData(RANGE, [row("e2", 2_000, "two"), row("e1", 1_000, "one")])
+    const adapter = new TanStackLocalStore(queryClient)
+
+    let openGate: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve
+    })
+    let reachedSecond: (() => void) | undefined
+    const secondSendStarted = new Promise<void>((resolve) => {
+      reachedSecond = resolve
+    })
+    let releaseSecond: (() => void) | undefined
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve
+    })
+
+    const outbox = new Outbox({
+      store: new MemoryOutboxStore(),
+      kinds: OP_KINDS,
+      send: async (op) => {
+        // Held until BOTH ops are journaled, so the drain cannot empty the
+        // queue before there is anything queued behind the head.
+        await gate
+        if (op.args.entryId === "e1") {
+          // What @convex-dev/react-query does on the socket push for this
+          // mutation's write: `setQueryData` with the server's whole array.
+          // It carries op 1's title and nothing of op 2's.
+          queryClient.setQueryData(RANGE, [
+            row("e2", 2_000, "two"),
+            row("e1", 1_000, "ONE EDITED"),
+          ])
+          return null
+        }
+        reachedSecond?.()
+        // Parks the drain at the second send so the assertion below runs at
+        // the one moment that matters: after the first send's push landed,
+        // before the second op's own send could paint its effect back.
+        await secondGate
+        return null
+      },
+      applyLocal: (op: Op) => {
+        const def = OP_KINDS[op.kind as OpKindName] as OpKind<any, any> | undefined
+        def?.optimistic?.(adapter, op.args, op.local)
+      },
+      retryable: () => false,
+      now: () => 1_000,
+    })
+
+    await outbox.enqueue("entries.setTitle", { entryId: "e1", title: "ONE EDITED" })
+    await outbox.enqueue("entries.setTitle", { entryId: "e2", title: "TWO EDITED" })
+    expect(outbox.pending()).toBe(2)
+
+    openGate?.()
+    await secondSendStarted
+
+    const titles = Object.fromEntries(
+      (queryClient.getQueryData<Array<Doc<"timeEntries">>>(RANGE) ?? []).map((e) => [
+        e._id,
+        e.title,
+      ])
+    )
+    expect(titles).toEqual({ e1: "ONE EDITED", e2: "TWO EDITED" })
+
+    releaseSecond?.()
+  })
+})

@@ -82,10 +82,16 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       // That is exactly the event this needs: the snapshot arriving
       // (`snapshotQueryFn` returns the snapshot AS the queryFn's value) and the
       // first online resolution. It excludes reapply's OWN writes, which go
-      // through `setQueryData` and so are `manual: true`, and it excludes
-      // @convex-dev/react-query's socket pushes, which also go through
-      // `setQueryData`. So reapply cannot retrigger itself: the loop is not
-      // guarded against, it is unreachable.
+      // through `setQueryData` and so are `manual: true`, so reapply cannot
+      // retrigger itself: the loop is not guarded against, it is unreachable.
+      //
+      // That is a trade, not a free win, and the cost is real: the same
+      // exclusion also skips @convex-dev/react-query's socket pushes, which
+      // go through `setQueryData` too. A push replaces a whole query value
+      // with server truth, wiping the optimistic effects of every op still
+      // queued — and this subscription will not answer it. The cost is paid
+      // in `Outbox.drain`, which re-applies the remaining queue itself after
+      // each successful send; see the comment there.
       if (event.type === "updated" && event.action.type === "success" && !event.action.manual) {
         schedule()
       }

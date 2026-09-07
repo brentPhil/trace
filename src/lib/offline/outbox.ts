@@ -353,6 +353,28 @@ export class Outbox {
       this.settlers.get(op.id)?.resolve(result)
       this.settlers.delete(op.id)
       this.setPending(next.ops.length)
+
+      // Repaint what is still queued over the server truth this send just
+      // brought in. Convex answers a mutation by pushing the resulting
+      // queries through `queryClient.setQueryData`, which replaces whole
+      // query values — carrying THIS op's effect and none of the ops still
+      // in the journal. Those pushes are `manual` writes, and the provider's
+      // cache subscription excludes `manual` deliberately (see
+      // `outbox-provider.tsx`), so nothing else re-applies them: without
+      // this, a user reconnecting with a queue watches their pending edits
+      // disappear one by one, each returning only as its own op is sent.
+      //
+      // The ordering here is right for two reasons. The push has already
+      // landed — Convex resolves a mutation only once the client's queries
+      // reflect the write, which is what `await this.send` waited for. And
+      // the sent op is already out of the journal above, so re-applying
+      // cannot re-mint its placeholder row over the real one the server just
+      // delivered.
+      //
+      // Awaited rather than fired off: `drain` is sequential and awaited
+      // throughout, and the screen should be consistent before the next send
+      // goes out.
+      if (next.ops.length > 0) await this.reapply()
     }
   }
 
