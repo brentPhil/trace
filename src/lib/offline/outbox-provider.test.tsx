@@ -46,7 +46,16 @@ vi.mock("convex/react", async (importOriginal) => {
   }
 })
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  // Restore the shared fake here rather than at the end of each test body: a
+  // failing assertion skips the tail of its own test, and a leaked
+  // `pending() => 1` plus a reapply closure bound to a dead QueryClient then
+  // corrupts every test after it — turning one readable failure into a file
+  // full of unreadable ones.
+  fakeOutbox.pending = () => 0
+  fakeOutbox.reapply = async () => undefined
+})
 
 describe("useOutboxMutation", () => {
   it("returns a referentially stable callback across renders", () => {
@@ -107,10 +116,6 @@ describe("OutboxProvider reapply on late-mounting queries", () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(calls.length).toBeGreaterThan(0)
-
-    // Reset shared fake state so it does not leak into later tests.
-    fakeOutbox.pending = () => 0
-    fakeOutbox.reapply = async () => undefined
   })
 
   it("does not call reapply() when no ops are pending", async () => {
@@ -162,7 +167,23 @@ describe("OutboxProvider reapply after a late query's data actually arrives", ()
     const store = new TanStackLocalStore(queryClient)
 
     fakeOutbox.pending = () => 1
+    // The cap is purely a termination guard, NOT part of what this asserts —
+    // it must not be 1. Reapply legitimately runs twice: once on `added`,
+    // while the query's data is still undefined and the patch is a no-op, and
+    // again when the queryFn resolves, which is the call that does the work.
+    // Capping at 1 swallows the second and fails the test for the wrong
+    // reason.
+    //
+    // It exists because an uncapped reapply writes on every round and each
+    // write emits `success`, so with the `!manual` predicate dropped this
+    // test — FIRST in the file — spins forever and kills the worker before
+    // the runaway test below can report the regression. Catching that
+    // regression is that test's job, not this one's; this one only has to
+    // stop.
+    let rounds = 0
     fakeOutbox.reapply = async () => {
+      rounds += 1
+      if (rounds > 10) return
       patchEverywhere(store, "e1" as Id<"timeEntries">, (entry) => ({
         ...entry,
         title: "patched",
@@ -209,8 +230,6 @@ describe("OutboxProvider reapply after a late query's data actually arrives", ()
     const rows = queryClient.getQueryData<Array<{ title: string }>>(key)!
     expect(rows[0].title).toBe("patched")
 
-    fakeOutbox.pending = () => 0
-    fakeOutbox.reapply = async () => undefined
   })
 })
 
@@ -272,7 +291,5 @@ describe("OutboxProvider reapply does not retrigger itself", () => {
     expect(calls).toBeLessThanOrEqual(4)
     expect(calls).toBeGreaterThan(0)
 
-    fakeOutbox.pending = () => 0
-    fakeOutbox.reapply = async () => undefined
   })
 })
