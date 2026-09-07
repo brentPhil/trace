@@ -8,13 +8,16 @@
 /**
  * A line's amount, from the quantity the document PRINTS.
  *
- * NOT from the raw milliseconds. `/reports` sums every entry's exact
- * fractional-cent worth and rounds once at the end, which is the right way to
- * total a set of entries — but an invoice line prints `98.80 x $10.00` and a
- * client must reproduce `$988.00` from those three numbers with a calculator.
- * So the amount is computed from the rounded quantity, and the two can differ
- * by a cent or two. That difference is accepted and surfaced; what is not
- * accepted is it being silent.
+ * NOT from the raw milliseconds. An invoice line prints `98.80 x $10.00` and a
+ * client must reproduce `$988.00` from those three numbers with a calculator,
+ * so the amount is computed from the floored, printed quantity.
+ *
+ * `/reports` prices every project's time through this same function (see
+ * `centsOf` in convex/entries.ts). It used to sum each entry's exact
+ * fractional-cent worth and round once — the better arithmetic for a set of
+ * entries, and a figure no invoice could print — and the two documents
+ * disagreed by a few cents over the same range. Now a project's report amount
+ * is its invoice line, and a range's is the invoice's subtotal.
  */
 export function lineAmountCents(quantityCentis: number, unitCents: number): number {
   // Integer arithmetic throughout, not `Math.round((quantityCentis * unitCents)

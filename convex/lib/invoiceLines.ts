@@ -94,9 +94,11 @@ export type InvoiceLineDraft = {
   /** Hundredths of an hour, the stored unit. 9880 prints as `98.80`. */
   quantityCentis: number
   unitCents: number
-  /** From the ROUNDED quantity, never from the breakdown's exact
-   *  `billableCents` — see `lineAmountCents` for why an invoice line has to be
-   *  reproducible with a calculator from the three numbers printed on it. */
+  /** From the FLOORED quantity — see `lineAmountCents` for why an invoice line
+   *  has to be reproducible with a calculator from the three numbers printed
+   *  on it. The breakdown's `billableCents` for the same bucket is the same
+   *  arithmetic (`centsOf` in convex/entries.ts), so the two agree by
+   *  construction rather than by coincidence. */
   amountCents: number
   /** Provenance only. Never read for money. */
   projectId: string | null

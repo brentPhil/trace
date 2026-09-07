@@ -421,22 +421,22 @@ describe("invoices.createFromRange", () => {
 
   /*
    * 98:48:00 is EXACTLY 98.80 hours, so `centiHours` has no remainder to lose
-   * and `lineAmountCents(9880, 1000)` equals the breakdown's own
-   * `billableCents` — the test above passes identically whether the amount is
-   * computed from the rounded quantity or taken straight from the breakdown.
-   * This fixture has a real remainder, so the two arithmetics genuinely
-   * differ and this test can actually fail against the wrong one.
+   * and the test above would pass under any rounding rule. This fixture has a
+   * real remainder: the exact worth of the time is 6133.8(8)… cents, and only
+   * flooring the hours first gets 6_100. Both figures are asserted — the line
+   * AND the report's `billableCents` for the same range — because the whole
+   * reason the report prices time this way is so the two never disagree
+   * (see `centsOf` in convex/entries.ts).
    */
-  it("prices a line from the rounded quantity, not the breakdown's exact billableCents", async () => {
+  it("prices a line from the floored quantity, and the report prices the same time identically", async () => {
     const t = setup()
     const { projectId } = await project(t, {
       name: "Website",
       hourlyRateCents: 6100,
     })
     // 1h 0m 20s = 3,620,000ms. centiHours floors 100.5(5)... down to 100
-    // centihours, so lineAmountCents(100, 6100) = 6_100 exactly. The exact
-    // value — (3,620,000 / 3,600,000) x 6100 = 6133.8(8)... -> 6_134 rounded —
-    // is what `billableCents` would price this same time at.
+    // centihours, so lineAmountCents(100, 6100) = 6_100 exactly — not the
+    // exact (3,620,000 / 3,600,000) x 6100 = 6133.8(8)... -> 6_134.
     await entry(t, {
       startedAt: MON + HOUR,
       durationMs: HOUR + 20_000,
@@ -445,7 +445,13 @@ describe("invoices.createFromRange", () => {
 
     const { invoiceId } = await create(t)
     const invoice = await get(t, invoiceId)
+    const report = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      fromMs: RANGE.fromMs,
+      toMs: RANGE.toMs,
+    })
 
+    expect(report.billableCents).toBe(6_100)
     expect(invoice.lines).toHaveLength(1)
     expect(invoice.lines[0]?.quantityCentis).toBe(100)
     expect(invoice.lines[0]?.unitCents).toBe(6100)

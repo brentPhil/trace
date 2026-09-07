@@ -976,32 +976,66 @@ describe("rangeSummary — billable money", () => {
   })
 
   /**
-   * THE rounding-rule test. $61/hr means one minute is worth 101.6666… cents
-   * — not a whole cent. Summed first and rounded once, three of them are
-   * 305.0 exactly (rounds to 305). Rounded per entry FIRST (102 each, since
-   * 101.67 rounds up) and then summed, they would total 306 — a different
-   * number from identical underlying work, purely from where the rounding
-   * happens. This test pins the documented rule: sum first, round once.
+   * THE ROUNDING-RULE TEST, and the rule is the invoice's.
+   *
+   * 1h 0m 20s at $61/hr is exactly 6133.8(8)… cents, which rounds to 6_134.
+   * The invoice line for the same time prints `1.00 × $61.00`, because hours
+   * are floored to the hundredth on paper, and a client with a calculator
+   * gets $61.00 from those three numbers. The report used to sum the exact
+   * worth and round once — the better arithmetic for a set of entries, and a
+   * figure no invoice raised from it could print. So it now prices time the
+   * way the invoice does: floor the hours to hundredths, then multiply. A
+   * report reading $829.09 above an invoice billing $829.00 was two documents
+   * disagreeing in a client's inbox, and this pins the figure that ends it.
    */
-  it("sums each entry's exact fractional-cent value before rounding once, rather than rounding per entry", async () => {
+  it("prices billable time from floored hundredths of an hour, the way an invoice line does", async () => {
     const t = setup()
     const { projectId } = await t.mutation(internal.projects.createAs, {
       userId: ALICE,
       name: "Acme",
-      hourlyRateCents: 6_100, // $61/hr -> 101.6666...cents/minute
+      hourlyRateCents: 6_100, // $61/hr
     })
-    await billableEntryOn(t, ALICE, projectId, T0, 60_000)
-    await billableEntryOn(t, ALICE, projectId, T0 + 60_000, 60_000)
-    await billableEntryOn(t, ALICE, projectId, T0 + 120_000, 60_000)
+    // 3,620,000 ms is 100.5(5)… centihours; floored, 100.
+    await billableEntryOn(t, ALICE, projectId, T0, 3_600_000 + 20_000)
 
     const summary = await t.query(internal.entries.rangeSummaryAs, {
       userId: ALICE,
       ...range,
     })
 
-    // Sum-then-round: 3 * 101.6666... = 305.0 exactly -> 305.
-    // (Round-then-sum would instead give 3 * 102 = 306.)
-    expect(summary.billableCents).toBe(305)
+    // 100 × 6100 / 100 = 6_100 — not the exact 6_134.
+    expect(summary.billableCents).toBe(6_100)
+  })
+
+  /**
+   * Floored PER PROJECT, not once over the range, because that is what the
+   * invoice does (`invoiceLineDrafts` floors each bucket's hours) and the
+   * report's total has to be the sum of the invoice's lines. Two projects of
+   * 30m 18s each at $10/hr are 50.5 centihours apiece: 50 + 50 = 100, $10.00.
+   * Flooring the range's 1h 0m 36s once instead gives 101, $10.10 — a total no
+   * pair of invoice lines could add up to.
+   */
+  it("floors each project's hours on its own, so the total is the sum of the invoice's lines", async () => {
+    const t = setup()
+    const { projectId: acme } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+      hourlyRateCents: 1_000,
+    })
+    const { projectId: bolt } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Bolt",
+      hourlyRateCents: 1_000,
+    })
+    await billableEntryOn(t, ALICE, acme, T0, 1_818_000)
+    await billableEntryOn(t, ALICE, bolt, T0 + 3_600_000, 1_818_000)
+
+    const summary = await t.query(internal.entries.rangeSummaryAs, {
+      userId: ALICE,
+      ...range,
+    })
+
+    expect(summary.billableCents).toBe(1_000)
   })
 
   it("mixes rated and unrated projects correctly within the same range", async () => {

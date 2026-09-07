@@ -257,9 +257,38 @@ describe("rangeBreakdown — by project", () => {
     })
     await entry(t, { startedAt: MON + 9 * HOUR, durationMs: 60_000, projectId, billable: true })
 
-    // 102, rounded once for this project. That is what goes on Acme's invoice,
-    // whoever else was worked for that week.
-    expect((await breakdown(t)).projects[0].billableCents).toBe(102)
+    // One minute is 0.01 hours on Acme's invoice line, and `0.01 × $61.00` is
+    // 61 — not the exact 101.666… rounded to 102. This figure IS the invoice
+    // line's figure, whoever else was worked for that week.
+    expect((await breakdown(t)).projects[0].billableCents).toBe(61)
+  })
+
+  /**
+   * The headline is the SUM OF THE PROJECT AMOUNTS — which is the subtotal of
+   * the invoice `createFromRange` raises from this same breakdown, line for
+   * line. Two projects of 30m 18s each at $10/hr are 50.5 centihours apiece,
+   * floored to 50 each: $5.00 + $5.00. Flooring the range's 1h 0m 36s once
+   * would give 101 centihours, $10.10, and an invoice whose two lines add up
+   * to $10.00 under a report saying $10.10.
+   */
+  it("makes the headline the sum of the project amounts, which is the invoice's subtotal", async () => {
+    const t = setup()
+    const { projectId: acme } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Acme",
+      hourlyRateCents: 1_000,
+    })
+    const { projectId: bolt } = await t.mutation(internal.projects.createAs, {
+      userId: ALICE,
+      name: "Bolt",
+      hourlyRateCents: 1_000,
+    })
+    await entry(t, { startedAt: MON + 9 * HOUR, durationMs: 1_818_000, projectId: acme, billable: true })
+    await entry(t, { startedAt: MON + 11 * HOUR, durationMs: 1_818_000, projectId: bolt, billable: true })
+
+    const result = await breakdown(t)
+    expect(result.projects.map((p) => p.billableCents)).toEqual([500, 500])
+    expect(result.billableCents).toBe(1_000)
   })
 
   it("reports unpriced billable time per project, so a zero can be told from a blank", async () => {
@@ -283,8 +312,8 @@ describe("rangeBreakdown — the earnings curve lands on the headline", () => {
    * The Summary tab draws a cumulative earnings line with the period total
    * printed directly above it. Rounding each day on its own makes the line end
    * a few cents away from that figure — two numbers on one screen describing
-   * the same money and disagreeing. Taking deltas of a rounded running total
-   * makes them equal by construction.
+   * the same money and disagreeing. Taking deltas of a running total priced
+   * by the same rule as the headline makes them equal by construction.
    */
   it("makes the per-day amounts sum EXACTLY to the period total", async () => {
     const t = setup()
@@ -293,8 +322,10 @@ describe("rangeBreakdown — the earnings curve lands on the headline", () => {
       name: "Acme",
       hourlyRateCents: 6_100,
     })
-    // Three one-minute blocks on three days. Rounded per day they are 102 each
-    // and sum to 306; the period total is exactly 305.
+    // Three one-minute blocks on three days. Floored per day they are one
+    // centihour — 61 cents — each, and sum to 183; the period's three minutes
+    // are FIVE centihours, 305. The deltas of the running floor are 61, 122,
+    // 122, which is the only per-day series that lands on the headline.
     for (const start of [MON, TUE, WED]) {
       await entry(t, {
         startedAt: start + 9 * HOUR,
@@ -306,6 +337,7 @@ describe("rangeBreakdown — the earnings curve lands on the headline", () => {
 
     const result = await breakdown(t)
     expect(result.billableCents).toBe(305)
+    expect(result.days.map((d) => d.billableCents)).toEqual([61, 122, 122])
     expect(result.days.reduce((n, d) => n + d.billableCents, 0)).toBe(305)
   })
 

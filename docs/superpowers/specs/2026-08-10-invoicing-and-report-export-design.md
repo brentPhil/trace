@@ -196,6 +196,15 @@ the `AMOUNT` column's info affordance states the derivation in full. A one-cent
 difference the user can see and explain is fine; a one-cent difference they
 discover from a client is the bug.
 
+> **Addendum, 2026-09-07.** The note above was never built, and invoice
+> 090726-0007 (82.90 h, $829.00) went to a client beside a report for the same
+> range reading $829.09. The disagreement is now removed rather than annotated:
+> `entries.rangeSummary` and `rangeBreakdown` price each project's billable time
+> with `centiHours` then `lineAmountCents` — the invoice's own two steps — and
+> sum the projects. A project's report amount is its invoice line and a range's
+> amount is the invoice's subtotal. The report's money is therefore a floor, as
+> its decimal hours already were. See `centsOf` in `convex/entries.ts`.
+
 ---
 
 ## 2. Backend

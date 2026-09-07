@@ -15,7 +15,9 @@ import {
   TITLE_ROW_LIMIT,
 } from "./lib/scan"
 import { dayOf, isValidTimeZone, localPartsOf, weekStartOf } from "./lib/day"
+import { centiHours } from "./lib/duration"
 import { isFilterActive, matchesFilter } from "./lib/entryFilter"
+import { lineAmountCents } from "./lib/invoiceMath"
 import { defaultRateCents } from "./settings"
 import type { EntryFilter } from "./lib/entryFilter"
 import type { EntryTimes, TimeEdit, TimesResult } from "./lib/entryTimes"
@@ -332,8 +334,8 @@ const summaryFields = {
    * project at all — a rate nothing set is not a rate of zero, but it is also
    * not money this total can claim to know. `unratedBillableMs` below is how
    * much time that was, so a caller can tell "worth nothing" from "worth an
-   * amount nobody has priced". See `rangeSummaryImpl` for the exact rounding
-   * rule this figure follows: it must be reproducible by hand.
+   * amount nobody has priced". See `centsOf` for the rounding rule this figure
+   * follows: it is the invoice's own, so this is what the time bills as.
    *
    * VALUED AT TODAY'S RATE, NOT THE RATE IN FORCE WHEN THE WORK WAS DONE.
    * There is no per-entry rate snapshot; this reads `projects.hourlyRateCents`
@@ -414,16 +416,31 @@ async function scanRange(
  * money rule is a per-bucket chance to get it wrong in a way that only shows up
  * as a chart whose bars do not add up to the figure above them.
  */
+/**
+ * One project's rated billable time inside a ledger, and the rate it prices
+ * at. Keyed in the ledger by project id, with `""` for the unassigned bucket.
+ *
+ * Kept PER PROJECT rather than as one running sum, because `centsOf` floors
+ * each project's hours on its own before pricing them — which is what an
+ * invoice line does with a project's bucket (`invoiceLineDrafts` in
+ * convex/lib/invoiceLines.ts). A ledger that summed milliseconds across
+ * projects and floored once would round differently from the lines it exists
+ * to equal: 50.5 + 50.5 centihours is 100 across two invoice lines and 101 as
+ * one figure.
+ *
+ * One rate per project is a fact of the scan, not an assumption: `rateOf`
+ * resolves a project's rate uniformly for every row inside it, so the rate
+ * the first row posts is the rate every later row would have posted.
+ */
+type RatedMs = { ms: number; rateCents: number }
+
 type Ledger = {
   totalMs: number
   billableMs: number
   count: number
   runningCount: number
-  /**
-   * In cents × milliseconds. Divided by an hour's worth of milliseconds ONCE,
-   * by `centsOf`. See the rounding rule on `post` below.
-   */
-  billableCentMs: number
+  /** See `RatedMs`. Priced by `centsOf`, and nowhere else. */
+  rated: Map<string, RatedMs>
   unratedBillableMs: number
 }
 
@@ -433,9 +450,20 @@ function emptyLedger(): Ledger {
     billableMs: 0,
     count: 0,
     runningCount: 0,
-    billableCentMs: 0,
+    rated: new Map(),
     unratedBillableMs: 0,
   }
+}
+
+function postRated(
+  rated: Map<string, RatedMs>,
+  key: string,
+  ms: number,
+  rateCents: number
+): void {
+  const bucket = rated.get(key)
+  if (bucket === undefined) rated.set(key, { ms, rateCents })
+  else bucket.ms += ms
 }
 
 /*
@@ -454,7 +482,7 @@ function emptyLedger(): Ledger {
  */
 function post(
   ledger: Ledger,
-  row: Pick<Doc<"timeEntries">, "durationMs" | "billable">,
+  row: Pick<Doc<"timeEntries">, "durationMs" | "billable" | "projectId">,
   rateCents: number | null
 ): void {
   if (row.durationMs === null) {
@@ -469,7 +497,7 @@ function post(
   if (rateCents === null) {
     ledger.unratedBillableMs += row.durationMs
   } else {
-    ledger.billableCentMs += row.durationMs * rateCents
+    postRated(ledger.rated, row.projectId ?? "", row.durationMs, rateCents)
   }
 }
 
@@ -477,41 +505,58 @@ function post(
  * What a ledger's billable time is worth, in whole cents.
  *
  * THE ROUNDING RULE for `billableCents`, stated once, here, because this is the
- * only place it is applied.
+ * only place it is applied — and it is THE INVOICE'S RULE, not one of the
+ * report's own.
  *
- * Each billable entry's EXACT worth — `durationMs ÷ 3,600,000 × hourlyRateCents`
- * — is a real number, not a whole cent (a 7-minute block at $61/hr is
- * 711.1666… cents). Those exact values are SUMMED FIRST, unrounded, and the
- * grand total is rounded to the nearest cent exactly ONCE, at the very end.
+ * Each project's rated billable time is floored to hundredths of an hour and
+ * multiplied by its rate — `centiHours`, then `lineAmountCents`, the very two
+ * steps `invoiceLineDrafts` prices an invoice line with — and the projects are
+ * summed. So a project's figure here IS its invoice line, and a range's figure
+ * IS the subtotal of the invoice `createFromRange` raises from it, line for
+ * line.
  *
- * The sum is kept in `cents × milliseconds` and divided by 3,600,000 once, at
- * the end, rather than accumulating fractional cents as it goes. Same rule,
- * strictly better arithmetic: every term is an integer, so the running total
- * is EXACT rather than merely close while it stays inside JavaScript's
- * 9.007e15 exact-integer range — which `MAX_RATE_CENTS` in convex/projects.ts
- * is chosen to keep a 24h entry inside. There is no measured drift in the old
- * float version (10,000 one-minute entries at $61/hr summed to
- * 1016666.6666665188 against an exact 1016666.666…, the same cent); the
- * residual this removes is an exact half-cent total flipping by one. The
- * discriminating 305-not-306 test below is unchanged and still passes, which
- * is the point: this changes the precision, not the rule.
+ * This used to sum every entry's EXACT fractional-cent worth and round once at
+ * the end: the better arithmetic for totalling a set of entries, and a figure
+ * no invoice could print. An invoice line reads `82.90 × $10.00`, and a client
+ * must get its amount from those three numbers with a calculator, so the
+ * invoice floors the hours before multiplying. That left a report saying
+ * $829.09 above an invoice billing $829.00 for the same 82:54:31 — two
+ * documents about one week disagreeing in a client's inbox — and the note on
+ * /invoices/new that was to explain the nine cents never shipped. Pricing the
+ * report by the invoice's rule removes the disagreement instead of annotating
+ * it: the report says what the time bills as.
  *
- * Rounding each entry first and then summing the roundings is a different,
- * and for many small entries LARGER, total from identical data — three
- * one-minute blocks at $61/hr are 101.6666… cents each, which rounds to 102
- * apiece and sums to 306; summed first and rounded once they are exactly
- * 305. `convex/entries.test.ts` pins 305, not 306. This is exactly the
- * per-entry-vs-per-subtotal divergence the Tier 2 plan notes for duration
- * rounding ("twelve 4-minute entries rounded to 15 each is 3h; the 48-minute
- * total rounded is 48m") — it applies identically to money, and sum-then-
- * round is the rule a person doing this by hand on a calculator would also
- * land on: add up the exact amounts, then round the total once.
+ * Two consequences are accepted, and stated rather than hidden:
+ *
+ *   - The report's money is a FLOOR, as its decimal hours already were
+ *     (`formatDecimalHours`: "2 dp, floor, totals and export only"). Up to 36
+ *     seconds per project per bucket goes unpriced — never over-priced.
+ *   - Buckets floor independently, so a day's or a description's amount can
+ *     fall short of its share of the project it sits in, and a 31-second entry
+ *     prices at $0.00. Parts never sum ABOVE the whole, which `centiHours`
+ *     states as its contract; and per-day amounts are deltas of a running
+ *     floor, so the earnings curve still lands on the headline exactly (see
+ *     `days` in `rangeBreakdownImpl`).
+ *
+ * One caveat carried over from `mergeLines`: an invoice raised with the merged
+ * summary line prices ONE quantity — the per-project floors summed — with one
+ * rounding, and at a rate with odd cents in it that can sit a cent from the sum
+ * of the per-project roundings here. At a whole-cent rate the two products are
+ * exact and the figures agree; the 2026-08-14 spec accepts the odd-cent case.
  *
  * A project with no `hourlyRateCents` — including no project at all —
  * contributes nothing: a rate nobody set is not a rate of zero.
  */
 function centsOf(ledger: Ledger): number {
-  return Math.round(ledger.billableCentMs / 3_600_000)
+  return ratedCents(ledger.rated)
+}
+
+function ratedCents(rated: ReadonlyMap<string, RatedMs>): number {
+  let cents = 0
+  for (const { ms, rateCents } of rated.values()) {
+    cents += lineAmountCents(centiHours(ms), rateCents)
+  }
+  return cents
 }
 
 /**
@@ -1029,18 +1074,19 @@ export async function rangeBreakdownImpl(
   }
 
   /*
-   * Per-day amounts are the DELTAS OF A ROUNDED RUNNING TOTAL, not each day's
-   * own rounded amount.
+   * Per-day amounts are the DELTAS OF A PRICED RUNNING TOTAL, not each day's
+   * own floored amount.
    *
-   * Rounding each day independently and summing gives a figure that can differ
-   * from `billableCents` by a cent per day — which the Summary tab would draw
-   * as a cumulative line ending somewhere other than the total printed directly
-   * above it. Taking deltas of the running total makes the last point EXACTLY
-   * `centsOf(total)` by construction, because the final running sum is the same
-   * `billableCentMs` the headline rounds, and every intermediate day is still
-   * the best whole-cent approximation of the period-to-date.
+   * Flooring each day independently and summing gives a figure that can fall
+   * short of `billableCents` by up to 36 seconds' worth per day — which the
+   * Summary tab would draw as a cumulative line ending somewhere below the
+   * total printed directly above it. Taking deltas of the running total makes
+   * the last point EXACTLY `centsOf(total)` by construction: the final running
+   * map holds the same per-project milliseconds `total.rated` does, priced by
+   * the same `ratedCents`, and every intermediate day is the period-to-date as
+   * it would bill.
    *
-   * Projects below are rounded independently instead, and that asymmetry is
+   * Projects below are floored independently instead, and that asymmetry is
    * deliberate: a project's amount is what you would invoice that client, so it
    * has to be right on its own rather than right in a sequence. Its parts may
    * therefore differ from the whole by a few cents, which is a real property of
@@ -1048,12 +1094,14 @@ export async function rangeBreakdownImpl(
    * the sort order of the others.
    */
   const days = []
-  let runningCentMs = 0
+  const running = new Map<string, RatedMs>()
   let paidToDate = 0
   for (const day of [...byDay.keys()].sort()) {
     const ledger = byDay.get(day)!
-    runningCentMs += ledger.billableCentMs
-    const cumulative = Math.round(runningCentMs / 3_600_000)
+    for (const [key, { ms, rateCents }] of ledger.rated) {
+      postRated(running, key, ms, rateCents)
+    }
+    const cumulative = ratedCents(running)
     days.push({
       day,
       totalMs: ledger.totalMs,
