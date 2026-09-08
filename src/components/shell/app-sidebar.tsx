@@ -11,7 +11,6 @@ import {
   sidebarMenuButtonVariants,
 } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
-import { Logo } from "@/components/logo"
 import {
   Popover,
   PopoverClose,
@@ -215,11 +214,10 @@ export function AppSidebar({
         {/* `to={NAV_ITEMS[0].to}`, not a `"/timer"` literal, so the header
             link always points at whatever the first nav destination is.
 
-            `aria-label` rather than letting the children name it: the
-            wordmark hides when the rail collapses and the mark left standing
-            is a picture, not a destination anybody can act on. Both are
-            decorative here, which also makes the name identical in jsdom (no
-            CSS) and in a browser. */}
+            `aria-label` rather than letting the glyphs below name it: the
+            wordmark collapses to its initial, and "C" is not a destination
+            anybody can act on. Both spans are decorative here, which also
+            makes the name identical in jsdom (no CSS) and in a browser. */}
         <Link
           to={NAV_ITEMS[0].to}
           aria-label={APP_NAME}
@@ -236,14 +234,17 @@ export function AppSidebar({
             "px-2 text-base font-medium tracking-tight"
           )}
         >
-          {/* The mark FIRST and always: it is the one glyph a collapsed rail
-              keeps, and it sits exactly where every nav item's icon sits —
-              the cva's `[&_svg]:size-4` sizes it like Clock or Receipt below,
-              and its `gap-2` is the same gap those rows put between icon and
-              label. The wordmark is the last child so the cva's
-              last-span rules apply to it, and it hides on collapse the way a
-              nav label does. */}
-          <Logo />
+          {/* The collapsed initial FIRST, so the full wordmark is the last
+              child: the cva sends that one `sr-only` when the rail collapses,
+              which is right for a nav label and would otherwise delete the
+              one glyph a collapsed rail has to keep. Only ever one of the two
+              is displayed, so the order is invisible. */}
+          <span
+            aria-hidden="true"
+            className="hidden group-data-[collapsible=icon]:inline"
+          >
+            {APP_NAME[0]}
+          </span>
           <span
             aria-hidden="true"
             className="group-data-[collapsible=icon]:hidden"

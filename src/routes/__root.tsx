@@ -66,7 +66,7 @@ export const Route = createRootRouteWithContext<{
         rel: "manifest",
         href: "/manifest.json",
       },
-      /* The mark, three ways, all rendered from public/logo.svg by
+      /* The icon, three ways, all rendered from public/logo.svg by
        * scripts/make-icons.mjs. The SVG is what a modern tab shows — crisp at
        * any pixel density — and the ICO sits beside it for the browsers and
        * the Windows pinned-site path that still want one; `sizes="any"` on

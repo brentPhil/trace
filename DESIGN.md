@@ -742,23 +742,6 @@ built panels by hand still hold — prefer the two shapes below.
 - **Direct names, not umbrellas.** Timer, Reports, Projects, Invoices,
   Settings. Nothing is called Home or Overview.
 
-### The Mark
-
-- **One source, `public/logo.svg`:** a clock face beside a page, near-black on
-  a white tile. Every raster the product ships — favicon, PWA icons, desktop
-  app icon, tray — is rendered from it by `pnpm icons` and then
-  `pnpm tauri icon src-tauri/app-icon.png` (docs/desktop.md). Nothing under
-  `public/` or `src-tauri/icons/` is drawn by hand.
-- **In the product it is `<Logo />`** (`src/components/logo.tsx`): the same
-  paths with no tile, filled with `currentColor`, so it takes the ramp the way
-  a Lucide icon does and a theme preset moves it along with everything else.
-  It sits beside the wordmark at the nav-icon size, and it is the whole of the
-  collapsed rail's header.
-- **The tile stays where the OS draws the icon.** A browser tab, a dock, the
-  Windows tray: that ground is not ours, and the tile is what keeps the mark
-  legible on a light and a dark taskbar alike. Inside the product the same
-  tile would be a white sticker on a dark sidebar.
-
 ### Chips
 
 - **Style:** `rounded-full`, `px-2.5 py-1`, label role at `text-xs`, on

@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react"
 import { cn } from "@/lib/utils"
-import { Logo } from "@/components/logo"
 import { APP_NAME } from "@shared/brand"
 
 /** Stable id so inputs can point at the error via aria-describedby. */
@@ -55,8 +54,7 @@ export function AuthShell({
         between them is what makes the panel read as an object rather than as
         the page.
       */}
-      <span className="flex items-center gap-2 self-start text-base font-medium tracking-tight text-foreground">
-        <Logo className="size-5 shrink-0" />
+      <span className="self-start text-base font-medium tracking-tight text-foreground">
         {APP_NAME}
       </span>
 

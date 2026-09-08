@@ -2,20 +2,20 @@
 // Run: pnpm icons — then `pnpm tauri icon src-tauri/app-icon.png` to fan the
 // desktop icon out into src-tauri/icons/ (see docs/desktop.md).
 //
-// public/logo.svg is the mark ON ITS WHITE TILE, and every file written here
-// keeps the tile: these icons are drawn by the OS — a browser tab, a home
-// screen, a dock, the Windows tray — on a ground that is not ours, and the
-// tile is what keeps a near-black mark legible on a dark taskbar. The one
-// place the tile is dropped is inside the product, where src/components/
-// logo.tsx renders the same paths in `currentColor` on our own surfaces.
+// public/logo.svg is the wordmark's initial ON ITS WHITE TILE, and every file
+// written here keeps the tile: these icons are drawn by the OS — a browser
+// tab, a home screen, a dock, the Windows tray — on a ground that is not ours,
+// and the tile is what keeps a near-black glyph legible on a dark taskbar.
+// Inside the product there is no icon at all: the sidebar shows the wordmark,
+// and its collapsed rail shows the same initial as text.
 import { writeFile } from "node:fs/promises"
 import sharp from "sharp"
 
 const svg = "public/logo.svg"
 
-// The SVG has only a viewBox (478.78 units square) and no intrinsic size, so
-// librsvg would rasterise it at 96 DPI — 479px — and every icon above that
-// would be an UPSCALE. 300 DPI renders it at ~1496px, above the largest
+// The SVG has only a viewBox (512 units square) and no intrinsic size, so
+// librsvg would rasterise it at 96 DPI — 512px — and every icon above that
+// would be an UPSCALE. 300 DPI renders it at 1600px, above the largest
 // target (1024), so each size below is a clean downsample.
 const source = () => sharp(svg, { density: 300 })
 
@@ -26,8 +26,8 @@ const png = (size) =>
 await writeFile("public/logo192.png", await png(192))
 await writeFile("public/logo512.png", await png(512))
 
-// Maskable: the mark inside the 80% safe zone so any platform mask shape —
-// circle, squircle, rounded square — leaves the clock and the page intact.
+// Maskable: the glyph inside the 80% safe zone so any platform mask shape —
+// circle, squircle, rounded square — leaves the initial intact.
 // The 400px render carries its own tile, and it sits on a white 512 so the
 // cropped corners are tile too rather than a second colour.
 await sharp({
