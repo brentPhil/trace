@@ -26,8 +26,11 @@ export const LANDING_DESCRIPTION =
  * rate", never "never rounds": invoices floor hours to hundredths.
  */
 const PROSE = "max-w-[60ch] text-base leading-relaxed text-muted-foreground"
+// An implicit auto column grows to its widest child's min-content width, so a
+// fragment with non-wrapping rows would push the section, prose included, past a
+// phone's edge. Use an explicit shrinkable column on small screens.
 const SECTION =
-  "grid gap-8 px-4 py-16 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-center lg:gap-12"
+  "grid grid-cols-[minmax(0,1fr)] gap-8 px-4 py-16 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:items-center lg:gap-12"
 const H2 = "text-xl font-medium tracking-[-0.01em] text-foreground"
 const LINK = "underline underline-offset-4 hover:text-foreground"
 
