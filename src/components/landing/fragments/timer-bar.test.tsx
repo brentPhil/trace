@@ -9,7 +9,10 @@ afterEach(() => {
 
 describe("TimerBarFragment", () => {
   it("opens at the sample value and advances with the wall clock", () => {
-    vi.useFakeTimers()
+    // A whole second strictly after real now: the store's snapshot (set at
+    // module import from real time) is already in the past relative to fake
+    // time, the way a remount minutes later would leave it.
+    vi.useFakeTimers({ now: Math.floor(Date.now() / 1000) * 1000 + 2000 })
     const { container } = render(<TimerBarFragment />)
     const elapsed = () =>
       container.querySelector("[data-landing-elapsed]")?.textContent
@@ -20,11 +23,32 @@ describe("TimerBarFragment", () => {
       vi.advanceTimersByTime(3000)
     })
 
-    // The clock store aligns to wall-clock second boundaries, so the exact
-    // figure depends on where in the second the test started. It must have
-    // moved, and by seconds, not minutes.
-    expect(elapsed()).not.toBe("1:47:12")
-    expect(elapsed()).toMatch(/^1:47:1[3-9]$/)
+    expect(elapsed()).toBe("1:47:15")
+  })
+
+  it("does not jump after a remount long after the store's snapshot was set", () => {
+    vi.useFakeTimers({ now: Math.floor(Date.now() / 1000) * 1000 + 2000 })
+    const first = render(<TimerBarFragment />)
+    act(() => {
+      vi.advanceTimersByTime(3000)
+    })
+    first.unmount()
+
+    act(() => {
+      vi.advanceTimersByTime(60_000)
+    })
+
+    const second = render(<TimerBarFragment />)
+    const elapsed = () =>
+      second.container.querySelector("[data-landing-elapsed]")?.textContent
+
+    expect(elapsed()).toBe("1:47:12")
+
+    act(() => {
+      vi.advanceTimersByTime(1000)
+    })
+
+    expect(elapsed()).toBe("1:47:13")
   })
 
   it("is an inert illustration", () => {
