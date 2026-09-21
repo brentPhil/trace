@@ -51,20 +51,22 @@ export function ReportReadoutFragment({ className }: { className?: string }) {
           </div>
         ))}
       </dl>
+      {/* Slim bars on a baseline, not slabs: at column width a bar outweighs
+          the figures above it, and this strip is supporting evidence. */}
       <div className="flex h-32 items-stretch gap-3">
         {WEEK.days.map((d) => (
           <div
             key={d.label}
-            className="flex flex-1 flex-col justify-end gap-1.5"
+            className="flex flex-1 flex-col items-center justify-end gap-1.5"
           >
             {d.ms === 0 ? (
               <div
                 data-hatched
-                className={cn(HATCH_EMPTY, "h-2 w-full rounded-sm")}
+                className={cn(HATCH_EMPTY, "h-2 w-full max-w-8 rounded-sm")}
               />
             ) : (
               <div
-                className="w-full rounded-sm bg-foreground/80"
+                className="w-full max-w-8 rounded-sm bg-foreground/70"
                 style={{ height: `${(d.ms / maxMs) * 100}px` }}
               />
             )}

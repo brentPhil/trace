@@ -1,10 +1,9 @@
-import { useState } from "react"
 import { DollarSign, Square } from "lucide-react"
 import { ProjectDot } from "@/components/classifiers/project-dot"
-import { useSecond } from "@/hooks/use-clock"
 import { cn } from "@/lib/utils"
 import { formatClock } from "@shared/duration"
 import { RUNNING_ENTRY } from "../sample-data"
+import { useRunningSeconds } from "../use-running-seconds"
 
 /**
  * MIRRORS src/components/timer/timer-bar.tsx in its RECORDING state — the
@@ -16,33 +15,10 @@ import { RUNNING_ENTRY } from "../sample-data"
  * editors and the `useAnnounce` context, none of which belong inside an inert
  * illustration on a signed-out page.
  *
- * THE TICK READS THE APP'S CLOCK, never a counter (src/lib/clock.ts: "never
- * accumulate"). `useSecond()` is null during server rendering and hydration,
- * so both paint the fixed sample value and agree; from the first real second
- * on, the figure is the sample value plus the seconds since then. It keeps
- * ticking under reduced motion, as the app's does — a running duration is
- * state, not decoration.
- *
- * `firstSecond` anchors to `Date.now()`, not to the store's snapshot: the
- * store only refreshes while something is subscribed, and this is the only
- * subscriber on the signed-out page, so on a remount its snapshot can be
- * stale by however long the visitor was away. Anchoring to the wall clock
- * makes the first frame correct instead of jumping once the store catches up.
+ * The tick lives in `useRunningSeconds`, shared with the day ruler.
  */
 export function TimerBarFragment({ className }: { className?: string }) {
-  const second = useSecond()
-  const [firstSecond, setFirstSecond] = useState<number | null>(null)
-  // Adjusting state during render, React's documented pattern for "remember
-  // the first value seen" — no effect, so no frame where it is missing.
-  if (second !== null && firstSecond === null) {
-    setFirstSecond(Math.floor(Date.now() / 1000))
-  }
-
-  const elapsedSeconds =
-    RUNNING_ENTRY.elapsedSeconds +
-    (second !== null && firstSecond !== null
-      ? Math.max(0, second - firstSecond)
-      : 0)
+  const elapsedSeconds = useRunningSeconds()
 
   return (
     <div

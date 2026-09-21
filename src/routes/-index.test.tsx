@@ -86,10 +86,10 @@ describe("LandingPage", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1)
   })
 
-  it("renders all four fragments, every one inert", () => {
+  it("renders all five fragments, every one inert", () => {
     const { container } = render(<LandingPage />)
     const fragments = container.querySelectorAll("[data-landing-fragment]")
-    expect(fragments).toHaveLength(4)
+    expect(fragments).toHaveLength(5)
     for (const f of fragments) expect(f.hasAttribute("inert")).toBe(true)
   })
 

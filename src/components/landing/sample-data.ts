@@ -22,10 +22,15 @@ export const PROJECTS = {
   internal: { name: "Internal", color: "slate", archived: false },
 } satisfies Record<string, SampleProject>
 
-/** Starts at 1:47:12 rather than 0:00:00, so the first paint looks like a real day. */
+/**
+ * Starts at 1:47:12 rather than 0:00:00, so the first paint looks like a real
+ * day. It began at 16:55, three minutes after the day's last entry — which
+ * puts "now" at 18:42 on the day ruler.
+ */
 export const RUNNING_ENTRY = {
   title: "[HS-44] Booking flow: mobile date picker",
   project: PROJECTS.harbour,
+  startMinute: 16 * 60 + 55,
   elapsedSeconds: 6432,
 }
 
@@ -78,6 +83,16 @@ export const DAY: { label: string; entries: ReadonlyArray<SampleEntry> } = {
     },
   ],
 }
+
+/** The day ruler's span, 8:00 to 19:00, in minutes after midnight. */
+export const DAY_AXIS = { startMinute: 8 * 60, endMinute: 19 * 60 } as const
+
+/**
+ * Untracked time shorter than this is drawn as plain ground on the ruler, not
+ * hatched: five-minute slivers of hatch between every pair of entries would
+ * read as noise, and the gap worth noticing is lunch.
+ */
+export const HATCH_GAP_MINUTES = 15
 
 const HOUR_MS = 3_600_000
 

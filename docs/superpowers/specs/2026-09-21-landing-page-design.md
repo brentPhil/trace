@@ -245,3 +245,30 @@ page may hold a colour the theme cannot reach), and forced-colors mode, where
 Pricing page, screenshots, testimonials, analytics, a blog, OG image
 generation, a theme control on the page, and publishing the desktop release.
 The last is a precondition for deploying this page and is the owner's action.
+
+## Revision, 2026-09-21: the bolder pass
+
+The first build repeated one composition five times (prose left, a small
+fragment right) and had no image a visitor would remember. The revision keeps
+every claim and every DESIGN.md rule and changes proportion, not vocabulary:
+no new token, font, gradient or shadow.
+
+- **The day, drawn.** A new fragment, `fragments/day-ruler.tsx`, draws the
+  sample day as one horizontal band from 8:00 to 19:00: each entry a block in
+  its project's hue (`--project-*` is data), untracked gaps of 15 minutes or
+  more hatched (The Hatch Rule), and the running entry outlined in `--primary`
+  with a full-height "now" line. It is the literal answer to the headline and
+  the page's one image.
+- **The stage.** The timer bar and the ruler sit together at full width in a
+  `bg-card` band under the hero, the way the app puts the timer bar above the
+  day. They share one tick (`use-running-seconds.ts`), so they cannot disagree.
+- **Scale.** The headline is a display size (`clamp(2.75rem, …, 5.75rem)`) in
+  two tones: the question in `--foreground`, the answer in
+  `--muted-foreground`. Section heads share one scale.
+- **The note section** sets the app's own note-field prompt ("What did you
+  actually do? A sentence is plenty.", `note-line.tsx`) as a pull quote.
+- **Reports and invoicing** are one section, "From the week to the invoice",
+  because they are a sequence; two columns only at `xl`, split 5:7 so the
+  invoice table's description column has room.
+- **Facts** are a two-column list at `md`, each under a hairline.
+- **The closing band** repeats the display scale: "Start with today."
