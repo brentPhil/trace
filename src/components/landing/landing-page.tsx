@@ -83,9 +83,10 @@ const FACTS = [
         <a className={LINK} href={DESKTOP_RELEASES_URL}>
           Download for Windows or macOS
         </a>
-        . The builds are unsigned, so the first launch needs{" "}
+        . The builds are unsigned, so the first launch needs one extra step —
+        see the{" "}
         <a className={LINK} href={DESKTOP_INSTALL_URL}>
-          one extra step
+          install steps for unsigned builds
         </a>
         .
       </>

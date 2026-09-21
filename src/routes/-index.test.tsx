@@ -1,7 +1,10 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { isRedirect } from "@tanstack/react-router"
-import { LandingPage } from "@/components/landing/landing-page"
+import {
+  LANDING_DESCRIPTION,
+  LandingPage,
+} from "@/components/landing/landing-page"
 import { DESKTOP_RELEASES_URL } from "@/lib/desktop-release"
 import { Route } from "@/routes/index"
 import type * as RouterModuleType from "@tanstack/react-router"
@@ -94,6 +97,17 @@ describe("LandingPage", () => {
     const { container } = render(<LandingPage />)
     const text = container.textContent
     expect(text).toContain("Works offline in the browser")
+    expect(text).toContain("Link a calendar in the web app")
     expect(text).not.toMatch(/never (silently )?rounds/i)
+  })
+})
+
+describe("/ head", () => {
+  it("sets the description meta from LANDING_DESCRIPTION", async () => {
+    const meta = await Route.options.head?.({} as never)
+    expect(meta?.meta).toContainEqual({
+      name: "description",
+      content: LANDING_DESCRIPTION,
+    })
   })
 })

@@ -33,6 +33,15 @@ describe("landing sample data", () => {
     expect(WEEK.days.filter((d) => d.ms === 0)).toHaveLength(1)
   })
 
+  it("agrees with the day log: WEEK's Tue equals the sum of DAY's entries", () => {
+    const dayTotalMs = DAY.entries.reduce(
+      (sum, e) => sum + (e.endMinute - e.startMinute) * 60_000,
+      0
+    )
+    const tue = WEEK.days.find((d) => d.label === "Tue")
+    expect(tue?.ms).toBe(dayTotalMs)
+  })
+
   it("never bills more than was tracked", () => {
     const trackedMs = WEEK.days.reduce((sum, d) => sum + d.ms, 0)
     // centis are hundredths of an hour: 36_000 ms each

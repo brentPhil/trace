@@ -37,7 +37,7 @@ describe("ReportReadoutFragment", () => {
       (d) => d.textContent
     )
     expect(labels).toEqual(["Tracked", "Billable", "Earned", "Entries"])
-    expect(container.textContent).toContain("25h 48m")
+    expect(container.textContent).toContain("25h 19m")
     expect(container.textContent).toContain("21h 30m")
     expect(container.textContent).toContain("$1,935.00")
   })

@@ -84,7 +84,7 @@ const HOUR_MS = 3_600_000
 export const WEEK = {
   days: [
     { label: "Mon", ms: 6 * HOUR_MS + 42 * 60_000 },
-    { label: "Tue", ms: 7 * HOUR_MS + 12 * 60_000 },
+    { label: "Tue", ms: 6 * HOUR_MS + 43 * 60_000 },
     { label: "Wed", ms: 0 },
     { label: "Thu", ms: 6 * HOUR_MS + 24 * 60_000 },
     { label: "Fri", ms: 5 * HOUR_MS + 30 * 60_000 },
