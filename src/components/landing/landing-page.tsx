@@ -157,7 +157,13 @@ export function LandingPage() {
         </section>
 
         <section className="border-t border-border">
-          <div className={SECTION}>
+          {/* The invoice table has a 544px minimum and its inert box cannot scroll, so this section gives the fragment two thirds rather than three fifths. */}
+          <div
+            className={cn(
+              SECTION,
+              "lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]"
+            )}
+          >
             <div className="flex flex-col gap-4">
               <h2 className={H2}>From hours to an invoice.</h2>
               <p className={PROSE}>
