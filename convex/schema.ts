@@ -688,9 +688,9 @@ export default defineSchema({
      * this preference. */
     mergeInvoiceLines: v.optional(v.boolean()),
     /** Start music when a timer starts. Optional and additive like `currency`
-     *  and `groupEntries` above — a row written before this field existed has
-     *  no opinion, `settings.get` falls through to `SETTINGS_DEFAULTS`, and no
-     *  backfill migration is required. */
+     *  and `groupEntries` above — no backfill migration is required. OFF for
+     *  new accounts; a row written before this field existed reads as ON,
+     *  which is what it had then (`LEGACY_MUSIC_AUTOPLAY` in settings.ts). */
     musicAutoplay: v.optional(v.boolean()),
     /** What happens to playback when a timer stops.
      *

@@ -74,9 +74,23 @@ export const SETTINGS_DEFAULTS: Settings = {
   pdfIncludeNotes: false,
   groupEntries: true,
   mergeInvoiceLines: true,
-  musicAutoplay: true,
+  // OFF for new accounts: sound that starts on its own is a surprise the user
+  // did not ask for. Accounts that existed before this changed keep what they
+  // had — see `LEGACY_MUSIC_AUTOPLAY`.
+  musicAutoplay: false,
   musicOnStop: "stop",
 }
+
+/**
+ * What a row with NO `musicAutoplay` column reads as — `true`, not the default.
+ *
+ * Such a row predates the column, and its account was playing music on every
+ * timer start when the default was `true`. Every row written since has the
+ * value spelled out (`ensure` and `update` spread `SETTINGS_DEFAULTS`), so
+ * flipping the default reaches new accounts only; this keeps the oldest ones
+ * from being switched off silently by the same change.
+ */
+const LEGACY_MUSIC_AUTOPLAY = true
 
 async function readSettings(ctx: QueryCtx | MutationCtx, userId: string) {
   return await ctx.db
@@ -126,9 +140,9 @@ async function getImpl(
     groupEntries: row.groupEntries ?? SETTINGS_DEFAULTS.groupEntries,
     mergeInvoiceLines:
       row.mergeInvoiceLines ?? SETTINGS_DEFAULTS.mergeInvoiceLines,
-    // Same additive-column fallback as `currency`, `pdfIncludeNotes`,
-    // `groupEntries` and `mergeInvoiceLines` above.
-    musicAutoplay: row.musicAutoplay ?? SETTINGS_DEFAULTS.musicAutoplay,
+    // Additive-column fallback like its neighbours, but to the value the
+    // default HAD when these rows were written, not the one it has now.
+    musicAutoplay: row.musicAutoplay ?? LEGACY_MUSIC_AUTOPLAY,
     // Not the plain `??` its four neighbours use, because this column has a
     // THIRD legacy value. `"pause"` was an option until it was noticed that it
     // and `"stop"` differed by one `currentTime = 0` — identical at the moment
