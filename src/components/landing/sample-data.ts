@@ -141,3 +141,10 @@ export const INVOICE = {
     timeLine("Weekly check-ins", 400),
   ],
 } as const
+
+/**
+ * What gets typed into the day log's one empty note when the visitor reaches
+ * it. NOT on the entry itself: `note: null` is the state the page opens in and
+ * the state a reader without script or motion keeps, hatch and all.
+ */
+export const TYPED_NOTE = "Agreed the October scope: two pages, no redesign."

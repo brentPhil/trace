@@ -4,6 +4,7 @@ import { formatCompactDuration } from "@shared/duration"
 import { lineAmountCents } from "@shared/invoiceMath"
 import { formatMoney } from "@shared/money"
 import { WEEK } from "../sample-data"
+import { staggerDelay, useCountProgress, useReveal } from "../use-reveal"
 
 const CENTI_MS = 36_000
 
@@ -15,28 +16,37 @@ const CENTI_MS = 36_000
  *
  * Earned is priced with `lineAmountCents`, the rule /reports and the invoice
  * share since 89d7b64.
+ *
+ * ON REVEAL THE WEEK ADDS UP: the four figures count to their values while the
+ * bars rise from the baseline, Monday first. Every intermediate figure is a
+ * real format of a real quantity (the amount is still `lineAmountCents` of the
+ * hours shown), so no frame prints a number the app could not.
  */
 export function ReportReadoutFragment({ className }: { className?: string }) {
+  const [ref, reveal] = useReveal<HTMLDivElement>()
+  const progress = useCountProgress(reveal)
   const trackedMs = WEEK.days.reduce((sum, d) => sum + d.ms, 0)
+  const billableCentis = Math.round(WEEK.billableCentis * progress)
   const maxMs = Math.max(...WEEK.days.map((d) => d.ms))
   const figures = [
-    { label: "Tracked", value: formatCompactDuration(trackedMs) },
+    { label: "Tracked", value: formatCompactDuration(trackedMs * progress) },
     {
       label: "Billable",
-      value: formatCompactDuration(WEEK.billableCentis * CENTI_MS),
+      value: formatCompactDuration(billableCentis * CENTI_MS),
     },
     {
       label: "Earned",
       value: formatMoney(
-        lineAmountCents(WEEK.billableCentis, WEEK.rateCents),
+        lineAmountCents(billableCentis, WEEK.rateCents),
         "USD"
       ),
     },
-    { label: "Entries", value: String(WEEK.entryCount) },
+    { label: "Entries", value: String(Math.round(WEEK.entryCount * progress)) },
   ]
 
   return (
     <div
+      ref={ref}
       data-landing-fragment="report"
       inert
       className={cn("flex flex-col gap-6", className)}
@@ -54,7 +64,7 @@ export function ReportReadoutFragment({ className }: { className?: string }) {
       {/* Slim bars on a baseline, not slabs: at column width a bar outweighs
           the figures above it, and this strip is supporting evidence. */}
       <div className="flex h-32 items-stretch gap-3">
-        {WEEK.days.map((d) => (
+        {WEEK.days.map((d, i) => (
           <div
             key={d.label}
             className="flex flex-1 flex-col items-center justify-end gap-1.5"
@@ -66,8 +76,16 @@ export function ReportReadoutFragment({ className }: { className?: string }) {
               />
             ) : (
               <div
-                className="w-full max-w-8 rounded-sm bg-foreground/70"
-                style={{ height: `${(d.ms / maxMs) * 100}px` }}
+                className={cn(
+                  "w-full max-w-8 origin-bottom rounded-sm bg-foreground/70",
+                  reveal === "pending" && "scale-y-0",
+                  reveal === "in" &&
+                    "animate-landing-grow-y motion-reduce:animate-none"
+                )}
+                style={{
+                  height: `${(d.ms / maxMs) * 100}px`,
+                  ...(reveal === "in" ? staggerDelay(i, 90, 150) : {}),
+                }}
               />
             )}
             <span className="text-center text-xs text-muted-foreground">

@@ -84,7 +84,16 @@ const HOUR_LABELS = [8, 10, 12, 14, 16, 18]
  * theme. The block grows with `useRunningSeconds`, the same tick as the timer
  * bar — at eleven hours across, a second is a fraction of a pixel, which is
  * the point: it is the timer's time, not an animation.
+ *
+ * ON LOAD THE DAY REPLAYS: the blocks are uncovered from 8:00 to now while the
+ * playhead rides the uncovered edge, on one curve (`landing-sweep-*` in
+ * styles.css), so the first thing the page does is what the product does —
+ * account for a day. CSS only, so it needs no hydration; `backwards` fill, so
+ * once it ends (or if it never runs) nothing is clipped. The "now" line then
+ * breathes, which is the page's standing signal that something is recording.
  */
+const SWEEP_DELAY = "[animation-delay:700ms]"
+
 export function DayRulerFragment({ className }: { className?: string }) {
   const elapsedSeconds = useRunningSeconds()
   const segments = rulerSegments(
@@ -95,6 +104,8 @@ export function DayRulerFragment({ className }: { className?: string }) {
   const span = DAY_AXIS.endMinute - DAY_AXIS.startMinute
   const hourLeft = (hour: number) =>
     ((hour * 60 - DAY_AXIS.startMinute) / span) * 100
+  const running = segments.at(-1)
+  const now = running ? running.left + running.width : 100
 
   return (
     <div
@@ -110,55 +121,74 @@ export function DayRulerFragment({ className }: { className?: string }) {
             style={{ left: `${hourLeft(hour)}%` }}
           />
         ))}
-        {segments.map((segment, i) => {
-          const box = { left: `${segment.left}%`, width: `${segment.width}%` }
-          if (segment.kind === "gap") {
+        <div
+          style={{ "--landing-now": `${now}%` } as CSSProperties}
+          className={cn(
+            "absolute inset-0 animate-landing-sweep-clip motion-reduce:animate-none",
+            SWEEP_DELAY
+          )}
+        >
+          {segments.map((segment, i) => {
+            const box = { left: `${segment.left}%`, width: `${segment.width}%` }
+            if (segment.kind === "gap") {
+              return (
+                <span
+                  key={i}
+                  data-hatched
+                  className={cn(HATCH_EMPTY, "absolute inset-y-2.5 rounded-sm")}
+                  style={box}
+                />
+              )
+            }
+            const color = {
+              ...box,
+              "--project-color": projectColorVar(segment.project.color),
+            } as CSSProperties
+            if (segment.kind === "running") {
+              return (
+                <span
+                  key={i}
+                  data-running
+                  style={color}
+                  className="absolute inset-y-2.5"
+                >
+                  <span className="absolute inset-0 rounded-l-sm border-2 border-r-0 border-primary bg-[color-mix(in_oklab,var(--primary)_14%,var(--background))]" />
+                </span>
+              )
+            }
             return (
               <span
                 key={i}
-                data-hatched
-                className={cn(HATCH_EMPTY, "absolute inset-y-2.5 rounded-sm")}
-                style={box}
+                data-entry
+                style={color}
+                className={cn(
+                  "absolute inset-y-2.5 rounded-sm border",
+                  // Mixed against the page, not against transparent: an opaque
+                  // block covers the hour rules instead of wearing them. OKLAB,
+                  // not OKLCH: `--background` is achromatic at hue 0, and an
+                  // OKLCH mix swings teal toward brown on the way there.
+                  "border-[color-mix(in_oklab,var(--project-color)_70%,var(--background))]",
+                  "bg-[color-mix(in_oklab,var(--project-color)_30%,var(--background))]",
+                  "forced-colors:border-[CanvasText]"
+                )}
               />
             )
-          }
-          const color = {
-            ...box,
-            "--project-color": projectColorVar(segment.project.color),
-          } as CSSProperties
-          if (segment.kind === "running") {
-            return (
-              <span
-                key={i}
-                data-running
-                style={color}
-                className="absolute inset-y-2.5"
-              >
-                <span className="absolute inset-0 rounded-l-sm border-2 border-r-0 border-primary bg-[color-mix(in_oklab,var(--primary)_14%,var(--background))]" />
-                {/* "Now": the running edge, full height, so the present is a line
-                    rather than the end of a box. */}
-                <span className="absolute -inset-y-2.5 right-0 w-0.5 bg-primary" />
-              </span>
-            )
-          }
-          return (
-            <span
-              key={i}
-              data-entry
-              style={color}
-              className={cn(
-                "absolute inset-y-2.5 rounded-sm border",
-                // Mixed against the page, not against transparent: an opaque
-                // block covers the hour rules instead of wearing them. OKLAB,
-                // not OKLCH: `--background` is achromatic at hue 0, and an
-                // OKLCH mix swings teal toward brown on the way there.
-                "border-[color-mix(in_oklab,var(--project-color)_70%,var(--background))]",
-                "bg-[color-mix(in_oklab,var(--project-color)_30%,var(--background))]",
-                "forced-colors:border-[CanvasText]"
-              )}
-            />
-          )
-        })}
+          })}
+        </div>
+        {/* "Now": the running edge, full height, so the present is a line
+            rather than the end of a box. Its wrapper is as wide as the day so
+            far, so sliding it in from -100% keeps the line on the sweep's
+            leading edge. */}
+        <div
+          data-now
+          style={{ width: `${now}%` }}
+          className={cn(
+            "absolute inset-y-0 left-0 animate-landing-sweep-head motion-reduce:animate-none",
+            SWEEP_DELAY
+          )}
+        >
+          <span className="absolute inset-y-0 right-0 w-0.5 animate-landing-breathe bg-primary motion-reduce:animate-none" />
+        </div>
       </div>
       <div className="relative h-4 font-mono text-xs tracking-[-0.02em] text-muted-foreground tabular-nums">
         {HOUR_LABELS.map((hour) => (

@@ -272,3 +272,28 @@ no new token, font, gradient or shadow.
   invoice table's description column has room.
 - **Facts** are a two-column list at `md`, each under a hairline.
 - **The closing band** repeats the display scale: "Start with today."
+
+## Revision, 2026-09-21: motion
+
+Requested by the owner, and an explicit exception to DESIGN.md's "no entrance
+animation" (recorded there). This supersedes the "Motion" section above. Each
+animation performs something the product does, in the product's order:
+
+- **Hero (CSS only, on load):** the headline's words arrive one at a time; the
+  timer bar rises; the day REPLAYS on the ruler — blocks uncovered from 8:00 to
+  now with the playhead on the uncovered edge — and the "now" line then
+  breathes.
+- **Day log (on reveal):** rows arrive in order, then the one empty note is
+  typed over its hatch (`TYPED_NOTE`). Without script or motion it stays
+  hatched.
+- **Report (on reveal):** the four figures count up to their real values and
+  the bars rise from the baseline.
+- **Invoice (on reveal):** lines, subtotal, total, in print order.
+- **Facts (on reveal):** each hairline is drawn, then its text rises.
+- **Closing band:** the running duration at display size, the same tick as the
+  hero's, with "Still recording".
+- The header is sticky; the primary button's arrow nudges on hover.
+
+`use-reveal.ts` only ever hides an element that starts below the fold, and
+returns `static` with no IntersectionObserver, under reduced motion, and on the
+server. Every animation carries `motion-reduce:animate-none`.

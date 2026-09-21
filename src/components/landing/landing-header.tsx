@@ -15,7 +15,7 @@ import { APP_NAME } from "@shared/brand"
  */
 export function LandingHeader() {
   return (
-    <header className="flex h-14 items-center justify-between gap-4 border-b border-border px-4">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-between gap-4 border-b border-border bg-background px-4">
       <span className="text-base font-medium tracking-tight">{APP_NAME}</span>
       <div className="flex items-center gap-2">
         <Link

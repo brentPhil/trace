@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router"
+import { ArrowRight } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import {
   DESKTOP_INSTALL_URL,
@@ -12,6 +13,10 @@ import { InvoiceFragment } from "./fragments/invoice"
 import { ReportReadoutFragment } from "./fragments/report-readout"
 import { TimerBarFragment } from "./fragments/timer-bar"
 import { LandingHeader } from "./landing-header"
+import { RUNNING_ENTRY } from "./sample-data"
+import { staggerDelay, useReveal } from "./use-reveal"
+import { useRunningSeconds } from "./use-running-seconds"
+import { formatClock } from "@shared/duration"
 
 export const LANDING_DESCRIPTION =
   "A time tracker that records what you got done, not only how long it took. Free."
@@ -26,6 +31,15 @@ export const LANDING_DESCRIPTION =
  * ruler beneath it — the literal answer to the headline. Everything after it
  * is evidence for that picture, so the sections get quieter as they go rather
  * than each shouting the same size.
+ *
+ * MOTION TELLS THE PRODUCT'S STORY, in the order the product works: the
+ * headline is said, the day replays on the ruler, the empty note gets written,
+ * the week adds up, the invoice prints line by line, and the timer that was
+ * running at the top is still running at the bottom. Nothing fades in merely
+ * because it scrolled into view. The hero's entrance is CSS-only (no
+ * hydration needed); everything below the fold goes through `useReveal`,
+ * which never hides anything a visitor has already seen. Every animation
+ * carries `motion-reduce:animate-none`, and the finished page is the default.
  *
  * COPY IS SPEC (docs/superpowers/specs/2026-09-21-landing-page-design.md).
  * Offline and Google Calendar are claimed for the web app only — both are
@@ -52,9 +66,13 @@ function CallToAction() {
       <Link
         to="/signup"
         search={{ redirect: undefined }}
-        className={cn(buttonVariants({ size: "lg" }))}
+        className={cn(buttonVariants({ size: "lg" }), "group")}
       >
         Create account
+        <ArrowRight
+          data-icon="inline-end"
+          className="transition-transform duration-150 ease-out group-hover:translate-x-0.5 motion-reduce:transition-none"
+        />
       </Link>
       <Link
         to="/login"
@@ -118,6 +136,98 @@ const FACTS = [
   },
 ]
 
+/** The hero's CSS-only entrance; pair with `staggerDelay` for the beat. */
+const ENTER = "animate-landing-rise motion-reduce:animate-none"
+
+/**
+ * A sentence whose words arrive one at a time, out of a blur.
+ *
+ * Each word is its own inline-block so it can move, and the spaces stay real
+ * text between them, so the heading reads, wraps, balances and is announced
+ * exactly as the plain sentence would be.
+ */
+function Words({ text, baseMs = 0 }: { text: string; baseMs?: number }) {
+  return text.split(" ").map((word, i, words) => (
+    <span key={i}>
+      <span
+        style={staggerDelay(i, 60, baseMs)}
+        className="inline-block animate-landing-word motion-reduce:animate-none"
+      >
+        {word}
+      </span>
+      {i < words.length - 1 ? " " : null}
+    </span>
+  ))
+}
+
+/** The facts, each under a hairline that is drawn rather than placed. */
+function Facts() {
+  const [ref, reveal] = useReveal<HTMLUListElement>()
+
+  return (
+    <ul
+      ref={ref}
+      className={cn(ONE_COLUMN, "gap-x-16 gap-y-10 md:grid-cols-2")}
+    >
+      {FACTS.map((fact, i) => (
+        <li key={fact.label} className="flex flex-col">
+          <span
+            aria-hidden="true"
+            style={reveal === "in" ? staggerDelay(i, 110) : undefined}
+            className={cn(
+              "mb-5 h-px origin-left bg-border",
+              reveal === "pending" && "scale-x-0",
+              reveal === "in" &&
+                "animate-landing-draw-x motion-reduce:animate-none"
+            )}
+          />
+          <div
+            style={reveal === "in" ? staggerDelay(i, 110, 150) : undefined}
+            className={cn(
+              "flex flex-col gap-2",
+              reveal === "pending" && "opacity-0",
+              reveal === "in" && ENTER
+            )}
+          >
+            <h3 className="text-base font-medium text-foreground">
+              {fact.label}
+            </h3>
+            <p className={cn(PROSE, "sm:text-base")}>{fact.body}</p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * The timer from the top of the page, still running at the bottom of it.
+ *
+ * DESIGN.md's Display role is "the running duration when it is the primary
+ * object on screen", and this is that: the same tick as the hero's timer bar
+ * (`useRunningSeconds`), so the figure has visibly moved on by however long
+ * the visitor spent reading — "never lose time", shown rather than claimed.
+ */
+function RunningReadout() {
+  const elapsedSeconds = useRunningSeconds()
+
+  return (
+    <div
+      data-landing-fragment="running-readout"
+      inert
+      className="flex flex-col gap-2 lg:items-end"
+    >
+      <span className="font-mono text-[clamp(3.5rem,1rem+9vw,8.5rem)] leading-none tracking-[-0.04em] text-foreground tabular-nums">
+        {formatClock(elapsedSeconds * 1000)}
+      </span>
+      <span className="flex items-center gap-2 text-sm text-muted-foreground">
+        <span className="size-1.5 animate-landing-breathe rounded-full bg-primary motion-reduce:animate-none" />
+        Still recording: {RUNNING_ENTRY.title}
+      </span>
+    </div>
+  )
+}
+
 export function LandingPage() {
   return (
     <div className="min-h-svh bg-background text-foreground">
@@ -129,17 +239,23 @@ export function LandingPage() {
               actual answer a step quieter, so the weight falls where the
               category never puts it. */}
           <h1 className="max-w-[15ch] text-[clamp(2.75rem,1.2rem+6vw,5.75rem)] leading-[0.98] font-medium tracking-[-0.035em] text-balance">
-            Know where the day went.{" "}
+            <Words text="Know where the day went." />{" "}
             <span className="text-muted-foreground">
-              And what you did with it.
+              <Words text="And what you did with it." baseMs={480} />
             </span>
           </h1>
           <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between lg:gap-16">
-            <p className={cn(PROSE, "max-w-[46ch]")}>
+            <p
+              style={staggerDelay(0, 0, 900)}
+              className={cn(PROSE, "max-w-[46ch]", ENTER)}
+            >
               {APP_NAME} turns the hours you track into invoices, and the notes
               you write along the way into the account behind them.
             </p>
-            <div className="flex flex-col gap-3">
+            <div
+              style={staggerDelay(0, 0, 1000)}
+              className={cn("flex flex-col gap-3", ENTER)}
+            >
               <CallToAction />
               <p className="text-sm text-muted-foreground">Free. No card.</p>
             </div>
@@ -147,7 +263,9 @@ export function LandingPage() {
         </section>
 
         <div className="flex flex-col gap-6 border-y border-border bg-card px-4 py-8 sm:py-12">
-          <TimerBarFragment />
+          <div style={staggerDelay(0, 0, 450)} className={ENTER}>
+            <TimerBarFragment />
+          </div>
           <DayRulerFragment />
         </div>
 
@@ -218,29 +336,20 @@ export function LandingPage() {
 
         <section className="flex flex-col gap-10 border-t border-border px-4 py-20 sm:py-28">
           <h2 className={H2}>What else it does.</h2>
-          <dl className={cn(ONE_COLUMN, "gap-x-16 gap-y-10 md:grid-cols-2")}>
-            {FACTS.map((fact) => (
-              <div
-                key={fact.label}
-                className="flex flex-col gap-2 border-t border-border pt-5"
-              >
-                <dt className="text-base font-medium text-foreground">
-                  {fact.label}
-                </dt>
-                <dd className={cn(PROSE, "sm:text-base")}>{fact.body}</dd>
-              </div>
-            ))}
-          </dl>
+          <Facts />
         </section>
 
-        <section className="flex flex-col gap-8 border-y border-border bg-card px-4 py-24 sm:py-32">
-          <h2 className="max-w-[14ch] text-[clamp(2.25rem,1rem+4.6vw,4.5rem)] leading-[1] font-medium tracking-[-0.035em] text-balance">
-            Start with today.
-          </h2>
-          <p className={PROSE}>
-            Create an account and track your next hour. It is free.
-          </p>
-          <CallToAction />
+        <section className="flex flex-col gap-12 border-y border-border bg-card px-4 py-24 sm:py-32 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col gap-8">
+            <h2 className="max-w-[14ch] text-[clamp(2.25rem,1rem+4.6vw,4.5rem)] leading-[1] font-medium tracking-[-0.035em] text-balance">
+              Start with today.
+            </h2>
+            <p className={PROSE}>
+              Create an account and track your next hour. It is free.
+            </p>
+            <CallToAction />
+          </div>
+          <RunningReadout />
         </section>
       </main>
 

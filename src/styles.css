@@ -1384,4 +1384,74 @@
       transform: translateY(6px);
     }
   }
+
+  /* The signed-out landing page's choreography (src/components/landing/).
+   * DESIGN.md §5 says an instrument's numbers do not need to arrive; a page
+   * whose job is a first impression is the stated exception. Same contract as
+   * `rise`: every keyframe is `from`-only, so an animation that never runs
+   * leaves the element in its natural state, and every call site carries
+   * `motion-reduce:animate-none`. */
+  --animate-landing-word: landing-word 800ms cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
+  --animate-landing-rise: landing-rise 600ms cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
+  --animate-landing-sweep-clip: landing-sweep-clip 2400ms
+    cubic-bezier(0.65, 0, 0.35, 1) backwards;
+  --animate-landing-sweep-head: landing-sweep-head 2400ms
+    cubic-bezier(0.65, 0, 0.35, 1) backwards;
+  --animate-landing-grow-y: landing-grow-y 700ms cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
+  --animate-landing-draw-x: landing-draw-x 900ms cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
+  --animate-landing-caret: landing-caret 1s steps(1) infinite;
+  --animate-landing-breathe: landing-breathe 2s ease-in-out infinite;
+
+  @keyframes landing-word {
+    from {
+      opacity: 0;
+      transform: translateY(0.35em);
+      filter: blur(8px);
+    }
+  }
+  @keyframes landing-rise {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+  }
+  /* The day replaying: the blocks are uncovered from 8:00 up to "now", and the
+   * playhead rides the same curve so the line is always the uncovered edge. */
+  @keyframes landing-sweep-clip {
+    from {
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      clip-path: inset(0 calc(100% - var(--landing-now)) 0 0);
+    }
+  }
+  @keyframes landing-sweep-head {
+    from {
+      transform: translateX(-100%);
+    }
+  }
+  @keyframes landing-grow-y {
+    from {
+      transform: scaleY(0);
+    }
+  }
+  @keyframes landing-draw-x {
+    from {
+      transform: scaleX(0);
+    }
+  }
+  @keyframes landing-caret {
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes landing-breathe {
+    50% {
+      opacity: 0.35;
+    }
+  }
 }

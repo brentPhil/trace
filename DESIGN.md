@@ -814,6 +814,16 @@ its own because every value below belongs to a component.
   updates continuously and must stay readable when everything else stops.
 - **No entrance animation on data.** Charts set `isAnimationActive={false}`;
   rows do not fly in. An instrument does not need its numbers to arrive.
+- **The signed-out landing page is the one exception**, by the owner's
+  decision (2026-09-21): it is a first impression, not the instrument, and its
+  sample data is static, so nothing replays on a Convex push. Its motion still
+  has to SAY something — the day replays on the ruler, the empty note is typed,
+  the week counts up, the invoice arrives in print order — and never a uniform
+  fade on every section. The keyframes are `landing-*` in `src/styles.css`;
+  scroll reveals go through `src/components/landing/use-reveal.ts`, which
+  never hides anything already on screen, and the finished page is the default
+  under reduced motion, without script, and in tests. None of this licenses
+  entrance motion inside the app.
 
 ## 6. Do's and Don'ts
 
