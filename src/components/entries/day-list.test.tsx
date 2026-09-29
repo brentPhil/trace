@@ -621,7 +621,7 @@ describe("grouped entries", () => {
     // Not merely hidden: not rendered. Fifty collapsed groups would otherwise
     // mount fifty rows' worth of pickers nobody can see.
     //
-    // The count is 1, not 0: `SittingRow`'s own static title span (see that
+    // The count is 1, not 0: `SittingRow`'s own title (see that
     // component) reads "Crew dropdowns" too, and it is not one of the members
     // this assertion is about — those are the ones absent.
     expect(screen.queryAllByText("Crew dropdowns")).toHaveLength(1)
@@ -655,7 +655,7 @@ describe("grouped entries", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true")
 
     // Scoped to the revealed container, not the whole document: the parent
-    // row's own static title span (see `SittingRow`) also reads "Crew
+    // row's own title (see `SittingRow`) also reads "Crew
     // dropdowns", and it is not one of the two members being counted here.
     const panelId = toggle.getAttribute("aria-controls")
     const panel = document.getElementById(panelId!)
@@ -673,8 +673,7 @@ describe("grouped entries", () => {
   })
 
   it("resumes the NEWEST member from the parent's play button", () => {
-    // The parent has no edits by design, and this is the one write it carries.
-    // `useEntryActions`'s resume already copies title, project, tags and
+    // `useEntryActions`'s resume copies title, project, tags and
     // billable off the entry it is given, so "the newest one" IS "start this
     // again" with nothing extra to build.
     const onResume = vi.fn()
@@ -712,6 +711,144 @@ describe("grouped entries", () => {
     expect(
       onSittingRemove.mock.calls[0][0].map((entry: Entry) => entry._id)
     ).toEqual(["b", "a"])
+  })
+
+  it("renames EVERY member of a sitting from the parent's title", async () => {
+    // The title is what makes these one sitting, so it is a fact about the
+    // work, like the note: renaming it one member at a time would split the
+    // group on the first rename and leave the rest behind under the old name.
+    const onSittingTitleChange = vi.fn(() => Promise.resolve())
+    renderLog(true, { onSittingTitleChange } as unknown as EntryRowActions)
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Description: Crew dropdowns" })
+    )
+    const field = screen.getByRole("textbox", { name: "Description: Crew dropdowns" })
+    fireEvent.change(field, { target: { value: "Crew pickers" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+
+    await waitFor(() => expect(onSittingTitleChange).toHaveBeenCalledTimes(1))
+    const [entries, title] = onSittingTitleChange.mock.calls[0] as unknown as [
+      Array<Entry>,
+      string,
+    ]
+    expect(entries.map((entry) => entry._id)).toEqual(["b", "a"])
+    expect(title).toBe("Crew pickers")
+  })
+
+  const INTERNAL = {
+    _id: "jd7internal" as unknown as Id<"projects">,
+    _creationTime: 0,
+    userId: "user-1",
+    name: "Internal",
+    color: "amber",
+    billableByDefault: false,
+    archived: false,
+    updatedAt: 0,
+    deletedAt: null,
+  } as unknown as Doc<"projects">
+
+  /*
+   * The title and project are what group a sitting, so an edit to either reads
+   * as a different group. The open mark has to follow the entries, or the
+   * sitting snaps shut under the person who was just looking inside it.
+   */
+  function EditableDayList({ fail = false }: { fail?: boolean }) {
+    const [entries, setEntries] = useState<Array<Entry>>([unrelated, ...twice])
+    const patch = (members: Array<Entry>, change: Partial<Entry>) => {
+      const ids = new Set(members.map((entry) => entry._id))
+      setEntries((all) =>
+        all.map((entry) => (ids.has(entry._id) ? { ...entry, ...change } : entry))
+      )
+    }
+    const actions = {
+      onSittingTitleChange: async (members: Array<Entry>, title: string) => {
+        if (fail) throw new Error("Refused")
+        patch(members, { title })
+      },
+      onSittingClassify: (
+        members: Array<Entry>,
+        change: Partial<Classification>
+      ) => {
+        if (change.projectId !== undefined) {
+          patch(members, { projectId: change.projectId ?? undefined })
+        }
+      },
+    } as unknown as EntryRowActions
+    return (
+      <DayList
+        groups={[{ ...groups[0], entries }]}
+        timeZone="UTC"
+        use12Hour={false}
+        weekStartDay={0}
+        projects={[INTERNAL]}
+        tags={[]}
+        actions={actions}
+        grouped
+      />
+    )
+  }
+
+  const renameSitting = (to: string) => {
+    fireEvent.click(screen.getByLabelText("Show grouped entries"))
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Description: Crew dropdowns" })[0]
+    )
+    const field = screen.getByRole("textbox", { name: "Description: Crew dropdowns" })
+    fireEvent.change(field, { target: { value: to } })
+    fireEvent.keyDown(field, { key: "Enter" })
+  }
+
+  it("keeps an open sitting open through a rename", async () => {
+    render(<EditableDayList />)
+    renameSitting("Crew pickers")
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Hide grouped entries")).toBeTruthy()
+    )
+    const panel = document.getElementById(
+      screen.getByLabelText("Hide grouped entries").getAttribute("aria-controls")!
+    )
+    expect(within(panel!).getAllByText("Crew pickers")).toHaveLength(2)
+
+    // Enter hands focus back to the title. A row keyed by its title would
+    // remount on the rename and drop it on the page instead.
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute("aria-label")).toBe(
+        "Description: Crew pickers"
+      )
+    )
+  })
+
+  it("keeps it open when the rename is refused, too", async () => {
+    render(<EditableDayList fail />)
+    renameSitting("Crew pickers")
+
+    // The field reopens with the error under it; the group behind it must not
+    // have closed while that happened.
+    await waitFor(() =>
+      expect(screen.getByText("That didn't save. Try again.")).toBeTruthy()
+    )
+    expect(screen.getByLabelText("Hide grouped entries")).toBeTruthy()
+  })
+
+  it("keeps an open sitting open through a project change", async () => {
+    render(<EditableDayList />)
+    fireEvent.click(screen.getByLabelText("Show grouped entries"))
+
+    const toggle = screen.getByLabelText("Hide grouped entries")
+    const sittingRow = toggle.closest(".group") as HTMLElement
+    fireEvent.click(within(sittingRow).getByLabelText(/^Project/))
+    fireEvent.click(screen.getByRole("option", { name: /Internal/ }))
+
+    await waitFor(() =>
+      expect(
+        within(
+          screen.getByLabelText("Hide grouped entries").closest(".group") as HTMLElement
+        ).getByLabelText(/^Project/).textContent
+      ).toContain("Internal")
+    )
+    expect(screen.getByLabelText("Hide grouped entries")).toBeTruthy()
   })
 
   it("leaves a day of unique titles completely alone", () => {
@@ -828,6 +965,7 @@ describe("grouped entries", () => {
           onRemove={() => {}}
           onClassify={onClassify}
           onNoteSave={onNoteSave}
+          onTitleChange={async () => {}}
           onCreateProject={vi.fn()}
           onCreateTag={vi.fn()}
           controls="sitting-panel"
@@ -882,6 +1020,7 @@ describe("grouped entries", () => {
           onRemove={() => {}}
           onClassify={() => {}}
           onNoteSave={async () => {}}
+          onTitleChange={async () => {}}
           onCreateProject={vi.fn()}
           onCreateTag={vi.fn()}
           controls="sitting-panel"

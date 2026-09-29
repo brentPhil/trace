@@ -5,6 +5,7 @@ import {
   ProjectPicker,
   TagPicker,
 } from "@/components/classifiers/classifier-pickers"
+import { EditableTitle } from "@/components/entries/editable-fields"
 import { NoteLine } from "@/components/entries/note-line"
 import { SelectionCheckbox } from "@/components/entries/selection-checkbox"
 import { formatTimeRange } from "@/lib/format-time"
@@ -24,8 +25,8 @@ type Sitting = Extract<LogItem, { kind: "sitting" }>
  * Several sittings at one piece of work, and the place that work is edited.
  *
  * THE SITTING IS THE UNIT OF WORK; THE ENTRIES UNDER IT ARE THE UNIT OF TIME.
- * The note, the project, the tags and the billable flag are facts about the
- * work, so they live here and write through to every member at once. Times are
+ * The title, the note, the project, the tags and the billable flag are facts
+ * about the work, so they live here and write through to every member at once. Times are
  * per-entry facts, so they stay on the member rows — and duration is absent
  * from this row for the reason it always was: editing a total would have to
  * pick a member to absorb the change.
@@ -60,6 +61,7 @@ export function SittingRow({
   onRemove,
   onClassify,
   onNoteSave,
+  onTitleChange,
   onCreateProject,
   onCreateTag,
   controls,
@@ -86,6 +88,9 @@ export function SittingRow({
   /** Writes ONE note onto every member, from the line's inline editor. The
    *  line shows their notes joined, so this saves what was on screen. */
   onNoteSave: (note: string) => Promise<void>
+  /** Writes ONE title onto every member. The title is what groups them, so a
+   *  rename has to carry the whole sitting or it splits it. */
+  onTitleChange: (title: string) => Promise<void>
   onCreateProject: EntryRowActions["onCreateProject"]
   onCreateTag: EntryRowActions["onCreateTag"]
   /**
@@ -190,18 +195,15 @@ export function SittingRow({
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1.5">
             {/* `min-h-6` pins the first line — see `entry-row.tsx`. */}
             <div className="flex min-h-6 min-w-0 items-center gap-1.5">
-              {/* NOT `flex-1`, matching `EditableTitle` on an entry row for the
-                  reason argued there: a title that fills the row pushes the
-                  project to the far right, where "Sealogs" reads as a property
-                  of the times rather than as part of the name of the work. It
-                  sizes to its text and truncates.
-
-                  `leading-none` with `py-0.5 -my-0.5` for the same reason
-                  `EditableTitle` carries them: no half-leading, and no clipped
-                  descender inside `truncate`'s `overflow: hidden`. */}
-              <span className="-my-0.5 min-w-0 truncate py-0.5 text-base font-medium">
-                {title}
-              </span>
+              {/* The same `EditableTitle` an entry row uses, with the same
+                  `text-base leading-none` — see `entry-row.tsx` for both. It
+                  seeds from the NEWEST member; every member shares its title
+                  by construction, since the title is the grouping key. */}
+              <EditableTitle
+                entry={newest}
+                onCommit={onTitleChange}
+                textClassName="text-base leading-none"
+              />
               <ProjectPicker
                 projects={projects}
                 value={newest.projectId ?? null}

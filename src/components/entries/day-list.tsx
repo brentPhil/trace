@@ -119,7 +119,16 @@ export function DayList({
   grouped?: boolean
 }) {
   /*
-   * WHICH SITTINGS ARE OPEN, keyed by `day\0key`.
+   * WHICH SITTINGS ARE OPEN, as the `day\0entryId` of their MEMBERS.
+   *
+   * By member and not by the sitting's own `title\0projectId` key, because
+   * that key is exactly what the sitting row edits: renaming a sitting or
+   * moving it to another project made it a "different" group, and it snapped
+   * shut under the person looking inside it. Ids survive every edit — and a
+   * refused one, where the optimistic write rolls back — so nothing here has
+   * to follow the writes. A sitting is open while ANY member is marked, which
+   * also keeps it open when a resumed entry joins it or a rename merges it
+   * into another.
    *
    * In memory and per-tab: a disclosure is a thing the reader is doing right
    * now, not a property of the data, so it resets on reload. It lives HERE
@@ -129,13 +138,23 @@ export function DayList({
    */
   const [open, setOpen] = useState<Set<string>>(new Set())
 
-  const toggle = (key: string) =>
+  const openKeys = (day: string, entries: Array<Entry>) =>
+    entries.map((entry) => `${day}\u0000${entry._id}`)
+
+  const isSittingOpen = (day: string, entries: Array<Entry>) =>
+    openKeys(day, entries).some((key) => open.has(key))
+
+  const toggle = (day: string, entries: Array<Entry>) => {
+    const wasOpen = isSittingOpen(day, entries)
     setOpen((current) => {
       const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
+      for (const key of openKeys(day, entries)) {
+        if (wasOpen) next.delete(key)
+        else next.add(key)
+      }
       return next
     })
+  }
 
   const targetFor = (
     entries: Array<Entry>,
@@ -288,15 +307,21 @@ export function DayList({
             ).map((item, index) => {
               if (item.kind === "row") return row(item.entry)
 
-              const stateKey = `${group.day}\u0000${item.key}`
-              // The DOM id cannot carry the NUL the state key does, and it does
-              // not need to be stable across reorderings — only unique on the
-              // page while it is rendered.
+              // Not stable across reorderings, and it does not need to be —
+              // only unique on the page while it is rendered.
               const panelId = `sitting-${group.day}-${index}`
-              const isOpen = open.has(stateKey)
+              const isOpen = isSittingOpen(group.day, item.entries)
 
               return (
-                <div key={`sitting-${item.key}`} className="flex flex-col">
+                // Keyed by its OLDEST member, not by `item.key`, for the same
+                // reason as `open` above: the title and project are editable
+                // from this row, and a key that changes on a rename remounts
+                // it and drops focus on the page the moment Enter commits.
+                // The oldest, because a resumed entry joins at the newest end.
+                <div
+                  key={`sitting-${item.entries[item.entries.length - 1]._id}`}
+                  className="flex flex-col"
+                >
                   <SittingRow
                     sitting={item}
                     timeZone={timeZone}
@@ -312,7 +337,7 @@ export function DayList({
                         item.entries[0].title.trim() || "untitled work"
                       }`
                     )}
-                    onToggle={() => toggle(stateKey)}
+                    onToggle={() => toggle(group.day, item.entries)}
                     // The NEWEST member. `useEntryActions`'s resume copies
                     // title, project, tags and billable off whatever it is
                     // given, so this already IS "start this again".
@@ -323,6 +348,7 @@ export function DayList({
                     onRemove={() => actions.onSittingRemove(item.entries)}
                     onClassify={(change) => actions.onSittingClassify(item.entries, change)}
                     onNoteSave={(note) => actions.onSittingNoteSave(item.entries, note)}
+                    onTitleChange={(title) => actions.onSittingTitleChange(item.entries, title)}
                     onCreateProject={actions.onCreateProject}
                     onCreateTag={actions.onCreateTag}
                     controls={panelId}

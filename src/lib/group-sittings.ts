@@ -15,7 +15,8 @@ export type LogItem =
   | { kind: "row"; entry: Entry }
   | {
       kind: "sitting"
-      /** `title\0projectId`. Stable, and the state key the log expands on. */
+      /** `title\0projectId` — what groups the members. NOT stable across the
+       *  sitting row's own edits, so `DayList` keys its state by member id. */
       key: string
       /** Two or more, newest first. A one-member sitting is never built. */
       entries: Array<Entry>

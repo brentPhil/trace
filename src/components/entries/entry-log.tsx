@@ -259,6 +259,14 @@ export function EntryLog({
      */
     onSittingNoteSave: (entries, note) =>
       updateMany({ entryIds: entries.map((entry) => entry._id), note }),
+    /*
+     * ONE TITLE ONTO EVERY MEMBER, in one transaction. The title is what
+     * groups them, so renaming member by member would split the sitting on the
+     * first write and leave the rest under the old name. Every id, for the
+     * same reason as the note above.
+     */
+    onSittingTitleChange: (entries, title) =>
+      updateMany({ entryIds: entries.map((entry) => entry._id), title }),
   }
 
   return (

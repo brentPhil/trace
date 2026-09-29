@@ -23,7 +23,8 @@ import type { Entry } from "@/lib/group-entries"
  * sentences for the same event — and the one that is used less would be the one
  * that quietly stopped matching. `EntryRowActions` is the vocabulary the log row
  * already speaks, so this returns exactly that (less `onNoteSave`,
- * `onSittingClassify`, `onSittingNoteSave` and `onSittingRemove`, which are the
+ * `onSittingClassify`, `onSittingNoteSave`, `onSittingTitleChange` and
+ * `onSittingRemove`, which are the
  * log's own note field and its sitting-shaped writes — they go through
  * `updateMany`, which `EntryLog` owns, and a calendar block never renders a
  * `SittingRow`) plus the one verb the popover adds.
@@ -34,7 +35,11 @@ import type { Entry } from "@/lib/group-entries"
  */
 export type EntryActions = Omit<
   EntryRowActions,
-  "onNoteSave" | "onSittingClassify" | "onSittingNoteSave" | "onSittingRemove"
+  | "onNoteSave"
+  | "onSittingClassify"
+  | "onSittingNoteSave"
+  | "onSittingTitleChange"
+  | "onSittingRemove"
 > & {
   /**
    * A second entry with the same title, times and classification.

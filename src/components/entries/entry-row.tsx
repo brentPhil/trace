@@ -52,6 +52,10 @@ export type EntryRowActions = {
    *  shows their notes joined, so what is saved is what was on screen. See
    *  `SittingRow.onNoteSave` and `EntryLog`, which implements it. */
   onSittingNoteSave: (entries: Array<Entry>, note: string) => Promise<void>
+  /** `onTitleChange`, for a sitting: writes ONE title onto every member, so a
+   *  rename carries the whole group rather than splitting it. See
+   *  `SittingRow` and `EntryLog`, which implements it. */
+  onSittingTitleChange: (entries: Array<Entry>, title: string) => Promise<void>
   /**
    * `onRemove`, for a sitting: deletes every member at once.
    *
