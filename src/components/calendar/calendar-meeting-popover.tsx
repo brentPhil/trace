@@ -1,5 +1,6 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Avatar, AvatarFallback, AvatarGroup } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import {
   ClockIcon,
   ExternalLinkIcon,
@@ -7,6 +8,7 @@ import {
   UserIcon,
   VideoIcon,
 } from "lucide-react"
+import { formatClock } from "@shared/duration"
 import { formatTimeRange } from "@/lib/format-time"
 import { linkify, safeHref } from "@/lib/linkify"
 import { cn } from "@/lib/utils"
@@ -168,6 +170,8 @@ export function CalendarMeetingPopover({
   nowMs,
   onSetTrack,
   onTrackNow,
+  recordingSince = null,
+  onEditEntry,
 }: {
   meeting: Meeting
   anchor: HTMLElement
@@ -193,6 +197,17 @@ export function CalendarMeetingPopover({
   /** **Track this** — `api.googleTrack.trackNow`. Same optionality, same
    *  reason. */
   onTrackNow?: (calendarId: string, eventId: string) => void
+  /**
+   * When this meeting's entry is the running timer, the instant it started.
+   * The tracking section then says so — the elapsed clock in place of the tick
+   * or the Track button, neither of which has anything left to do — and every
+   * other section stays exactly where it was.
+   */
+  recordingSince?: number | null
+  /** Opens the running entry's editor in place of this popover. The meeting's
+   *  block stands in for the entry while it records, so this is the grid's
+   *  only way to reach it. */
+  onEditEntry?: () => void
 }) {
   /*
    * READ-ONLY, and that is the whole design of this component.
@@ -293,7 +308,33 @@ export function CalendarMeetingPopover({
             </span>
           </header>
 
-          {onSetTrack === undefined && onTrackNow === undefined ? null : (
+          {recordingSince !== null ? (
+            <div className="flex items-center gap-2 p-3">
+              {/* The bar's own carriers for "running": a pulsing dot, the
+                  duration in primary, and the word — the Over-Determined
+                  State Rule. */}
+              <span
+                aria-hidden
+                className="size-2 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
+              />
+              <span className="text-xs font-medium text-foreground">
+                Recording
+              </span>
+              <span className="font-mono text-xs tracking-[-0.02em] tabular-nums text-primary">
+                {formatClock(nowMs - recordingSince)}
+              </span>
+              {onEditEntry === undefined ? null : (
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={onEditEntry}
+                  className="ml-auto"
+                >
+                  Edit entry
+                </Button>
+              )}
+            </div>
+          ) : onSetTrack === undefined && onTrackNow === undefined ? null : (
             <div className="p-3">
               {meeting.startedAt > nowMs ? (
                 /*

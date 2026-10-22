@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { CloudOff, RefreshCw, Check } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const SAVED_FOR_MS = 2_000
@@ -11,6 +12,18 @@ const SAVED_FOR_MS = 2_000
  * glyph and a sentence carry the state (The Over-Determined State Rule).
  * Not an error surface: being offline is ordinary, and a change waiting to
  * sync is the product working as promised, not failing.
+ *
+ * A FLOATING GLYPH, NOT A ROW. This used to be a full-width band under the
+ * timer bar, and it came and went with every write — so the log below it
+ * jumped a line down and back up a second later, and a click aimed at a row
+ * landed on the one beside it. Fixed to the corner it occupies no layout at
+ * all. The sentence is still there: in the tooltip for a pointer, and inside
+ * the `status` region for a screen reader, so the state is never glyph-only.
+ *
+ * Bottom-right, ABOVE the bar below `md` (the bar is pinned to the bottom of a
+ * phone and measures itself into `--timer-bar-height`), in the bottom corner
+ * at `md` and up. Bottom-left is the sidebar's account menu; toasts share this
+ * corner but stack above it and are gone in seconds.
  */
 export function SyncStatus({ offline, pending }: { offline: boolean; pending: number }) {
   const [justSaved, setJustSaved] = useState(false)
@@ -59,11 +72,20 @@ export function SyncStatus({ offline, pending }: { offline: boolean; pending: nu
     <div
       role="status"
       className={cn(
-        "flex items-center gap-2 border-b border-border bg-card px-4 py-1.5 text-sm text-muted-foreground"
+        "fixed right-3 z-40 bottom-[calc(var(--timer-bar-height,6.5rem)+0.5rem)]",
+        "md:right-4 md:bottom-4"
       )}
     >
-      <Icon aria-hidden="true" className={cn("size-4", spin && "animate-spin motion-reduce:animate-none")} />
-      <span>{text}</span>
+      <Tooltip>
+        <TooltipTrigger
+          render={<span />}
+          className="flex size-8 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-sm"
+        >
+          <Icon aria-hidden="true" className={cn("size-4", spin && "animate-spin motion-reduce:animate-none")} />
+          <span className="sr-only">{text}</span>
+        </TooltipTrigger>
+        <TooltipContent side="left">{text}</TooltipContent>
+      </Tooltip>
     </div>
   )
 }

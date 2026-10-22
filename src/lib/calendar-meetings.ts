@@ -41,6 +41,12 @@ export type MeetingEventProps = {
    * render, this runs once per meeting per mapping.
    */
   startable: boolean
+  /**
+   * When this meeting's own entry is the running timer, the instant that entry
+   * started; `null` otherwise. Non-null draws the block in the running accent
+   * with its elapsed clock — see the skip rule in `meetingEvents`.
+   */
+  recordingSince: number | null
 }
 
 /** The same discriminator on an ENTRY's props, so the panel can narrow either
@@ -61,10 +67,13 @@ export function isMeetingEvent(
  * field reads it — a meeting's start and end are stored instants and nothing
  * else here moves with the clock, which is what lets the panel hand this a
  * PINNED value rather than the once-a-second one. See `meetingClockMs` there.
+ * @param running The running entry, if any — its id and start only, both of
+ * which hold still while it runs, so the panel's memo stays put between ticks.
  */
 export function meetingEvents(
   meetings: Array<Meeting>,
-  nowMs: number
+  nowMs: number,
+  running: { entryId: Id<"timeEntries">; startedAt: number } | null = null
 ): Array<EventInput & { extendedProps: MeetingEventProps }> {
   const events: Array<EventInput & { extendedProps: MeetingEventProps }> = []
 
@@ -79,8 +88,17 @@ export function meetingEvents(
      *
      * So a meeting is a ghost right up to the moment it becomes real, and a
      * block on the grid means exactly one thing at a time.
+     *
+     * EXCEPT WHILE IT IS BEING RECORDED. A running entry's block starts at the
+     * instant tracking began and grows with the clock, so swapping the meeting
+     * for it made the block jump to another size the moment the meeting
+     * started — and took the meeting's details with it. Until the timer stops,
+     * the MEETING keeps its block and wears the running accent; the panel
+     * leaves that entry out, so the hour is still drawn once. Once stopped, the
+     * entry is the record and takes over as above.
      */
-    if (meeting.entryId !== null) continue
+    const recording = running !== null && meeting.entryId === running.entryId
+    if (meeting.entryId !== null && !recording) continue
 
     // No clock, and `allDaySlot={false}` means no rail to draw it on. The server
     // filters these too; this is the second half of one rule, kept here because
@@ -120,6 +138,7 @@ export function meetingEvents(
         // `>`, not `>=`: at the start instant itself the switch has already
         // fired, so there is nothing left for a tick to instruct.
         startable: meeting.startedAt > nowMs,
+        recordingSince: recording ? running.startedAt : null,
       },
     })
   }

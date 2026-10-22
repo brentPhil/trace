@@ -49,6 +49,33 @@ describe("meetingEvents", () => {
     expect(meetingEvents([tracked], NOW)).toEqual([])
   })
 
+  it("keeps a meeting drawn, marked recording, while its own entry runs", () => {
+    // Swapping the meeting for its running entry moved and resized the block
+    // the moment tracking began, and lost the meeting's details with it.
+    const tracked = meeting({ entryId: "te_1" as Id<"timeEntries"> })
+    const [event] = meetingEvents([tracked], NOW, {
+      entryId: "te_1" as Id<"timeEntries">,
+      startedAt: START + 60_000,
+    })
+    expect((event.start as Date).getTime()).toBe(START)
+    expect(event.extendedProps.recordingSince).toBe(START + 60_000)
+  })
+
+  it("drops a tracked meeting when a different entry is the one running", () => {
+    const tracked = meeting({ entryId: "te_1" as Id<"timeEntries"> })
+    expect(
+      meetingEvents([tracked], NOW, {
+        entryId: "te_2" as Id<"timeEntries">,
+        startedAt: START,
+      })
+    ).toEqual([])
+  })
+
+  it("is not recording when nothing is running", () => {
+    const [event] = meetingEvents([meeting()], NOW)
+    expect(event.extendedProps.recordingSince).toBeNull()
+  })
+
   it("drops an all-day meeting", () => {
     expect(meetingEvents([meeting({ isAllDay: true })], NOW)).toEqual([])
   })

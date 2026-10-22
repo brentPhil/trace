@@ -619,14 +619,46 @@ export function CalendarPanel({
     0
   )
 
+  /*
+   * THE RUNNING ENTRY, AS PRIMITIVES — its id and start hold still while it
+   * runs, so the meeting memo below is not rebuilt by the once-a-second tick.
+   * `recordedMeetingEntryId` is that entry when a drawn meeting owns it: the
+   * meeting keeps its block while recording (see `meetingEvents`), so the
+   * entry's own block is left out rather than drawn beside it.
+   */
+  const runningEntry = entries.find((entry) => entry.endedAt === null)
+  const runningId = runningEntry?._id ?? null
+  const runningStartedAt = runningEntry?.startedAt ?? null
+
   const meetingBlocks = useMemo(
-    () => meetingEvents(meetings, meetingClockMs),
-    [meetings, meetingClockMs]
+    () =>
+      meetingEvents(
+        meetings,
+        meetingClockMs,
+        runningId === null || runningStartedAt === null
+          ? null
+          : { entryId: runningId, startedAt: runningStartedAt }
+      ),
+    [meetings, meetingClockMs, runningId, runningStartedAt]
   )
 
+  const recordedMeetingEntryId = meetingBlocks.some(
+    (block) => block.extendedProps.recordingSince !== null
+  )
+    ? runningId
+    : null
+
   const events = useMemo(
-    () => [...calendarEvents(entries, clockMs), ...meetingBlocks],
-    [entries, clockMs, meetingBlocks]
+    () => [
+      ...calendarEvents(
+        recordedMeetingEntryId === null
+          ? entries
+          : entries.filter((entry) => entry._id !== recordedMeetingEntryId),
+        clockMs
+      ),
+      ...meetingBlocks,
+    ],
+    [entries, clockMs, meetingBlocks, recordedMeetingEntryId]
   )
 
   /*
@@ -1097,7 +1129,20 @@ export function CalendarPanel({
           return cn(
             MEETING_BLOCK_BOX,
             BLOCK_INTERACTIVE,
-            info.isStart ? MEETING_BLOCK_OUTLINE : HATCH_EMPTY
+            info.isStart ? MEETING_BLOCK_OUTLINE : HATCH_EMPTY,
+            /*
+             * BEING RECORDED: the running entry's own fill and edge, laid over
+             * the meeting's box. This block IS the running timer while it
+             * lasts — the entry's block is left out — so the Exposure Rule's
+             * accent belongs here and nowhere else on the grid. A tail keeps
+             * its hatch edge; only the fill says "running" there.
+             */
+            props.recordingSince !== null &&
+              cn(
+                "bg-primary/15 text-foreground",
+                RUNNING_HOVER,
+                info.isStart && "border-primary"
+              )
           )
         }
 
@@ -1200,9 +1245,20 @@ export function CalendarPanel({
             blockHeightPx(props.startedAt, props.endedAt, nowMs, timeZone),
             false
           )
+          /*
+           * The elapsed clock, ADDED beside the title rather than swapped in
+           * for the meeting's window: the block keeps saying when the meeting
+           * is, and also says how long it has been recorded. Spoken in full,
+           * since a dot and a number alone do not say "recording".
+           */
+          const recordingText =
+            props.recordingSince === null
+              ? null
+              : formatClock(nowMs - props.recordingSince)
           const meetingSpoken = [
             meetingFit.titleLines === 0 ? titleOf(info.event) : null,
             meetingFit.time ? null : meetingTimeText,
+            recordingText === null ? null : `Recording, ${recordingText}`,
           ]
             .filter((part) => part !== null)
             .join(" — ")
@@ -1254,6 +1310,15 @@ export function CalendarPanel({
                   >
                     {titleOf(info.event)}
                   </span>
+                  {recordingText === null ? null : (
+                    <span
+                      aria-hidden
+                      className="ml-auto flex shrink-0 items-center gap-1 pl-1 font-mono text-[0.6875rem] tracking-[-0.02em] tabular-nums text-primary"
+                    >
+                      <span className="size-1.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
+                      {recordingText}
+                    </span>
+                  )}
                 </div>
               )}
               {meetingFit.time ? (
@@ -1413,6 +1478,19 @@ export function CalendarPanel({
           nowMs={nowMs}
           onSetTrack={onSetTrack}
           onTrackNow={onTrackNow}
+          recordingSince={
+            reading.entryId !== null && reading.entryId === runningId
+              ? runningStartedAt
+              : null
+          }
+          onEditEntry={() => {
+            if (reading.entryId === null) return
+            setSelected({
+              entryId: reading.entryId,
+              anchor: selectedMeeting.anchor,
+            })
+            setSelectedMeeting(null)
+          }}
         />
       )}
     </>

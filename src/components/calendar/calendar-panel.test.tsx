@@ -795,6 +795,29 @@ describe("CalendarPanel", () => {
      * the title through the middle of its glyphs, and half-hour meetings are
      * the common case.
      */
+    it("keeps a meeting's own block while its entry is recording", () => {
+      // Swapping the meeting for the running entry's block moved and resized
+      // it the moment tracking began. The meeting stays, in the running
+      // accent, and the entry is not drawn a second time beside it.
+      const running = entry({
+        _id: "e_run" as Id<"timeEntries">,
+        title: "Standup",
+        startedAt: Date.parse("2026-08-11T02:01:00.000Z"),
+        endedAt: null,
+      } as Partial<Doc<"timeEntries">>)
+      const { container } = renderPanel({
+        entries: [running],
+        meetings: [meetingFixture({ entryId: running._id })],
+      })
+      expect(blocks(container)).toHaveLength(1)
+      const block = blockSaying(container, "Standup")
+      expect(block.className).toContain("border-primary")
+      expect(block.textContent).toContain("1:59:00")
+      expect(block.querySelector(".sr-only")?.textContent).toContain(
+        "Recording, 1:59:00"
+      )
+    })
+
     it("keeps only a half-hour meeting's title, and still says the time", () => {
       // 30 minutes is 24px: one 16px row over the 7px the block spends on
       // itself. `meetingFixture` is 10:00 – 10:30 Manila.
