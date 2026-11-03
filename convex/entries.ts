@@ -1,5 +1,5 @@
 import { v } from "convex/values"
-import type { ObjectType } from "convex/values"
+import type { Infer, ObjectType } from "convex/values"
 import { paginationOptsValidator, paginationResultValidator } from "convex/server"
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server"
 import { requireUserId } from "./auth"
@@ -731,6 +731,20 @@ const projectTotal = v.object({
 // sentence nothing ties to this cap. `src/` may only reach into Convex
 // through that alias onto convex/lib — entries.ts itself is off limits.
 
+/**
+ * One completed entry under a title row: when it ran, and whether it bills.
+ *
+ * `billable` rides along so the export can share the row's own amount out
+ * over the entries that earned it, rather than pricing each entry again under
+ * a second rounding rule — see `entryCents` in src/lib/export/report-rows.ts.
+ */
+const titleEntry = v.object({
+  startedAt: v.number(),
+  endedAt: v.number(),
+  durationMs: v.number(),
+  billable: v.boolean(),
+})
+
 const titleTotal = v.object({
   /** null is the unassigned bucket, same convention as `projectTotal`. */
   projectId: v.union(v.id("projects"), v.null()),
@@ -769,6 +783,21 @@ const titleTotal = v.object({
    * `NOTES_CHAR_BUDGET`.
    */
   notes: v.array(v.string()),
+  /**
+   * This row's COMPLETED entries, oldest first — and EMPTY unless the caller
+   * asked with `withEntries`.
+   *
+   * What lets an export print each record's own start and end under the
+   * description that totals them. Off by default for the reason `notes` is:
+   * /reports re-reads this breakdown on every date change and never draws a
+   * single entry, so only the export asks, at the moment it is pressed.
+   *
+   * A running entry is left out. It has no end to print and adds nothing to
+   * `totalMs`, so a row's entries' durations sum to its `totalMs` exactly.
+   * Bounded by the scan itself — `SUMMARY_SCAN_LIMIT` rows across every title
+   * at most, under the platform's 8,192-element array limit.
+   */
+  entries: v.array(titleEntry),
   totalMs: v.number(),
   billableMs: v.number(),
   billableCents: v.number(),
@@ -891,6 +920,17 @@ const breakdownArgs = {
    * off never pays for the collection on any of the page's many refetches.
    */
   withNotes: v.optional(v.boolean()),
+  /**
+   * Carry each title row's own entries (see `titleTotal.entries`). Off when
+   * absent.
+   *
+   * Like `withNotes`, only the export asks: it fetches the breakdown afresh
+   * with both on, at the moment it is pressed. The document is then one scan —
+   * its totals, its rows, their notes and their entries all from the same
+   * read — without every chart refetch paying for a list of every entry in
+   * the quarter.
+   */
+  withEntries: v.optional(v.boolean()),
 }
 
 /*
@@ -1010,6 +1050,10 @@ export async function rangeBreakdownImpl(
    *  different mechanisms with the same consequence for a reader. */
   let perRowNotesDropped = false
 
+  /** Completed entries per title, filed against the row's ledger object for
+   *  the reason notes are — see below. Only populated when asked. */
+  const entriesByTitle = new Map<Ledger, Array<Infer<typeof titleEntry>>>()
+
   for (const row of rows) {
     const rateCents = rateOf(row, projectDocs, accountRate)
     const day = dayOf(row.startedAt, args.timeZone)
@@ -1067,6 +1111,19 @@ export async function rangeBreakdownImpl(
         if (notes.size < NOTES_PER_ROW_LIMIT) notes.add(note)
         else if (!notes.has(note)) perRowNotesDropped = true
       }
+    }
+    if (args.withEntries === true && row.durationMs !== null && row.endedAt !== null) {
+      let entries = entriesByTitle.get(titleLedger)
+      if (entries === undefined) {
+        entries = []
+        entriesByTitle.set(titleLedger, entries)
+      }
+      entries.push({
+        startedAt: row.startedAt,
+        endedAt: row.endedAt,
+        durationMs: row.durationMs,
+        billable: row.billable,
+      })
     }
     if (row.durationMs !== null) {
       hours[localPartsOf(row.startedAt, args.timeZone).hour] += row.durationMs
@@ -1157,6 +1214,11 @@ export async function rangeBreakdownImpl(
         // whichever rows the Map happened to iterate first, including rows that
         // are about to be discarded.
         notes: [...(notesByTitle.get(ledger) ?? [])],
+        // Oldest first, whatever order the scan read them in — a list of
+        // sittings is read as a sequence.
+        entries: (entriesByTitle.get(ledger) ?? []).sort(
+          (a, b) => a.startedAt - b.startedAt
+        ),
         totalMs: ledger.totalMs,
         billableMs: ledger.billableMs,
         billableCents: centsOf(ledger),

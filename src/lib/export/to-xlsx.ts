@@ -130,30 +130,46 @@ function breakdownSheet(rows: ReportRows): SheetData {
     [
       text("Project", true),
       text("Week", true),
+      text("Date", true),
+      text("Start", true),
+      text("End", true),
       text("Description", true),
       text("Duration", true),
       text("Hours", true),
       text("%", true),
       text("Amount", true),
     ],
-    ...rows.titles.map((row) => [
-      text(row.project),
-      // A real Date cell, not text — the same rule `date()` already applies
-      // to the By-day sheet, and for the same reason: it is a value a pivot
-      // can group by, not a string a formula has to re-parse first.
-      date(row.weekStart),
-      text(row.description),
-      // The clock form stays as text beside the numeric one: it is what the
-      // reference report prints, and a reader reconciling against that PDF
-      // needs the same string to compare against.
-      text(formatClock(row.totalMs)),
-      hours(row.totalMs),
-      { value: row.percent, type: Number, format: "0.00" } as const,
-      money(row.billableCents, currency, row.unpriced),
-    ]),
+    // One row per entry, in the same order the CSV writes them — see there.
+    ...rows.titles.flatMap((row) =>
+      row.entries.map((entry) => [
+        text(row.project),
+        // A real Date cell, not text — the same rule `date()` already applies
+        // to the By-day sheet, and for the same reason: it is a value a pivot
+        // can group by, not a string a formula has to re-parse first.
+        date(row.weekStart),
+        date(entry.day),
+        // TEXT, in the user's own clock, not time cells. A time cell would
+        // have to be rebuilt from the instant in the user's zone a second
+        // time, here, and the point of `ReportEntryRow.start` is that the
+        // three documents print one entry's times from one derivation.
+        text(entry.start),
+        text(entry.end),
+        text(row.description),
+        // The clock form stays as text beside the numeric one: it is what the
+        // reference report prints, and a reader reconciling against that PDF
+        // needs the same string to compare against.
+        text(formatClock(entry.totalMs)),
+        hours(entry.totalMs),
+        { value: entry.percent, type: Number, format: "0.00" } as const,
+        money(entry.billableCents, currency, entry.unpriced),
+      ])
+    ),
     [
       text("TOTAL", true),
-      null, // no single week, matching Description's own null below
+      null, // no single week, day or time, matching Description's own null below
+      null,
+      null,
+      null,
       null,
       text(formatClock(rows.totals.totalMs), true),
       hours(rows.totals.totalMs),

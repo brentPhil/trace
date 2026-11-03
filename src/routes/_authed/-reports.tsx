@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { convexQuery } from "@convex-dev/react-query"
-import { usePaginatedQuery } from "convex/react"
+import { useConvex, usePaginatedQuery } from "convex/react"
 import { CopyEntriesButton } from "@/components/entries/copy-entries-button"
 import { EntryLog } from "@/components/entries/entry-log"
 import { LogSkeleton } from "@/components/entries/day-list"
@@ -98,6 +98,7 @@ type View = (typeof VIEWS)[number]["value"]
 export function Reports() {
   const { data: settings } = useSuspenseQuery(convexQuery(api.settings.get, {}))
   const { projects } = useClassifiers()
+  const convex = useConvex()
 
   const today = dayOf(Date.now(), settings.timezone)
   /*
@@ -129,13 +130,7 @@ export function Reports() {
   const { data: breakdown, isPlaceholderData } = useQuery({
     ...convexQuery(
       api.entries.rangeBreakdown,
-      breakdownArgs(
-        range,
-        settings.timezone,
-        filters,
-        settings.weekStartDay,
-        settings.pdfIncludeNotes
-      )
+      breakdownArgs(range, settings.timezone, filters, settings.weekStartDay)
     ),
     placeholderData: (previous) => previous,
   })
@@ -315,11 +310,27 @@ export function Reports() {
                 disabledReason={invoiceReason}
                 search={invoiceSearchOf(range, entryFilterOf(filters))}
               />
+              {/*
+               * THE SAME KEY AS ABOVE, PLUS WHAT ONLY A DOCUMENT READS — each
+               * row's notes (when the setting prints them) and its entries — in
+               * a one-shot read rather than a subscription, fetched by the
+               * click that needs it and by nothing else. See `breakdownArgs`.
+               */}
               <ExportMenu
-                breakdown={breakdown ?? EMPTY_BREAKDOWN}
+                load={() =>
+                  convex.query(
+                    api.entries.rangeBreakdown,
+                    breakdownArgs(range, settings.timezone, filters, settings.weekStartDay, {
+                      withNotes: settings.pdfIncludeNotes,
+                      withEntries: true,
+                    })
+                  )
+                }
                 from={filters.from}
                 to={filters.to}
                 currency={settings.currency}
+                timeZone={settings.timezone}
+                use12Hour={settings.timeFormat === "12"}
                 disabledReason={exportReason}
               />
             </div>
@@ -430,13 +441,7 @@ function SummaryTab({ filters, settings }: { filters: Filters; settings: Setting
   const { data, isPlaceholderData } = useQuery({
     ...convexQuery(
       api.entries.rangeBreakdown,
-      breakdownArgs(
-        range,
-        settings.timezone,
-        filters,
-        settings.weekStartDay,
-        settings.pdfIncludeNotes
-      )
+      breakdownArgs(range, settings.timezone, filters, settings.weekStartDay)
     ),
     placeholderData: (previous) => previous,
   })

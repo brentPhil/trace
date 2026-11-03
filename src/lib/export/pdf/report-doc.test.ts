@@ -4,7 +4,7 @@ import { PAGE, PAPER, TYPE, paperColorFor } from "./paper"
 import { textWidth } from "./ops"
 import { groupWeeks } from "../report-rows"
 import type { PdfOp } from "./ops"
-import type { ReportRows } from "../report-rows"
+import type { ReportEntryRow, ReportRows } from "../report-rows"
 
 const BOTTOM = PAGE.margin
 
@@ -47,6 +47,7 @@ function rowsWith(titleCount: number, over: Partial<ReportRows> = {}): ReportRow
       description: `CB-${n} Fixing something`,
       weekStart: "2026-07-13",
       notes: [],
+      entries: [],
       totalMs: HOUR,
       percent: 1,
       billableCents: 1_000,
@@ -102,6 +103,22 @@ function footnoteText(page: { ops: Array<PdfOp> }): string {
     )
     .map((op) => op.text)
     .join(" ")
+}
+
+/** One entry under a row — an hour, Monday morning, unless a test says otherwise. */
+function entryRow(
+  over: Partial<ReportEntryRow> = {}
+): ReportEntryRow {
+  return {
+    day: "2026-07-13",
+    start: "9:00 AM",
+    end: "10:00 AM",
+    totalMs: HOUR,
+    percent: 1,
+    billableCents: 1_000,
+    unpriced: false,
+    ...over,
+  }
 }
 
 /** Every string drawn on a page, for assertions that do not care about layout. */
@@ -307,6 +324,7 @@ describe("reportPages", () => {
           description: "Tide table caching",
           weekStart: "2026-07-13",
           notes: [],
+          entries: [],
           totalMs: HOUR,
           percent: 100,
           billableCents: 1_000,
@@ -338,6 +356,7 @@ describe("reportPages", () => {
             description: "Tide table caching",
             weekStart: "2026-07-13",
             notes,
+            entries: [],
             totalMs: HOUR,
             percent: 100,
             billableCents: 1_000,
@@ -411,6 +430,126 @@ describe("reportPages", () => {
               op.kind === "text" && op.text === "Total"
           )!.y
       expect(totalY(withNotes)).toBeLessThan(totalY(bare))
+    })
+  })
+
+  describe("entries", () => {
+    const listed = (
+      entries: Array<ReportEntryRow>,
+      notes: Array<string> = []
+    ) =>
+      rowsWith(1, {
+        titles: [
+          {
+            project: "Sealogs",
+            description: "Tide table caching",
+            weekStart: "2026-07-13",
+            notes,
+            entries,
+            totalMs: entries.reduce((sum, entry) => sum + entry.totalMs, 0),
+            percent: 100,
+            billableCents: 1_000,
+            unpriced: false,
+          },
+        ],
+      })
+
+    const textOps = (page: { ops: Array<PdfOp> }) =>
+      page.ops.filter((op): op is Extract<PdfOp, { kind: "text" }> => op.kind === "text")
+
+    it("puts each entry's day, start and end under its description, above its notes", () => {
+      const [, breakdown] = reportPages(
+        listed(
+          [
+            entryRow({ day: "2026-07-13", start: "9:00 AM", end: "9:30 AM", totalMs: HOUR / 2 }),
+            entryRow({ day: "2026-07-14", start: "1:15 PM", end: "2:15 PM" }),
+          ],
+          ["Went fine."]
+        )
+      )
+      const ops = textOps(breakdown)
+      const description = ops.find((op) => op.text === "Tide table caching")!
+      const first = ops.find((op) => op.text.startsWith("Mon 13 Jul"))!
+      const second = ops.find((op) => op.text.startsWith("Tue 14 Jul"))!
+      const note = ops.find((op) => op.text === "· Went fine.")!
+
+      expect(first.text).toBe("Mon 13 Jul · 9:00 AM – 9:30 AM")
+      expect(second.text).toBe("Tue 14 Jul · 1:15 PM – 2:15 PM")
+      // Detail of the row, not a row of its own: indented past the description,
+      // set at the caption size, muted — and in order, oldest first, left to
+      // right on one line while the width holds both.
+      expect(first.x).toBeGreaterThan(description.x)
+      expect(first.size).toBe(TYPE.tick)
+      expect(first.color).toBe(PAPER.inkMuted)
+      expect(first.y).toBeLessThan(description.y)
+      expect(second.y).toBe(first.y)
+      expect(second.x).toBeGreaterThan(first.x)
+      expect(note.y).toBeLessThan(second.y)
+    })
+
+    /* Every cell is as wide as the widest, so the next column's times start
+     * at one x on every line — and the grid stays left of where the Duration
+     * column's figures begin, where a time would read as one more figure. */
+    it("flows entries into aligned columns, clear of the figures", () => {
+      const [, breakdown] = reportPages(
+        listed(
+          Array.from({ length: 5 }, (_, n) =>
+            entryRow({ day: `2026-07-1${3 + n}`, end: n === 0 ? "10:30 AM" : "10:00 AM" })
+          )
+        )
+      )
+      const ops = textOps(breakdown)
+      const cells = ops.filter((op) => /^\w{3} 1\d Jul · /.test(op.text))
+      const lines = [...new Set(cells.map((op) => op.y))]
+      const columnXs = [...new Set(cells.map((op) => op.x))]
+      const rowDuration = ops.find((op) => op.text === "5:00:00" && op.size === TYPE.body)!
+
+      expect(cells).toHaveLength(5)
+      expect(lines.length).toBeLessThan(5)
+      expect(columnXs).toHaveLength(Math.ceil(cells.length / lines.length))
+      for (const cell of cells) {
+        const end = cell.x + textWidth(cell.text, TYPE.tick, false)
+        const figureStart = COL.duration - textWidth(rowDuration.text, TYPE.body, false)
+        expect(end).toBeLessThan(figureStart)
+      }
+    })
+
+    /* The start and end already say how long; a per-entry figure is what the
+     * CSV and XLSX columns are for. */
+    it("prints no per-entry duration, only the row's own", () => {
+      const [, breakdown] = reportPages(listed([entryRow(), entryRow()]))
+      const perEntry = textOps(breakdown).filter(
+        (op) => op.size === TYPE.tick && /^\d+:\d\d:\d\d$/.test(op.text)
+      )
+      expect(perEntry).toEqual([])
+    })
+
+    it("reserves the height its entries occupy", () => {
+      const totalY = (pages: ReturnType<typeof reportPages>) =>
+        textOps(pages.at(-1)!).find((op) => op.text === "Total")!.y
+      expect(totalY(reportPages(listed([entryRow(), entryRow(), entryRow()])))).toBeLessThan(
+        totalY(reportPages(listed([])))
+      )
+    })
+
+    /* A row is placed on one page whole, so a description logged more times
+     * than a page can list is cut — and says so twice: on the row, so the
+     * reader knows WHICH row is short, and under the Total, so the document
+     * says where the rest are. */
+    it("cuts an entry list too long for a page, and says so on the row and under the Total", () => {
+      const total = 200
+      const pages = reportPages(listed(Array.from({ length: total }, () => entryRow())))
+      const strings = pages.flatMap(textOf)
+      const shown = strings.filter((line) => line.startsWith("Mon 13 Jul")).length
+      expect(shown).toBeGreaterThan(0)
+      expect(shown).toBeLessThan(total)
+      expect(strings).toContain(`+ ${total - shown} more entries`)
+      expect(footnoteText(pages.at(-1)!)).toContain("The CSV and XLSX exports list every entry.")
+    })
+
+    it("says nothing about cut entries when none were", () => {
+      const pages = reportPages(listed([entryRow(), entryRow()]))
+      expect(footnoteText(pages.at(-1)!)).not.toContain("every entry")
     })
   })
 
@@ -685,6 +824,7 @@ describe("reportPages", () => {
             "[B-CB-326] Building Crew Training CSV and PDF download for the offshore vessel maintenance logs",
           weekStart: "2026-07-13",
           notes: [],
+          entries: [],
           totalMs: 445_507_000, // formatClock -> "123:45:07", as wide as a duration string gets
           percent: 42,
           billableCents: 123_456,
@@ -738,6 +878,7 @@ describe("reportPages", () => {
             "[B-CB-326] Building Crew Training CSV and PDF download for the offshore vessel maintenance logs",
           weekStart: "2026-07-13",
           notes: [],
+          entries: [],
           totalMs: HOUR,
           percent: 42,
           billableCents: 123_456,
@@ -778,6 +919,7 @@ describe("reportPages", () => {
           description: "Short note",
           weekStart: "2026-07-13",
           notes: [],
+          entries: [],
           totalMs: 3_661_000,
           percent: 12,
           billableCents: 4_000,
@@ -822,6 +964,7 @@ describe("reportPages", () => {
         description: `[B-CB-${300 + n}] ${LONG_DESCRIPTION}`,
         weekStart: "2026-07-13",
         notes: [],
+        entries: [],
         totalMs: HOUR,
         percent: 1,
         billableCents: 1_000,
@@ -858,25 +1001,37 @@ describe("reportPages", () => {
    * client's document with no marker.
    *
    * Seeded at exactly what the server's own caps allow, so this asserts the
-   * real worst case rather than a comfortable one.
+   * real worst case rather than a comfortable one. Entry lines share the notes'
+   * budget, and the tallest row is one holding BOTH — the gap between the two
+   * lists is the one height a notes-only or entries-only row never pays — so
+   * every row here carries ten entries as well. Every footnote is on, so every
+   * page carries the largest reserve it can.
    */
   it("keeps a notes-heavy row inside the page, at the worst case the server permits", () => {
     const MAX_NOTE_LENGTH = 2_000
     const NOTES_PER_ROW_LIMIT = 5
+    const MAX_TITLE_LENGTH = 500
     const rows = rowsWith(6, {
       titles: Array.from({ length: 6 }, (_, n) => ({
         project: "Vessel Vanguard",
-        description: `[B-CB-${300 + n}] Reconciling offshore vessel maintenance logs against the client's own crew training CSV export`,
+        description: `[B-CB-${300 + n}] ${"Reconciling offshore vessel maintenance logs ".repeat(12)}`.slice(
+          0,
+          MAX_TITLE_LENGTH
+        ),
         weekStart: "2026-07-13",
         notes: Array.from(
           { length: NOTES_PER_ROW_LIMIT },
           (_unused, i) => `Note ${i} ${"lorem ipsum dolor sit amet ".repeat(MAX_NOTE_LENGTH / 27)}`
         ),
+        entries: Array.from({ length: 10 }, () => entryRow()),
         totalMs: HOUR,
         percent: 1,
         billableCents: 1_000,
         unpriced: false,
       })),
+      titlesTruncated: true,
+      notesTruncated: true,
+      totals: { ...rowsWith(6).totals, unpriced: true },
     })
 
     for (const page of reportPages(rows)) {
@@ -899,6 +1054,7 @@ describe("reportPages", () => {
           description: "Tide table caching",
           weekStart: "2026-07-13",
           notes: Array.from({ length: 5 }, () => "lorem ipsum dolor sit amet ".repeat(74)),
+          entries: [],
           totalMs: HOUR,
           percent: 100,
           billableCents: 1_000,
@@ -920,6 +1076,7 @@ describe("reportPages", () => {
           description: "Tide table caching",
           weekStart: "2026-07-13",
           notes: [one],
+          entries: [],
           totalMs: HOUR,
           percent: 100,
           billableCents: 1_000,
@@ -1003,6 +1160,7 @@ describe("reportPages", () => {
         description: `W1-${n}`,
         weekStart: "2026-07-13",
         notes: [],
+        entries: [],
         totalMs: HOUR,
         percent: 12.5,
         billableCents: 1_000,
@@ -1013,6 +1171,7 @@ describe("reportPages", () => {
         description: `W2-${n}`,
         weekStart: "2026-07-20",
         notes: [],
+        entries: [],
         totalMs: HOUR,
         percent: 12.5,
         billableCents: 1_000,
@@ -1059,6 +1218,7 @@ describe("reportPages", () => {
         description: `W1-${n}`,
         weekStart: "2026-07-13",
         notes: [],
+        entries: [],
         totalMs: HOUR,
         percent: 1,
         billableCents: 1_000,
@@ -1069,6 +1229,7 @@ describe("reportPages", () => {
         description: `W2-${n}`,
         weekStart: "2026-07-20",
         notes: [],
+        entries: [],
         totalMs: HOUR,
         percent: 1,
         billableCents: 1_000,

@@ -43,6 +43,17 @@ function rowsWithTotals(totals: ReportRows["totals"]): ReportRows {
       description: "Standup",
       weekStart: "2026-07-13",
       notes: [],
+      entries: [
+        {
+          day: "2026-07-13",
+          start: "9:00 AM",
+          end: "10:00 AM",
+          totalMs: totals.totalMs,
+          percent: 100,
+          billableCents: totals.billableCents,
+          unpriced: totals.unpriced,
+        },
+      ],
       totalMs: totals.totalMs,
       percent: 100,
       billableCents: totals.billableCents,
@@ -105,7 +116,7 @@ function csvTotalAmount(rows: ReportRows): string {
 function xlsxTotalAmount(rows: ReportRows): unknown {
   const breakdown = xlsxSheets(rows).find((s) => s.sheet === "Breakdown")!
   const total = breakdown.data.at(-1)!
-  return (total[6] as { value: number } | null)?.value ?? null
+  return (total[9] as { value: number } | null)?.value ?? null
 }
 
 describe("the three writers agree on the grand-total Amount", () => {
@@ -193,13 +204,13 @@ function csvTotalPercent(rows: ReportRows): string {
   const totalLine = toCsv(rows)
     .split("\r\n")
     .find((line) => line.startsWith("TOTAL,"))!
-  return totalLine.split(",")[5] // Percent is the sixth field
+  return totalLine.split(",")[8] // Percent is the ninth field
 }
 
 function xlsxTotalPercent(rows: ReportRows): unknown {
   const breakdown = xlsxSheets(rows).find((s) => s.sheet === "Breakdown")!
   const total = breakdown.data.at(-1)!
-  return (total[5] as { value: number } | null)?.value ?? null
+  return (total[8] as { value: number } | null)?.value ?? null
 }
 
 /*
@@ -245,10 +256,10 @@ describe("the three writers agree on the grand-total Percent for an empty range"
       notesTruncated: false,
     }
 
-    expect(toCsv(empty).split("\r\n").at(-1)!.split(",")[5]).toBe("0")
+    expect(toCsv(empty).split("\r\n").at(-1)!.split(",")[8]).toBe("0")
 
     const breakdown = xlsxSheets(empty).find((s) => s.sheet === "Breakdown")!
-    expect(breakdown.data.at(-1)![5]).toMatchObject({ value: 0 })
+    expect(breakdown.data.at(-1)![8]).toMatchObject({ value: 0 })
 
     // The PDF's own reading of this is gone with its percent column. The
     // hazard it guarded — a hardcoded "100%" that disagreed with both other

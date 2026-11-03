@@ -78,11 +78,23 @@ export type TitleTotal = {
    *  reads it, and only when the setting is on; see `titleTotal.notes` in
    *  convex/entries.ts for the caps that bound it. */
   notes: Array<string>
+  /** This row's completed entries, oldest first, or empty when the caller did
+   *  not ask for them — only the export does. See `titleTotal.entries` in
+   *  convex/entries.ts. */
+  entries: Array<TitleEntry>
   totalMs: number
   billableMs: number
   billableCents: number
   unratedBillableMs: number
   count: number
+}
+
+/** One completed entry under a `TitleTotal`. */
+export type TitleEntry = {
+  startedAt: number
+  endedAt: number
+  durationMs: number
+  billable: boolean
 }
 
 /**

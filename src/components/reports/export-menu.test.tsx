@@ -40,6 +40,14 @@ const BREAKDOWN: Breakdown = {
       title: "Standup",
       weekStart: "2026-07-13",
       notes: [],
+      entries: [
+        {
+          startedAt: Date.parse("2026-07-13T09:00:00Z"),
+          endedAt: Date.parse("2026-07-13T10:00:00Z"),
+          durationMs: HOUR,
+          billable: true,
+        },
+      ],
       totalMs: HOUR,
       billableMs: HOUR,
       billableCents: 1_000,
@@ -52,10 +60,12 @@ const BREAKDOWN: Breakdown = {
 }
 
 const PROPS = {
-  breakdown: BREAKDOWN,
+  load: () => Promise.resolve(BREAKDOWN),
   from: "2026-07-13" as const,
   to: "2026-07-13" as const,
   currency: "USD",
+  timeZone: "UTC",
+  use12Hour: true,
 }
 
 // `ExportMenu` reads `useToastManager()`, which throws with no
@@ -91,7 +101,6 @@ describe("ExportMenu", () => {
   it("refuses a truncated range, and says why on the control itself", () => {
     renderMenu({
       ...PROPS,
-      breakdown: { ...BREAKDOWN, truncated: true },
       disabledReason: "This period is too large to total exactly. Narrow the dates.",
     })
 
@@ -106,6 +115,51 @@ describe("ExportMenu", () => {
     expect(document.getElementById(describedBy!)?.textContent).toBe(
       "This period is too large to total exactly. Narrow the dates."
     )
+  })
+
+  /*
+   * The page's own breakdown carries no entries — only an export reads them —
+   * so the document is fetched by the click that asks for it, and by nothing
+   * else.
+   */
+  it("fetches what it exports when a format is picked, not before", async () => {
+    const load = vi.fn(() => Promise.resolve(BREAKDOWN))
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    vi.stubGlobal("URL", { ...URL, createObjectURL: () => "blob:x", revokeObjectURL: () => {} })
+
+    renderMenu({ ...PROPS, load, disabledReason: null })
+    fireEvent.click(screen.getByRole("button", { name: /export/i }))
+    expect(load).not.toHaveBeenCalled()
+
+    fireEvent.click(await screen.findByRole("menuitem", { name: "CSV" }))
+    await waitFor(() => expect(click).toHaveBeenCalled())
+    expect(load).toHaveBeenCalledTimes(1)
+
+    vi.unstubAllGlobals()
+    click.mockRestore()
+  })
+
+  /*
+   * The trigger was enabled on the page's breakdown; the export is built from a
+   * second read. A range that crossed the scan limit in between must be refused
+   * there too — with the reason, and with no file.
+   */
+  it("refuses what it fetched if that turned out truncated, and downloads nothing", async () => {
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+
+    renderMenu({
+      ...PROPS,
+      load: () => Promise.resolve({ ...BREAKDOWN, truncated: true }),
+      disabledReason: null,
+    })
+    fireEvent.click(screen.getByRole("button", { name: /export/i }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "CSV" }))
+
+    const alert = await screen.findByRole("alert")
+    expect(within(alert).getByText(/too large to total exactly/)).toBeTruthy()
+    expect(click).not.toHaveBeenCalled()
+
+    click.mockRestore()
   })
 
   it("downloads a CSV named for the range", async () => {

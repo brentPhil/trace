@@ -53,6 +53,17 @@ const ROWS: ReportRows = {
       description: "Standup",
       weekStart: "2026-07-13",
       notes: [],
+      entries: [
+        {
+          day: "2026-07-14",
+          start: "9:00 AM",
+          end: "12:00 PM",
+          totalMs: 3 * HOUR,
+          percent: 100,
+          billableCents: 3_000,
+          unpriced: false,
+        },
+      ],
       totalMs: 3 * HOUR,
       percent: 100,
       billableCents: 3_000,
@@ -85,7 +96,32 @@ describe("xlsxSheets", () => {
   it("writes durations as numbers, so the recipient can sum the column", () => {
     const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
-    expect(first[4]).toEqual({ value: 3, type: Number, format: "0.00" })
+    expect(first[7]).toEqual({ value: 3, type: Number, format: "0.00" })
+  })
+
+  /*
+   * One row per entry: its own day as a real Date cell, for the reason the
+   * week is one, and its start and end as the same text the CSV and the PDF
+   * print for it.
+   */
+  it("writes each entry's day as a Date cell and its times as the text the other documents print", () => {
+    const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
+    const [header, first] = breakdown.data
+    expect(header.map((cell) => (cell as { value: string }).value)).toEqual([
+      "Project",
+      "Week",
+      "Date",
+      "Start",
+      "End",
+      "Description",
+      "Duration",
+      "Hours",
+      "%",
+      "Amount",
+    ])
+    expect((first[2] as { value: Date }).value.toISOString()).toBe("2026-07-14T00:00:00.000Z")
+    expect(first[3]).toEqual({ value: "9:00 AM", type: String })
+    expect(first[4]).toEqual({ value: "12:00 PM", type: String })
   })
 
   /*
@@ -117,17 +153,22 @@ describe("xlsxSheets", () => {
   it("floors the hours it writes, so the workbook never shows more time than the CSV for the same entry", () => {
     const floored = {
       ...ROWS,
-      titles: [{ ...ROWS.titles[0], totalMs: 29_502_000 }],
+      titles: [
+        {
+          ...ROWS.titles[0],
+          entries: [{ ...ROWS.titles[0].entries[0], totalMs: 29_502_000 }],
+        },
+      ],
     }
     const breakdown = xlsxSheets(floored).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
-    expect((first[4] as { value: number }).value).toBe(8.19)
+    expect((first[7] as { value: number }).value).toBe(8.19)
   })
 
   it("writes amounts as currency-formatted numbers, not strings", () => {
     const breakdown = xlsxSheets(ROWS).find((s) => s.sheet === "Breakdown")!
     const [, first] = breakdown.data
-    expect(first[6]).toEqual({ value: 30, type: Number, format: '#,##0.00" "USD' })
+    expect(first[9]).toEqual({ value: 30, type: Number, format: '#,##0.00" "USD' })
   })
 
   it("writes days as real dates, so a pivot can group them by week", () => {
@@ -143,16 +184,23 @@ describe("xlsxSheets", () => {
     const unpriced = {
       ...ROWS,
       totals: { ...ROWS.totals, unpriced: true },
-      titles: [{ ...ROWS.titles[0], billableCents: 0, unpriced: true }],
+      titles: [
+        {
+          ...ROWS.titles[0],
+          billableCents: 0,
+          unpriced: true,
+          entries: [{ ...ROWS.titles[0].entries[0], billableCents: 0, unpriced: true }],
+        },
+      ],
     }
     const breakdown = xlsxSheets(unpriced).find((s) => s.sheet === "Breakdown")!
-    expect(breakdown.data[1][6]).toBeNull()
+    expect(breakdown.data[1][9]).toBeNull()
     // The TOTAL row has its own unpriced branch — money(rows.totals.billableCents,
     // currency, rows.totals.unpriced) — separate from the body row's, and
     // asserting only the body row above left this one able to regress to `0`
     // unseen.
     const total = breakdown.data.at(-1)!
-    expect(total[6]).toBeNull()
+    expect(total[9]).toBeNull()
   })
 
   /*
@@ -169,7 +217,7 @@ describe("xlsxSheets", () => {
     }
     const breakdown = xlsxSheets(empty).find((s) => s.sheet === "Breakdown")!
     const total = breakdown.data.at(-1)!
-    expect(total[5]).toEqual({ value: 0, type: Number, format: "0.00" })
+    expect(total[8]).toEqual({ value: 0, type: Number, format: "0.00" })
   })
 
   it("leaves the TOTAL row's Week cell blank — it is not any one week", () => {

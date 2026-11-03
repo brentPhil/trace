@@ -942,3 +942,55 @@ describe("rangeBreakdown — notes", () => {
     expect((await breakdown(t, { withNotes: true })).notesTruncated).toBe(false)
   })
 })
+
+describe("rangeBreakdown — entries", () => {
+  it("carries no entries unless asked", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + 9 * HOUR })
+    expect((await breakdown(t)).titles[0].entries).toEqual([])
+  })
+
+  /* What lets the export print each record's own start and end under the
+   * description that totals it. */
+  it("lists each completed entry under its own row, oldest first", async () => {
+    const t = setup()
+    await entry(t, { startedAt: TUE + 14 * HOUR, durationMs: HOUR / 2, title: "Standup", billable: true })
+    await entry(t, { startedAt: MON + 9 * HOUR, durationMs: HOUR, title: "Standup" })
+    await entry(t, { startedAt: MON + 11 * HOUR, title: "Review" })
+
+    const result = await breakdown(t, { withEntries: true })
+    const standup = result.titles.find((row) => row.title === "Standup")!
+
+    expect(standup.entries).toEqual([
+      { startedAt: MON + 9 * HOUR, endedAt: MON + 10 * HOUR, durationMs: HOUR, billable: false },
+      {
+        startedAt: TUE + 14 * HOUR,
+        endedAt: TUE + 14.5 * HOUR,
+        durationMs: HOUR / 2,
+        billable: true,
+      },
+    ])
+    expect(result.titles.find((row) => row.title === "Review")!.entries).toHaveLength(1)
+  })
+
+  /* A running entry has no end to print and adds nothing to the row's total,
+   * so leaving it out keeps a row's entries summing to the row exactly. */
+  it("leaves out a running entry, so the entries sum to their row", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + 9 * HOUR })
+    await entry(t, { startedAt: WED + 9 * HOUR, durationMs: null })
+
+    const [row] = (await breakdown(t, { withEntries: true })).titles
+    expect(row.entries).toHaveLength(1)
+    expect(row.entries.reduce((sum, item) => sum + item.durationMs, 0)).toBe(row.totalMs)
+  })
+
+  it("lists only the entries the filter kept", async () => {
+    const t = setup()
+    await entry(t, { startedAt: MON + 9 * HOUR, billable: true })
+    await entry(t, { startedAt: TUE + 9 * HOUR, billable: false })
+
+    const [row] = (await breakdown(t, { withEntries: true, billableOnly: true })).titles
+    expect(row.entries.map((item) => item.startedAt)).toEqual([MON + 9 * HOUR])
+  })
+})

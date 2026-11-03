@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { percentOf, reportRows } from "./report-rows"
+import { percentOf, reportRows, shareCents } from "./report-rows"
 import { NO_PROJECT_LABEL } from "@/lib/report-series"
 import type { Breakdown } from "@/lib/report-series"
 
@@ -24,7 +24,13 @@ function breakdownOf(over: Partial<Breakdown> = {}): Breakdown {
   }
 }
 
-const RANGE = { from: "2026-07-13", to: "2026-07-15", currency: "USD" } as const
+const RANGE = {
+  from: "2026-07-13",
+  to: "2026-07-15",
+  currency: "USD",
+  timeZone: "UTC",
+  use12Hour: true,
+} as const
 
 describe("percentOf", () => {
   it("gives two decimal places, matching the reference report", () => {
@@ -115,6 +121,7 @@ describe("reportRows — projects and descriptions", () => {
             title: "",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: 0,
             billableCents: 0,
@@ -144,6 +151,7 @@ describe("reportRows — projects and descriptions", () => {
             title: "Standup",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: 29_520_000,
             billableMs: 29_520_000,
             billableCents: 98_800,
@@ -170,6 +178,7 @@ describe("reportRows — projects and descriptions", () => {
             title: "Standup",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: HOUR,
             billableCents: 0,
@@ -203,6 +212,7 @@ describe("reportRows — weeks", () => {
             title: "Second week",
             weekStart: "2026-07-20",
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: 0,
             billableCents: 0,
@@ -215,6 +225,7 @@ describe("reportRows — weeks", () => {
             title: "First week, row A",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: 0,
             billableCents: 0,
@@ -227,6 +238,7 @@ describe("reportRows — weeks", () => {
             title: "First week, row B",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: 0,
             billableCents: 0,
@@ -235,7 +247,7 @@ describe("reportRows — weeks", () => {
           },
         ],
       }),
-      { from: "2026-07-13", to: "2026-07-26", currency: "USD" }
+      { ...RANGE, from: "2026-07-13", to: "2026-07-26" }
     )
 
     expect(rows.weeks.map((w) => w.weekStart)).toEqual(["2026-07-13", "2026-07-20"])
@@ -256,6 +268,7 @@ describe("reportRows — weeks", () => {
             title: "Standup",
             weekStart: "2026-08-03",
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: 0,
             billableCents: 0,
@@ -264,7 +277,7 @@ describe("reportRows — weeks", () => {
           },
         ],
       }),
-      { from: "2026-08-03", to: "2026-08-09", currency: "USD" }
+      { ...RANGE, from: "2026-08-03", to: "2026-08-09" }
     )
 
     expect(rows.weeks[0].label).toBe("3 – 9 Aug 2026")
@@ -285,6 +298,7 @@ describe("reportRows — weeks", () => {
             title: "Standup",
             weekStart: "2026-08-03", // the Monday; range starts Wednesday the 5th
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: 0,
             billableCents: 0,
@@ -293,7 +307,7 @@ describe("reportRows — weeks", () => {
           },
         ],
       }),
-      { from: "2026-08-05", to: "2026-08-09", currency: "USD" }
+      { ...RANGE, from: "2026-08-05", to: "2026-08-09" }
     )
 
     expect(rows.weeks[0].label).toBe("5 – 9 Aug 2026")
@@ -311,6 +325,7 @@ describe("reportRows — weeks", () => {
             title: "A",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: HOUR,
             billableMs: HOUR,
             billableCents: 100,
@@ -323,6 +338,7 @@ describe("reportRows — weeks", () => {
             title: "B",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: 2 * HOUR,
             billableMs: 2 * HOUR,
             billableCents: 200,
@@ -331,7 +347,7 @@ describe("reportRows — weeks", () => {
           },
         ],
       }),
-      { from: "2026-07-13", to: "2026-07-19", currency: "USD" }
+      { ...RANGE, from: "2026-07-13", to: "2026-07-19" }
     )
 
     expect(rows.weeks[0].subtotal.totalMs).toBe(3 * HOUR)
@@ -357,6 +373,7 @@ describe("reportRows — weeks", () => {
             title: "Small week",
             weekStart: "2026-07-13",
             notes: [],
+            entries: [],
             totalMs: HOUR, // 1 of 4 hours in the RANGE -> 25%, not 100% of its own 1h week
             billableMs: 0,
             billableCents: 0,
@@ -369,6 +386,7 @@ describe("reportRows — weeks", () => {
             title: "Big week",
             weekStart: "2026-07-20",
             notes: [],
+            entries: [],
             totalMs: 3 * HOUR,
             billableMs: 0,
             billableCents: 0,
@@ -377,7 +395,7 @@ describe("reportRows — weeks", () => {
           },
         ],
       }),
-      { from: "2026-07-13", to: "2026-07-26", currency: "USD" }
+      { ...RANGE, from: "2026-07-13", to: "2026-07-26" }
     )
 
     expect(rows.weeks[0].rows[0].percent).toBe(25)
@@ -389,5 +407,120 @@ describe("reportRows — weeks", () => {
   it("gives an empty range no weeks, rather than one empty week", () => {
     const rows = reportRows(breakdownOf(), RANGE)
     expect(rows.weeks).toEqual([])
+  })
+})
+
+describe("shareCents", () => {
+  it("splits in proportion and sums exactly to the whole", () => {
+    expect(shareCents(1_000, [1, 1, 1])).toEqual([334, 333, 333])
+    expect(shareCents(1_000, [3, 1])).toEqual([750, 250])
+  })
+
+  it("hands the leftover cents to the largest remainders, not the first entries", () => {
+    // 100 over 2:1 is 66.67 and 33.33 — the spare cent goes to the .67,
+    // wherever it sits.
+    expect(shareCents(100, [2, 1])).toEqual([67, 33])
+    expect(shareCents(100, [1, 2])).toEqual([33, 67])
+  })
+
+  it("gives a weightless entry nothing, and a weightless row nothing at all", () => {
+    expect(shareCents(500, [0, 2, 0])).toEqual([0, 500, 0])
+    expect(shareCents(500, [0, 0])).toEqual([0, 0])
+  })
+})
+
+describe("reportRows — entries", () => {
+  const AUG_3_0905_UTC = Date.parse("2026-08-03T09:05:00Z")
+
+  function rowWith(
+    entries: Breakdown["titles"][number]["entries"],
+    over: Partial<Breakdown["titles"][number]> = {}
+  ): Breakdown {
+    const totalMs = entries.reduce((sum, entry) => sum + entry.durationMs, 0)
+    return breakdownOf({
+      totalMs,
+      titles: [
+        {
+          projectId: null,
+          project: "Acme",
+          title: "Standup",
+          weekStart: "2026-08-03",
+          notes: [],
+          entries,
+          totalMs,
+          billableMs: totalMs,
+          billableCents: 1_000,
+          unratedBillableMs: 0,
+          count: entries.length,
+          ...over,
+        },
+      ],
+    })
+  }
+
+  const entry = (startedAt: number, durationMs = HOUR, billable = true) => ({
+    startedAt,
+    endedAt: startedAt + durationMs,
+    durationMs,
+    billable,
+  })
+
+  it("writes each entry's day, start and end in the user's own zone and clock", () => {
+    const breakdown = rowWith([entry(AUG_3_0905_UTC)])
+    const range = { ...RANGE, from: "2026-08-03", to: "2026-08-09" } as const
+
+    expect(reportRows(breakdown, range).titles[0].entries[0]).toMatchObject({
+      day: "2026-08-03",
+      start: "9:05 AM",
+      end: "10:05 AM",
+      totalMs: HOUR,
+    })
+    expect(
+      reportRows(breakdown, { ...range, use12Hour: false }).titles[0].entries[0]
+    ).toMatchObject({ start: "09:05", end: "10:05" })
+    // Twelve hours ahead of UTC, the same instant is the evening — and still
+    // the same day, which is the day the backend attributed it to.
+    expect(
+      reportRows(breakdown, { ...range, timeZone: "Pacific/Auckland" }).titles[0].entries[0]
+    ).toMatchObject({ day: "2026-08-03", start: "9:05 PM", end: "10:05 PM" })
+  })
+
+  /* The PDF prints the row's amount and the CSV prints its entries'. A client
+   * adding up the second must land on the first. */
+  it("shares the row's own amount over its billable entries, to the cent", () => {
+    const rows = reportRows(
+      rowWith(
+        [
+          entry(AUG_3_0905_UTC, HOUR),
+          entry(AUG_3_0905_UTC + 2 * HOUR, HOUR / 2, false),
+          entry(AUG_3_0905_UTC + 4 * HOUR, 2 * HOUR),
+        ],
+        { billableCents: 1_000 }
+      ),
+      RANGE
+    )
+    const cents = rows.titles[0].entries.map((row) => row.billableCents)
+
+    expect(cents).toEqual([333, 0, 667])
+    expect(cents.reduce((sum, value) => sum + value, 0)).toBe(rows.titles[0].billableCents)
+  })
+
+  it("marks only the billable entries of an unrated row as unpriced", () => {
+    const rows = reportRows(
+      rowWith([entry(AUG_3_0905_UTC), entry(AUG_3_0905_UTC + 2 * HOUR, HOUR, false)], {
+        billableCents: 0,
+        unratedBillableMs: HOUR,
+      }),
+      RANGE
+    )
+    expect(rows.titles[0].entries.map((row) => row.unpriced)).toEqual([true, false])
+  })
+
+  it("gives each entry its share of the whole range, like its row", () => {
+    const rows = reportRows(
+      rowWith([entry(AUG_3_0905_UTC, HOUR), entry(AUG_3_0905_UTC + 2 * HOUR, 3 * HOUR)]),
+      RANGE
+    )
+    expect(rows.titles[0].entries.map((row) => row.percent)).toEqual([25, 75])
   })
 })

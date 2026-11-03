@@ -40,13 +40,7 @@ export const Route = createFileRoute("/_authed/reports")({
     await context.queryClient.ensureQueryData(
       convexQuery(
         api.entries.rangeBreakdown,
-        breakdownArgs(
-          range,
-          settings.timezone,
-          filters,
-          settings.weekStartDay,
-          settings.pdfIncludeNotes
-        )
+        breakdownArgs(range, settings.timezone, filters, settings.weekStartDay)
       )
     )
   },

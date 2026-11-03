@@ -4,6 +4,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Button } from "@/components/ui/button"
 import { ChevronDown } from "lucide-react"
 import { downloadBlob, exportFilename } from "@/lib/export/download"
+import { exportDisabledReason } from "@/lib/export/export-disabled-reason"
 import { csvBlob } from "@/lib/export/to-csv"
 import { reportRows } from "@/lib/export/report-rows"
 import { xlsxBlob } from "@/lib/export/to-xlsx"
@@ -26,16 +27,26 @@ const FORMAT_LABEL: Record<"pdf" | "csv" | "xlsx", string> = {
  * a toast after a click that appeared to work is not a refusal.
  */
 export function ExportMenu({
-  breakdown,
+  load,
   from,
   to,
   currency,
+  timeZone,
+  use12Hour,
   disabledReason,
 }: {
-  breakdown: Breakdown
+  /**
+   * The breakdown to export, fetched when a format is picked — WITH each row's
+   * entries, which the breakdown the page draws its charts from does not carry
+   * (see `withEntries` in convex/entries.ts). A function rather than the data
+   * so the entries are only ever read by somebody who asked for a document.
+   */
+  load: () => Promise<Breakdown>
   from: DayString
   to: DayString
   currency: string
+  timeZone: string
+  use12Hour: boolean
   /** Non-null disables the control and is announced as its description. */
   disabledReason: string | null
 }) {
@@ -45,7 +56,19 @@ export function ExportMenu({
   async function run(format: "pdf" | "csv" | "xlsx") {
     setBusy(true)
     try {
-      const rows = reportRows(breakdown, { from, to, currency })
+      const breakdown = await load()
+      /*
+       * THE RULE ABOVE, ASKED AGAIN OF WHAT WAS ACTUALLY FETCHED. The trigger
+       * was enabled on the page's own breakdown; this one is a second read,
+       * and a range that grew past the scan limit in between would otherwise
+       * become exactly the floor-as-a-document this control exists to refuse.
+       */
+      const refusal = exportDisabledReason(breakdown, false)
+      if (refusal !== null) {
+        toasts.add({ title: refusal, priority: "high" })
+        return
+      }
+      const rows = reportRows(breakdown, { from, to, currency, timeZone, use12Hour })
       const blob =
         format === "csv"
           ? csvBlob(rows)

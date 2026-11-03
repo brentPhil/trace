@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { toCsv } from "./to-csv"
-import type { ReportRows } from "./report-rows"
+import type { ReportEntryRow, ReportRows } from "./report-rows"
 
 const HOUR = 3_600_000
 
@@ -37,12 +37,23 @@ function rowsOf(titles: ReportRows["titles"]): ReportRows {
   }
 }
 
+const ENTRY: ReportEntryRow = {
+  day: "2026-07-13",
+  start: "9:00 AM",
+  end: "10:00 AM",
+  totalMs: HOUR,
+  percent: 100,
+  billableCents: 1_000,
+  unpriced: false,
+}
+
 const ONE: ReportRows["titles"] = [
   {
     project: "Acme",
     description: "Standup",
     weekStart: "2026-07-13",
     notes: [],
+    entries: [ENTRY],
     totalMs: HOUR,
     percent: 100,
     billableCents: 1_000,
@@ -54,13 +65,13 @@ describe("toCsv", () => {
   it("leads with a header row and nothing else — a preamble is not a CSV", () => {
     const [header] = toCsv(rowsOf(ONE)).split("\r\n")
     expect(header).toBe(
-      "Project,Week,Description,Duration,Decimal hours,Percent,Amount,Currency"
+      "Project,Week,Date,Start,End,Description,Duration,Decimal hours,Percent,Amount,Currency"
     )
   })
 
   it("writes both duration forms, so the reader need not convert either", () => {
     expect(toCsv(rowsOf(ONE)).split("\r\n")[1]).toBe(
-      "Acme,2026-07-13,Standup,1:00:00,1.00,100,10.00,USD"
+      "Acme,2026-07-13,2026-07-13,9:00 AM,10:00 AM,Standup,1:00:00,1.00,100,10.00,USD"
     )
   })
 
@@ -68,8 +79,41 @@ describe("toCsv", () => {
   // week needs a plain value to key on, and this is the DayString the backend
   // already attributed the row to — not re-derived on the client.
   it("writes the week as the plain DayString its rows were attributed to", () => {
-    const csv = toCsv(rowsOf([{ ...ONE[0], weekStart: "2026-08-10" }]))
-    expect(csv.split("\r\n")[1]).toBe("Acme,2026-08-10,Standup,1:00:00,1.00,100,10.00,USD")
+    const csv = toCsv(
+      rowsOf([{ ...ONE[0], weekStart: "2026-08-10", entries: [{ ...ENTRY, day: "2026-08-11" }] }])
+    )
+    expect(csv.split("\r\n")[1]).toBe(
+      "Acme,2026-08-10,2026-08-11,9:00 AM,10:00 AM,Standup,1:00:00,1.00,100,10.00,USD"
+    )
+  })
+
+  /* One record per entry, each carrying its own day, times and figures under
+   * its row's project and description — consecutive, oldest first, so a
+   * description's sittings read as a run. */
+  it("writes one record per entry, with the entry's own times and figures", () => {
+    const csv = toCsv(
+      rowsOf([
+        {
+          ...ONE[0],
+          entries: [
+            { ...ENTRY, totalMs: HOUR / 2, end: "9:30 AM", percent: 50, billableCents: 500 },
+            {
+              ...ENTRY,
+              day: "2026-07-14",
+              start: "2:00 PM",
+              end: "2:30 PM",
+              totalMs: HOUR / 2,
+              percent: 50,
+              billableCents: 500,
+            },
+          ],
+        },
+      ])
+    )
+    expect(csv.split("\r\n").slice(1, 3)).toEqual([
+      "Acme,2026-07-13,2026-07-13,9:00 AM,9:30 AM,Standup,0:30:00,0.50,50,5.00,USD",
+      "Acme,2026-07-13,2026-07-14,2:00 PM,2:30 PM,Standup,0:30:00,0.50,50,5.00,USD",
+    ])
   })
 
   it("separates records with CRLF, per RFC 4180", () => {
@@ -89,6 +133,7 @@ describe("toCsv", () => {
           description: 'Fixing "toggle" bleeding across Maintenance, Log\nEntries',
           weekStart: "2026-07-13",
           notes: [],
+          entries: [ENTRY],
           totalMs: HOUR,
           percent: 100,
           billableCents: 1_000,
@@ -98,24 +143,33 @@ describe("toCsv", () => {
     )
 
     expect(csv.split("\r\n")[1]).toBe(
-      'Acme,2026-07-13,"Fixing ""toggle"" bleeding across Maintenance, Log\nEntries",1:00:00,1.00,100,10.00,USD'
+      'Acme,2026-07-13,2026-07-13,9:00 AM,10:00 AM,"Fixing ""toggle"" bleeding across Maintenance, Log\nEntries",1:00:00,1.00,100,10.00,USD'
     )
   })
 
   it("ends with a TOTAL record, so a truncated paste is visibly incomplete", () => {
     const lines = toCsv(rowsOf(ONE)).split("\r\n")
-    // Week is blank on TOTAL, matching Description — the row spans every
-    // week in the export, and it is not any one of them.
-    expect(lines.at(-1)).toBe("TOTAL,,,1:00:00,1.00,100,10.00,USD")
+    // Week, day and times are blank on TOTAL, matching Description — the row
+    // spans every entry in the export, and it is not any one of them.
+    expect(lines.at(-1)).toBe("TOTAL,,,,,,1:00:00,1.00,100,10.00,USD")
   })
 
   it("writes an amount of nothing for an unpriced row rather than 0.00", () => {
     const csv = toCsv(
-      rowsOf([{ ...ONE[0], billableCents: 0, unpriced: true }])
+      rowsOf([
+        {
+          ...ONE[0],
+          billableCents: 0,
+          unpriced: true,
+          entries: [{ ...ENTRY, billableCents: 0, unpriced: true }],
+        },
+      ])
     )
     // Empty, not "0.00". Zero is a real rate somebody chose; unpriced is a
     // question nobody has answered, and the two must not share a cell value.
-    expect(csv.split("\r\n")[1]).toBe("Acme,2026-07-13,Standup,1:00:00,1.00,100,,USD")
+    expect(csv.split("\r\n")[1]).toBe(
+      "Acme,2026-07-13,2026-07-13,9:00 AM,10:00 AM,Standup,1:00:00,1.00,100,,USD"
+    )
   })
 
   it("agrees with its own body rows even when the range is entirely non-billable", () => {
@@ -134,7 +188,7 @@ describe("toCsv", () => {
         billableCents: 0,
       },
     })
-    expect(csv.split("\r\n").at(-1)).toBe("TOTAL,,,1:00:00,1.00,100,0.00,USD")
+    expect(csv.split("\r\n").at(-1)).toBe("TOTAL,,,,,,1:00:00,1.00,100,0.00,USD")
   })
 
   /*
@@ -147,7 +201,7 @@ describe("toCsv", () => {
    */
   it("appends the truncation note as a trailing record, after TOTAL", () => {
     const lines = toCsv({ ...rowsOf(ONE), titlesTruncated: true }).split("\r\n")
-    expect(lines.at(-2)).toBe("TOTAL,,,1:00:00,1.00,100,10.00,USD")
+    expect(lines.at(-2)).toBe("TOTAL,,,,,,1:00:00,1.00,100,10.00,USD")
     expect(lines.at(-1)).toContain("Only the 500 highest-duration rows")
   })
 
@@ -155,7 +209,7 @@ describe("toCsv", () => {
     const rows = rowsOf(ONE)
     const csv = toCsv({ ...rows, totals: { ...rows.totals, unpriced: true } })
     const lines = csv.split("\r\n")
-    expect(lines.at(-2)).toBe("TOTAL,,,1:00:00,1.00,100,,USD")
+    expect(lines.at(-2)).toBe("TOTAL,,,,,,1:00:00,1.00,100,,USD")
     expect(lines.at(-1)).toBe(
       "Some billable time has no hourly rate and is not in the amount above."
     )
@@ -180,6 +234,6 @@ describe("toCsv", () => {
 
   it("appends neither note when neither applies", () => {
     const lines = toCsv(rowsOf(ONE)).split("\r\n")
-    expect(lines.at(-1)).toBe("TOTAL,,,1:00:00,1.00,100,10.00,USD")
+    expect(lines.at(-1)).toBe("TOTAL,,,,,,1:00:00,1.00,100,10.00,USD")
   })
 })

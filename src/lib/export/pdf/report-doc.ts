@@ -1,8 +1,13 @@
 import { formatClock } from "@shared/duration"
 import { formatMoney } from "@shared/money"
-import { hourTicks } from "@/lib/report-series"
+import { format, hourTicks } from "@/lib/report-series"
 import { usDate } from "../../us-date"
-import { NOTES_CAP_NOTE, TITLE_CAP_NOTE, UNPRICED_NOTE } from "../report-rows"
+import {
+  ENTRIES_CAP_NOTE,
+  NOTES_CAP_NOTE,
+  TITLE_CAP_NOTE,
+  UNPRICED_NOTE,
+} from "../report-rows"
 import {
   axisTickIndices,
   barColumns,
@@ -15,7 +20,7 @@ import {
 } from "./ops"
 import { PAGE, PAPER, TYPE, paperColorFor } from "./paper"
 import type { PdfOp, PdfPage } from "./ops"
-import type { ReportRows } from "../report-rows"
+import type { ReportEntryRow, ReportRows } from "../report-rows"
 
 /**
  * The report, as pages of ops.
@@ -799,7 +804,8 @@ const NOTE_INDENT = 14
 const NOTE_HANG = textWidth(`${NOTE_BULLET} `, TYPE.tick, false)
 
 /**
- * The most note LINES one row may draw.
+ * The most detail LINES one row may draw — its entry lines and its note lines
+ * together.
  *
  * THE BOUND THAT KEEPS A ROW ON ITS PAGE. The packer places a row atomically —
  * a description and the figures on its first line cannot be separated — and
@@ -810,17 +816,96 @@ const NOTE_HANG = textWidth(`${NOTE_BULLET} `, TYPE.tick, false)
  * width and size is ~150 lines — roughly 1,500pt on a 713pt page body.
  * Everything past the bottom margin is drawn at a y pdf-lib silently discards,
  * so note text would disappear from a client's document with no marker at all.
+ * Entry lines broke it a second way — a description logged a hundred times in
+ * a week is a long grid even flowed into columns — which is why the two share
+ * ONE budget rather than each taking a whole one.
  *
- * 34 lines is ~2,200 characters, so ONE maximal note still prints whole, and it
- * bounds the tallest row this document can produce (a 500-character
- * description wraps to nine lines) at ~470pt. That it actually fits the
- * smallest per-page budget is asserted by a test rather than trusted to this
- * arithmetic.
+ * 34 lines is ~2,200 characters, so ONE maximal note still prints whole on a
+ * row with no entries listed, and it bounds the tallest row this document can
+ * produce (a 500-character description wraps to nine lines) at ~475pt. That it
+ * actually fits the smallest per-page budget is asserted by a test rather than
+ * trusted to this arithmetic.
  *
- * Clipping here is reported, never silent: it feeds the same `NOTES_CAP_NOTE`
- * footnote the server's own character budget does.
+ * ENTRIES CLAIM IT FIRST. A start and an end are the record the row is built
+ * from; a note is prose about it. Clipping either is reported, never silent:
+ * notes through the same `NOTES_CAP_NOTE` the server's own character budget
+ * feeds, entries through `ENTRIES_CAP_NOTE`.
  */
-const NOTE_LINES_PER_ROW_LIMIT = 34
+const DETAIL_LINES_PER_ROW_LIMIT = 34
+
+/**
+ * The air between a row's last entry line and its first note, when it has
+ * both — two lists of the same size and colour, which without it read as one.
+ * The note's bullet tells them apart up close; this tells them apart at a
+ * glance.
+ */
+const ENTRY_NOTE_GAP = 4
+
+/**
+ * Where a row's entries start, and the air between two of their columns.
+ *
+ * Entries stay INSIDE THE DESCRIPTION'S COLUMN, short of the Duration and
+ * Amount figures. A time drawn under those two columns reads as one more
+ * figure in them — the eye scans a column downward and does not check the
+ * type size — so the grid is bounded by the same budget the description is.
+ */
+const ENTRY_LEFT = COL.description + NOTE_INDENT
+const ENTRY_COLUMN_GAP = 14
+/** More than three across reads as a table of times rather than a list of
+ *  sittings, and the eye loses which line it is on. */
+const ENTRY_COLUMNS_MAX = 3
+
+/**
+ * One entry, as a cell of the grid under its description: `Mon 3 Aug · 9:00 AM
+ * – 10:30 AM`, the separator and the en dash the log and the copied text use.
+ *
+ * The weekday and day but no year — the week band above already names the
+ * year, and the cell has to stay narrow enough for two to share a line.
+ *
+ * NO DURATION OF ITS OWN. The start and end already say how long, and the
+ * figure is what pushed a cell too wide for two to fit beside each other. It
+ * is not lost: CSV and XLSX carry every entry's duration in a column of its
+ * own, which is where a figure to sum belongs.
+ */
+function entryCell(entry: ReportEntryRow): string {
+  return `${format(entry.day, { weekday: "short", day: "numeric", month: "short" })} · ${entry.start} – ${entry.end}`
+}
+
+/**
+ * A row's entries, flowed into as many equal columns as `width` holds — left
+ * to right, then down, so the oldest sits top-left and the order reads like
+ * text. Two sittings a day for a week is five lines instead of ten.
+ *
+ * EVERY CELL IS AS WIDE AS THE WIDEST, so the columns line up down the row:
+ * a time that ragged from line to line is a time the eye has to hunt for.
+ *
+ * A row with more entries than the budget holds lists as many as fit and says
+ * how many it left out ON THE ROW — the footnote says so for the document, and
+ * this is what tells a reader WHICH row is short. The count spends one of the
+ * grid's own cells, so a clipped row is exactly as tall as the limit.
+ */
+function entryGrid(
+  entries: ReadonlyArray<ReportEntryRow>,
+  width: number
+): { lines: Array<Array<string>>; columnWidth: number; clipped: boolean } {
+  const cells = entries.map(entryCell)
+  const columnWidth =
+    Math.max(0, ...cells.map((cell) => textWidth(cell, TYPE.tick, false))) + ENTRY_COLUMN_GAP
+  // The last column owes no trailing gap, hence adding one back to the width.
+  const columns = Math.max(
+    1,
+    Math.min(ENTRY_COLUMNS_MAX, Math.floor((width + ENTRY_COLUMN_GAP) / columnWidth))
+  )
+
+  const capacity = DETAIL_LINES_PER_ROW_LIMIT * columns
+  const clipped = cells.length > capacity
+  const shown = clipped ? cells.slice(0, capacity - 1) : cells
+  if (clipped) shown.push(`+ ${cells.length - shown.length} more entries`)
+
+  const lines: Array<Array<string>> = []
+  for (let n = 0; n < shown.length; n += columns) lines.push(shown.slice(n, n + columns))
+  return { lines, columnWidth, clipped }
+}
 
 /**
  * A row, pre-measured: the project line, the wrapped description, and the
@@ -846,16 +931,23 @@ type NoteLine = {
 type SizedRow = {
   row: ReportRows["titles"][number]
   descriptionLines: Array<string>
+  /** The entries under the description, flowed into columns — see
+   *  `entryGrid`. Each line spends one detail line of the row's budget. */
+  entryLines: Array<Array<string>>
+  entryColumnWidth: number
   noteLines: Array<NoteLine>
-  /** Some of this row's notes exceeded `NOTE_LINES_PER_ROW_LIMIT` and are not
-   *  drawn. Collected across the document so the footnote can say so. */
+  /** This row has more entries than `DETAIL_LINES_PER_ROW_LIMIT` lets it
+   *  list. Collected across the document so the footnote can say so. */
+  entriesClipped: boolean
+  /** Some of this row's notes did not fit what the entries left of
+   *  `DETAIL_LINES_PER_ROW_LIMIT` and are not drawn. Collected the same way. */
   notesClipped: boolean
   height: number
 }
 
 /**
  * A row's own height: one line for the project, its description's lines, its
- * notes' lines, and the gap before the next row.
+ * entries' lines, its notes' lines, and the gap before the next row.
  *
  * The project line is unconditional even when the project is "" — `reportRows`
  * substitutes `NO_PROJECT_LABEL` for that, so there is always something to
@@ -864,6 +956,14 @@ type SizedRow = {
  */
 function sizeRow(row: ReportRows["titles"][number], descriptionMaxWidth: number): SizedRow {
   const descriptionLines = wrapToWidth(row.description, descriptionMaxWidth, TYPE.body, false)
+
+  const {
+    lines: entryLines,
+    columnWidth: entryColumnWidth,
+    clipped: entriesClipped,
+  } = entryGrid(row.entries, descriptionMaxWidth - NOTE_INDENT)
+  const noteBudget = DETAIL_LINES_PER_ROW_LIMIT - entryLines.length
+
   /*
    * Notes wrap into the description's own column, measured at `TYPE.tick` —
    * the size they are drawn at. Measuring them at the body size would
@@ -876,12 +976,12 @@ function sizeRow(row: ReportRows["titles"][number], descriptionMaxWidth: number)
    * the first line one bullet narrower than the rest and leaves continuations
    * aligned under the marker instead of under the text.
    *
-   * WHOLE NOTES WHILE THEY FIT `NOTE_LINES_PER_ROW_LIMIT`, matching the rule
-   * the server applies to its own character budget: half a note is a sentence
-   * that stops mid-clause on a document a client reads. The single exception is
-   * a FIRST note too long to fit on its own — there, clipping beats dropping,
-   * because dropping leaves the row silent about work somebody did write up,
-   * and the footnote says either way.
+   * WHOLE NOTES WHILE THEY FIT what the entries left of the budget, matching
+   * the rule the server applies to its own character budget: half a note is a
+   * sentence that stops mid-clause on a document a client reads. The single
+   * exception is a FIRST note too long to fit on its own — there, clipping
+   * beats dropping, because dropping leaves the row silent about work somebody
+   * did write up, and the footnote says either way.
    */
   const noteWidth = descriptionMaxWidth - NOTE_INDENT - NOTE_HANG
   const noteLines: Array<NoteLine> = []
@@ -890,27 +990,31 @@ function sizeRow(row: ReportRows["titles"][number], descriptionMaxWidth: number)
     const wrapped: Array<NoteLine> = wrapToWidth(note, noteWidth, TYPE.tick, false).map(
       (line, n) => ({ text: line, hanging: n > 0 })
     )
-    if (noteLines.length + wrapped.length > NOTE_LINES_PER_ROW_LIMIT) {
+    if (noteLines.length + wrapped.length > noteBudget) {
       notesClipped = true
-      if (noteLines.length === 0) noteLines.push(...wrapped.slice(0, NOTE_LINES_PER_ROW_LIMIT))
+      if (noteLines.length === 0) noteLines.push(...wrapped.slice(0, noteBudget))
       break
     }
     noteLines.push(...wrapped)
   }
 
+  // Entry lines and note lines are one block at one leading: its own lead-in
+  // plus one `NOTE_LINE_HEIGHT` per line AFTER the first — the first line's
+  // step from the description is the lead-in itself — and the gap between the
+  // two lists when there are both. Nothing at all when there is neither.
+  const detailLines = entryLines.length + noteLines.length
   return {
     row,
     descriptionLines,
+    entryLines,
+    entryColumnWidth,
     noteLines,
+    entriesClipped,
     notesClipped,
-    // The note block costs its own lead-in plus one `NOTE_LINE_HEIGHT` per line
-    // AFTER the first — the first line's step from the description is the
-    // lead-in itself. Nothing at all when there are no notes.
     height:
       rowSlotHeight(1 + descriptionLines.length) +
-      (noteLines.length === 0
-        ? 0
-        : NOTE_BLOCK_LEAD + (noteLines.length - 1) * NOTE_LINE_HEIGHT),
+      (detailLines === 0 ? 0 : NOTE_BLOCK_LEAD + (detailLines - 1) * NOTE_LINE_HEIGHT) +
+      (entryLines.length > 0 && noteLines.length > 0 ? ENTRY_NOTE_GAP : 0),
   }
 }
 
@@ -1078,7 +1182,7 @@ function breakdownRow(
   firstLineY: number,
   currency: string
 ): Array<PdfOp> {
-  const { row, descriptionLines, noteLines } = sized
+  const { row, descriptionLines, entryLines, noteLines } = sized
 
   // The project leads, muted and small — it is the row's heading, not its
   // content, and on a run of rows under one client it is the thing the eye
@@ -1119,9 +1223,33 @@ function breakdownRow(
   )
 
   // The last description baseline, then the block's lead-in. Written as the
-  // same two terms `sizeRow` reserves, so the two cannot drift.
-  const notesTop =
+  // same terms `sizeRow` reserves, so the two cannot drift.
+  const detailTop =
     descriptionTop - (descriptionLines.length - 1) * LINE_HEIGHT - NOTE_BLOCK_LEAD
+
+  // Entries first, directly under the description they total: when the work
+  // happened is part of the record, and what was said about it follows.
+  // Indented and set like a note — detail of the row, not a row of its own —
+  // but carrying no bullet, which is what a note's first line is told by.
+  entryLines.forEach((line, n) => {
+    const y = detailTop - n * NOTE_LINE_HEIGHT
+    line.forEach((cell, column) => {
+      ops.push(
+        text({
+          x: ENTRY_LEFT + column * sized.entryColumnWidth,
+          y,
+          text: cell,
+          size: TYPE.tick,
+          color: PAPER.inkMuted,
+        })
+      )
+    })
+  })
+
+  const notesTop =
+    detailTop -
+    entryLines.length * NOTE_LINE_HEIGHT -
+    (entryLines.length > 0 ? ENTRY_NOTE_GAP : 0)
   noteLines.forEach((line, n) => {
     ops.push(
       text({
@@ -1177,9 +1305,9 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
       week.rows.map((row) => sizeRow(row, descriptionMaxWidth)),
     ])
   )
-  const anyNotesClipped = [...sizedByWeek.values()]
-    .flat()
-    .some((sized) => sized.notesClipped)
+  const allSized = [...sizedByWeek.values()].flat()
+  const anyNotesClipped = allSized.some((sized) => sized.notesClipped)
+  const anyEntriesClipped = allSized.some((sized) => sized.entriesClipped)
 
   /*
    * The TOTAL row is reserved a slot on the last page from the start, sized
@@ -1234,6 +1362,7 @@ export function reportPages(rows: ReportRows): Array<PdfPage> {
      * nothing missing to report, and saying so would invent a defect.
      */
     rows.notesTruncated || anyNotesClipped ? NOTES_CAP_NOTE : null,
+    anyEntriesClipped ? ENTRIES_CAP_NOTE : null,
     rows.totals.unpriced ? UNPRICED_NOTE : null,
   ]
     .filter((note): note is string => note !== null)

@@ -21,22 +21,17 @@ export function breakdownArgs(
   filters: Filters,
   weekStartDay: number,
   /*
-   * Whether this page's breakdown should also carry each row's entry notes.
+   * What only a DOCUMENT reads — each row's notes and each row's entries — and
+   * so what only the export asks for, in its own one-shot read at the moment it
+   * is pressed (see `ExportMenu`'s `load`).
    *
-   * Driven by `settings.pdfIncludeNotes`, and therefore part of the QUERY KEY:
-   * a user who turns notes on gets a refetch of the range they are looking at,
-   * once, and every export from then on has the prose it needs. Threading it
-   * here rather than fetching notes separately at export time is what keeps the
-   * document built from the SAME scan the charts above it were drawn from —
-   * a second query could disagree with the page it was exported from.
-   *
-   * Defaults to off so a caller that has no opinion mints the cheap key. Every
-   * production call site DOES have one — the loader awaits `settings.get`
-   * before it builds its key, and both panels read the same settings object —
-   * so the default is really only reached by tests that do not care about
-   * notes.
+   * The page's subscription leaves both off. It is re-read on every date change
+   * and every reactive update and draws neither, so carrying a range's prose
+   * and its every entry there was paying for a document nobody had asked for.
+   * The document still comes from ONE scan: its totals, its rows, their notes
+   * and their entries all arrive in the same response.
    */
-  withNotes = false
+  extras: { withNotes?: boolean; withEntries?: boolean } = {}
 ) {
   const filter = entryFilterOf(filters)
   return {
@@ -48,6 +43,7 @@ export function breakdownArgs(
     billableOnly: filter.billableOnly,
     text: filter.text,
     presets: [...filter.presets],
-    withNotes,
+    withNotes: extras.withNotes ?? false,
+    withEntries: extras.withEntries ?? false,
   }
 }

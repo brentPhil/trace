@@ -1,5 +1,6 @@
-import { addDays } from "@shared/day"
+import { addDays, dayOf } from "@shared/day"
 import { TITLE_ROW_LIMIT } from "@shared/scan"
+import { formatTimeOfInstant } from "@/lib/format-time"
 import { NO_PROJECT_LABEL, bucketDays, format } from "@/lib/report-series"
 import type { Bucket, Breakdown, Granularity } from "@/lib/report-series"
 import type { DayString } from "@shared/day"
@@ -66,6 +67,12 @@ export type ReportTitleRow = {
    * paragraphs joined by a separator is worse than no column at all.
    */
   notes: Array<string>
+  /**
+   * The entries this row totals, oldest first — one record each in CSV and
+   * XLSX, one line each under the description in the PDF. Their durations sum
+   * to `totalMs` and their amounts to `billableCents`, exactly.
+   */
+  entries: Array<ReportEntryRow>
   totalMs: number
   /**
    * This row's share of the WHOLE RANGE — not of the week it is grouped
@@ -79,6 +86,24 @@ export type ReportTitleRow = {
   percent: number
   billableCents: number
   /** Some of this row's billable time has no rate, so its amount is a floor. */
+  unpriced: boolean
+}
+
+/** One entry under a `ReportTitleRow`: when it ran, and what it was worth. */
+export type ReportEntryRow = {
+  /** The local day the entry STARTED on — the day `days` and `weekStart`
+   *  attribute it to, so an overnight entry is dated by its start. */
+  day: DayString
+  /** `9:05 AM` / `09:05`, in the user's own zone and clock — what the log on
+   *  screen prints for the same entry. Written once here so the three
+   *  documents cannot spell one entry's times three ways. */
+  start: string
+  end: string
+  totalMs: number
+  /** Share of the WHOLE RANGE, like `ReportTitleRow.percent`. */
+  percent: number
+  /** This entry's part of its row's amount — see `shareCents`. */
+  billableCents: number
   unpriced: boolean
 }
 
@@ -279,9 +304,53 @@ export function groupWeeks(
   })
 }
 
+/**
+ * A row's amount, shared out over its entries in proportion to their billable
+ * time — whole cents, summing EXACTLY to `totalCents`.
+ *
+ * NOT each entry priced on its own. `billableCents` follows the invoice's rule
+ * (convex/entries.ts, `centsOf`): billable time is floored to hundredths of an
+ * hour before it is priced. Applied per entry, that floor bites once per entry
+ * instead of once per row — up to 36 seconds' worth each — so a CSV's Amount
+ * column would sum to visibly less than the description it was split from, on
+ * the document a client reconciles line by line. Sharing out the row's own
+ * figure keeps the entries and the PDF's description row in agreement.
+ *
+ * The cents left over after flooring every share go to the largest
+ * remainders, earliest entry first on a tie.
+ */
+export function shareCents(
+  totalCents: number,
+  weights: ReadonlyArray<number>
+): Array<number> {
+  const whole = weights.reduce((sum, weight) => sum + weight, 0)
+  if (whole <= 0) return weights.map(() => 0)
+
+  const exact = weights.map((weight) => (totalCents * weight) / whole)
+  const shares = exact.map(Math.floor)
+  let left = totalCents - shares.reduce((sum, share) => sum + share, 0)
+  const byRemainder = exact
+    .map((value, index) => ({ index, remainder: value - shares[index] }))
+    .sort((a, b) => b.remainder - a.remainder || a.index - b.index)
+  for (const { index } of byRemainder) {
+    if (left <= 0) break
+    shares[index] += 1
+    left -= 1
+  }
+  return shares
+}
+
 export function reportRows(
   breakdown: Breakdown,
-  opts: { from: DayString; to: DayString; currency: string }
+  opts: {
+    from: DayString
+    to: DayString
+    currency: string
+    /** The zone and clock an entry's start and end are written in — the
+     *  user's own, so the document reads like the log it came from. */
+    timeZone: string
+    use12Hour: boolean
+  }
 ): ReportRows {
   const { granularity, buckets } = bucketDays(breakdown.days, opts.from, opts.to)
 
@@ -297,16 +366,35 @@ export function reportRows(
   const daysWorked = breakdown.days.length
   const averageDailyMs = daysWorked === 0 ? 0 : breakdown.totalMs / daysWorked
 
-  const titles = breakdown.titles.map((row) => ({
-    project: row.project === "" ? NO_PROJECT_LABEL : row.project,
-    description: row.title === "" ? NO_DESCRIPTION : row.title,
-    weekStart: row.weekStart,
-    notes: row.notes,
-    totalMs: row.totalMs,
-    percent: percentOf(row.totalMs, breakdown.totalMs),
-    billableCents: row.billableCents,
-    unpriced: row.unratedBillableMs > 0,
-  }))
+  const titles = breakdown.titles.map((row) => {
+    const unpriced = row.unratedBillableMs > 0
+    const cents = shareCents(
+      row.billableCents,
+      row.entries.map((entry) => (entry.billable ? entry.durationMs : 0))
+    )
+    return {
+      project: row.project === "" ? NO_PROJECT_LABEL : row.project,
+      description: row.title === "" ? NO_DESCRIPTION : row.title,
+      weekStart: row.weekStart,
+      notes: row.notes,
+      entries: row.entries.map((entry, n) => ({
+        day: dayOf(entry.startedAt, opts.timeZone),
+        start: formatTimeOfInstant(entry.startedAt, opts.timeZone, opts.use12Hour),
+        end: formatTimeOfInstant(entry.endedAt, opts.timeZone, opts.use12Hour),
+        totalMs: entry.durationMs,
+        percent: percentOf(entry.durationMs, breakdown.totalMs),
+        billableCents: cents[n],
+        // A row's rate is one rate — the key it was grouped under includes the
+        // project, which is all a rate depends on — so an unrated row leaves
+        // every one of its billable entries unpriced, and none of the others.
+        unpriced: unpriced && entry.billable,
+      })),
+      totalMs: row.totalMs,
+      percent: percentOf(row.totalMs, breakdown.totalMs),
+      billableCents: row.billableCents,
+      unpriced,
+    }
+  })
 
   return {
     meta: {
@@ -369,6 +457,17 @@ export const TITLE_CAP_NOTE =
  */
 export const NOTES_CAP_NOTE =
   "Some entry notes are not shown — this range holds more note text than the report carries."
+
+/**
+ * The sentence a PDF row cut short of its entries must carry.
+ *
+ * Only the PDF ever cuts — a row there is placed on one page whole, so its
+ * entry lines are bounded (see `DETAIL_LINES_PER_ROW_LIMIT` in
+ * pdf/report-doc.ts) — while CSV and XLSX write every entry. So the sentence
+ * names where the rest are rather than only saying that they are missing.
+ */
+export const ENTRIES_CAP_NOTE =
+  "Some rows list only their first entries, because the full list would not fit on a page. The CSV and XLSX exports list every entry."
 
 /** The sentence unpriced billable time must carry. Same reasoning. */
 export const UNPRICED_NOTE =

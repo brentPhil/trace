@@ -40,6 +40,9 @@ function amount(cents: number, unpriced: boolean): string {
 const HEADER = [
   "Project",
   "Week",
+  "Date",
+  "Start",
+  "End",
   "Description",
   "Duration",
   "Decimal hours",
@@ -51,20 +54,30 @@ const HEADER = [
 export function toCsv(rows: ReportRows): string {
   const { currency } = rows.meta
 
-  const body = rows.titles.map((row) =>
-    record([
-      row.project,
-      // The plain DayString the backend attributed the row to (see
-      // convex/entries.ts) — not a formatted span like the PDF's week
-      // headings, so a spreadsheet can sort or pivot on it directly.
-      row.weekStart,
-      row.description,
-      formatClock(row.totalMs),
-      formatDecimalHours(row.totalMs),
-      String(row.percent),
-      amount(row.billableCents, row.unpriced),
-      currency,
-    ])
+  /*
+   * ONE RECORD PER ENTRY, grouped by description in the breakdown's own order
+   * — a row's entries are consecutive and oldest first, so a description's
+   * sittings read as a run and a pivot on Description rebuilds the PDF's row.
+   */
+  const body = rows.titles.flatMap((row) =>
+    row.entries.map((entry) =>
+      record([
+        row.project,
+        // The plain DayString the backend attributed the row to (see
+        // convex/entries.ts) — not a formatted span like the PDF's week
+        // headings, so a spreadsheet can sort or pivot on it directly.
+        row.weekStart,
+        entry.day,
+        entry.start,
+        entry.end,
+        row.description,
+        formatClock(entry.totalMs),
+        formatDecimalHours(entry.totalMs),
+        String(entry.percent),
+        amount(entry.billableCents, entry.unpriced),
+        currency,
+      ])
+    )
   )
 
   /*
@@ -76,7 +89,10 @@ export function toCsv(rows: ReportRows): string {
    */
   const total = record([
     "TOTAL",
-    "", // no single week — same reason Description is blank here
+    "", // no single week, day or time — same reason Description is blank here
+    "",
+    "",
+    "",
     "",
     formatClock(rows.totals.totalMs),
     formatDecimalHours(rows.totals.totalMs),
